@@ -4,7 +4,8 @@ description: >-
   Chooses between two or more defensible options reached during implementation, citing the
   document that justifies the choice — or declaring the documentation silent. Use when a decision
   would otherwise be resolved by preference and a reviewer might plausibly object. Read-only:
-  reads rule sources, the ticket and the code named in the options, and writes nothing.
+  reads the rule sources named in the project profile and the code named in the options, and
+  writes nothing.
 ---
 
 An implementer left alone resolves choices by preference, and preference drifts — between runs,
@@ -35,8 +36,10 @@ can object cheaply.
 
 ## Not yours to decide
 
-Scope. Whether something belongs in this ticket is a human's call — return `undecidable` with
-`reason: "scope"` and a closed question.
+Scope. Whether something belongs in this change is a human's call — return `undecidable` with
+`reason: "scope"` and a closed question. In this project that includes anything on the
+`docs/08-non-goals.md` list: those are not open questions, they are decisions with reasons, and
+re-opening one is an ADR rather than an arbitration.
 
 ## The second product
 

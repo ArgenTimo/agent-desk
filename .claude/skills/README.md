@@ -78,3 +78,44 @@ top of its output instead of silently doing half its job.
 3. **A check that did not run is never reported as passed.** Skipped, unavailable and
    not-applicable are outcomes with names.
 4. **Nothing approves its own work**, and nothing blocks on taste.
+
+---
+
+## In this repository
+
+This folder is ai-worker's `project-template/` dropped into agent-desk unchanged, so everything
+above describes the template rather than this project. Three things differ here, and each is a
+consequence of agent-desk having no tracker, no clients and no pipeline
+([`../../docs/adr/0001`](../../docs/adr/0001-a-separate-repository.md)).
+
+**Rule 1 above has an exception here.** `project-bootstrap` is the only writer of project facts in
+a project ai-worker manages, because a console configures it. Nothing configures this one, so
+`.ai-worker/project-profile.yml` was **written by hand**, and `project-bootstrap` is marked
+`not_applicable`. The rule that still holds, and is the one that matters, is the other half: every
+skill and hook *reads* its commands from that file and hardcodes none.
+
+**A third of these skills do not apply, and say so.** `.ai-worker/capabilities.yml` marks each one
+— `ticket-intake`, `ticket-plan` and `tracker-report` have no tracker to read;
+`http-service-virtualization` has no outbound call to virtualise. They are marked rather than
+deleted, so an improvement made upstream still applies here as a patch. A skill that reports
+`not_applicable` is doing its job; a skill that invents work to look busy is not.
+
+**Where the rule sources are.** `decision-arbitration` and `requirement-traceability` cite
+`rule_sources` from the profile, which here is `CLAUDE.md`, then `docs/`, then `design/`, then
+`docs/adr/`. In this project those documents are the specification, not notes: present tense in
+them is a requirement on the implementation.
+
+## One verified gap in the harness
+
+`secret-scan.sh` prefers `gitleaks` and falls back to `grep -E` over `security-patterns.yaml`.
+`grep -E` is POSIX ERE and does not understand the `(?i)` inline flag — it warns and matches
+nothing, and the hook sends that warning to `/dev/null`. On a machine without `gitleaks`, every
+`(?i)` pattern in that file is therefore silently inert.
+
+Found by testing the hook rather than by reading it: a staged
+`AWS_SECRET_ACCESS_KEY = "wJalr…"` committed without complaint. POSIX-safe duplicates were added
+for the two highest-value patterns and the rest are recorded in
+[`../security-guidance.md`](../security-guidance.md) under "Known gaps".
+
+**This applies to the upstream `project-template/` as well**, where the same file and the same
+hook live unchanged.

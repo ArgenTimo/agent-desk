@@ -31,7 +31,10 @@ supplied:
     kind: github
     repository: null            # no remote yet — set this when one exists
     default_branch: main
-    branch_prefix: ""           # human branches here; see CLAUDE.md "Working conventions"
+    # Empty on purpose. `worktree-workflow` builds `<branch_prefix><TICKET>`; with no tracker
+    # there is no ticket key, so the branch is a bare task slug — `registry-reader`, `idea-card`.
+    # CLAUDE.md "Working conventions" is the spelling.
+    branch_prefix: ""
     reviewers: []
   policy:
     max_clarification_questions: 10

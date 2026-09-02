@@ -114,8 +114,15 @@ a fire-and-forget `create_task` produces a failure nobody observes. Use `TaskGro
 ## Working conventions
 
 **One worktree per task**, off a fresh `origin/main`:
-`git worktree add ../ad-<slug> -b <slug> origin/main`. The Stop hooks lint the tree the session is
-in.
+
+```
+git worktree add ../agent-desk-<slug> -b <slug> origin/main
+```
+
+`<slug>` is two or three words describing the task — `registry-reader`, `idea-card`. There is no
+tracker here, so the slug takes the place of the ticket key the `worktree-workflow` skill expects,
+and `branch_prefix` is empty in the profile for the same reason. The Stop hooks lint the tree the
+session is in, which is why a shared checkout makes their output ambiguous.
 
 **Tests ship with the change.** A parser without a recorded fixture and a store write without a
 crash case are incomplete.
