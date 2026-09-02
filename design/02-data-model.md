@@ -31,10 +31,11 @@ CREATE TABLE idea (
     text        TEXT NOT NULL,          -- verbatim
     summary     TEXT NOT NULL,          -- generated, editable
     state       TEXT NOT NULL,          -- new | kept | promoted | dropped
-    -- the context, which is most of an idea's meaning a week later
-    project     TEXT,
-    branch      TEXT,
-    session_id  TEXT,
+    -- Where it came from, which is most of an idea's meaning a week later.
+    -- Deliberately a source rather than a session: see below.
+    source_kind TEXT NOT NULL,          -- session | typed | meeting
+    source_ref  TEXT,                   -- sessionId, or a meeting id
+    context     TEXT NOT NULL,          -- JSON: project, branch, title — or meeting, speaker, offset
     created_at  INTEGER NOT NULL
 );
 
@@ -72,6 +73,17 @@ the classifier should be replaced by a default and a click.
 `block.input` and `idea.text` hold the original text and are never overwritten by a generated
 summary. The summary is a convenience for scanning; losing the thought to it would be the tool
 failing at the one job it has ([`../docs/05-ideas.md`](../docs/05-ideas.md)).
+
+`idea.source_kind` / `source_ref` / `context` replace what would naturally have been three columns
+— `project`, `branch`, `session_id` — shaped like a Claude Code session, which is one source of one
+kind. A meeting-sourced idea sets `source_kind = "meeting"` and puts the meeting, the speaker and
+the timestamp in `context`, and nothing else in the store, the inbox or the drafts changes
+([`../docs/10-meeting-intake.md`](../docs/10-meeting-intake.md)).
+
+This is the only concession made to a future version, it costs one JSON column today, and it is
+made now because a schema is cheap to shape before it holds a year of rows and expensive
+afterwards. No interface is generalised and no plugin system exists — that would be `CLAUDE.md`
+rule 2 broken in the name of a roadmap.
 
 ## Migrations
 

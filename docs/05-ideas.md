@@ -27,11 +27,22 @@ thought would be the tool losing the thing it was built to keep.
 **Capture never asks a second question.** Keep or discard, one click. Anything more and the tool is
 competing with the run it was supposed to stay out of.
 
+That holds for one idea at a time, which is how they arrive when a human types them. A source that
+proposes twelve at once — a meeting transcript — is a review queue rather than a card, and the
+shape of that queue is an open question recorded in
+[`10-meeting-intake.md`](10-meeting-intake.md) rather than guessed at here.
+
 ## The inbox
 
 Kept ideas go to a list, not into anyone's documentation. Each carries where it came from — the
 project, the session that was running, the branch, the time — because "what was I doing when I
 thought this" is most of an idea's meaning a week later.
+
+The context is recorded as a **source** — kind, reference, and a free map — rather than as the
+three session-shaped fields it would naturally have been. Today every idea has
+`source_kind = "session"` or `"typed"`; the third kind is a meeting, and it costs one JSON column
+to keep the door open ([`10-meeting-intake.md`](10-meeting-intake.md),
+[`../design/02-data-model.md`](../design/02-data-model.md)).
 
 An idea has exactly four states: `new`, `kept`, `promoted`, `dropped`. There is no priority field,
 no assignee, no estimate. That is a backlog, and a backlog needs a process to stay honest; this is

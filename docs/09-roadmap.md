@@ -1,6 +1,6 @@
 # Roadmap
 
-Five phases. Each has a **done-when** criterion that is observable from outside the code — not
+Five phases to v1, and a page for what comes after it. Each has a **done-when** criterion that is observable from outside the code — not
 "the module is written" but "the thing it was for is true". A phase is not done because its tests
 pass.
 
@@ -63,6 +63,16 @@ ideas list first, the board only if the disclosure decision of
 **Entry condition, not a date:** a teammate has asked twice, unprompted. Until then this is a
 feature for a hypothetical user, and building it early forces a security model onto a tool that
 currently does not need one.
+
+## Beyond v1
+
+Meeting intake — reading a transcript, then attending live, then asking a question when called on —
+is [`10-meeting-intake.md`](10-meeting-intake.md). It is not phased here, because it has no user
+yet and its real blocker is consent rather than engineering.
+
+Two things were done in the foundation for it and nothing else was: an idea records a **source**
+rather than a session, and `observe/` is named as *a* source rather than *the* source. Both cost a
+sentence and a column today; both are expensive to retrofit.
 
 ## What is measured
 

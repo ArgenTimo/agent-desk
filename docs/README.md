@@ -19,7 +19,8 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | 06 | [console](06-console.md) | the screens, and the overlay window |
 | 07 | [security](07-security.md) | credentials, transcript content, and a second pair of eyes |
 | 08 | [non-goals](08-non-goals.md) | what v1 does not do, each with its reason |
-| 09 | [roadmap](09-roadmap.md) | four phases with a done-when criterion each |
+| 09 | [roadmap](09-roadmap.md) | five phases with a done-when criterion each |
+| 10 | [meeting intake](10-meeting-intake.md) | beyond v1 — and the two things the foundation does now |
 
 ## Decisions
 

@@ -28,6 +28,11 @@ it never opens a file inside an observed repository, and it never writes one any
 This is the only module allowed to know the on-disk formats. Everything downstream sees
 `agent_desk` types ([`design/01-module-layout.md`](../design/01-module-layout.md)).
 
+It is *a* source, not *the* source. A reader of meeting transcripts would be a sibling package
+under the same rule — its own format stays inside it, it hands downstream the same types, and it is
+read-only towards whatever produced its input ([`10-meeting-intake.md`](10-meeting-intake.md)).
+Nothing is abstracted for that today; the sentence is the whole preparation.
+
 ## store
 
 SQLite through async SQLAlchemy, one file under `~/.local/share/agent-desk/`. Holds what the tool

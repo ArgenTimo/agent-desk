@@ -46,7 +46,8 @@ has no opinion about what they should do next. It is a window and a notebook.
 | [`docs/06-console.md`](docs/06-console.md) | the screens and the overlay |
 | [`docs/07-security.md`](docs/07-security.md) | transcripts hold secrets; this is what follows |
 | [`docs/08-non-goals.md`](docs/08-non-goals.md) | what v1 deliberately does not do |
-| [`docs/09-roadmap.md`](docs/09-roadmap.md) | four phases, each with a done-when criterion |
+| [`docs/09-roadmap.md`](docs/09-roadmap.md) | five phases, each with a done-when criterion |
+| [`docs/10-meeting-intake.md`](docs/10-meeting-intake.md) | what comes after v1, and why the hand-raise is not a new principle |
 | [`docs/adr/`](docs/adr/) | the decisions, with their alternatives and costs |
 | [`design/`](design/) | module layout and data model |
 
