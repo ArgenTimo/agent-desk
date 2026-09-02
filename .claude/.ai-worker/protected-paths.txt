@@ -1,0 +1,7 @@
+# Extra protected paths, one glob per line, relative to the repository root.
+# Enforced by .claude/hooks/scope-guard.sh in addition to its built-in list.
+#
+# The fixtures are recorded from real files and scrubbed by hand (tests/fixtures/README.md).
+# An automatic edit to one of them would re-introduce whatever it re-recorded, which is the one
+# way a real path or a real secret gets committed here.
+tests/fixtures/**

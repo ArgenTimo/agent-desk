@@ -1,0 +1,25 @@
+{
+  "pid": 15688,
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "cwd": "/home/dev/projects/example",
+  "startedAt": 1788379214575,
+  "procStart": "10644",
+  "version": "2.1.258",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "pidDomain": "linux:00000000000000000000000000000000:pid:[4026531836]",
+  "messagingSocketPath": "/run/user/1000/cc-socks/15688.sock",
+  "name": "example-d0",
+  "nameSource": "derived",
+  "nameSince": 1788379214575,
+  "status": "idle",
+  "updatedAt": 1788380407338,
+  "statusUpdatedAt": 1788380407338,
+  "bridgeSessionId": "session_00000000000000000000000"
+}

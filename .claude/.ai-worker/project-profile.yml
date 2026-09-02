@@ -1,0 +1,111 @@
+# project-profile.yml — the single source of project facts for agent-desk.
+#
+# Every skill and every hook in .claude/ resolves its commands from here and hardcodes nothing.
+# That rule is what lets this skillset be dropped into any project, and it is why this file is
+# filled in by hand here rather than left as the template: agent-desk is not managed by
+# ai-worker's console, so nothing else was going to write it.
+#
+# `null` means "not detected and not supplied", and it is never a placeholder for a plausible
+# guess. A skill whose entry is null reports `needs_toolchain` and degrades. A guessed test
+# command produces a gate that is green because it ran nothing.
+
+profile_version: 1
+generated_at: "2026-09-02T00:00:00Z"
+input_hash: null
+
+# ---------------------------------------------------------------------------
+# Supplied. A human wrote these; detection must not override them.
+# ---------------------------------------------------------------------------
+supplied:
+  project_slug: agent-desk
+  # No tracker. This project's work items are the phases of docs/09-roadmap.md, and the skills
+  # that assume a tracker are marked not_applicable in capabilities.yml rather than pointed at
+  # a Jira that does not exist.
+  tracker:
+    kind: null
+    project_key: null
+    worker_account_id: null
+    label_prefix: "ai:"
+    status_map: {}
+  code_host:
+    kind: github
+    repository: null            # no remote yet — set this when one exists
+    default_branch: main
+    branch_prefix: ""           # human branches here; see CLAUDE.md "Working conventions"
+    reviewers: []
+  policy:
+    max_clarification_questions: 10
+    max_questions_per_round: 5
+    max_dev_rounds: 3
+    max_test_rounds: 3
+    max_arbitrations_per_run: 8
+    max_review_rounds: 2
+    local_gate: required
+    decomposition: propose_only
+    ci_bootstrap: propose
+
+# ---------------------------------------------------------------------------
+# Detected from the repository.
+# ---------------------------------------------------------------------------
+detected:
+  languages: [python]
+  primary_language: python
+  frameworks: [fastapi, sqlalchemy, jinja2]
+  package_managers:
+    python: poetry
+
+  paths:
+    source_roots: [agent_desk]
+    test_roots: [tests]
+    e2e_roots: []
+    migrations_glob: agent_desk/store/schema.sql
+    docs_roots: [docs, design]
+
+  ci:
+    platform: none              # no pipeline yet; `make gate` is the whole gate
+    pipeline_file: null
+    test_cmd: "poetry run pytest -m unit -q"
+    ci_test_script: "make gate"
+    expensive_jobs: []
+
+  # What the arbiter may cite when two options both look reasonable. Order matters: the first
+  # that settles the question wins (.claude/skills/decision-arbitration).
+  rule_sources:
+    - CLAUDE.md
+    - docs/
+    - design/
+    - docs/adr/
+  has_snapshot_baselines: false
+  has_property_tests: false
+
+# ---------------------------------------------------------------------------
+# Per-language commands. Every unresolved cell stays null.
+# ---------------------------------------------------------------------------
+toolchain:
+  python:
+    test: "poetry run pytest -m unit -q"
+    test_changed: null          # no impact-selection tooling here, and at this size none is worth it
+    lint: "poetry run ruff check agent_desk tests scripts"
+    typecheck: "poetry run mypy agent_desk"
+    coverage: "poetry run pytest -m unit --cov=agent_desk --cov-report=term-missing"
+    property: null              # no hypothesis dependency; add it with the parser if it earns one
+    e2e: null
+    sast: null                  # no gitleaks or bandit binary on this machine yet
+    build: null                 # nothing to build — docs/adr/0003
+
+# ---------------------------------------------------------------------------
+# Conventions this project actually has. Absent means "not declared".
+# ---------------------------------------------------------------------------
+user_overrides:
+  language_policy:
+    enabled: false
+    policy_language: null
+    foreign_data_locations: []
+  delivery:
+    remove_source_branch: true
+    draft_first: true
+    commit_convention: null     # see CLAUDE.md: the subject names the document the change serves
+  testing:
+    markers:
+      unit: unit
+    flaky_policy: quarantine_with_ticket

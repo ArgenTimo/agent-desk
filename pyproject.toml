@@ -1,0 +1,113 @@
+[tool.poetry]
+name = "agent-desk"
+version = "0.0.0"
+description = "A read-first console over the Claude Code sessions running on this machine."
+authors = ["agent-desk"]
+readme = "README.md"
+packages = [{ include = "agent_desk" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# The console. design/01-module-layout.md `web/`. Server-rendered: HTMX and SSE come over the
+# wire, so there is no JavaScript build step (docs/adr/0003).
+fastapi = "^0.115"
+uvicorn = { version = "^0.34", extras = ["standard"] }
+jinja2 = "^3.1"
+
+# Configuration and the types `observe` hands downstream. Every shape read off disk is validated
+# at the boundary rather than trusted (docs/adr/0004).
+pydantic = "^2.10"
+pydantic-settings = "^2.7"
+# .claude/security-patterns.yaml is a YAML file and store/redact.py reads it.
+pyyaml = "^6.0"
+
+# One SQLite file, one process. docs/adr/0003 is why this is not Postgres.
+sqlalchemy = { version = "^2.0", extras = ["asyncio"] }
+aiosqlite = "^0.20"
+
+# ULIDs sort by time, which makes a list of blocks chronological without an index.
+python-ulid = "^3.0"
+
+# Structured from the first line, with redaction installed at the logger.
+structlog = "^25.1"
+
+# Deliberately absent: httpx (this process makes no outbound calls — docs/07-security.md),
+# alembic (plain SQL at startup — docs/adr/0003), and anything that would need a build step.
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9"
+mypy = "^1.14"
+pytest = "^8.3"
+pytest-asyncio = "^0.25"
+pytest-cov = "^6.0"
+types-pyyaml = "^6.0"
+
+[build-system]
+requires = ["poetry-core>=1.9"]
+build-backend = "poetry.core.masonry.api"
+
+# ---------------------------------------------------------------------------
+# Tooling. These settings are the local gate, and .claude/hooks/stop-verify.sh runs the same
+# commands at every turn end, so a green turn and a green `make gate` mean the same thing.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["agent_desk", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import order
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "ASYNC",     # blocking IO in an async path — here it stalls the whole console
+    "S",         # bandit
+    "T20",       # print() in a process that logs structurally
+    "RUF",
+]
+ignore = [
+    "E501",      # line length is the formatter's business
+    # Titles, prompts and ideas are written in Russian as often as in English, so Cyrillic in
+    # strings is expected data rather than a homoglyph smell.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures carry token-shaped strings on purpose, so the redaction tests have something to redact.
+# assert is what a test is written in.
+"tests/**" = ["S101", "S105", "S106", "S108"]
+# A command-line check reports to the operator on stdout; printing is what it is for.
+"scripts/*.py" = ["T201"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Without this, a missing tests/ makes pytest search from the current directory — which means the
+# virtualenv, and collecting a dependency's own suite.
+norecursedirs = [".venv", ".git", "docs", "design", ".claude"]
+asyncio_mode = "auto"
+addopts = "--strict-markers"
+# One marker. Nothing here needs a service: the only external dependency is the filesystem, and a
+# filesystem is faked with tmp_path (design/01-module-layout.md, "Tests").
+markers = [
+    "unit: no external dependency; runs in the Stop hook on every turn end",
+]
+
+[tool.coverage.run]
+source = ["agent_desk"]
+branch = true

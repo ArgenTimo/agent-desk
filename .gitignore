@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# The store lives in ~/.local/share/agent-desk/, never in the tree — but a stray copy from a
+# test run or a manual experiment must not be committable: it holds captured ideas, and an idea
+# carries the branch and project it was captured on (docs/07-security.md).
+*.db
+*.db-wal
+*.db-shm
+
+# Never, under any circumstances.
+.env
+.env.*

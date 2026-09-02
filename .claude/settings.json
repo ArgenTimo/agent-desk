@@ -1,0 +1,139 @@
+{
+  "$comment": "Permission and hook profile for agent-desk. Inherited from ai-worker's project-template and NARROWED, never widened: the deny list gained the three credential paths of docs/07-security.md, and the allow list gained this project's own toolchain. Commands are resolved from .claude/.ai-worker/project-profile.yml at run time.",
+  "permissions": {
+    "allow": [
+      "Bash(gh pr *)",
+      "Bash(./scripts/*)",
+      "Bash(scripts/*)",
+      "Bash(mypy *)",
+      "Bash(ruff *)",
+      "Bash(pytest *)",
+      "Bash(poetry *)",
+      "Bash(make *)",
+      "Bash(git status*)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git fetch *)",
+      "Bash(git merge-base *)",
+      "Bash(git worktree *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git rebase *)",
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(jq *)",
+      "Bash(awk *)",
+      "Bash(sed *)",
+      "Bash(find *)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(test *)",
+      "Bash(command -v *)",
+      "Bash(gitleaks *)"
+    ],
+    "deny": [
+      "Bash(sudo*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git checkout main*)",
+      "Bash(git checkout master*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh release*)",
+      "Bash(gh pr review*)",
+      "Bash(glab mr merge*)",
+      "Bash(glab mr approve*)",
+      "Bash(git tag *)",
+      "Bash(env)",
+      "Bash(printenv*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Edit(./.env*)",
+      "Write(./.env*)",
+      "Edit(./.git/config)",
+      "Write(./.git/config)",
+      "Edit(./.github/workflows/**)",
+      "Write(./.github/workflows/**)",
+      "Edit(./.gitlab-ci.yml)",
+      "Write(./.gitlab-ci.yml)",
+      "Edit(./.claude/settings.json)",
+      "Write(./.claude/settings.json)",
+      "Edit(./.claude/hooks/**)",
+      "Write(./.claude/hooks/**)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(//home/skotwind/.claude/.credentials.json)",
+      "Read(~/.claude/sessions/*.key)",
+      "Read(//home/skotwind/.claude/sessions/*.key)",
+      "Edit(~/.claude/**)",
+      "Write(~/.claude/**)",
+      "Edit(//home/skotwind/.claude/**)",
+      "Write(//home/skotwind/.claude/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/scope-guard.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/secret-scan.sh",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "if": "Bash(git push*)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-push-guard.sh",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh pr create*)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pr-create-guard.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "if": "Bash(glab mr create*)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pr-create-guard.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-verify.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

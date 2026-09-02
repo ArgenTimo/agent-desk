@@ -1,0 +1,61 @@
+# capabilities.yml — per-skill readiness for agent-desk.
+#
+# A skill reports its status at the top of its output rather than silently doing half its job:
+#
+#   ready             everything it needs is resolved
+#   needs_toolchain   a command it needs is null in project-profile.yml — it degrades and asks
+#   needs_credentials a credential it needs is not configured
+#   not_applicable    this project has no surface for it
+#
+# The `not_applicable` entries below are the honest ones. This skillset came from a service that
+# runs client repositories through a ticket lifecycle (docs/adr/0001); a good half of it assumes
+# a tracker, a client, or a pipeline that this local tool does not have. Marking those rather
+# than deleting them keeps the folder patchable from upstream — and a skill that says
+# "not applicable here" is more useful than one that was quietly removed.
+
+skills:
+  # lifecycle
+  project-bootstrap:               {status: not_applicable, reason: "profile written by hand; no console to detect from"}
+  ticket-intake:                   {status: not_applicable, reason: "no tracker — work items are the phases of docs/09-roadmap.md"}
+  ticket-plan:                     {status: not_applicable, reason: "no tracker"}
+  decision-arbitration:            {status: ready}
+  implementation-loop:             {status: ready}
+  local-gate:                      {status: ready}
+  result-review:                   {status: ready}
+  correction-round:                {status: ready}
+  pr-lifecycle:                    {status: needs_credentials, missing: [code_host.repository]}
+  tracker-report:                  {status: not_applicable, reason: "no tracker"}
+  ci-bootstrap:                    {status: ready, reason: "no pipeline yet; proposing one is in scope"}
+
+  # engineering discipline
+  requirement-traceability:        {status: ready}
+  integration-adapter-contract:    {status: ready, reason: "the on-disk formats are the integration — docs/adr/0004"}
+  api-change-discipline:           {status: ready}
+  schema-migration-safety:         {status: ready, reason: "plain SQL at startup — design/02-data-model.md"}
+  observability-discipline:        {status: ready}
+  secret-handling:                 {status: ready, reason: "the central concern here — docs/07-security.md"}
+  worktree-workflow:               {status: ready}
+  documentation-discipline:        {status: ready}
+
+  # testing
+  requirements-based-tests:        {status: ready}
+  generated-test-review:           {status: ready}
+  fakes-over-mocks:                {status: ready, reason: "the filesystem is faked with tmp_path"}
+  flaky-test-management:           {status: ready}
+  test-data-management:            {status: ready}
+  test-impact-selection:           {status: needs_toolchain, missing: [toolchain.python.test_changed]}
+  coverage-report-review:          {status: ready}
+  property-based-testing:          {status: needs_toolchain, missing: [toolchain.python.property]}
+  combinatorial-test-design:       {status: ready}
+  http-service-virtualization:     {status: not_applicable, reason: "this process makes no outbound calls"}
+
+  # verification and release
+  qa-gate:                         {status: ready}
+  pre-pr-checklist:                {status: ready}
+  post-change-smoke:               {status: ready, reason: "`make run` and look at the board"}
+  ui-regression-review:            {status: ready, reason: "there is a UI, and it is the product"}
+
+  # security and policy
+  diff-security-scan:              {status: ready}
+  static-analysis-security-triage: {status: needs_toolchain, missing: [toolchain.python.sast]}
+  language-policy-guard:           {status: not_applicable, reason: "no language policy declared"}
