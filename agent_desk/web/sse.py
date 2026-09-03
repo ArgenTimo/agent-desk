@@ -18,16 +18,21 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from agent_desk.config import settings
-from agent_desk.web.routes import render_board
+from agent_desk.web.routes import render_blocks, render_board
 
 router = APIRouter()
 
 
-def _event(html: str) -> str:
-    """One `message` event. Each line of the fragment is its own `data:` field, which is how the
-    protocol carries a multi-line payload; EventSource rejoins them with newlines."""
+def _event(name: str, html: str) -> str:
+    """One named event. Each line of the fragment is its own `data:` field, which is how the
+    protocol carries a multi-line payload; EventSource rejoins them with newlines.
+
+    The board and the blocks are two channels on one connection rather than two connections: a
+    second EventSource would be a second polling loop over the same filesystem, and the page needs
+    to tell "the board moved" from "an answer arrived" anyway.
+    """
     body = "\n".join(f"data: {line}" for line in html.splitlines())
-    return f"{body}\n\n"
+    return f"event: {name}\n{body}\n\n"
 
 
 # A named event rather than a comment, because the page has to be able to tell "nothing changed"
@@ -45,13 +50,18 @@ async def board_events() -> AsyncIterator[str]:
     away, and this generator would poll the filesystem for a window that closed an hour ago; and
     without a *named* event, the page could not put a time on what it is showing.
     """
-    previous: str | None = None
+    previous: dict[str, str] = {}
     while True:
-        html = await asyncio.to_thread(render_board)
-        if html != previous:
-            previous = html
-            yield _event(html)
-        else:
+        pushed = False
+        for name, html in (
+            ("board", await asyncio.to_thread(render_board)),
+            ("blocks", await render_blocks()),
+        ):
+            if previous.get(name) != html:
+                previous[name] = html
+                pushed = True
+                yield _event(name, html)
+        if not pushed:
             yield _HEARTBEAT
         await asyncio.sleep(settings.registry_poll_seconds)
 

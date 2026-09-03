@@ -1,0 +1,31 @@
+{# The column under the input field: newest first, each showing its state and its thread
+   (docs/06-console.md). A block never disappears on failure — a question that vanished is a
+   question you ask again (docs/04-threads-and-blocks.md). #}
+{% if not blocks %}
+<p class="empty">nothing asked yet</p>
+{% endif %}
+{% for block in blocks %}
+<article class="block {{ block.state }}" data-block="{{ block.id }}">
+  <header>
+    <span class="state">{{ block.state }}</span>
+    <span class="asked">{{ block.input }}</span>
+    <span class="thread">thread: {{ threads[block.thread_id].subject if block.thread_id in threads else "—" }}</span>
+  </header>
+
+  {% if block.state == "running" %}
+  <div class="answer streaming">{{ partial.get(block.id, "") }}<span class="caret">▍</span></div>
+  {% elif block.answer %}
+  <div class="answer">{{ block.answer }}</div>
+  {% elif block.error %}
+  <div class="failure">{{ block.error }}</div>
+  {% endif %}
+
+  <footer>
+    {% if block.state in ("queued", "running") %}
+    <button hx-post="/blocks/{{ block.id }}/cancel" hx-target="#blocks">cancel</button>
+    {% elif block.state in ("failed", "cancelled") %}
+    <button hx-post="/blocks/{{ block.id }}/retry" hx-target="#blocks">retry</button>
+    {% endif %}
+  </footer>
+</article>
+{% endfor %}

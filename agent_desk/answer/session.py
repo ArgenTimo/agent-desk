@@ -24,7 +24,7 @@ import contextlib
 import json
 import os
 import signal
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from pathlib import Path
 
 from agent_desk.config import settings
@@ -219,6 +219,7 @@ async def answer_block(
     prompt: str,
     *,
     add_dirs: Sequence[Path] = (),
+    on_chunk: Callable[[str], None] | None = None,
 ) -> None:
     """Run one block from `queued` to `answered`, or to `failed` with the reason.
 
@@ -232,6 +233,10 @@ async def answer_block(
     try:
         async for chunk in stream_answer(prompt, add_dirs=add_dirs):
             chunks.append(chunk)
+            if on_chunk is not None:
+                # docs/04: the answer as it streams. The partial lives in memory only — a second
+                # copy of an answer is a second thing to redact (docs/07-security.md).
+                on_chunk("".join(chunks))
     except asyncio.CancelledError:
         # Shielded: the cancellation is already in flight, and a state that did not get written
         # would come back as `running` forever — the exact thing the crash rule exists to prevent.

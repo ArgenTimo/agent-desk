@@ -13,17 +13,52 @@ sees it.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_desk.web import routes, sse
+from agent_desk.web import blocks, routes, sse
 
-# No OpenAPI surface: this application has three read-only routes and no client but the page it
-# serves.
-app = FastAPI(title="agent-desk", openapi_url=None)
+STATIC = Path(__file__).parent / "static"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Open the store, hold one task group for every run, and end them on the way out.
+
+    The group is the mechanism behind "no fire-and-forget task": a run that raises is observed
+    here rather than swallowed by the event loop. Shutdown cancels what is in flight instead of
+    waiting for it — a console that will not close while three questions are in the air is the
+    same failure as one that will not close while a browser is watching the board.
+    """
+    await routes.store.open()
+    try:
+        async with asyncio.TaskGroup() as group:
+            blocks.runs.attach(group)
+            try:
+                yield
+            finally:
+                blocks.runs.cancel_all()
+                blocks.runs.attach(None)
+    finally:
+        await routes.store.close()
+
+
+# No OpenAPI surface: this application has a handful of read-mostly routes and no client but the
+# page it serves.
+app = FastAPI(title="agent-desk", openapi_url=None, lifespan=lifespan)
 # Loopback names only, and deliberately not `settings.host`: that is a bind address, and reading
 # it here would let a changed bind silently widen the one check docs/07-security.md says never to
 # widen. A non-loopback bind is outside the v1 security model altogether.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+if STATIC.is_dir():
+    # HTMX, vendored rather than fetched: a local tool that needs the network to render a list of
+    # five sessions has lost the argument (docs/adr/0003).
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.include_router(routes.router)
 app.include_router(sse.router)

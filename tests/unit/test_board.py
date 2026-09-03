@@ -10,12 +10,14 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 from agent_desk.config import Settings
 from agent_desk.observe import registry, transcript
+from agent_desk.store.repo import Store
 from agent_desk.web import routes, sse
 from jinja2 import UndefinedError
 
@@ -213,27 +215,40 @@ def test_a_session_id_that_is_not_one_reaches_no_glob(home: Home) -> None:
     assert "no transcript" in routes.render_tail("../../../etc/passwd")
 
 
+@pytest.fixture
+async def wired(
+    home: Home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[Store]:
+    """The board tests that go through a route need a store, because the page now has two halves."""
+    store = Store(tmp_path / "blocks.db")
+    await store.open()
+    monkeypatch.setattr(routes, "store", store)
+    yield store
+    await store.close()
+
+
 @pytest.mark.unit
-async def test_the_page_serves_the_board_and_opens_one_stream(home: Home) -> None:
+async def test_the_page_serves_the_board_and_opens_one_stream(home: Home, wired: Store) -> None:
     body = (await routes.page()).body.decode()
     assert "no live sessions" in body
     assert "new EventSource('/events')" in body
 
 
 @pytest.mark.unit
-async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home) -> None:
+async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home, wired: Store) -> None:
     home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
     events = sse.board_events()
 
     first = await anext(events)
-    assert first.startswith("data: ")
+    assert first.startswith("event: board")
     assert first.endswith("\n\n")
     # A multi-line fragment is one `data:` field per line; that is the protocol, not a preference.
-    assert all(line.startswith("data: ") for line in first.strip().splitlines())
+    assert all(line.startswith("data: ") for line in first.strip().splitlines()[1:])
     assert "example" in first
 
-    # Nothing changed between the two reads, so nothing is re-rendered into the page — but the
-    # page is still told that somebody looked, because "quiet" and "gone" must not look alike.
+    # The blocks channel is pushed once too, and then nothing changes — but the page is still told
+    # that somebody looked, because "quiet" and "gone" must not look alike.
+    assert (await anext(events)).startswith("event: blocks")
     second = await anext(events)
     assert second.startswith("event: heartbeat")
     assert "<article" not in second
@@ -241,7 +256,7 @@ async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home) -> N
 
 
 @pytest.mark.unit
-async def test_the_page_says_when_it_last_heard_from_the_server(home: Home) -> None:
+async def test_the_page_says_when_it_last_heard_from_the_server(home: Home, wired: Store) -> None:
     """A board that has silently stopped updating looks exactly like a quiet one (CLAUDE.md).
 
     Both halves of docs/06-console.md are asserted: the stream dropping, and the stream staying
@@ -303,7 +318,7 @@ async def _request(path: str, host: str) -> tuple[int, str]:
 
 
 @pytest.mark.unit
-async def test_the_console_answers_a_loopback_host(home: Home) -> None:
+async def test_the_console_answers_a_loopback_host(home: Home, wired: Store) -> None:
     home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
     status, body = await _request("/", "127.0.0.1:8787")
     assert status == 200

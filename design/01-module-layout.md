@@ -16,7 +16,8 @@ agent_desk/
     classify.py    new thread or continuation
   ideas/         capture, the card, the three draft actions
   web/           FastAPI app, Jinja2 templates, HTMX (from Phase 2), SSE
-    app.py  routes.py  sse.py  templates/
+    app.py  routes.py  sse.py  templates/  static/
+    blocks.py      the input field: one task group for every run in flight
   peer.py        the ONE write path: a message to a named session
   config.py      paths and settings, resolved once
 ```

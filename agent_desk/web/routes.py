@@ -14,7 +14,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
@@ -29,8 +29,14 @@ from agent_desk.observe.model import (
     since,
     triage_rank,
 )
+from agent_desk.store.repo import Store
+from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
+
+# One process, one SQLite file (docs/adr/0003). The instance is opened by the application's
+# lifespan and replaced wholesale by a test that wants its own.
+store = Store(settings.db_path)
 
 TEMPLATES = Path(__file__).parent / "templates"
 
@@ -106,11 +112,24 @@ def render_tail(session_id: str) -> str:
     return env.get_template("_tail.html").render(tail=tail)
 
 
+async def render_blocks() -> str:
+    """The column under the input field: newest first, each showing its state and its thread."""
+    rows = await store.blocks()
+    threads = {thread.id: thread for thread in await store.open_threads()}
+    return env.get_template("_blocks.html").render(
+        blocks=rows, threads=threads, partial=block_runs.PARTIAL
+    )
+
+
 @router.get("/", response_class=HTMLResponse)
 async def page() -> HTMLResponse:
     board_html = await asyncio.to_thread(render_board)
     return HTMLResponse(
-        env.get_template("board.html").render(board=board_html, poll=settings.registry_poll_seconds)
+        env.get_template("board.html").render(
+            board=board_html,
+            blocks=await render_blocks(),
+            poll=settings.registry_poll_seconds,
+        )
     )
 
 
@@ -118,3 +137,40 @@ async def page() -> HTMLResponse:
 async def session_tail(session_id: str) -> HTMLResponse:
     """A row expands to the tail of its transcript. That is the whole drill-down in v1."""
     return HTMLResponse(await asyncio.to_thread(render_tail, session_id))
+
+
+@router.post("/blocks", response_class=HTMLResponse)
+async def ask(request: Request) -> HTMLResponse:
+    """One line of input, accepted and answered on its own time.
+
+    The response is the column, and the field is cleared by the page the moment this returns —
+    submitting frees it, and nothing here waits for an answer (docs/04-threads-and-blocks.md).
+    """
+    form = await request.form()
+    typed = str(form.get("text") or "").strip()
+    if typed:
+        rows, _ = await asyncio.to_thread(board)
+        await block_runs.submit(store, typed, rows)
+    return HTMLResponse(await render_blocks())
+
+
+@router.get("/blocks", response_class=HTMLResponse)
+async def block_column() -> HTMLResponse:
+    return HTMLResponse(await render_blocks())
+
+
+@router.post("/blocks/{block_id}/retry", response_class=HTMLResponse)
+async def retry_block(block_id: str) -> HTMLResponse:
+    """A block that failed does not disappear; it offers this (docs/04)."""
+    block = await store.block(block_id)
+    if block is not None and block.state in ("failed", "cancelled"):
+        rows, _ = await asyncio.to_thread(board)
+        await block_runs.retry(store, block, rows)
+    return HTMLResponse(await render_blocks())
+
+
+@router.post("/blocks/{block_id}/cancel", response_class=HTMLResponse)
+async def cancel_block(block_id: str) -> HTMLResponse:
+    """Stop a run that is no longer worth waiting for. The block stays, saying it was cancelled."""
+    block_runs.cancel(block_id)
+    return HTMLResponse(await render_blocks())

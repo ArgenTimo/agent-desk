@@ -64,6 +64,32 @@
   .who { color: var(--dim); }
   .when { color: var(--dim); margin-right: 4px; }
   .hint { margin: 6px 0 0; color: var(--flag); font-size: 12px; }
+  #ask { margin: 12px 0 8px; }
+  #ask input {
+    width: 100%; padding: 8px 10px; font: inherit; color: var(--fg);
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--busy);
+  }
+  #ask input:focus { outline: none; border-left-color: var(--fg); }
+  .block {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
+    padding: 8px 10px; margin-bottom: 6px;
+  }
+  .block.running { border-left-color: var(--busy); }
+  .block.answered { border-left-color: var(--idle); }
+  .block.failed { border-left-color: var(--flag); }
+  .block header { display: flex; gap: 10px; align-items: baseline; }
+  .block .state { color: var(--dim); min-width: 9ch; }
+  .block .asked { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .block .thread { color: var(--dim); font-size: 11px; }
+  .answer, .failure { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .failure { color: var(--flag); }
+  .caret { color: var(--busy); }
+  .block footer { margin-top: 6px; }
+  .block button {
+    font: inherit; color: var(--dim); background: none; cursor: pointer;
+    border: 1px solid var(--line); padding: 1px 8px;
+  }
+  .block button:hover { color: var(--fg); border-color: var(--fg); }
   .tail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
   .entries { list-style: none; margin: 0; padding: 0; }
   .entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
@@ -87,6 +113,17 @@
 
 <div id="board">{{ board|safe }}</div>
 
+{# One field, always focused, never blocked. Submitting frees it immediately
+   (docs/04-threads-and-blocks.md). #}
+<form id="ask" hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
+      hx-on::after-request="this.reset(); this.text.focus()">
+  <input name="text" autocomplete="off" autofocus
+         placeholder="ask anything — the field is free again the moment you press enter">
+</form>
+
+<div id="blocks">{{ blocks|safe }}</div>
+
+<script src="/static/htmx.min.js"></script>
 <script>
 // Twelve lines instead of a framework. The board is server-rendered; the browser does three
 // things — replace it when the server says it changed, expand one row on demand, and say plainly
@@ -157,14 +194,22 @@ document.addEventListener('click', (event) => {
 });
 
 const stream = new EventSource('/events');
-stream.onmessage = (event) => {
+stream.addEventListener('board', (event) => {
   document.getElementById('board').innerHTML = event.data;
   restore();
   checked();
   // The window title is the part of an always-on-top window you can read without focusing it.
   const waiting = document.querySelectorAll('.row.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
-};
+});
+stream.addEventListener('blocks', (event) => {
+  // Never while the reader is inside a block: replacing the column under a selection loses it,
+  // and an answer is the one thing here anybody copies out.
+  if (!document.getSelection().isCollapsed) return;
+  document.getElementById('blocks').innerHTML = event.data;
+  htmx.process(document.getElementById('blocks'));
+  checked();
+});
 stream.addEventListener('heartbeat', checked);
 stream.onerror = () => lost('stream lost — reconnecting');
 </script>
