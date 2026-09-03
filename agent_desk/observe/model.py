@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # The CLI version tests/fixtures/ was recorded from. A live session reporting anything else is not
 # an error and never a block — it is the advisory banner of docs/adr/0004, and the fixture README
 # is the procedure.
-RECORDED_CLI_VERSION = "2.1.258"
+RECORDED_CLI_VERSION = "2.1.259"
 
 # docs/03-session-observation.md: written by the session itself, and the only trustworthy
 # statement about what it is doing.

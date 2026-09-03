@@ -11,7 +11,7 @@
 <p class="empty">no live sessions</p>
 {% else %}
 {% for row in rows %}
-<article class="row{% if row.hint.waiting %} waiting{% endif %}" data-session="{{ row.session.session_id }}">
+<article class="row{% if row.hint.waiting %} flagged{% endif %}" data-session="{{ row.session.session_id }}">
   <header>
     <span class="project">{{ row.session.project }}</span>
     <span class="sep">·</span>
@@ -52,7 +52,7 @@
   {% if row.hint.waiting %}
   {# Never a bare claim: the flag carries the observation it was inferred from
      (docs/03-session-observation.md, "What cannot be known"). #}
-  <p class="hint">⚑ may be waiting for you — inferred from {{ row.hint.observation }}; no Notification hook installed, so this is a guess</p>
+  <p class="hint">⚑ may be waiting for you — inferred from {{ row.hint.observation }}; no hook signal for this session, so this is a guess</p>
   {% endif %}
 
   <div class="tail" hidden></div>

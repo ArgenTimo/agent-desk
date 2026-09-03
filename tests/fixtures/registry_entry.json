@@ -4,7 +4,7 @@
   "cwd": "/home/dev/projects/example",
   "startedAt": 1788379214575,
   "procStart": "10644",
-  "version": "2.1.258",
+  "version": "2.1.259",
   "peerProtocol": 1,
   "peerFeatures": [
     "notify_idle",

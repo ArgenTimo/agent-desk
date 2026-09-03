@@ -103,7 +103,9 @@ def render_tail(session_id: str) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def page() -> HTMLResponse:
     board_html = await asyncio.to_thread(render_board)
-    return HTMLResponse(env.get_template("board.html").render(board=board_html))
+    return HTMLResponse(
+        env.get_template("board.html").render(board=board_html, poll=settings.registry_poll_seconds)
+    )
 
 
 @router.get("/sessions/{session_id}/tail", response_class=HTMLResponse)

@@ -49,6 +49,13 @@ already read `~/.claude/` directly, because it is the same operating-system user
 bind is therefore load-bearing, not a default** — the day it becomes `0.0.0.0`, the whole security
 model of v1 is gone and the tool needs a real one.
 
+**A browser is not a local process, and the loopback argument does not cover it.** Any page on the
+open web can point a hostname of its own at `127.0.0.1`; the request then leaves the user's own
+browser, and as far as that browser is concerned it is same-origin with this console. The reply
+would be transcript text. So the application answers only to a `Host` header naming loopback and
+refuses anything else before a route sees it — which is what makes the bind mean, for the one
+client that is not a process on this machine, what the paragraph above says it means.
+
 No outbound network calls. The `claude` CLI makes its own; this tool makes none.
 
 ## Phase 3, where the model changes
@@ -67,6 +74,7 @@ adding a login form.
 ## For anyone changing this code
 
 - Never widen `sessions/*.json`.
+- Never widen the allowed `Host` list beyond loopback while there is no authentication.
 - Never write a path under `~/.claude/` or under an observed repository.
 - Never put transcript text into a log line, an error message, or a subprocess argument.
 - Never pass a session's socket key to anything, including the peer-messaging client — that client

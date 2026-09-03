@@ -9,7 +9,7 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 
 | File | Recorded from | CLI `version` |
 |---|---|---|
-| `registry_entry.json` | `~/.claude/sessions/<pid>.json` | `2.1.258` |
+| `registry_entry.json` | `~/.claude/sessions/<pid>.json` | `2.1.259` |
 | `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` | `2.1.258` |
 
 ## What was scrubbed, and what was not
@@ -35,6 +35,21 @@ When a CLI update breaks a parser test, re-record rather than patch:
    [`docs/03-session-observation.md`](../../docs/03-session-observation.md).
 
 This is a normal task with a normal review, not an emergency.
+
+## Two notes from the second recording
+
+`registry_entry.json` was re-recorded at `2.1.259`. The key set and every type were **identical**
+to the `2.1.258` recording — the update that moved the version moved nothing this program reads.
+That is worth writing down: the check is cheap precisely because most of the time it says nothing
+changed, and the one time it says otherwise is the day it earns its keep.
+
+**One shape is documented and not recorded.** `docs/03-session-observation.md` records a fourth
+status value, `waiting`, seen in the registry at `2.1.259`. No live session carried it at the
+moment this fixture was re-recorded, and a fixture is recorded rather than written — inventing the
+entry would produce exactly the hand-written artefact
+[`docs/adr/0004`](../../docs/adr/0004-the-transcript-format-is-not-a-contract.md) exists to
+replace. The value is covered by an ordering test instead, and the gap is named here rather than
+papered over. Re-record when a session is next seen holding it.
 
 ## A note recorded on the first day
 

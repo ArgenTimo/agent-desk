@@ -40,7 +40,7 @@
     background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
     padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
   }
-  .row.waiting { border-left-color: var(--flag); }
+  .row.flagged { border-left-color: var(--flag); }
   header { display: flex; gap: 6px; align-items: baseline; color: var(--dim); }
   .project { color: var(--fg); font-weight: 600; }
   .name, .kind { margin-left: auto; font-size: 11px; }
@@ -49,6 +49,9 @@
   .status.busy { color: var(--busy); }
   .status.idle { color: var(--idle); }
   .status.shell { color: var(--shell); }
+  /* A status this program has no colour for is one it does not recognise. It is shown as the
+     session wrote it and marked as unread-by-us, rather than styled into looking understood. */
+  .status:not(.idle):not(.busy):not(.shell) { text-decoration: underline dotted; }
   .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title.unread { color: var(--dim); font-style: italic; }
   .age { color: var(--dim); white-space: nowrap; }
@@ -89,8 +92,13 @@ const state = document.getElementById('stream-state');
 
 async function fillTail(row) {
   const box = row.querySelector('.tail');
-  box.innerHTML = await (await fetch(`/sessions/${row.dataset.session}/tail`)).text();
   box.hidden = false;
+  try {
+    const response = await fetch(`/sessions/${row.dataset.session}/tail`);
+    box.innerHTML = response.ok ? await response.text() : '<p class="empty">could not read the tail</p>';
+  } catch {
+    box.innerHTML = '<p class="empty">could not read the tail</p>';
+  }
 }
 
 function restore() {
@@ -99,12 +107,29 @@ function restore() {
   }
 }
 
+let lastChecked = 0;
+
 function checked() {
+  lastChecked = Date.now();
   asof.textContent = `checked ${new Date().toLocaleTimeString()}`;
   state.textContent = '·';
   state.className = '';
   document.body.classList.remove('stale');
 }
+
+function lost(why) {
+  state.textContent = why;
+  state.className = 'lost';
+  document.body.classList.add('stale');
+}
+
+// A dropped connection fires onerror; a connection that stays open while nothing arrives fires
+// nothing at all, and that is the shape a saturated reader or a hanging stat() takes. Both end
+// the same way: the board says it is no longer being told anything.
+const silence = {{ poll }} * 3 * 1000;
+setInterval(() => {
+  if (lastChecked && Date.now() - lastChecked > silence) lost('no update — stream stalled');
+}, 1000);
 
 document.addEventListener('click', (event) => {
   const row = event.target.closest('[data-session]');
@@ -127,15 +152,11 @@ stream.onmessage = (event) => {
   restore();
   checked();
   // The window title is the part of an always-on-top window you can read without focusing it.
-  const waiting = document.querySelectorAll('.row.waiting').length;
+  const waiting = document.querySelectorAll('.row.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 };
 stream.addEventListener('heartbeat', checked);
-stream.onerror = () => {
-  state.textContent = 'stream lost — reconnecting';
-  state.className = 'lost';
-  document.body.classList.add('stale');
-};
+stream.onerror = () => lost('stream lost — reconnecting');
 </script>
 </body>
 </html>

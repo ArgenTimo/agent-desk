@@ -55,6 +55,26 @@ def is_alive(pid: int, proc_start: str, *, proc_root: Path = PROC) -> bool:
     return _starttime(pid, proc_root) == proc_start
 
 
+def _is_newer(observed: str, recorded: str) -> bool:
+    """Is `observed` a version the fixtures were recorded before?
+
+    The banner of docs/adr/0004 is direction-sensitive, and it has to be to stay readable. A
+    session *newer* than the recording is the case that ADR is about: a field may have moved and
+    nothing announced it, so the shape is unverified and the board says so. A session *older* than
+    the recording raises nothing, for two reasons — an older shape that no longer fits the model
+    already produces its own, far more specific notice naming the field, and on a machine where a
+    session runs for days there is always one, so a banner lit by age is a banner nobody reads.
+
+    A version that is not dotted integers is reported: unknown is not evidence of sameness.
+    """
+    try:
+        return tuple(int(part) for part in observed.split(".")) > tuple(
+            int(part) for part in recorded.split(".")
+        )
+    except ValueError:
+        return True
+
+
 def _why(exc: Exception) -> str:
     """A reason a human can act on, carrying no content out of the file.
 
@@ -92,10 +112,11 @@ def read_registry(*, pattern: str | None = None, proc_root: Path = PROC) -> Regi
         if is_alive(session.pid, session.proc_start, proc_root=proc_root):
             sessions.append(session)
 
-    unrecorded = sorted({s.version for s in sessions} - {RECORDED_CLI_VERSION})
-    if unrecorded:
+    ahead = sorted({s.version for s in sessions if _is_newer(s.version, RECORDED_CLI_VERSION)})
+    if ahead:
         notices.append(
-            f"CLI {', '.join(unrecorded)} — the parser is tested against fixtures recorded from "
-            f"{RECORDED_CLI_VERSION}. If a row looks wrong, re-record (docs/adr/0004)."
+            f"CLI {', '.join(ahead)} is newer than the {RECORDED_CLI_VERSION} the fixtures were "
+            f"recorded from — a shape may have moved without announcing it. If a row looks wrong, "
+            f"re-record (docs/adr/0004)."
         )
     return RegistryRead(sessions=sessions, notices=notices)

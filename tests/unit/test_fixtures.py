@@ -34,7 +34,10 @@ def test_registry_fixture_carries_every_field_the_board_needs() -> None:
     entry = json.loads((FIXTURES / "registry_entry.json").read_text())
     missing = REQUIRED_REGISTRY_FIELDS - set(entry)
     assert not missing, f"registry fixture is missing {sorted(missing)} — re-record it"
-    assert entry["status"] in {"idle", "busy", "shell"}
+    # Three values were recorded at 2.1.251 and 2.1.258, and a fourth — `waiting` — was seen at
+    # 2.1.259 (docs/03-session-observation.md). The set is what that document records; a fifth
+    # arriving in a recording should fail here and be read by a human before it reaches the board.
+    assert entry["status"] in {"idle", "busy", "shell", "waiting"}
 
 
 @pytest.mark.unit

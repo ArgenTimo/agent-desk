@@ -243,3 +243,73 @@ async def test_the_page_says_when_it_last_heard_from_the_server(home: Home) -> N
     assert 'id="asof"' in body
     assert "stream lost" in body
     assert "heartbeat" in body
+
+
+async def _request(path: str, host: str) -> tuple[int, str]:
+    """Drive the ASGI application directly: the middleware and the routing, with no test client.
+
+    `httpx` is deliberately absent from this project's dependencies, and a dependency added to
+    reach a route is a dependency in the lock file forever.
+    """
+    from agent_desk.web.app import app
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", host.encode())],
+        "client": ("127.0.0.1", 54321),
+        "server": ("127.0.0.1", 8787),
+    }
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await app(scope, receive, send)
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return status, body.decode()
+
+
+@pytest.mark.unit
+async def test_the_console_answers_a_loopback_host(home: Home) -> None:
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    status, body = await _request("/", "127.0.0.1:8787")
+    assert status == 200
+    assert "agent-desk" in body
+
+
+@pytest.mark.unit
+async def test_a_page_on_the_web_cannot_read_this_console_through_the_browser(home: Home) -> None:
+    """A hostname resolving to 127.0.0.1 is same-origin to a browser, and the reply is transcript
+    text. Loopback keeps other users off the port; the Host check keeps other *pages* off it
+    (docs/07-security.md)."""
+    status, _ = await _request("/", "board.attacker.example")
+    assert status == 400
+
+    status, _ = await _request(
+        "/sessions/aaaaaaaa-0000-4000-8000-000000000001/tail", "board.attacker.example"
+    )
+    assert status == 400
+
+
+@pytest.mark.unit
+def test_a_transcript_that_cannot_be_read_leaves_the_row_marked(home: Home) -> None:
+    """Present but unreadable is not the same as quiet, and the row must not pretend otherwise."""
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    directory = home.root / "projects" / "-broken"
+    directory.mkdir(parents=True)
+    (directory / "aaaaaaaa-0000-4000-8000-000000000001.jsonl").write_text("torn\n")
+
+    html = routes.render_board()
+    assert "registry facts only" in html

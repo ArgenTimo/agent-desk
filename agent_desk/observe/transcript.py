@@ -46,7 +46,16 @@ def _find(session_id: str, root: Path) -> Path | None:
     matches = list(root.glob(f"*/{session_id}.jsonl"))
     if not matches:
         return None
-    return max(matches, key=lambda p: p.stat().st_mtime if p.exists() else 0)
+
+    def written_at(path: Path) -> float:
+        # The file can be removed between the glob and the question; a session that ended while
+        # the board was drawing is not an error worth propagating into the stream.
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return max(matches, key=written_at)
 
 
 def _tail_window(path: Path, max_bytes: int) -> list[str]:
@@ -159,6 +168,12 @@ def read_tail(
                     role=kind, text=_flatten(line.get("message")), at=_at(line.get("timestamp"))
                 )
             )
+
+    if title is None and last_prompt is None and not entries:
+        # The file exists and the window yielded nothing readable. Returning an empty tail here
+        # would render a row of em-dashes that looks like a quiet session; returning None marks it
+        # as unread, which is what it is (docs/02-architecture.md, failure posture).
+        return None
 
     return TranscriptTail(
         session_id=session_id,

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent_desk.config import Settings
 from agent_desk.observe import registry
 from agent_desk.observe.model import RECORDED_CLI_VERSION
 
@@ -134,6 +135,8 @@ def test_a_key_file_beside_an_entry_is_never_opened(tmp_path: Path) -> None:
     )
     assert len(read.sessions) == 1
     assert read.notices == []
+    # And the pattern the program actually uses when nobody passes one.
+    assert Settings(claude_home=tmp_path).registry_glob.endswith("*.json")
 
 
 @pytest.mark.unit
@@ -175,7 +178,7 @@ def test_a_notice_carries_no_content_out_of_the_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_an_unrecorded_cli_version_raises_the_banner(tmp_path: Path) -> None:
+def test_a_cli_newer_than_the_recording_raises_the_banner(tmp_path: Path) -> None:
     """Advisory, never a block: the session is still on the board (docs/adr/0004)."""
     entry = _entry(version="9.9.999")
     read = registry.read_registry(
@@ -185,6 +188,34 @@ def test_an_unrecorded_cli_version_raises_the_banner(tmp_path: Path) -> None:
     assert len(read.sessions) == 1
     assert "9.9.999" in read.notices[0]
     assert RECORDED_CLI_VERSION in read.notices[0]
+
+
+@pytest.mark.unit
+def test_a_session_older_than_the_recording_does_not_raise_it(tmp_path: Path) -> None:
+    """A banner that is always lit is a banner nobody reads.
+
+    Sessions live for days, so an older one is always present after an update. An older shape that
+    no longer fits the model raises its own notice naming the field, which is the specific signal;
+    the version banner is for the direction the recording cannot have covered.
+    """
+    entry = _entry(version="2.1.100")
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry),
+        proc_root=_proc(tmp_path, entry["pid"], entry["procStart"]),
+    )
+    assert len(read.sessions) == 1
+    assert read.notices == []
+
+
+@pytest.mark.unit
+def test_a_version_that_is_not_a_version_is_reported(tmp_path: Path) -> None:
+    """Unknown is not evidence of sameness."""
+    entry = _entry(version="dev-build")
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry),
+        proc_root=_proc(tmp_path, entry["pid"], entry["procStart"]),
+    )
+    assert "dev-build" in read.notices[0]
 
 
 @pytest.mark.unit

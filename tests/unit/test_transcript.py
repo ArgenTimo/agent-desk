@@ -148,3 +148,25 @@ def test_a_pasted_file_does_not_reach_the_template_whole(tmp_path: Path) -> None
     tail = transcript.read_tail(SESSION_ID, root=root)
     assert tail is not None
     assert len(tail.entries[0].text) == transcript._MAX_ENTRY_CHARS
+
+
+@pytest.mark.unit
+def test_a_transcript_that_yields_nothing_readable_counts_as_unread(tmp_path: Path) -> None:
+    """An empty tail would render a row of em-dashes that looks like a quiet session.
+
+    docs/02-architecture.md wants that row marked as such, and the marker downstream is `None`.
+    """
+    root = tmp_path / "projects"
+    directory = root / "-broken"
+    directory.mkdir(parents=True)
+    (directory / f"{SESSION_ID}.jsonl").write_text("not json at all\nnor this one\n")
+    assert transcript.read_tail(SESSION_ID, root=root) is None
+
+
+@pytest.mark.unit
+def test_an_empty_transcript_file_is_unread_too(tmp_path: Path) -> None:
+    root = tmp_path / "projects"
+    directory = root / "-fresh"
+    directory.mkdir(parents=True)
+    (directory / f"{SESSION_ID}.jsonl").write_text("")
+    assert transcript.read_tail(SESSION_ID, root=root) is None

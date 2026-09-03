@@ -4,9 +4,10 @@ Three sources, in decreasing order of how much you can trust them. All three are
 observed session noticing, which is the property the whole tool is built on
 ([adr/0002](adr/0002-read-first-never-interrupt.md)).
 
-Everything on this page was verified against Claude Code `2.1.251` on Linux and re-checked at
-`2.1.258` — the CLI updated itself between the two readings, and a key had appeared. Nothing broke
-and nothing announced it, which is [adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)
+Everything on this page was verified against Claude Code `2.1.251` on Linux, re-checked at
+`2.1.258` — the CLI updated itself between the two readings, and a key had appeared — and read
+again at `2.1.259`, where the shape held and a status value did not. Nothing broke and nothing
+announced it, which is [adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)
 demonstrating its own argument before a line of the parser existed.
 
 These files are internal state, not a published interface. Treat every shape below as *recorded*,
@@ -122,3 +123,10 @@ Every shape above is recorded under `tests/fixtures/`, with the CLI `version` th
 and the parser is tested against the recording rather than against a hand-written idea of it. When
 a CLI update changes a shape, the fixture test fails with a name attached — which is the entire
 plan for that day ([adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)).
+
+**The version banner points forward.** A session reporting a version *newer* than the recording is
+the case that ADR is about, and it is what the banner names. A session older than the recording
+raises nothing: an older shape that no longer fits produces its own notice naming the field, which
+is the specific signal, and sessions here live for days — so a banner lit by age alone would be lit
+permanently, and a banner that is always on is one nobody reads. `tests/fixtures/README.md` records
+one shape that is documented above and deliberately not recorded, and why.
