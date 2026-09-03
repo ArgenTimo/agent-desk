@@ -228,7 +228,18 @@ async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home) -> N
     assert all(line.startswith("data: ") for line in first.strip().splitlines())
     assert "example" in first
 
-    # Nothing changed between the two reads, so nothing is re-rendered into the page.
+    # Nothing changed between the two reads, so nothing is re-rendered into the page — but the
+    # page is still told that somebody looked, because "quiet" and "gone" must not look alike.
     second = await anext(events)
-    assert second.startswith(":")
+    assert second.startswith("event: heartbeat")
+    assert "<article" not in second
     await events.aclose()
+
+
+@pytest.mark.unit
+async def test_the_page_says_when_it_last_heard_from_the_server(home: Home) -> None:
+    """A board that has silently stopped updating looks exactly like a quiet one (CLAUDE.md)."""
+    body = (await routes.page()).body.decode()
+    assert 'id="asof"' in body
+    assert "stream lost" in body
+    assert "heartbeat" in body

@@ -115,8 +115,20 @@ class AttentionHint(BaseModel):
     observation: str
 
 
-def _minutes_since(then_ms: int, now: int) -> int:
-    return max(0, (now - then_ms) // 60_000)
+def since(then_ms: int, now: int) -> str:
+    """A duration in the largest unit that is still exact enough to act on.
+
+    Minute granularity above a minute is deliberate: a board that re-renders because a number
+    ticked from 41s to 42s cannot be read, and nothing on it is decided at that resolution.
+    """
+    seconds = max(0, (now - then_ms) // 1000)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86_400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86_400}d"
 
 
 def attention_hint(
@@ -133,8 +145,7 @@ def attention_hint(
     about to be busy again.
     """
     last = tail.last_entry if tail else None
-    idle_for = _minutes_since(session.status_updated_at, now)
-    seen = f"{session.status} {idle_for}m"
+    seen = f"{session.status} {since(session.status_updated_at, now)}"
     seen += f" · last entry: {last.role}" if last else " · no transcript entry read"
 
     waiting = (

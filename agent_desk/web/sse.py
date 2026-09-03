@@ -30,11 +30,20 @@ def _event(html: str) -> str:
     return f"{body}\n\n"
 
 
+# A named event rather than a comment, because the page has to be able to tell "nothing changed"
+# from "nobody is reading the registry any more". A comment reaches the browser but not the
+# script, which would leave a board that had silently stopped updating looking exactly like a
+# board on which nothing is happening — the fifth rule of CLAUDE.md, in the shape a console takes
+# it.
+_HEARTBEAT = "event: heartbeat\ndata: checked\n\n"
+
+
 async def board_events() -> AsyncIterator[str]:
     """The rendered board whenever it changes, and a comment when it does not.
 
-    The comment is not decoration: without a write, a server never learns that the browser went
-    away, and this generator would poll the filesystem for a window that closed an hour ago.
+    The heartbeat is not decoration. Without a write, a server never learns that the browser went
+    away, and this generator would poll the filesystem for a window that closed an hour ago; and
+    without a *named* event, the page could not put a time on what it is showing.
     """
     previous: str | None = None
     while True:
@@ -43,7 +52,7 @@ async def board_events() -> AsyncIterator[str]:
             previous = html
             yield _event(html)
         else:
-            yield ": no change\n\n"
+            yield _HEARTBEAT
         await asyncio.sleep(settings.registry_poll_seconds)
 
 

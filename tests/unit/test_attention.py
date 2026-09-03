@@ -140,7 +140,26 @@ def test_a_status_this_program_does_not_know_is_not_treated_as_quiet() -> None:
 
 @pytest.mark.unit
 def test_age_is_rendered_in_the_shortest_form_that_is_still_true() -> None:
-    assert _ago(NOW - 4_000, NOW) == "4s ago"
     assert _ago(NOW - 120_000, NOW) == "2m ago"
     assert _ago(NOW - 3 * 3_600_000, NOW) == "3h ago"
     assert _ago(NOW - 2 * 86_400_000, NOW) == "2d ago"
+
+
+@pytest.mark.unit
+def test_under_a_minute_the_board_does_not_count_seconds() -> None:
+    """A per-second number re-renders the page every second, which costs a text selection and an
+    open row all day, and decides nothing (docs/06-console.md)."""
+    assert _ago(NOW - 4_000, NOW) == "just now"
+    assert _ago(NOW - 59_000, NOW) == "just now"
+    assert _ago(NOW - 61_000, NOW) == "1m ago"
+
+
+@pytest.mark.unit
+def test_a_long_silence_is_read_in_hours_rather_than_minutes() -> None:
+    hint = attention_hint(
+        _session(status="idle", statusUpdatedAt=NOW - 3 * 3_600_000),
+        _tail("assistant"),
+        now=NOW,
+        after_seconds=FIVE_MINUTES,
+    )
+    assert hint.observation == "idle 3h · last entry: assistant"

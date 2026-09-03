@@ -26,6 +26,7 @@ from agent_desk.observe.model import (
     TranscriptTail,
     attention_hint,
     now_ms,
+    since,
     triage_rank,
 )
 
@@ -35,15 +36,17 @@ TEMPLATES = Path(__file__).parent / "templates"
 
 
 def _ago(then_ms: int, now: int | None = None) -> str:
-    """How long since anything changed, in the shortest form that is still true."""
-    seconds = max(0, ((now if now is not None else now_ms()) - then_ms) // 1000)
-    if seconds < 60:
-        return f"{seconds}s ago"
-    if seconds < 3600:
-        return f"{seconds // 60}m ago"
-    if seconds < 86_400:
-        return f"{seconds // 3600}h ago"
-    return f"{seconds // 86_400}d ago"
+    """How long since anything changed.
+
+    Under a minute the board says "just now" rather than counting seconds. The reason is not
+    taste: the fragment is diffed to decide whether to push it, so a per-second number would
+    re-render the page every second — losing a text selection, and re-fetching whatever row the
+    reader had open, all day.
+    """
+    now = now if now is not None else now_ms()
+    if now - then_ms < 60_000:
+        return "just now"
+    return f"{since(then_ms, now)} ago"
 
 
 def _clock(entry_at: object) -> str:

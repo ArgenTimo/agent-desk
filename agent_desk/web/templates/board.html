@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-desk</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c1b19'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23e0a250'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f7f7f5; --fg: #1c1b19; --dim: #6b6862; --line: #e0ddd6;
@@ -22,6 +23,13 @@
     margin: 0; padding: 10px; background: var(--bg); color: var(--fg);
     font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  #bar {
+    display: flex; gap: 8px; align-items: baseline; margin: 0 0 10px; color: var(--dim);
+  }
+  .brand { color: var(--fg); font-weight: 600; }
+  #stream-state { margin-left: auto; }
+  #stream-state.lost { color: var(--flag); }
+  body.stale .row, body.stale .notices { opacity: 0.5; }
   .notices { margin: 0 0 10px; }
   .notice {
     margin: 0 0 4px; padding: 6px 8px; border-left: 3px solid var(--warn);
@@ -62,12 +70,22 @@
 </style>
 </head>
 <body>
+<header id="bar">
+  <span class="brand">agent-desk</span>
+  <span id="asof">connecting…</span>
+  <span id="stream-state">·</span>
+</header>
+
 <div id="board">{{ board|safe }}</div>
 
 <script>
-// Twelve lines instead of a framework. The board is server-rendered; the browser does two
-// things — replace it when the server says it changed, and expand one row on demand.
+// Twelve lines instead of a framework. The board is server-rendered; the browser does three
+// things — replace it when the server says it changed, expand one row on demand, and say plainly
+// when it has stopped hearing from the server. The third is not a nicety: a board that has quietly
+// stopped updating looks exactly like a board on which nothing is happening.
 const expanded = new Set();
+const asof = document.getElementById('asof');
+const state = document.getElementById('stream-state');
 
 async function fillTail(row) {
   const box = row.querySelector('.tail');
@@ -79,6 +97,13 @@ function restore() {
   for (const row of document.querySelectorAll('[data-session]')) {
     if (expanded.has(row.dataset.session)) fillTail(row);
   }
+}
+
+function checked() {
+  asof.textContent = `checked ${new Date().toLocaleTimeString()}`;
+  state.textContent = '·';
+  state.className = '';
+  document.body.classList.remove('stale');
 }
 
 document.addEventListener('click', (event) => {
@@ -96,9 +121,20 @@ document.addEventListener('click', (event) => {
   }
 });
 
-new EventSource('/events').onmessage = (event) => {
+const stream = new EventSource('/events');
+stream.onmessage = (event) => {
   document.getElementById('board').innerHTML = event.data;
   restore();
+  checked();
+  // The window title is the part of an always-on-top window you can read without focusing it.
+  const waiting = document.querySelectorAll('.row.waiting').length;
+  document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
+};
+stream.addEventListener('heartbeat', checked);
+stream.onerror = () => {
+  state.textContent = 'stream lost — reconnecting';
+  state.className = 'lost';
+  document.body.classList.add('stale');
 };
 </script>
 </body>

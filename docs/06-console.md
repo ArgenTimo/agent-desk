@@ -35,6 +35,12 @@ The ⚑ marks the inference "may be waiting for you", and hovering it shows the 
 it — `idle 14m · last entry: assistant` — or, where the `Notification` hook is installed, the
 event itself. The two are visibly different, because one is a guess and one is a fact.
 
+**A board that has stopped updating says so.** The page shows when it last heard from the server
+and marks itself lost the moment the stream drops, dimming what it is still displaying. A console
+that quietly froze looks exactly like a console on which nothing is happening, and that is the
+same failure as a guessed status: something inferred from silence, rendered as a fact
+([03-session-observation.md](03-session-observation.md)).
+
 A row expands to the tail of that session's transcript. That is the whole drill-down: v1 has no
 transcript viewer, no diff view and no tool-call browser. The board answers "should I go look",
 and the place to look is the terminal that is already open.
