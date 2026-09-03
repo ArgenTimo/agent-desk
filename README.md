@@ -68,5 +68,22 @@ file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
 ## Status
 
-Specification and harness only. No implementation yet — [`docs/09-roadmap.md`](docs/09-roadmap.md)
-lists Phase 1 in the order it should be built.
+**Phase 1 is built and not yet done.** `observe/` reads the registry and the transcript tails,
+`web/` renders the board and pushes it over server-sent events, and the whole path is read-only:
+no store, no input field, no model call, and no way to write to a session
+([`docs/09-roadmap.md`](docs/09-roadmap.md)).
+
+The distinction is the one that page insists on: a phase is not done because its tests pass. Phase
+1's criterion is a full working day with three or more sessions in which every "what is that agent
+doing" is answered from the board and no terminal is opened to check — and the count of times it
+failed is the report. That day has not happened yet.
+
+Two things a reader of the code should know before trusting it:
+
+- The live CLI writes a status value this specification did not record — `waiting`, at `2.1.259`.
+  The board shows the word and concludes nothing from it, and
+  [`docs/03-session-observation.md`](docs/03-session-observation.md) records the observation. What
+  it means is a human's call, not the reader's.
+- The board is server-rendered with plain JavaScript rather than HTMX in this phase, because the
+  library could not be fetched offline on the machine it was built on. HTMX arrives with the input
+  field in Phase 2.
