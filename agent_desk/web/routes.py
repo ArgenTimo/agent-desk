@@ -118,7 +118,11 @@ async def render_blocks() -> str:
     threads = {thread.id: thread for thread in await store.open_threads()}
     ideas = {idea.block_id: idea for idea in await store.ideas() if idea.block_id}
     return env.get_template("_blocks.html").render(
-        blocks=rows, threads=threads, ideas=ideas, partial=block_runs.PARTIAL
+        blocks=rows,
+        threads=threads,
+        open_threads=list(threads.values()),
+        ideas=ideas,
+        partial=block_runs.PARTIAL,
     )
 
 
@@ -217,6 +221,18 @@ async def inbox_page() -> HTMLResponse:
 @router.get("/ideas/list", response_class=HTMLResponse)
 async def inbox_list() -> HTMLResponse:
     return HTMLResponse(await render_inbox())
+
+
+@router.post("/blocks/{block_id}/thread", response_class=HTMLResponse)
+async def set_block_thread(block_id: str, request: Request) -> HTMLResponse:
+    """Correcting a misfile costs one click, and the block re-runs against the right context."""
+    block = await store.block(block_id)
+    if block is not None:
+        form = await request.form()
+        chosen = str(form.get("thread_id") or "").strip()
+        rows, _ = await asyncio.to_thread(board)
+        await block_runs.set_thread(store, block, chosen or None, rows)
+    return HTMLResponse(await render_blocks())
 
 
 @router.post("/blocks/{block_id}/cancel", response_class=HTMLResponse)

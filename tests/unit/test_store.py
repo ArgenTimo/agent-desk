@@ -143,18 +143,29 @@ async def test_a_block_that_was_running_when_the_process_died_comes_back_failed(
 
 
 @pytest.mark.unit
-async def test_moving_a_block_records_that_a_human_did_it(store: Store) -> None:
-    """That column is the Phase 2 measurement, not decoration (design/02-data-model.md)."""
-    first, second = await _thread(store), await _thread(store)
-    block = await store.create_block(
-        thread_id=first, kind="question", input="?", thread_set_by="classifier"
-    )
-    await store.move_block(block.id, second)
+async def test_moving_a_block_records_who_decided(store: Store) -> None:
+    """That column is the Phase 2 measurement, not decoration (design/02-data-model.md).
 
-    moved = await store.block(block.id)
-    assert moved is not None
-    assert moved.thread_id == second
-    assert moved.thread_set_by == "human"
+    Both values are written by this program: `classifier` when its classifier attached the block,
+    `human` when a person corrected it. A correction that did not record itself is a measurement
+    the project decided to take and then did not.
+    """
+    first, second, third = await _thread(store), await _thread(store), await _thread(store)
+    block = await store.create_block(
+        thread_id=first, kind="question", input="?", thread_set_by="human"
+    )
+
+    await store.move_block(block.id, second, set_by="classifier")
+    attached = await store.block(block.id)
+    assert attached is not None
+    assert attached.thread_id == second
+    assert attached.thread_set_by == "classifier"
+
+    await store.move_block(block.id, third, set_by="human")
+    corrected = await store.block(block.id)
+    assert corrected is not None
+    assert corrected.thread_id == third
+    assert corrected.thread_set_by == "human"
 
 
 @pytest.mark.unit

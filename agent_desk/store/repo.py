@@ -298,21 +298,34 @@ class Store:
                 },
             )
 
-    async def move_block(self, block_id: str, thread_id: str) -> None:
-        """The one-click override of docs/04-threads-and-blocks.md.
+    async def move_block(self, block_id: str, thread_id: str, *, set_by: ThreadSetBy) -> None:
+        """Attach a block to a thread, recording who decided.
 
-        `thread_set_by` becomes `human` and stays that way: the column exists to measure how often
-        the classifier is corrected, and a correction that did not record itself is a measurement
-        the project decided to take and then did not.
+        `classifier` is written when this program's classifier attached it; `human` when a person
+        did, which is both the one-click override of docs/04-threads-and-blocks.md and the signal
+        the correction rate is counted from. A block that is where it started says `human` too,
+        because that is what a default is: nobody's decision but the person who typed it.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    "UPDATE block SET thread_id = :thread_id, thread_set_by = 'human' "
+                    "UPDATE block SET thread_id = :thread_id, thread_set_by = :set_by "
                     "WHERE id = :id"
                 ),
-                {"id": block_id, "thread_id": thread_id},
+                {"id": block_id, "thread_id": thread_id, "set_by": set_by},
             )
+
+    async def blocks_in_thread(self, thread_id: str) -> list[Block]:
+        """The thread so far, oldest first — what a continuation is answered against."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
+                    "created_at, finished_at FROM block WHERE thread_id = :thread_id ORDER BY id"
+                ),
+                {"thread_id": thread_id},
+            )
+            return [self._block(row._mapping) for row in rows]
 
     async def blocks(self, *, limit: int = 50) -> list[Block]:
         """Newest first, which is how the column reads (docs/06-console.md)."""

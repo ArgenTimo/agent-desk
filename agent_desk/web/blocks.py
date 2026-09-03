@@ -18,6 +18,9 @@ from collections.abc import Coroutine, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
+
+from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox
 from agent_desk.observe.model import Session
@@ -85,6 +88,8 @@ class Runs:
 
 
 runs = Runs()
+
+log = structlog.get_logger("agent_desk.blocks")
 
 
 def _add_dirs(sessions: Sequence[Session]) -> list[Path]:
@@ -220,14 +225,57 @@ async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
     if text.startswith(NEW_PREFIX):
         text = text[len(NEW_PREFIX) :].strip()
 
+    # The block exists before anything is classified or answered, and the field is free the moment
+    # it does. Its thread starts as the default — a subject of its own — and says so: `human`,
+    # because nobody but the person who typed it has decided anything yet.
+    forced_new = typed.strip().startswith(NEW_PREFIX)
     thread = await store.create_thread(text[:60] or "untitled")
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
-
-    prompt = session.build_prompt(text, board=board_lines(rows), history=[])
-    runs.start(block.id, _run(store, block, prompt, _add_dirs([row.session for row in rows])))
+    runs.start(
+        block.id,
+        _classify_then_run(store, block, rows, classify=not forced_new),
+    )
     return block
+
+
+async def _thread_history(store: Store, thread_id: str, exclude: str) -> list[tuple[str, str]]:
+    """The thread's previous questions and answers, which a continuation inherits (docs/04)."""
+    return [
+        (block.input, block.answer or "")
+        for block in await store.blocks_in_thread(thread_id)
+        if block.id != exclude and block.state == "answered" and block.answer
+    ]
+
+
+async def _classify_then_run(
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow],
+    *,
+    classify: bool,
+) -> None:
+    """Decide the subject first, then answer against it.
+
+    The order matters and it is the reason classification is not a separate task: a block attached
+    to a thread after its answer was built would have been answered against the wrong background,
+    which is the failure the attaching was meant to prevent.
+    """
+    thread_id = block.thread_id
+    if classify:
+        open_threads = [
+            thread for thread in await store.open_threads() if thread.id != block.thread_id
+        ]
+        chosen = await classifier.classify(block.input, open_threads)
+        if chosen is not None:
+            await store.move_block(block.id, chosen, set_by="classifier")
+            await store.close_thread(block.thread_id)
+            thread_id = chosen
+
+    history = await _thread_history(store, thread_id, exclude=block.id)
+    prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
+    await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
 
 
 async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) -> None:
@@ -245,8 +293,38 @@ async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) ->
 
 async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A failed block offers retry, and retrying re-runs the same input (docs/04)."""
-    prompt = session.build_prompt(block.input, board=board_lines(rows), history=[])
+    history = await _thread_history(store, block.thread_id, exclude=block.id)
+    prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
     runs.start(block.id, _run(store, block, prompt, _add_dirs([row.session for row in rows])))
+
+
+async def set_thread(
+    store: Store, block: Block, thread_id: str | None, rows: Sequence[BoardRow]
+) -> None:
+    """The visible, one-click override — move the block, or split it off (docs/04).
+
+    Two things happen besides the move. The click is logged, because the correction rate is the
+    number that decides whether the classifier is worth keeping at all (docs/09-roadmap.md) — ids
+    only, never the text of the question. And the block re-runs, because a block corrected into
+    the right thread was answered against the wrong one.
+    """
+    target = thread_id
+    if target is None:
+        split = await store.create_thread(block.input[:60] or "untitled")
+        target = split.id
+
+    log.info(
+        "thread override",
+        block=block.id,
+        was=block.thread_id,
+        now=target,
+        was_set_by=block.thread_set_by,
+    )
+    await store.move_block(block.id, target, set_by="human")
+
+    moved = await store.block(block.id)
+    if moved is not None:
+        await retry(store, moved, rows)
 
 
 def cancel(block_id: str) -> bool:

@@ -1,0 +1,256 @@
+"""Classification, and the click that undoes it.
+
+docs/04-threads-and-blocks.md states the design's own opinion of this feature: the classifier is
+wrong sometimes and the design assumes it. So the tests that matter are not "does it classify
+correctly" — nothing here has ground truth — but "is every decision visible, reversible, and
+counted", and "does a failure land on the safe side".
+"""
+
+from __future__ import annotations
+
+import asyncio
+import pathlib
+from collections.abc import AsyncIterator
+
+import pytest
+from agent_desk.answer import classify as classifier
+from agent_desk.answer import session
+from agent_desk.config import Settings
+from agent_desk.store.repo import Store, Thread
+from agent_desk.web import blocks, routes
+
+# A fake that attaches everything to the first open subject, so the attaching path is exercised.
+ATTACHING = """#!/bin/sh
+here=$(dirname "$0")
+prompt=$(cat)
+case "$prompt" in
+  *"Open subjects"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"1"}]}}\\n' ;;
+  *)
+    n=$(cat "$here/runs" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$here/runs"
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"answer %s"}]}}\\n' "$n" ;;
+esac
+"""
+
+
+@pytest.fixture
+def attaching_claude(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    binary = tmp_path / "cli" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(ATTACHING)
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=5.0)
+    )
+
+
+@pytest.fixture
+async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Store]:
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    monkeypatch.setattr(routes, "store", store)
+    async with asyncio.TaskGroup() as group:
+        blocks.runs.attach(group)
+        try:
+            yield store
+        finally:
+            blocks.runs.cancel_all()
+            blocks.runs.attach(None)
+    await store.close()
+
+
+async def _settled(store: Store, block_id: str) -> str:
+    for _ in range(60):
+        block = await store.block(block_id)
+        assert block is not None
+        if block.state in ("answered", "failed", "cancelled"):
+            return block.state
+        await asyncio.sleep(0.1)
+    raise AssertionError("the block never settled")
+
+
+async def _answer_changes_from(store: Store, block_id: str, before: str | None) -> str:
+    """Wait until the block carries a *different* answer.
+
+    Polling for the transient `running` state is a race the fake wins: an instant run passes
+    through it between two polls. The fake numbers its answers instead, so "the block re-ran" is
+    observable in the result rather than in a moment that may not be caught.
+    """
+    for _ in range(60):
+        block = await store.block(block_id)
+        assert block is not None
+        if block.state == "answered" and block.answer != before:
+            return block.answer or ""
+        await asyncio.sleep(0.05)
+    raise AssertionError("the block never produced a second answer")
+
+
+# --- reading a decision -------------------------------------------------------------------------
+@pytest.mark.unit
+def test_a_reply_this_module_does_not_understand_is_a_new_subject() -> None:
+    """New is the safe answer: attaching wrongly silently changes what a question is answered
+    against, which is the more expensive of the two mistakes (docs/04)."""
+    threads = [
+        Thread(id="t1", subject="one", created_at=0),
+        Thread(id="t2", subject="two", created_at=0),
+    ]
+
+    assert classifier.read_choice("2", threads) == "t2"
+    assert classifier.read_choice("new", threads) is None
+    assert classifier.read_choice("NEW", threads) is None
+    assert classifier.read_choice("I think this continues subject 1", threads) == "t1"
+    assert classifier.read_choice("", threads) is None
+    assert classifier.read_choice("42", threads) is None
+    assert classifier.read_choice("it is hard to say", threads) is None
+
+
+@pytest.mark.unit
+async def test_a_classifier_that_cannot_run_starts_a_new_subject(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A classifier that could fail a submission would make the field unreliable to keep the
+    threading tidy, which is the wrong trade in a tool whose first promise is that typing is free.
+    """
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
+    threads = [Thread(id="t1", subject="one", created_at=0)]
+    assert await classifier.classify("anything", threads) is None
+
+
+@pytest.mark.unit
+async def test_with_no_open_subjects_nothing_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first question of the day costs no model call at all."""
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="a-cli-that-would-crash"))
+    assert await classifier.classify("the first question", []) is None
+
+
+@pytest.mark.unit
+def test_the_prompt_tells_it_to_prefer_a_new_subject_when_unsure() -> None:
+    prompt = classifier.prompt(
+        "and what about the other one", [Thread(id="t", subject="duck", created_at=0)]
+    )
+    assert "1. duck" in prompt
+    assert "answer new" in prompt
+    assert "and what about the other one" in prompt
+
+
+# --- what the classifier does to a block ---------------------------------------------------------
+@pytest.mark.unit
+async def test_an_attached_block_records_the_classifier_and_inherits_the_thread(
+    desk: Store, attaching_claude: None
+) -> None:
+    first = await blocks.submit(desk, "what did the docker client do about timeouts", [])
+    await _settled(desk, first.id)
+
+    second = await blocks.submit(desk, "and what about the other one", [])
+    await _settled(desk, second.id)
+
+    attached = await desk.block(second.id)
+    assert attached is not None
+    assert attached.thread_id == first.thread_id
+    assert attached.thread_set_by == "classifier"
+
+
+@pytest.mark.unit
+async def test_slash_new_never_reaches_the_classifier(desk: Store, attaching_claude: None) -> None:
+    """When you already know, you should not have to hope (docs/04)."""
+    first = await blocks.submit(desk, "the first subject", [])
+    await _settled(desk, first.id)
+
+    forced = await blocks.submit(desk, "/new a different subject entirely", [])
+    await _settled(desk, forced.id)
+
+    block = await desk.block(forced.id)
+    assert block is not None
+    assert block.thread_id != first.thread_id
+    assert block.thread_set_by == "human"
+    assert block.input == "a different subject entirely"
+
+
+@pytest.mark.unit
+async def test_a_continuation_is_answered_against_the_thread_it_joined(
+    desk: Store, attaching_claude: None
+) -> None:
+    """The block inherits the thread's context — that is what attaching is *for*."""
+    first = await blocks.submit(desk, "what about timeouts", [])
+    await _settled(desk, first.id)
+
+    history = await blocks._thread_history(desk, first.thread_id, exclude="none")
+    assert [asked for asked, _ in history] == ["what about timeouts"]
+
+    prompt = session.build_prompt("and the other one", board=[], history=history)
+    assert "what about timeouts" in prompt
+    assert history[0][1] in prompt
+
+
+# --- the click that undoes it ---------------------------------------------------------------------
+@pytest.mark.unit
+async def test_correcting_a_misfile_costs_one_click_and_re_runs_the_block(
+    desk: Store, attaching_claude: None
+) -> None:
+    first = await blocks.submit(desk, "the first subject", [])
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "swallowed into the first", [])
+    await _settled(desk, second.id)
+
+    misfiled = await desk.block(second.id)
+    assert misfiled is not None and misfiled.thread_set_by == "classifier"
+
+    await blocks.set_thread(desk, misfiled, None, [])
+    # docs/04: after the correction the block re-runs against the right context.
+    await _answer_changes_from(desk, second.id, misfiled.answer)
+
+    corrected = await desk.block(second.id)
+    assert corrected is not None
+    assert corrected.thread_id != first.thread_id
+    assert corrected.thread_set_by == "human"
+
+
+@pytest.mark.unit
+async def test_every_override_is_logged_by_id_and_never_by_its_text(
+    desk: Store, attaching_claude: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The correction rate is the number that decides whether the classifier should exist
+    (docs/09-roadmap.md), and a log line is where it comes from. What it must not carry is the
+    question itself (docs/07-security.md)."""
+    first = await blocks.submit(desk, "a subject worth remembering", [])
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "a private sounding question", [])
+    await _settled(desk, second.id)
+
+    capsys.readouterr()
+    block = await desk.block(second.id)
+    assert block is not None
+    await blocks.set_thread(desk, block, None, [])
+    logged = capsys.readouterr().out
+
+    assert "thread override" in logged
+    assert block.id in logged
+    assert "a private sounding question" not in logged
+
+
+@pytest.mark.unit
+async def test_moving_one_block_never_takes_its_neighbours_with_it(
+    desk: Store, attaching_claude: None
+) -> None:
+    """Threads are never merged automatically — that is a judgement, and the human makes it.
+
+    The mechanism is that nothing in this program moves more than one block at a time, so the
+    check is behavioural: correct one block out of a thread and the rest of the thread stays.
+    """
+    first = await blocks.submit(desk, "the subject", [])
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "attached to it", [])
+    await _settled(desk, second.id)
+    third = await blocks.submit(desk, "also attached", [])
+    await _settled(desk, third.id)
+
+    assert len(await desk.blocks_in_thread(first.thread_id)) == 3
+
+    moved = await desk.block(third.id)
+    assert moved is not None
+    await blocks.set_thread(desk, moved, None, [])
+    await _answer_changes_from(desk, third.id, moved.answer)
+
+    remaining = await desk.blocks_in_thread(first.thread_id)
+    assert {block.id for block in remaining} == {first.id, second.id}

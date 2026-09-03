@@ -84,7 +84,13 @@
   .block header { display: flex; gap: 10px; align-items: baseline; }
   .block .state { color: var(--dim); min-width: 9ch; }
   .block .asked { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .block .thread { color: var(--dim); font-size: 11px; }
+  .block .thread { display: flex; gap: 6px; align-items: baseline; color: var(--dim); font-size: 11px; }
+  .block .set-by { color: var(--dim); }
+  .block .thread select {
+    font: inherit; font-size: 11px; color: var(--dim); background: var(--card);
+    border: 1px solid var(--line); max-width: 22ch;
+  }
+  .block .thread select:hover { color: var(--fg); }
   .answer, .failure { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .failure { color: var(--flag); }
   .caret { color: var(--busy); }

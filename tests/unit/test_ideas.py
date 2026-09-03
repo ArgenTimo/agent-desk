@@ -21,6 +21,7 @@ from agent_desk.web import blocks, routes
 FAKE = """#!/bin/sh
 prompt=$(cat)
 case "$prompt" in
+  *"Open subjects"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"new"}]}}\n' ;;
   *"Summarise the following"*)
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"Cache tracker probes per project"}]}}\\n' ;;
   *"short markdown proposal"*)

@@ -23,6 +23,9 @@ FAKE = """#!/bin/sh
 here=$(dirname "$0")
 prompt=$(cat)
 case "$prompt" in
+  # The classifier asks first, and it must be matched first: its prompt quotes the subjects of the
+  # open threads, so every marker in this file appears inside it too.
+  *"Open subjects"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"new"}]}}\n' ;;
   *PLEASE_HANG*)
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"thinking"}]}}\\n'
     sleep 30 ;;

@@ -9,7 +9,18 @@
   <header>
     <span class="state">{{ block.state }}</span>
     <span class="asked">{{ block.input }}</span>
-    <span class="thread">thread: {{ threads[block.thread_id].subject if block.thread_id in threads else "—" }}</span>
+    {# Every block shows the thread it landed in, as a control: move it, or split it off. A
+       misfile costs one click to correct, and the block re-runs against the right context
+       (docs/04-threads-and-blocks.md). #}
+    <form class="thread" hx-post="/blocks/{{ block.id }}/thread" hx-target="#blocks">
+      <span class="set-by" title="who chose this thread">{{ block.thread_set_by }}</span>
+      <select name="thread_id" onchange="this.form.requestSubmit()">
+        {% for thread in open_threads %}
+        <option value="{{ thread.id }}" {% if thread.id == block.thread_id %}selected{% endif %}>{{ thread.subject }}</option>
+        {% endfor %}
+        <option value="">— split into a new thread —</option>
+      </select>
+    </form>
   </header>
 
   {% if block.kind == "idea" and block.id in ideas %}
