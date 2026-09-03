@@ -41,6 +41,21 @@ def test_registry_fixture_carries_every_field_the_board_needs() -> None:
 
 
 @pytest.mark.unit
+def test_the_headless_fixture_is_the_shape_the_board_skips() -> None:
+    """Recorded from a live `claude -p` this program started (tests/fixtures/README.md).
+
+    Two properties are load-bearing and neither is obvious: `kind` says `interactive` even for a
+    headless run, so it is not the discriminator — `entrypoint` is; and there is no `status` at
+    all, which is why requiring one would have dropped these entries loudly instead of quietly.
+    """
+    entry = json.loads((FIXTURES / "registry_entry_headless.json").read_text())
+    assert entry["entrypoint"].startswith("sdk-")
+    assert entry["kind"] == "interactive"
+    assert "status" not in entry
+    assert "updatedAt" not in entry
+
+
+@pytest.mark.unit
 def test_transcript_fixture_covers_the_line_types_v1_reads() -> None:
     lines = [
         json.loads(line)

@@ -266,3 +266,70 @@ def test_the_board_reaches_the_run_as_facts_and_not_as_a_guess() -> None:
     assert "reading the client" in line
     assert "waiting" not in line
     assert "may be waiting" not in line
+
+
+async def _post(path: str, fields: dict[str, str]) -> tuple[int, str]:
+    """One urlencoded POST through the real ASGI stack — middleware, routing and form parsing.
+
+    Every other test in this file calls `submit()` directly, and that is exactly how a route-level
+    bug survived them: the browser found a 500 from `request.form()`, which asserts that
+    `python-multipart` is installed before it will read even an urlencoded body. The fix was three
+    lines of `urllib`; this test is the reason it stays fixed.
+    """
+    from urllib.parse import urlencode
+
+    from agent_desk.web.app import app
+
+    body = urlencode(fields).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"127.0.0.1:8787"),
+            (b"content-type", b"application/x-www-form-urlencoded"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+        "client": ("127.0.0.1", 54321),
+        "server": ("127.0.0.1", 8787),
+    }
+    sent: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    await app(scope, receive, send)
+    status = next(int(m["status"]) for m in sent if m["type"] == "http.response.start")  # type: ignore[arg-type]
+    html = b"".join(bytes(m.get("body", b"")) for m in sent if m["type"] == "http.response.body")
+    return status, html.decode()
+
+
+@pytest.mark.unit
+async def test_a_typed_line_survives_the_route_and_not_only_the_function(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    status, html = await _post("/blocks", {"text": "what about timeouts"})
+
+    assert status == 200
+    assert "what about timeouts" in html
+    assert len(await desk.blocks()) == 1
+
+
+@pytest.mark.unit
+async def test_an_empty_line_is_accepted_and_produces_nothing(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Pressing enter on an empty field is not an error and is not a block."""
+    status, _ = await _post("/blocks", {"text": "   "})
+
+    assert status == 200
+    assert await desk.blocks() == []

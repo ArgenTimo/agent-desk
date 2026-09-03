@@ -224,3 +224,52 @@ def test_an_empty_registry_is_an_empty_board(tmp_path: Path) -> None:
     read = registry.read_registry(pattern=str(tmp_path / "sessions" / "*.json"))
     assert read.sessions == []
     assert read.notices == []
+
+
+def _headless(**overrides: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = json.loads((FIXTURES / "registry_entry_headless.json").read_text())
+    entry.update(overrides)
+    return entry
+
+
+@pytest.mark.unit
+def test_a_programs_own_run_is_not_a_row_and_is_not_a_complaint(tmp_path: Path) -> None:
+    """A headless `claude -p` registers itself, publishes no status, and is not a session a human
+    triages — it is this program answering a question typed into it (docs/03-session-observation).
+
+    Both halves matter. It must not appear on the board, and it must not raise the format banner:
+    a warning that fires every time the tool is used is a warning nobody reads.
+    """
+    entry = _headless()
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry),
+        proc_root=_proc(tmp_path, entry["pid"], entry["procStart"]),
+    )
+    assert read.sessions == []
+    assert read.notices == []
+
+
+@pytest.mark.unit
+def test_a_human_session_that_lost_a_field_is_still_a_complaint(tmp_path: Path) -> None:
+    """The quiet skip above is for one recorded shape, not for anything missing a status."""
+    entry = _entry()
+    del entry["status"]
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry),
+        proc_root=_proc(tmp_path, entry["pid"], entry["procStart"]),
+    )
+    assert read.sessions == []
+    assert "status" in read.notices[0]
+
+
+@pytest.mark.unit
+def test_a_headless_entry_beside_a_human_one_leaves_the_board_intact(tmp_path: Path) -> None:
+    human = _entry()
+    machine = _headless()
+    pattern = _sessions_dir(tmp_path, human, machine)
+    proc = _proc(tmp_path, human["pid"], human["procStart"])
+    _proc(tmp_path, machine["pid"], machine["procStart"])
+
+    read = registry.read_registry(pattern=pattern, proc_root=proc)
+    assert [s.pid for s in read.sessions] == [human["pid"]]
+    assert read.notices == []

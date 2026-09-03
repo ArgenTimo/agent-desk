@@ -11,6 +11,7 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 |---|---|---|
 | `registry_entry.json` | `~/.claude/sessions/<pid>.json` | `2.1.259` |
 | `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` | `2.1.258` |
+| `registry_entry_headless.json` | `~/.claude/sessions/<pid>.json` of a `claude -p` run | `2.1.259` |
 | `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `2.1.259` |
 
 ## What was scrubbed, and what was not
@@ -36,6 +37,18 @@ When a CLI update breaks a parser test, re-record rather than patch:
    [`docs/03-session-observation.md`](../../docs/03-session-observation.md).
 
 This is a normal task with a normal review, not an emergency.
+
+## The entry this tool creates by working
+
+`registry_entry_headless.json` was recorded from a headless `claude -p` that agent-desk itself
+started, caught while it lived — the CLI removes the file the moment the run ends, which is why
+the first attempt to record it found nothing.
+
+It is in here because it was found the hard way. The board raised two red banners during the first
+end-to-end run, naming three missing fields, and the entries they named were this program's own
+answer runs: `entrypoint` is `sdk-cli` rather than `cli`, and a headless run publishes no `status`
+because nothing is watching it work. `kind` says `interactive` in both, so the obvious
+discriminator is the wrong one.
 
 ## The stream is a format too
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -153,6 +154,19 @@ async def session_tail(session_id: str) -> HTMLResponse:
     return HTMLResponse(await asyncio.to_thread(render_tail, session_id))
 
 
+async def _form(request: Request) -> dict[str, str]:
+    """One urlencoded form, parsed with the standard library.
+
+    Starlette's own `request.form()` asserts that `python-multipart` is installed before it will
+    read even an `application/x-www-form-urlencoded` body — and this console has exactly two
+    forms, each carrying one short field, and will never accept a file. Three lines of `urllib`
+    against a dependency in the lock file forever is not a close call (CLAUDE.md, "Simplicity
+    first"; the deliberately-absent list in pyproject.toml is the same argument).
+    """
+    body = (await request.body()).decode("utf-8", errors="replace")
+    return {key: values[0] for key, values in parse_qs(body, keep_blank_values=True).items()}
+
+
 @router.post("/blocks", response_class=HTMLResponse)
 async def ask(request: Request) -> HTMLResponse:
     """One line of input, accepted and answered on its own time.
@@ -160,8 +174,7 @@ async def ask(request: Request) -> HTMLResponse:
     The response is the column, and the field is cleared by the page the moment this returns —
     submitting frees it, and nothing here waits for an answer (docs/04-threads-and-blocks.md).
     """
-    form = await request.form()
-    typed = str(form.get("text") or "").strip()
+    typed = (await _form(request)).get("text", "").strip()
     if typed:
         rows, _ = await asyncio.to_thread(board)
         await block_runs.submit(store, typed, rows)
@@ -197,8 +210,7 @@ async def idea_action(idea_id: str, action: str, request: Request) -> HTMLRespon
     if action in ("keep", "drop"):
         await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")
     elif action == "summary":
-        form = await request.form()
-        summary = str(form.get("summary") or "").strip()
+        summary = (await _form(request)).get("summary", "").strip()
         if summary:
             await store.set_idea_summary(idea_id, summary)
     elif action in DRAFT_KINDS:
@@ -228,8 +240,7 @@ async def set_block_thread(block_id: str, request: Request) -> HTMLResponse:
     """Correcting a misfile costs one click, and the block re-runs against the right context."""
     block = await store.block(block_id)
     if block is not None:
-        form = await request.form()
-        chosen = str(form.get("thread_id") or "").strip()
+        chosen = (await _form(request)).get("thread_id", "").strip()
         rows, _ = await asyncio.to_thread(board)
         await block_runs.set_thread(store, block, chosen or None, rows)
     return HTMLResponse(await render_blocks())

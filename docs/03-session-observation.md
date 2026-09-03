@@ -43,6 +43,22 @@ the "waiting for a human" fact that the rest of this page says cannot be known. 
 *is* that fact is a change to this document, made by a human who has confirmed the meaning; it is
 not a change the reader may make on the strength of the word ([adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)).
 
+**Not every entry is a session a human is working with.** A headless `claude -p` registers itself
+in the same directory, with `entrypoint` naming the SDK that started it (`sdk-cli`, `sdk-py`)
+rather than `cli`, and it publishes **no `status` at all** — nothing is watching it work. Note that
+`kind` says `interactive` for both, so it is not the field that separates them.
+
+The board skips those entries, and skips them *quietly*. They are not sessions to triage: they
+appear and vanish with every question typed into this console, and one of them is this program
+answering that question ([06-console.md](06-console.md)). Nor are they a format that moved — an
+entry with no `status` is a different shape, not a broken one, and a banner that fires every time
+the tool is used is a banner nobody reads
+([adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)).
+
+Recorded 2026-09-03 at `2.1.259`, and found by running the console against its own machine rather
+than by reading the format: the first end-to-end run raised two red banners, and both were
+agent-desk's own answer runs.
+
 **A file is a claim about a process, and the claim is checkable.** A stale file, or a pid the
 operating system has since handed to something else, would put a dead session on the board as
 `busy` — the exact failure that makes a status board worthless. So liveness is two checks, not

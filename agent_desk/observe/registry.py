@@ -75,6 +75,25 @@ def _is_newer(observed: str, recorded: str) -> bool:
         return True
 
 
+def _is_headless(entry: object) -> bool:
+    """Is this a program's own run rather than a human's session?
+
+    A headless `claude -p` registers itself like any other session, with `entrypoint` naming the
+    SDK that started it — and it publishes no `status`, because nothing is watching it work. Two
+    consequences, both found by running this tool against its own machine rather than by reading
+    the file format:
+
+    The board must not show them. They are not sessions a human triages; they appear and vanish
+    with every question typed into this console, and one of them is *this program answering that
+    question* (docs/06-console.md — the board is what needs a human).
+
+    And they must not raise the banner. An entry with no `status` is not a shape that moved, it is
+    a different shape, and a warning that fires on normal operation is a warning nobody reads
+    (docs/adr/0004).
+    """
+    return isinstance(entry, dict) and str(entry.get("entrypoint", "")).startswith("sdk-")
+
+
 def _why(exc: Exception) -> str:
     """A reason a human can act on, carrying no content out of the file.
 
@@ -105,8 +124,15 @@ def read_registry(*, pattern: str | None = None, proc_root: Path = PROC) -> Regi
 
     for path in sorted(Path(p) for p in glob.glob(pattern or settings.registry_glob)):
         try:
-            session = Session.model_validate(json.loads(path.read_text()))
-        except (OSError, ValueError, ValidationError) as exc:
+            entry = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            notices.append(f"{path.name}: {_why(exc)}")
+            continue
+        if _is_headless(entry):
+            continue
+        try:
+            session = Session.model_validate(entry)
+        except ValidationError as exc:
             notices.append(f"{path.name}: {_why(exc)}")
             continue
         if is_alive(session.pid, session.proc_start, proc_root=proc_root):
