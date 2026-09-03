@@ -17,6 +17,7 @@ import pytest
 from agent_desk.config import Settings
 from agent_desk.observe import registry, transcript
 from agent_desk.web import routes, sse
+from jinja2 import UndefinedError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 MINUTE = 60_000
@@ -137,6 +138,9 @@ def test_the_session_that_may_be_waiting_sorts_above_the_one_that_is_working(hom
     assert "may be waiting for you" in html
     assert "idle 14m · last entry: assistant" in html
     assert "guess" in html
+    # The class the stylesheet colours and the script counts for the window title. It lives in
+    # three files and nothing else would notice them drifting apart.
+    assert "row flagged" in html
 
 
 @pytest.mark.unit
@@ -238,11 +242,28 @@ async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home) -> N
 
 @pytest.mark.unit
 async def test_the_page_says_when_it_last_heard_from_the_server(home: Home) -> None:
-    """A board that has silently stopped updating looks exactly like a quiet one (CLAUDE.md)."""
+    """A board that has silently stopped updating looks exactly like a quiet one (CLAUDE.md).
+
+    Both halves of docs/06-console.md are asserted: the stream dropping, and the stream staying
+    open while nothing arrives. The second is pinned down to the rendered number, because the
+    number is interpolated into JavaScript — an empty one is a syntax error that takes every
+    script on the page with it, and a page frozen at first paint still renders a plausible board.
+    """
     body = (await routes.page()).body.decode()
     assert 'id="asof"' in body
     assert "stream lost" in body
     assert "heartbeat" in body
+    assert "stream stalled" in body
+    assert "const silence = 0.0 * 3 * 1000;" in body
+
+
+@pytest.mark.unit
+async def test_a_template_asking_for_something_the_route_did_not_pass_fails_loudly(
+    home: Home,
+) -> None:
+    """The failure above, made structural rather than remembered."""
+    with pytest.raises(UndefinedError):
+        routes.env.from_string("{{ never_passed }}").render()
 
 
 async def _request(path: str, host: str) -> tuple[int, str]:
@@ -300,6 +321,10 @@ async def test_a_page_on_the_web_cannot_read_this_console_through_the_browser(ho
     status, _ = await _request(
         "/sessions/aaaaaaaa-0000-4000-8000-000000000001/tail", "board.attacker.example"
     )
+    assert status == 400
+
+    # /events is the route that keeps sending, which makes it the one worth stealing.
+    status, _ = await _request("/events", "board.attacker.example")
     assert status == 400
 
 

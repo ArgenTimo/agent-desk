@@ -57,7 +57,10 @@ context). See [08-non-goals.md](08-non-goals.md).
 
 ## web
 
-FastAPI, Jinja2 templates, HTMX for interaction, server-sent events for the live board. Bound to
+FastAPI, Jinja2 templates, HTMX for interaction, server-sent events for the live board. HTMX
+arrives with the input field in Phase 2; the Phase 1 board is the same server-rendered page driven
+by a dozen lines of plain JavaScript, because the library could not be fetched on the machine it
+was built on and a board does not need it ([09-roadmap.md](09-roadmap.md)). Bound to
 `127.0.0.1` and to one operating-system user by default. The overlay is the same page in a
 dedicated always-on-top browser window ([06-console.md](06-console.md)).
 

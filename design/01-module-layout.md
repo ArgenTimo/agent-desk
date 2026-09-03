@@ -15,7 +15,7 @@ agent_desk/
     session.py     subprocess, stream-json parsing, cancellation, timeout
     classify.py    new thread or continuation
   ideas/         capture, the card, the three draft actions
-  web/           FastAPI app, Jinja2 templates, HTMX, SSE
+  web/           FastAPI app, Jinja2 templates, HTMX (from Phase 2), SSE
     app.py  routes.py  sse.py  templates/
   peer.py        the ONE write path: a message to a named session
   config.py      paths and settings, resolved once

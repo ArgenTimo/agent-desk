@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from agent_desk.config import settings
 from agent_desk.observe import registry, transcript
@@ -57,6 +57,12 @@ def _clock(entry_at: object) -> str:
 env = Environment(
     loader=FileSystemLoader(TEMPLATES),
     autoescape=select_autoescape(["html"]),
+    # A name the template asks for and the route did not pass raises here instead of rendering an
+    # empty string. The default cost a whole page once: `const silence = {{ poll }} * 3` became
+    # `const silence =  * 3`, a syntax error that killed every script on the board — a page frozen
+    # at first paint, and a green test suite. Loud beats plausible, which is the argument of
+    # docs/adr/0004 applied one layer up.
+    undefined=StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,
 )

@@ -16,15 +16,14 @@ from __future__ import annotations
 from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_desk.config import settings
 from agent_desk.web import routes, sse
 
 # No OpenAPI surface: this application has three read-only routes and no client but the page it
 # serves.
 app = FastAPI(title="agent-desk", openapi_url=None)
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=sorted({settings.host, "127.0.0.1", "localhost"}),
-)
+# Loopback names only, and deliberately not `settings.host`: that is a bind address, and reading
+# it here would let a changed bind silently widen the one check docs/07-security.md says never to
+# widen. A non-loopback bind is outside the v1 security model altogether.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 app.include_router(routes.router)
 app.include_router(sse.router)

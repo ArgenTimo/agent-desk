@@ -18,6 +18,14 @@ in `tests/fixtures/` from a real file, with the producing CLI `version` recorded
 reader checks the observed `version` against the fixtures' and reports a mismatch as a visible
 banner on the board.
 
+**Amended 2026-09-03, after the first machine to run this had two CLI versions live at once: the
+check is direction-sensitive.** A version *newer* than the recording, or one that does not parse as
+a version at all, raises the banner. An older one does not, because the machine keeps sessions
+alive for days — so after any update there is always one, and a banner that is always lit is a
+banner nobody reads. An older shape that no longer fits the model raises the field-level notice
+instead, which names what moved and is the better signal anyway
+([03-session-observation.md](../03-session-observation.md), "Fixtures").
+
 No other module parses those files. No other module is given a raw line.
 
 ## Why
@@ -47,3 +55,8 @@ pattern worth copying and not a library worth sharing
   ([07-security.md](../07-security.md)).
 - The version check is advisory, never a block. A tool that refuses to start because the CLI was
   upgraded has chosen the wrong failure.
+- **A backward mismatch is not reported at all**, not even quietly. The case it would catch and the
+  field-level notice would not — a field that keeps its name and type and changes its meaning —
+  exists in the forward direction too, which is exactly where the banner is kept. Buying a second
+  permanent line on the board to half-cover it in one direction is the trade this amendment
+  refuses.
