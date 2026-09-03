@@ -67,7 +67,13 @@
   .tail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
   .entries { list-style: none; margin: 0; padding: 0; }
   .entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
-  .entry .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Two lines per entry. The drill-down answers "what has this session been doing", and a single
+     pasted file in one entry used to answer it by filling the window. The place to read a
+     transcript in full is the terminal that is already open (docs/06-console.md). */
+  .entry .text {
+    white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  }
   .entry.assistant .text { color: var(--fg); }
   .entry.user .text { color: var(--dim); }
 </style>
@@ -118,6 +124,10 @@ function checked() {
 }
 
 function lost(why) {
+  // The reconnect attempt and the silence timer both fire while the server is down, and each has
+  // a true thing to say; alternating them once a second is a board nobody can read. First one to
+  // notice keeps the floor until something arrives.
+  if (document.body.classList.contains('stale')) return;
   state.textContent = why;
   state.className = 'lost';
   document.body.classList.add('stale');

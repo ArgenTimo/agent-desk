@@ -38,8 +38,13 @@ verify: gate check-links ## Everything green before a human sees it
 check-links: ## Prove every relative link in docs/ and design/ resolves
 	@scripts/check-doc-links.sh
 
+# --timeout-graceful-shutdown is not a tuning knob, it is a bug fix. Uvicorn's graceful stop waits
+# for open responses to finish, and the board's server-sent-events response never finishes by
+# design — so Ctrl-C on a running console with a board open hangs forever, and SIGTERM does not
+# end it either. Found by killing the server with a browser attached.
 run: ## The console on http://127.0.0.1:8787
-	$(POETRY) run uvicorn agent_desk.web.app:app --host 127.0.0.1 --port $(PORT) --reload
+	$(POETRY) run uvicorn agent_desk.web.app:app --host 127.0.0.1 --port $(PORT) --reload \
+	  --timeout-graceful-shutdown 2
 
 overlay: ## The console in its own window, for a window rule to pin always-on-top
 	@browser=$$(command -v google-chrome || command -v chromium || command -v chromium-browser); \
