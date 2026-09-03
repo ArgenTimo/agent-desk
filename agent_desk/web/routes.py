@@ -29,7 +29,7 @@ from agent_desk.observe.model import (
     since,
     triage_rank,
 )
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import DRAFT_KINDS, Store
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -116,8 +116,18 @@ async def render_blocks() -> str:
     """The column under the input field: newest first, each showing its state and its thread."""
     rows = await store.blocks()
     threads = {thread.id: thread for thread in await store.open_threads()}
+    ideas = {idea.block_id: idea for idea in await store.ideas() if idea.block_id}
     return env.get_template("_blocks.html").render(
-        blocks=rows, threads=threads, partial=block_runs.PARTIAL
+        blocks=rows, threads=threads, ideas=ideas, partial=block_runs.PARTIAL
+    )
+
+
+async def render_inbox() -> str:
+    """Kept ideas, each carrying where it came from (docs/05-ideas.md)."""
+    ideas = await store.ideas()
+    drafts = {idea.id: await store.drafts_for(idea.id) for idea in ideas}
+    return env.get_template("_inbox.html").render(
+        ideas=ideas, drafts=drafts, drafting=block_runs.DRAFTING
     )
 
 
@@ -167,6 +177,46 @@ async def retry_block(block_id: str) -> HTMLResponse:
         rows, _ = await asyncio.to_thread(board)
         await block_runs.retry(store, block, rows)
     return HTMLResponse(await render_blocks())
+
+
+@router.post("/ideas/{idea_id}/{action}", response_class=HTMLResponse)
+async def idea_action(idea_id: str, action: str, request: Request) -> HTMLResponse:
+    """Keep, discard, edit the summary, or produce one of the three drafts (docs/05-ideas.md).
+
+    Nothing here writes outside this program's own store. That is the rule the ideas page exists
+    for, and the corollary is explicit: an action that writes elsewhere is an ADR, not a commit.
+    """
+    idea = await store.idea(idea_id)
+    if idea is None:
+        return HTMLResponse(await render_inbox(), status_code=404)
+
+    if action in ("keep", "drop"):
+        await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")
+    elif action == "summary":
+        form = await request.form()
+        summary = str(form.get("summary") or "").strip()
+        if summary:
+            await store.set_idea_summary(idea_id, summary)
+    elif action in DRAFT_KINDS:
+        # The tuple and the Literal are defined together in the store, so a route validating a
+        # path segment and the type describing it cannot drift apart — and the membership test
+        # narrows the string for free.
+        await block_runs.draft(store, idea, action)
+        await store.set_idea_state(idea_id, "promoted")
+
+    if request.headers.get("hx-target") == "blocks":
+        return HTMLResponse(await render_blocks())
+    return HTMLResponse(await render_inbox())
+
+
+@router.get("/ideas", response_class=HTMLResponse)
+async def inbox_page() -> HTMLResponse:
+    return HTMLResponse(env.get_template("inbox.html").render(inbox=await render_inbox()))
+
+
+@router.get("/ideas/list", response_class=HTMLResponse)
+async def inbox_list() -> HTMLResponse:
+    return HTMLResponse(await render_inbox())
 
 
 @router.post("/blocks/{block_id}/cancel", response_class=HTMLResponse)

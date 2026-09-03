@@ -30,6 +30,9 @@ BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 IdeaState = Literal["new", "kept", "promoted", "dropped"]
 SourceKind = Literal["session", "typed", "meeting"]
 DraftKind = Literal["proposal", "ticket", "paste"]
+# The same three, as values. Defined here so a route validating a path segment and the type that
+# describes it cannot drift apart.
+DRAFT_KINDS: tuple[DraftKind, ...] = ("proposal", "ticket", "paste")
 ThreadSetBy = Literal["classifier", "human"]
 
 

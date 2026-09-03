@@ -38,6 +38,36 @@ esac
 """
 
 
+def make_row(project: str, branch: str) -> object:
+    """One board row, built the way `routes.board()` builds them."""
+    from agent_desk.observe.model import AttentionHint, Session, TailEntry, TranscriptTail
+    from agent_desk.web.routes import BoardRow
+
+    return BoardRow(
+        session=Session.model_validate(
+            {
+                "pid": abs(hash(project)) % 100000,
+                "procStart": "1",
+                "sessionId": f"session-{project}",
+                "cwd": f"/home/dev/projects/{project}",
+                "name": f"{project}-d0",
+                "kind": "interactive",
+                "version": "2.1.259",
+                "status": "busy",
+                "updatedAt": 0,
+                "statusUpdatedAt": 0,
+            }
+        ),
+        tail=TranscriptTail(
+            session_id=f"session-{project}",
+            title="a title",
+            git_branch=branch,
+            entries=[TailEntry(role="assistant", text="doing something")],
+        ),
+        hint=AttentionHint(waiting=False, observation="busy 0s"),
+    )
+
+
 @pytest.fixture
 def fake_claude(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
     binary = tmp_path / "cli" / "claude"

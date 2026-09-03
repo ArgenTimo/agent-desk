@@ -1,0 +1,43 @@
+{# Kept ideas, each carrying where it came from — "what was I doing when I thought this" is most
+   of an idea's meaning a week later (docs/05-ideas.md). Four states, no priority, no assignee, no
+   estimate: that is a backlog, and a backlog needs a process to stay honest. #}
+{% if not ideas %}
+<p class="empty">no ideas captured yet</p>
+{% endif %}
+{% for idea in ideas %}
+<article class="idea {{ idea.state }}">
+  <header>
+    <span class="state">{{ idea.state }}</span>
+    <form class="rename" hx-post="/ideas/{{ idea.id }}/summary" hx-target="#inbox">
+      <input name="summary" value="{{ idea.summary }}" aria-label="summary">
+    </form>
+  </header>
+  <p class="verbatim">{{ idea.text }}</p>
+  <dl class="context">
+    <dt>from</dt><dd>{{ idea.source_kind }}{% if idea.source_ref %} · {{ idea.source_ref }}{% endif %}</dd>
+    {% for key, value in idea.context | dictsort %}
+    <dt>{{ key }}</dt><dd>{{ value }}</dd>
+    {% endfor %}
+  </dl>
+
+  <footer class="actions">
+    {% if idea.state == "new" %}
+    <button hx-post="/ideas/{{ idea.id }}/keep" hx-target="#inbox">Keep</button>
+    <button hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">Discard</button>
+    {% elif idea.state == "kept" %}
+    {# All three produce text in this tool. None writes into another repository. #}
+    <button hx-post="/ideas/{{ idea.id }}/proposal" hx-target="#inbox">Draft a proposal</button>
+    <button hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#inbox">Draft a ticket</button>
+    <button hx-post="/ideas/{{ idea.id }}/paste" hx-target="#inbox">Copy for a session</button>
+    {% endif %}
+    {% if idea.id in drafting %}<span class="drafting">drafting…</span>{% endif %}
+  </footer>
+
+  {% for draft in drafts.get(idea.id, []) %}
+  <details class="draft">
+    <summary>{{ draft.kind }}</summary>
+    <pre>{{ draft.body }}</pre>
+  </details>
+  {% endfor %}
+</article>
+{% endfor %}

@@ -12,7 +12,23 @@
     <span class="thread">thread: {{ threads[block.thread_id].subject if block.thread_id in threads else "—" }}</span>
   </header>
 
-  {% if block.state == "running" %}
+  {% if block.kind == "idea" and block.id in ideas %}
+  {# The card of docs/05-ideas.md. Keep or discard, one click, and never a second question. #}
+  {% set idea = ideas[block.id] %}
+  <div class="card">
+    <p class="recorded">Idea recorded. <span class="summary">{{ idea.summary }}</span>. Keep it?</p>
+    <p class="verbatim">{{ idea.text }}</p>
+    <footer class="actions">
+      {% if idea.state == "new" %}
+      <button hx-post="/ideas/{{ idea.id }}/keep" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">Keep</button>
+      <button hx-post="/ideas/{{ idea.id }}/drop" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">Discard</button>
+      {% else %}
+      <span class="state">{{ idea.state }}</span>
+      {% endif %}
+      <a href="/ideas">inbox</a>
+    </footer>
+  </div>
+  {% elif block.state == "running" %}
   <div class="answer streaming">{{ partial.get(block.id, "") }}<span class="caret">▍</span></div>
   {% elif block.answer %}
   <div class="answer">{{ block.answer }}</div>

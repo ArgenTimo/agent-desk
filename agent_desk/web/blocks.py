@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_desk.answer import session
+from agent_desk.ideas import inbox
 from agent_desk.observe.model import Session
-from agent_desk.store.repo import Block, Store
+from agent_desk.store.repo import Block, DraftKind, Idea, Store
 
 if TYPE_CHECKING:
     from agent_desk.web.routes import BoardRow
@@ -29,6 +30,16 @@ if TYPE_CHECKING:
 # the store holds the answer, and a partial answer is a second copy of a thing already redacted
 # once (design/02-data-model.md, "What is deliberately not stored").
 PARTIAL: dict[str, str] = {}
+
+# Ideas whose draft is being written, so the inbox can say "drafting" instead of showing a click
+# that appeared to do nothing. Memory only, for the same reason as PARTIAL.
+DRAFTING: set[str] = set()
+
+# Prefixes for when you already know what you want (docs/06-console.md). `/idea` skips
+# classification entirely; `/new` forces a new thread, which is what every question gets until the
+# classifier exists to propose otherwise.
+IDEA_PREFIX = "/idea"
+NEW_PREFIX = "/new"
 
 
 class Runs:
@@ -105,14 +116,110 @@ def board_lines(rows: Sequence[BoardRow]) -> list[str]:
     return lines
 
 
+def _capture_context(rows: Sequence[BoardRow]) -> tuple[str, str | None, dict[str, str]]:
+    """What was happening when the thought arrived (docs/05-ideas.md).
+
+    A typed idea is attached to a session only when there is exactly one to attach it to. With
+    several running, "the session that was running" is a guess, and an idea remembered against the
+    wrong branch is worse a week later than one remembered against none — so the board is
+    described instead, and the source stays `typed`.
+    """
+    if len(rows) == 1:
+        row = rows[0]
+        return (
+            "session",
+            row.session.session_id,
+            {
+                "project": row.session.project,
+                "branch": (row.tail.git_branch if row.tail else None) or "—",
+                "title": (row.tail.title if row.tail else None) or "no title read",
+            },
+        )
+    return (
+        "typed",
+        None,
+        {
+            "sessions": str(len(rows)),
+            "projects": ", ".join(sorted({row.session.project for row in rows})) or "none",
+        },
+    )
+
+
+async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Block:
+    """`/idea`: recorded in one step, with a card and no second question (docs/05-ideas.md).
+
+    The block is `answered` the moment it exists, because it is: the card is the whole content of
+    an idea block, and nothing about the thought is pending. What runs afterwards only improves
+    the summary line, and the idea is complete without it.
+    """
+    source_kind, source_ref, context = _capture_context(rows)
+    thread = await store.create_thread(inbox.fallback_summary(text) or "an idea")
+    block = await store.create_block(
+        thread_id=thread.id, kind="idea", input=text, thread_set_by="human"
+    )
+    idea = await inbox.capture(
+        store,
+        text,
+        source_kind=source_kind,  # type: ignore[arg-type]
+        source_ref=source_ref,
+        context=context,
+        block_id=block.id,
+    )
+    await store.finish_block(block.id, "")
+    runs.start(f"summary:{idea.id}", _summarise(store, idea))
+    return block
+
+
+async def _summarise(store: Store, idea: Idea) -> None:
+    """Replace the fallback line if a run produces a better one. Never fail the capture over it."""
+    try:
+        parts = [chunk async for chunk in session.stream_answer(inbox.summary_prompt(idea.text))]
+    except (session.AnswerFailed, OSError):
+        return
+    line = "".join(parts).strip().splitlines()[0].strip() if any(parts) else ""
+    if line:
+        await store.set_idea_summary(idea.id, line[: inbox.SUMMARY_CHARS])
+
+
+async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:
+    """One of the three actions of docs/05-ideas.md. All three produce text in this tool."""
+    if kind == "paste":
+        await store.create_draft(idea_id=idea.id, kind=kind, body=inbox.paste_body(idea))
+        return
+
+    DRAFTING.add(idea.id)
+    runs.start(f"draft:{idea.id}:{kind}", _draft(store, idea, kind))
+
+
+async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
+    try:
+        prompt = inbox.PROMPTS[kind](idea)
+        body = "".join([chunk async for chunk in session.stream_answer(prompt)]).strip()
+        if body:
+            await store.create_draft(idea_id=idea.id, kind=kind, body=body)
+    except (session.AnswerFailed, OSError) as exc:
+        await store.create_draft(
+            idea_id=idea.id,
+            kind=kind,
+            body=f"The draft could not be written: {exc}\n\nThe idea itself is unharmed above.",
+        )
+    finally:
+        DRAFTING.discard(idea.id)
+
+
 async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
     """Accept one line of input and start answering it.
 
-    Slice by slice: everything typed here is a question in a thread of its own. `/idea` capture and
-    the classifier that decides "continuation or new subject" are the two pieces that follow, and
-    the thread is recorded as set by a human until a classifier exists to claim otherwise.
+    `/idea` captures instead of asking. `/new` forces a new thread, which is what a question gets
+    anyway until the classifier of docs/04-threads-and-blocks.md exists to propose otherwise — so
+    the thread is recorded as set by a human, because it was.
     """
     text = typed.strip()
+    if text.startswith(IDEA_PREFIX):
+        return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows)
+    if text.startswith(NEW_PREFIX):
+        text = text[len(NEW_PREFIX) :].strip()
+
     thread = await store.create_thread(text[:60] or "untitled")
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"

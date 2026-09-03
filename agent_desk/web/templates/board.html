@@ -29,6 +29,10 @@
   .brand { color: var(--fg); font-weight: 600; }
   #stream-state { margin-left: auto; }
   #stream-state.lost { color: var(--flag); }
+  #no-htmx {
+    margin: 0 0 10px; padding: 6px 8px; border-left: 3px solid var(--warn);
+    background: var(--warn-bg); color: var(--warn);
+  }
   body.stale .row, body.stale .notices { opacity: 0.5; }
   .notices { margin: 0 0 10px; }
   .notice {
@@ -105,6 +109,11 @@
 </style>
 </head>
 <body>
+{# The one vendored file. If it is not there the buttons and the form do nothing, so the page
+   says so rather than looking fine and losing what you type into it. #}
+<p id="no-htmx" hidden>htmx is missing — put htmx.min.js in agent_desk/web/static/ (see README).
+  Until then the input field and the block buttons do nothing.</p>
+
 <header id="bar">
   <span class="brand">agent-desk</span>
   <span id="asof">connecting…</span>
@@ -129,6 +138,11 @@
 // things — replace it when the server says it changed, expand one row on demand, and say plainly
 // when it has stopped hearing from the server. The third is not a nicety: a board that has quietly
 // stopped updating looks exactly like a board on which nothing is happening.
+if (!window.htmx) {
+  document.getElementById('no-htmx').hidden = false;
+  document.querySelector('#ask input').disabled = true;
+}
+
 const expanded = new Set();
 const asof = document.getElementById('asof');
 const state = document.getElementById('stream-state');
@@ -207,7 +221,7 @@ stream.addEventListener('blocks', (event) => {
   // and an answer is the one thing here anybody copies out.
   if (!document.getSelection().isCollapsed) return;
   document.getElementById('blocks').innerHTML = event.data;
-  htmx.process(document.getElementById('blocks'));
+  if (window.htmx) htmx.process(document.getElementById('blocks'));
   checked();
 });
 stream.addEventListener('heartbeat', checked);
