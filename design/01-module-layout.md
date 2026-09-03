@@ -40,10 +40,12 @@ dict from those files. Enforced by a test that greps the tree for `.claude/sessi
 `.claude/projects` and `json.loads` outside `observe/`
 ([`../docs/adr/0004`](../docs/adr/0004-the-transcript-format-is-not-a-contract.md)).
 
-`json.loads` is a proxy for "reads one of those formats", and it has exactly one named exception:
-`store/repo.py`, which serialises `idea.context` — a JSON column in this program's own SQLite
-file, required by name in [`02-data-model.md`](02-data-model.md). The exception is a path in the
-test, not a category: any other module that starts parsing JSON still fails it, which is the point.
+`json.loads` is a proxy for "reads one of *those* formats", and it has two named exceptions, both
+paths rather than categories. `store/repo.py` serialises `idea.context`, a JSON column in this
+program's own SQLite file required by name in [`02-data-model.md`](02-data-model.md).
+`answer/session.py` reads the stream-json of a subprocess this program started, which is this
+line's own description of that module's job. Any third module that starts parsing JSON still fails
+the test, which is the point of keeping the exceptions as a list of paths.
 
 **2. Only `web/` imports `peer.py`.** The write path exists in exactly one place, behind a route a
 human reaches by clicking. Enforced by an import-graph test asserting that `observe`, `store`,

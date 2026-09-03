@@ -11,6 +11,7 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 |---|---|---|
 | `registry_entry.json` | `~/.claude/sessions/<pid>.json` | `2.1.259` |
 | `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` | `2.1.258` |
+| `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `2.1.259` |
 
 ## What was scrubbed, and what was not
 
@@ -35,6 +36,19 @@ When a CLI update breaks a parser test, re-record rather than patch:
    [`docs/03-session-observation.md`](../../docs/03-session-observation.md).
 
 This is a normal task with a normal review, not an emergency.
+
+## The stream is a format too
+
+`stream_json.jsonl` is the stdout of one real headless run — the answer engine's input, recorded
+the same way and for the same reason as the two files above. It is what the parser in
+`agent_desk/answer/session.py` is tested against, and the test's fake `claude` is a script that
+prints this file: the shapes the parser depends on come from a run that happened, not from a
+reading of the help text.
+
+It cost one request. The run that produced it carried a `rate_limit_event` line — a type v1 does
+not read and skips — which is the whole argument for recording rather than writing: nobody would
+have invented that line, and a parser that fell over on an unknown `type` would have looked
+correct until the day it met one.
 
 ## Two notes from the second recording
 

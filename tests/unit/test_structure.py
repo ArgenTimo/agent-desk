@@ -15,12 +15,18 @@ import pytest
 
 PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 
-# The rule below is about the formats Claude Code writes, and JSON is the proxy for reading them.
-# `idea.context` is a JSON column in this program's *own* SQLite file, required by name in
-# design/02-data-model.md, so the module that owns that column is named here rather than left to
-# trip a check whose subject it is not. The exception is one path, and everything else still
-# trips: a second module that starts parsing JSON is a module to look at.
-_OWN_JSON_COLUMN = {"store/repo.py"}
+# The rule below is about the *on-disk* formats Claude Code writes, and JSON is the proxy for
+# reading them. Two modules parse JSON that is not that, and each is named here rather than left
+# to trip a check whose subject it is not:
+#
+#   store/repo.py       `idea.context`, a JSON column in this program's own SQLite file, required
+#                       by name in design/02-data-model.md.
+#   answer/session.py   the stream-json of a subprocess this program started itself, which
+#                       design/01-module-layout.md names as this module's job.
+#
+# Both are paths, not categories. A third module that starts parsing JSON still fails this test,
+# which is the point of it.
+_NOT_AN_ON_DISK_FORMAT = {"store/repo.py", "answer/session.py"}
 
 
 def _modules() -> list[Path]:
@@ -102,7 +108,7 @@ def test_only_observe_parses_the_on_disk_formats() -> None:
             continue
         source = path.read_text()
         # `json.load` is a prefix of `json.loads`, so one check covers both.
-        uses_json = "json.load" in source and rel.as_posix() not in _OWN_JSON_COLUMN
+        uses_json = "json.load" in source and rel.as_posix() not in _NOT_AN_ON_DISK_FORMAT
         touches_claude = ".claude/sessions" in source or ".claude/projects" in source
         # config.py names the paths for everyone; naming is not parsing.
         if touches_claude and rel.name != "config.py":

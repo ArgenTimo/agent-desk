@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # --- The inference of docs/03-session-observation.md, rendered as an inference. ----------
     idle_hint_seconds: int = 300
 
+    # --- The answer engine: one headless `claude -p` run per block (docs/04). The CLI is
+    # resolved from PATH; when it is absent the board still works and blocks say so
+    # (docs/02-architecture.md, failure posture). There is no --max-turns in the CLI, so the
+    # timeout is the only bound on a run.
+    claude_bin: str = "claude"
+    answer_timeout_seconds: float = 180.0
+
     @property
     def registry_glob(self) -> str:
         """`*.json`, never `*`. See the module docstring."""
