@@ -1,6 +1,7 @@
 # Data model
 
-One SQLite file at `~/.local/share/agent-desk/agent-desk.db`. Four tables. Timestamps are
+One SQLite file at `~/.local/share/agent-desk/agent-desk.db`. Four tables, and a fifth that
+arrived with the shared view. Timestamps are
 Unix milliseconds, matching what the registry writes, so that a comparison never needs a
 conversion nobody remembers to do.
 

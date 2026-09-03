@@ -7,7 +7,7 @@ agent_desk/
     transcript.py  tail of ~/.claude/projects/*/<sessionId>.jsonl
     signals.py     hook posts arriving at /api/signal
     model.py       Session, TranscriptTail, Signal — the types everything downstream sees
-  store/         SQLite: threads, blocks, ideas, drafts  ·  redaction at this boundary
+  store/         SQLite: threads, blocks, ideas, drafts, viewers  ·  redaction at this boundary
     schema.sql     tables, applied in order at startup
     repo.py        every SQL statement in the program lives here
     redact.py      applies .claude/security-patterns.yaml before text leaves the store

@@ -36,7 +36,8 @@ Nothing is abstracted for that today; the sentence is the whole preparation.
 ## store
 
 SQLite through async SQLAlchemy, one file under `~/.local/share/agent-desk/`. Holds what the tool
-itself produces and must not lose: threads, blocks, ideas, and the drafts an idea grows into
+itself produces and must not lose: threads, blocks, ideas, the drafts an idea grows into, and
+the named viewers who may open the shared list
 ([`design/02-data-model.md`](../design/02-data-model.md)).
 
 It does **not** hold a copy of the transcripts. Those are large, they already exist on disk, and a
