@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # --- Observation cadence. The registry is five small files; polling it is cheap. ---------
     registry_poll_seconds: float = 2.0
     transcript_tail_lines: int = 40
+    # A transcript reaches tens of megabytes, so the reader seeks from the end and stops. The
+    # budget is bytes rather than lines because a single line holding a tool result can be
+    # hundreds of kilobytes, and because the board's headline (`ai-title`) is rewritten once a
+    # turn — a window measured in lines can miss it after one long turn.
+    transcript_tail_bytes: int = 256 * 1024
 
     # --- The inference of docs/03-session-observation.md, rendered as an inference. ----------
     idle_hint_seconds: int = 300
