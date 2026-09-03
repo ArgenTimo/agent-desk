@@ -31,9 +31,16 @@ One file per live session, rewritten as the session's status changes, removed wh
 This is the board's backbone: it gives the name, the working directory, and a status, for every
 session, for the cost of reading five small files.
 
-**`status` is a fact and takes three values** — `idle`, `busy`, `shell`. It is written by the
-session itself. It is the only trustworthy statement about what a session is doing, and it is
-rendered as-is.
+**`status` is a fact and it is rendered as-is.** It is written by the session itself, and it is the
+only trustworthy statement about what a session is doing. Three values were recorded at `2.1.251`
+and `2.1.258` — `idle`, `busy`, `shell`.
+
+**A fourth appeared.** On 2026-09-03, at CLI `2.1.259`, the registry on this machine carried
+`waiting`. Nothing on disk says what the session means by it, so v1 does not act on it: the value
+is shown as the session wrote it, and it is ordered below `busy` and above `idle` — not treated as
+the "waiting for a human" fact that the rest of this page says cannot be known. Deciding that it
+*is* that fact is a change to this document, made by a human who has confirmed the meaning; it is
+not a change the reader may make on the strength of the word ([adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)).
 
 **A file is a claim about a process, and the claim is checkable.** A stale file, or a pid the
 operating system has since handed to something else, would put a dead session on the board as

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,9 @@ from typing import Any
 from agent_desk.config import settings
 from agent_desk.observe.model import TailEntry, TranscriptTail
 
-_CHUNK = 64 * 1024
+# A session id reaches this module from a URL path, and it is interpolated into a glob. Anything
+# that is not a session id is not sanitised into one — it is refused.
+_SESSION_ID = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")
 
 # One entry is rendered on a board row, and a human pasted a file into some of them. The cap is a
 # display decision and it is here rather than in a template because the template is not the place
@@ -38,6 +41,8 @@ def _find(session_id: str, root: Path) -> Path | None:
     A session id resumed in a second directory can produce two files; the most recently written
     one is the one the session is appending to.
     """
+    if not _SESSION_ID.match(session_id):
+        return None
     matches = list(root.glob(f"*/{session_id}.jsonl"))
     if not matches:
         return None

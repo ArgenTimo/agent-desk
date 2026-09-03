@@ -1,0 +1,16 @@
+{# The drill-down. v1 has no transcript viewer, no diff view and no tool-call browser: the board
+   answers "should I go look", and the place to look is the terminal already open
+   (docs/06-console.md). #}
+{% if not tail %}
+<p class="empty">no transcript for this session</p>
+{% else %}
+<ol class="entries">
+  {% for entry in tail.entries %}
+  <li class="entry {{ entry.role }}">
+    <span class="who">{{ entry.role }}</span>
+    <span class="when">{{ entry.at | clock }}</span>
+    <span class="text">{{ entry.text or "—" }}</span>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}

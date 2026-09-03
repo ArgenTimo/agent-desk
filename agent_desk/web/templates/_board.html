@@ -1,0 +1,61 @@
+{# The board fragment: the page holds it once, and every server-sent event replaces it whole. #}
+{% if notices %}
+<section class="notices">
+  {% for notice in notices %}
+  <p class="notice">{{ notice }}</p>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if not rows %}
+<p class="empty">no live sessions</p>
+{% else %}
+{% for row in rows %}
+<article class="row{% if row.hint.waiting %} waiting{% endif %}" data-session="{{ row.session.session_id }}">
+  <header>
+    <span class="project">{{ row.session.project }}</span>
+    <span class="sep">·</span>
+    <span class="branch">{{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</span>
+    <span class="name">{{ row.session.name }}</span>
+    {% if row.session.kind != "interactive" %}<span class="kind">{{ row.session.kind }}</span>{% endif %}
+  </header>
+
+  <div class="headline">
+    <span class="status {{ row.session.status }}">{{ row.session.status }}</span>
+    {% if row.tail %}
+    <span class="title">{{ row.tail.title or "—" }}</span>
+    {% else %}
+    {# docs/02-architecture.md, failure posture: registry facts only, and marked as such. #}
+    <span class="title unread">no transcript read — registry facts only</span>
+    {% endif %}
+    <span class="age">{{ row.session.updated_at | ago }}</span>
+  </div>
+
+  {% if row.tail %}
+  {# docs/01-vision.md, problem 4: the last thing asked and the last thing done, with a time. #}
+  <dl class="last">
+    <dt>asked</dt>
+    <dd>{{ row.tail.last_prompt or "—" }}</dd>
+    <dt>did</dt>
+    <dd>
+      {% if row.tail.last_entry %}
+      <span class="who">{{ row.tail.last_entry.role }}</span>
+      <span class="when">{{ row.tail.last_entry.at | clock }}</span>
+      {{ row.tail.last_entry.text or "—" }}
+      {% else %}
+      —
+      {% endif %}
+    </dd>
+  </dl>
+  {% endif %}
+
+  {% if row.hint.waiting %}
+  {# Never a bare claim: the flag carries the observation it was inferred from
+     (docs/03-session-observation.md, "What cannot be known"). #}
+  <p class="hint">⚑ may be waiting for you — inferred from {{ row.hint.observation }}; no Notification hook installed, so this is a guess</p>
+  {% endif %}
+
+  <div class="tail" hidden></div>
+</article>
+{% endfor %}
+{% endif %}

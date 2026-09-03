@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-desk</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --fg: #1c1b19; --dim: #6b6862; --line: #e0ddd6;
+    --card: #ffffff; --busy: #b06500; --idle: #4a7a3f; --shell: #3f6a7a;
+    --flag: #a33; --warn: #8a5a00; --warn-bg: #fdf3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171614; --fg: #e8e5df; --dim: #8d8880; --line: #2c2a27;
+      --card: #1e1d1a; --busy: #e0a250; --idle: #86c06f; --shell: #6fb0c0;
+      --flag: #e07a7a; --warn: #e0b060; --warn-bg: #2a2313;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 10px; background: var(--bg); color: var(--fg);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .notices { margin: 0 0 10px; }
+  .notice {
+    margin: 0 0 4px; padding: 6px 8px; border-left: 3px solid var(--warn);
+    background: var(--warn-bg); color: var(--warn);
+  }
+  .empty { color: var(--dim); padding: 20px 8px; }
+  .row {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
+    padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
+  }
+  .row.waiting { border-left-color: var(--flag); }
+  header { display: flex; gap: 6px; align-items: baseline; color: var(--dim); }
+  .project { color: var(--fg); font-weight: 600; }
+  .name, .kind { margin-left: auto; font-size: 11px; }
+  .headline { display: flex; gap: 10px; align-items: baseline; margin-top: 3px; }
+  .status { text-transform: lowercase; min-width: 5ch; }
+  .status.busy { color: var(--busy); }
+  .status.idle { color: var(--idle); }
+  .status.shell { color: var(--shell); }
+  .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title.unread { color: var(--dim); font-style: italic; }
+  .age { color: var(--dim); white-space: nowrap; }
+  .last {
+    display: grid; grid-template-columns: 5ch 1fr; gap: 0 8px;
+    margin: 4px 0 0; color: var(--dim); font-size: 12px;
+  }
+  .last dt { color: var(--dim); }
+  .last dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who { color: var(--dim); }
+  .when { color: var(--dim); margin-right: 4px; }
+  .hint { margin: 6px 0 0; color: var(--flag); font-size: 12px; }
+  .tail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+  .entries { list-style: none; margin: 0; padding: 0; }
+  .entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
+  .entry .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .entry.assistant .text { color: var(--fg); }
+  .entry.user .text { color: var(--dim); }
+</style>
+</head>
+<body>
+<div id="board">{{ board|safe }}</div>
+
+<script>
+// Twelve lines instead of a framework. The board is server-rendered; the browser does two
+// things — replace it when the server says it changed, and expand one row on demand.
+const expanded = new Set();
+
+async function fillTail(row) {
+  const box = row.querySelector('.tail');
+  box.innerHTML = await (await fetch(`/sessions/${row.dataset.session}/tail`)).text();
+  box.hidden = false;
+}
+
+function restore() {
+  for (const row of document.querySelectorAll('[data-session]')) {
+    if (expanded.has(row.dataset.session)) fillTail(row);
+  }
+}
+
+document.addEventListener('click', (event) => {
+  const row = event.target.closest('[data-session]');
+  if (!row) return;
+  const id = row.dataset.session;
+  if (expanded.has(id)) {
+    expanded.delete(id);
+    const box = row.querySelector('.tail');
+    box.hidden = true;
+    box.innerHTML = '';
+  } else {
+    expanded.add(id);
+    fillTail(row);
+  }
+});
+
+new EventSource('/events').onmessage = (event) => {
+  document.getElementById('board').innerHTML = event.data;
+  restore();
+};
+</script>
+</body>
+</html>
