@@ -40,6 +40,11 @@ dict from those files. Enforced by a test that greps the tree for `.claude/sessi
 `.claude/projects` and `json.loads` outside `observe/`
 ([`../docs/adr/0004`](../docs/adr/0004-the-transcript-format-is-not-a-contract.md)).
 
+`json.loads` is a proxy for "reads one of those formats", and it has exactly one named exception:
+`store/repo.py`, which serialises `idea.context` — a JSON column in this program's own SQLite
+file, required by name in [`02-data-model.md`](02-data-model.md). The exception is a path in the
+test, not a category: any other module that starts parsing JSON still fails it, which is the point.
+
 **2. Only `web/` imports `peer.py`.** The write path exists in exactly one place, behind a route a
 human reaches by clicking. Enforced by an import-graph test asserting that `observe`, `store`,
 `answer` and `ideas` do not import it — the mechanism behind

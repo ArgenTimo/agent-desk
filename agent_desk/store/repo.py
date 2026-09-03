@@ -1,0 +1,447 @@
+"""Every SQL statement in the program.
+
+One place to look when the storage shape changes, for the same reason `observe/` is one module
+(design/01-module-layout.md). `schema.sql` is the schema; this file is the queries.
+
+**Redaction runs here, on the way out.** Not every column: the line is provenance. `block.input`
+and `idea.text` are what a human typed, and docs/05-ideas.md is explicit that the original is the
+thing that survives — scrubbing it would let a net aimed at transcripts eat the thought this tool
+exists to keep. `block.answer`, `block.error`, `idea.context` and `draft.body` are built from what
+an agent saw, which is the text docs/07-security.md is about, and they are scrubbed every time
+they leave.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from ulid import ULID
+
+from agent_desk.store.redact import scrub, scrub_optional
+
+BlockKind = Literal["question", "idea", "observation"]
+BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
+IdeaState = Literal["new", "kept", "promoted", "dropped"]
+SourceKind = Literal["session", "typed", "meeting"]
+DraftKind = Literal["proposal", "ticket", "paste"]
+ThreadSetBy = Literal["classifier", "human"]
+
+
+# The store's own clock, in the units the registry writes (design/02-data-model.md). Deliberately
+# not imported from `observe`: a store does not need to know that a session reader exists.
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _new_id() -> str:
+    """ULIDs sort by time, so a list of blocks is chronological without an index."""
+    return str(ULID())
+
+
+class Thread(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    subject: str
+    created_at: int
+    closed_at: int | None = None
+
+
+class Block(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    thread_id: str
+    kind: BlockKind
+    state: BlockState
+    input: str
+    answer: str | None = None
+    error: str | None = None
+    thread_set_by: ThreadSetBy
+    created_at: int
+    finished_at: int | None = None
+
+
+class Idea(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    block_id: str | None
+    text: str
+    summary: str
+    state: IdeaState
+    source_kind: SourceKind
+    source_ref: str | None
+    context: dict[str, Any]
+    created_at: int
+
+
+class Draft(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    idea_id: str
+    kind: DraftKind
+    body: str
+    created_at: int
+
+
+def _statements(script: str) -> list[str]:
+    """One SQL statement per element.
+
+    The sqlite driver takes one statement per call, so a schema file is split here. Comment lines
+    are dropped first, which is the only reason a `;` could appear anywhere but the end of a
+    statement in these files.
+    """
+    body = "\n".join(line for line in script.splitlines() if not line.strip().startswith("--"))
+    return [statement.strip() for statement in body.split(";") if statement.strip()]
+
+
+def _migrations(directory: Path) -> list[tuple[int, Path]]:
+    """`schema.sql` is version 1; every later change is `NNN-<name>.sql` applied in order.
+
+    Forward-only, and never edited in place: a file that has been applied on a machine is history
+    (docs/adr/0003).
+    """
+    found = [(1, directory / "schema.sql")]
+    found += [(int(p.name[:3]), p) for p in sorted(directory.glob("[0-9][0-9][0-9]-*.sql"))]
+    return sorted(found)
+
+
+def _enforce_foreign_keys(dbapi_connection: Any, _record: Any) -> None:
+    """SQLite ignores `REFERENCES` unless asked, once per connection.
+
+    The schema declares foreign keys; a store that silently does not enforce them is a schema
+    documenting a guarantee it does not have. Registered on this engine rather than on every pool
+    in the process, because a global listener would be this module reaching outside itself.
+    """
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+class Store:
+    """One SQLite file, opened once at startup (docs/adr/0003)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._engine: AsyncEngine | None = None
+
+    @property
+    def engine(self) -> AsyncEngine:
+        if self._engine is None:  # pragma: no cover - a programming error, not a state
+            raise RuntimeError("the store is not open")
+        return self._engine
+
+    async def open(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
+        event.listen(self._engine.sync_engine, "connect", _enforce_foreign_keys)
+        await self._migrate()
+        await self._recover_interrupted()
+
+    async def close(self) -> None:
+        if self._engine is not None:
+            await self._engine.dispose()
+            self._engine = None
+
+    # --- schema ---------------------------------------------------------------------------
+    async def _migrate(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS schema_version ("
+                    "version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)"
+                )
+            )
+            rows = await conn.execute(text("SELECT version FROM schema_version"))
+            applied = {row[0] for row in rows}
+            for version, path in _migrations(Path(__file__).parent):
+                if version in applied:
+                    continue
+                for statement in _statements(path.read_text()):
+                    await conn.execute(text(statement))
+                await conn.execute(
+                    text("INSERT INTO schema_version (version, applied_at) VALUES (:v, :t)"),
+                    {"v": version, "t": _now_ms()},
+                )
+
+    async def _recover_interrupted(self) -> None:
+        """A block that was running when the process died comes back `failed`, never `answered`.
+
+        A restart that silently promoted an unfinished block would produce an empty answer that
+        looks complete (design/02-data-model.md, "Crash behaviour"). A `queued` block is left
+        queued: it never started, and nothing about it is lost by running it now.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = 'failed', error = 'interrupted', finished_at = :t "
+                    "WHERE state = 'running'"
+                ),
+                {"t": _now_ms()},
+            )
+
+    # --- threads --------------------------------------------------------------------------
+    async def create_thread(self, subject: str) -> Thread:
+        thread = Thread(id=_new_id(), subject=subject, created_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO thread (id, subject, created_at, closed_at) "
+                    "VALUES (:id, :subject, :created_at, NULL)"
+                ),
+                thread.model_dump(),
+            )
+        return thread
+
+    async def open_threads(self) -> list[Thread]:
+        """What a new block is classified against — closed subjects are not candidates."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, subject, created_at, closed_at FROM thread "
+                    "WHERE closed_at IS NULL ORDER BY created_at DESC"
+                )
+            )
+            return [Thread(**row._mapping) for row in rows]
+
+    async def rename_thread(self, thread_id: str, subject: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE thread SET subject = :subject WHERE id = :id"),
+                {"id": thread_id, "subject": subject},
+            )
+
+    async def close_thread(self, thread_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE thread SET closed_at = :t WHERE id = :id"),
+                {"id": thread_id, "t": _now_ms()},
+            )
+
+    # --- blocks ---------------------------------------------------------------------------
+    async def create_block(
+        self,
+        *,
+        thread_id: str,
+        kind: BlockKind,
+        input: str,
+        thread_set_by: ThreadSetBy,
+    ) -> Block:
+        block = Block(
+            id=_new_id(),
+            thread_id=thread_id,
+            kind=kind,
+            state="queued",
+            input=input,
+            thread_set_by=thread_set_by,
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO block (id, thread_id, kind, state, input, answer, error, "
+                    "thread_set_by, created_at, finished_at) VALUES (:id, :thread_id, :kind, "
+                    ":state, :input, NULL, NULL, :thread_set_by, :created_at, NULL)"
+                ),
+                block.model_dump(exclude={"answer", "error", "finished_at"}),
+            )
+        return block
+
+    async def set_block_running(self, block_id: str) -> None:
+        await self._set_block_state(block_id, "running")
+
+    async def finish_block(self, block_id: str, answer: str) -> None:
+        await self._set_block_state(block_id, "answered", answer=answer, finished=True)
+
+    async def fail_block(self, block_id: str, error: str) -> None:
+        """A failed block says why and stays: a question that vanished is one you ask again."""
+        await self._set_block_state(block_id, "failed", error=error, finished=True)
+
+    async def cancel_block(self, block_id: str) -> None:
+        await self._set_block_state(block_id, "cancelled", finished=True)
+
+    async def _set_block_state(
+        self,
+        block_id: str,
+        state: BlockState,
+        *,
+        answer: str | None = None,
+        error: str | None = None,
+        finished: bool = False,
+    ) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = :state, "
+                    "answer = COALESCE(:answer, answer), error = COALESCE(:error, error), "
+                    "finished_at = CASE WHEN :finished THEN :t ELSE finished_at END "
+                    "WHERE id = :id"
+                ),
+                {
+                    "id": block_id,
+                    "state": state,
+                    "answer": answer,
+                    "error": error,
+                    "finished": finished,
+                    "t": _now_ms(),
+                },
+            )
+
+    async def move_block(self, block_id: str, thread_id: str) -> None:
+        """The one-click override of docs/04-threads-and-blocks.md.
+
+        `thread_set_by` becomes `human` and stays that way: the column exists to measure how often
+        the classifier is corrected, and a correction that did not record itself is a measurement
+        the project decided to take and then did not.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE block SET thread_id = :thread_id, thread_set_by = 'human' "
+                    "WHERE id = :id"
+                ),
+                {"id": block_id, "thread_id": thread_id},
+            )
+
+    async def blocks(self, *, limit: int = 50) -> list[Block]:
+        """Newest first, which is how the column reads (docs/06-console.md)."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
+                    "created_at, finished_at FROM block ORDER BY id DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
+            return [self._block(row._mapping) for row in rows]
+
+    async def block(self, block_id: str) -> Block | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
+                    "created_at, finished_at FROM block WHERE id = :id"
+                ),
+                {"id": block_id},
+            )
+            row = rows.first()
+            return None if row is None else self._block(row._mapping)
+
+    @staticmethod
+    def _block(row: Any) -> Block:
+        fields = dict(row)
+        fields["answer"] = scrub_optional(fields["answer"])
+        fields["error"] = scrub_optional(fields["error"])
+        return Block(**fields)
+
+    # --- ideas ----------------------------------------------------------------------------
+    async def create_idea(
+        self,
+        *,
+        text_: str,
+        summary: str,
+        source_kind: SourceKind,
+        source_ref: str | None = None,
+        context: dict[str, Any] | None = None,
+        block_id: str | None = None,
+    ) -> Idea:
+        idea = Idea(
+            id=_new_id(),
+            block_id=block_id,
+            text=text_,
+            summary=summary,
+            state="new",
+            source_kind=source_kind,
+            source_ref=source_ref,
+            context=context or {},
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO idea (id, block_id, text, summary, state, source_kind, "
+                    "source_ref, context, created_at) VALUES (:id, :block_id, :text, :summary, "
+                    ":state, :source_kind, :source_ref, :context, :created_at)"
+                ),
+                {**idea.model_dump(exclude={"context"}), "context": json.dumps(idea.context)},
+            )
+        return idea
+
+    async def set_idea_state(self, idea_id: str, state: IdeaState) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET state = :state WHERE id = :id"),
+                {"id": idea_id, "state": state},
+            )
+
+    async def set_idea_summary(self, idea_id: str, summary: str) -> None:
+        """The summary is editable; `text` is not, and there is no statement here that writes it."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET summary = :summary WHERE id = :id"),
+                {"id": idea_id, "summary": summary},
+            )
+
+    async def ideas(self, *, state: IdeaState | None = None, limit: int = 200) -> list[Idea]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
+                    "context, created_at FROM idea "
+                    "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
+                ),
+                {"state": state, "limit": limit},
+            )
+            return [self._idea(row._mapping) for row in rows]
+
+    async def idea(self, idea_id: str) -> Idea | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
+                    "context, created_at FROM idea WHERE id = :id"
+                ),
+                {"id": idea_id},
+            )
+            row = rows.first()
+            return None if row is None else self._idea(row._mapping)
+
+    @staticmethod
+    def _idea(row: Any) -> Idea:
+        fields = dict(row)
+        # The context carries a project, a branch and a session's generated title — all of it read
+        # off a transcript, none of it typed by the human whose thought this is.
+        fields["context"] = json.loads(scrub(fields["context"]))
+        return Idea(**fields)
+
+    # --- drafts ---------------------------------------------------------------------------
+    async def create_draft(self, *, idea_id: str, kind: DraftKind, body: str) -> Draft:
+        draft = Draft(id=_new_id(), idea_id=idea_id, kind=kind, body=body, created_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO draft (id, idea_id, kind, body, created_at) "
+                    "VALUES (:id, :idea_id, :kind, :body, :created_at)"
+                ),
+                draft.model_dump(),
+            )
+        return draft
+
+    async def drafts_for(self, idea_id: str) -> list[Draft]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, idea_id, kind, body, created_at FROM draft "
+                    "WHERE idea_id = :idea_id ORDER BY id DESC"
+                ),
+                {"idea_id": idea_id},
+            )
+            return [Draft(**{**row._mapping, "body": scrub(row._mapping["body"])}) for row in rows]

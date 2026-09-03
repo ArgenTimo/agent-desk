@@ -15,6 +15,13 @@ import pytest
 
 PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 
+# The rule below is about the formats Claude Code writes, and JSON is the proxy for reading them.
+# `idea.context` is a JSON column in this program's *own* SQLite file, required by name in
+# design/02-data-model.md, so the module that owns that column is named here rather than left to
+# trip a check whose subject it is not. The exception is one path, and everything else still
+# trips: a second module that starts parsing JSON is a module to look at.
+_OWN_JSON_COLUMN = {"store/repo.py"}
+
 
 def _modules() -> list[Path]:
     return sorted(p for p in PKG.rglob("*.py"))
@@ -95,7 +102,7 @@ def test_only_observe_parses_the_on_disk_formats() -> None:
             continue
         source = path.read_text()
         # `json.load` is a prefix of `json.loads`, so one check covers both.
-        uses_json = "json.load" in source
+        uses_json = "json.load" in source and rel.as_posix() not in _OWN_JSON_COLUMN
         touches_claude = ".claude/sessions" in source or ".claude/projects" in source
         # config.py names the paths for everyone; naming is not parsing.
         if touches_claude and rel.name != "config.py":

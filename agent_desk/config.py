@@ -58,5 +58,14 @@ class Settings(BaseSettings):
     def db_path(self) -> Path:
         return self.data_dir / "agent-desk.db"
 
+    @property
+    def security_patterns(self) -> Path:
+        """The secret shapes the store redacts with.
+
+        One source of them, and it is the file the skillset already ships and the commit hook
+        already reads — not a second list that drifts from it (docs/07-security.md).
+        """
+        return Path(__file__).resolve().parents[1] / ".claude" / "security-patterns.yaml"
+
 
 settings = Settings()
