@@ -77,7 +77,7 @@ arriving at the same answer from the other direction.
 published protocol. Not a reverse-engineered frame: that would be a write into another agent's
 context on the strength of a guess, and it needs an ADR arguing for it rather than a commit.
 
-## Phase 4 — The shared view · ~1–2 days, gated
+## Phase 4 — The shared view · built
 
 A network bind, authentication, per-viewer authorisation, and a redacted read-only view — the
 ideas list first, the board only if the disclosure decision of
@@ -86,6 +86,23 @@ ideas list first, the board only if the disclosure decision of
 **Entry condition, not a date:** a teammate has asked twice, unprompted. Until then this is a
 feature for a hypothetical user, and building it early forces a security model onto a tool that
 currently does not need one.
+
+**Lifted 2026-09-03 by decision rather than met by a teammate**, and it is recorded that way so
+nobody later reads this page as evidence that two people asked. What was built:
+
+- A second application on a second bind, off by default, which imports neither `observe` nor
+  `peer` and so cannot reach the board or a session however it is called. The separation is
+  structural because a conditional is a thing to get wrong.
+- A named link per viewer: 256 random bits, stored hashed, shown once, revocable by timestamp,
+  logged by name on every open.
+- **The disclosure decision was made, and it was the narrow one.** The shared page shows the
+  summary, the text, the state and the date of an idea. No project, no branch, no session title,
+  no drafts, no blocks. The board is not shared at all.
+- The other half of problem 5: a box a teammate can put an idea into, attributed to their name.
+
+**Done when:** a teammate has used it, an idea of theirs is in the inbox, and nothing on that page
+turned out to be something you would rather they had not seen. The first two are one afternoon;
+the third is the one worth checking against the real list rather than against this page.
 
 ## Beyond v1
 

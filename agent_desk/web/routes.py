@@ -13,10 +13,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
+import structlog
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from agent_desk import peer
@@ -35,6 +36,8 @@ from agent_desk.store.repo import DRAFT_KINDS, Store
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
+
+log = structlog.get_logger("agent_desk.web")
 
 # One process, one SQLite file (docs/adr/0003). The instance is opened by the application's
 # lifespan and replaced wholesale by a test that wants its own.
@@ -179,6 +182,45 @@ async def _form(request: Request) -> dict[str, str]:
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     return {key: values[0] for key, values in parse_qs(body, keep_blank_values=True).items()}
+
+
+@router.get("/viewers", response_class=HTMLResponse)
+async def viewers_page(minted: str = "", name: str = "") -> HTMLResponse:
+    """Who may open the shared ideas list, and until when (docs/07-security.md, Phase 4).
+
+    Owner-only, like everything else on this bind. `minted` carries a token exactly once, on the
+    response to the click that created it: the store keeps only a hash, so a link that is lost is
+    replaced rather than recovered.
+    """
+    return HTMLResponse(
+        env.get_template("viewers.html").render(
+            viewers=await store.viewers(),
+            minted=minted,
+            minted_for=name,
+            share_host=settings.share_host,
+            share_port=settings.share_port,
+        )
+    )
+
+
+@router.post("/viewers", response_class=HTMLResponse)
+async def mint_viewer(request: Request) -> Response:
+    """Mint one named link. The name is the whole identity, so it is required."""
+    name = (await _form(request)).get("name", "").strip()
+    if not name:
+        return RedirectResponse("/viewers", status_code=303)
+
+    _, token = await store.create_viewer(name)
+    log.info("viewer link minted", viewer=name)
+    return RedirectResponse(f"/viewers?minted={quote(token)}&name={quote(name)}", status_code=303)
+
+
+@router.post("/viewers/{viewer_id}/revoke", response_class=HTMLResponse)
+async def revoke_viewer(viewer_id: str) -> Response:
+    """Revocation is a timestamp, not a delete: an audit asks "until when"."""
+    await store.revoke_viewer(viewer_id)
+    log.info("viewer link revoked", viewer_id=viewer_id)
+    return RedirectResponse("/viewers", status_code=303)
 
 
 @router.get("/sessions/{session_id}/message", response_class=HTMLResponse)

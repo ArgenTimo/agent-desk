@@ -13,7 +13,9 @@ they leave.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -85,6 +87,21 @@ class Idea(BaseModel):
     created_at: int
 
 
+class Viewer(BaseModel):
+    """A person who may open the shared ideas list, and nothing else (docs/07-security.md)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    created_at: int
+    revoked_at: int | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
+
+
 class Draft(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -95,14 +112,45 @@ class Draft(BaseModel):
     created_at: int
 
 
+def new_token() -> str:
+    """A link that is somebody's whole identity, so it is long enough to be one.
+
+    256 bits from the system generator. Nothing about a viewer is guessable, which is why this
+    program does not rate-limit the shared route and does not need to.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def token_hash(token: str) -> str:
+    """What is stored. A high-entropy token needs no key stretching; it needs not being kept."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _strip_comment(line: str) -> str:
+    """Everything before a `--` that is not inside a quoted string.
+
+    Trailing comments have to go, not just whole comment lines. The second migration written
+    against this splitter carried a semicolon inside a trailing comment — "sha256 of a token; not
+    stored" — and the statement was cut in half at it. The error was `incomplete input`, which is
+    a stranger way to learn this than reading it here.
+    """
+    quoted = False
+    for index, character in enumerate(line):
+        if character == "'":
+            quoted = not quoted
+        elif character == "-" and not quoted and line[index + 1 : index + 2] == "-":
+            return line[:index]
+    return line
+
+
 def _statements(script: str) -> list[str]:
     """One SQL statement per element.
 
-    The sqlite driver takes one statement per call, so a schema file is split here. Comment lines
-    are dropped first, which is the only reason a `;` could appear anywhere but the end of a
-    statement in these files.
+    The sqlite driver takes one statement per call, so a schema file is split here. Comments go
+    first — whole lines and trailing ones alike — which is what makes a `;` reliably the end of a
+    statement rather than the middle of a sentence.
     """
-    body = "\n".join(line for line in script.splitlines() if not line.strip().startswith("--"))
+    body = "\n".join(_strip_comment(line) for line in script.splitlines())
     return [statement.strip() for statement in body.split(";") if statement.strip()]
 
 
@@ -437,6 +485,49 @@ class Store:
         # off a transcript, none of it typed by the human whose thought this is.
         fields["context"] = json.loads(scrub(fields["context"]))
         return Idea(**fields)
+
+    # --- viewers ------------------------------------------------------------------------
+    async def create_viewer(self, name: str) -> tuple[Viewer, str]:
+        """Mint a link for one named person. The token is returned once and never again."""
+        token = new_token()
+        viewer = Viewer(id=_new_id(), name=name, created_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO viewer (id, name, token_hash, created_at, revoked_at) "
+                    "VALUES (:id, :name, :token_hash, :created_at, NULL)"
+                ),
+                {**viewer.model_dump(exclude={"revoked_at"}), "token_hash": token_hash(token)},
+            )
+        return viewer, token
+
+    async def viewer_for(self, token: str) -> Viewer | None:
+        """The viewer this token names, or `None` — revoked included, because revoked is `None`."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, name, created_at, revoked_at FROM viewer "
+                    "WHERE token_hash = :token_hash AND revoked_at IS NULL"
+                ),
+                {"token_hash": token_hash(token)},
+            )
+            row = rows.first()
+            return None if row is None else Viewer(**row._mapping)
+
+    async def viewers(self) -> list[Viewer]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, name, created_at, revoked_at FROM viewer ORDER BY id DESC")
+            )
+            return [Viewer(**row._mapping) for row in rows]
+
+    async def revoke_viewer(self, viewer_id: str) -> None:
+        """A timestamp rather than a delete: an audit asks "until when", not "was there one"."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE viewer SET revoked_at = :t WHERE id = :id AND revoked_at IS NULL"),
+                {"id": viewer_id, "t": _now_ms()},
+            )
 
     # --- drafts ---------------------------------------------------------------------------
     async def create_draft(self, *, idea_id: str, kind: DraftKind, body: str) -> Draft:

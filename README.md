@@ -60,6 +60,7 @@ the implementation, not a description of running code.
 make install          # dependencies, dev group included
 make gate             # ruff · mypy · pytest -m unit
 make run              # the console on http://127.0.0.1:8787
+make share SHARE_HOST=192.168.1.10   # the console, plus the shared ideas list on the network
 make overlay          # the same page in its own always-on-top window
 ```
 
@@ -68,7 +69,8 @@ file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
 ## Status
 
-**Phases 1 and 2 are built. Neither is done. Phase 3 is built up to a wall.** The board reads the registry and the transcript
+**Phases 1 and 2 are built. Neither is done. Phase 3 is built up to a wall. Phase 4 is built and
+off by default.** The board reads the registry and the transcript
 tails and pushes itself over server-sent events; the input field accepts a line and frees itself
 immediately; blocks answer on their own time through a headless `claude -p` that cannot write
 anywhere; ideas are captured before anything is generated and grow into drafts that stay in this
@@ -81,13 +83,21 @@ agent doing" is answered from the board and no terminal is opened to check. Phas
 captured mid-run in under ten seconds, still legible a week later with what was happening around
 it. Neither day has happened yet, and the count of times the board failed is the Phase 1 report.
 
+Phase 4 puts an ideas list on the network for a named teammate, and it is the one thing here that
+changes the security model — so it is served only when someone types `make share SHARE_HOST=…`.
+It is a **second application on a second bind** that imports neither the session reader nor the
+write path, so it cannot show a board or reach a session however it is called. A viewer gets a
+long link of their own, stored hashed and shown once, revocable, and logged by name on every open.
+The page shows an idea's summary, text, state and date — and nothing about the project, branch,
+session or drafts it came from ([`docs/07-security.md`](docs/07-security.md)).
+
 Phase 3 is the one path that can write to a running session. Its human half exists — the button,
 the panel, the message shown in full beside the session it would reach — and the send reports
 `needs_toolchain`, because the installed CLI publishes no client for its cross-session socket and
 guessing that protocol would put a malformed prompt into somebody's working context. The panel
 hands the text back to be pasted instead ([`docs/09-roadmap.md`](docs/09-roadmap.md)).
 
-Five things a reader of the code should know before trusting it:
+Six things a reader of the code should know before trusting it:
 
 - The live CLI writes a status value this specification did not record — `waiting`, at `2.1.259`.
   The board shows the word and concludes nothing from it, and
@@ -99,6 +109,8 @@ Five things a reader of the code should know before trusting it:
 - Answering a block runs the `claude` CLI, which costs whatever your account charges. Nothing runs
   it on a timer: a block runs because a line was typed, and the classifier runs once per line
   when there are open subjects to classify against.
+- The shared view has no TLS. The link travels in clear over whatever network it is served on,
+  so it belongs on a trusted LAN or behind a tunnel, and not on the open internet.
 - `agent_desk/peer.py` opens nothing — no file, no socket, no subprocess — and a test asserts
   that by reading its imports. It is the only module that could ever write to a session, and only
   `web/` may import it.

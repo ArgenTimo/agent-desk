@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # --- The inference of docs/03-session-observation.md, rendered as an inference. ----------
     idle_hint_seconds: int = 300
 
+    # --- The shared view of docs/09-roadmap.md Phase 4. Empty means it is not served at all,
+    # which is the safe default and the state this tool spends most of its life in: the day this
+    # is set, the loopback argument of docs/07-security.md stops covering everything and the
+    # named-viewer links become the security model.
+    share_host: str = ""
+    share_port: int = 8788
+
     # --- The answer engine: one headless `claude -p` run per block (docs/04). The CLI is
     # resolved from PATH; when it is absent the board still works and blocks say so
     # (docs/02-architecture.md, failure posture). There is no --max-turns in the CLI, so the

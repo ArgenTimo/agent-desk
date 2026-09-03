@@ -18,6 +18,8 @@ agent_desk/
   web/           FastAPI app, Jinja2 templates, HTMX (from Phase 2), SSE
     app.py  routes.py  sse.py  templates/  static/
     blocks.py      the input field: one task group for every run in flight
+    shared.py      a SECOND application: the ideas list, on its own bind, for a named viewer
+  __main__.py    serves the console, and the shared view beside it when one is asked for
   peer.py        the ONE write path: a message to a named session
   config.py      paths and settings, resolved once
 ```
@@ -47,6 +49,10 @@ program's own SQLite file required by name in [`02-data-model.md`](02-data-model
 `answer/session.py` reads the stream-json of a subprocess this program started, which is this
 line's own description of that module's job. Any third module that starts parsing JSON still fails
 the test, which is the point of keeping the exceptions as a list of paths.
+
+**1a. `web/shared.py` imports neither `observe` nor `peer`.** It is the surface a second person
+can open, and the guarantee that it cannot show a board or reach a session is an import graph
+rather than a branch ([`../docs/07-security.md`](../docs/07-security.md), Phase 4).
 
 **2. Only `web/` imports `peer.py`.** The write path exists in exactly one place, behind a route a
 human reaches by clicking. Enforced by an import-graph test asserting that `observe`, `store`,

@@ -48,6 +48,17 @@ CREATE TABLE draft (
 );
 ```
 
+```sql
+-- Phase 4. One row per person who may open the shared ideas list.
+CREATE TABLE viewer (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,          -- who this link is for, in a human's words
+    token_hash  TEXT NOT NULL UNIQUE,   -- sha256 of 256 random bits; the token itself is not here
+    created_at  INTEGER NOT NULL,
+    revoked_at  INTEGER                 -- a timestamp, not a delete: an audit asks "until when"
+);
+```
+
 ## What is deliberately not stored
 
 **No transcript content.** Tails are read on demand and rendered. A copy would be large, stale, and

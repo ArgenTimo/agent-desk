@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ideas · agent-desk</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1c1b19; --dim: #6b6862; --line: #e0ddd6; --card: #fff;
+          --kept: #4a7a3f; --promoted: #b06500; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171614; --fg: #e8e5df; --dim: #8d8880; --line: #2c2a27; --card: #1e1d1a;
+            --kept: #86c06f; --promoted: #e0a250; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; padding: 16px; max-width: 46rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  h1 { font-size: 1.1rem; margin: 0 0 2px; }
+  .who { color: var(--dim); font-size: 0.85rem; }
+  form { margin: 16px 0 24px; }
+  textarea {
+    width: 100%; font: inherit; color: var(--fg); background: var(--card);
+    border: 1px solid var(--line); border-radius: 4px; padding: 8px;
+  }
+  button {
+    font: inherit; margin-top: 6px; padding: 6px 14px; cursor: pointer;
+    color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+  }
+  button:hover { border-color: var(--fg); }
+  .idea {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
+    border-radius: 3px; padding: 10px 12px; margin-bottom: 10px;
+  }
+  .idea.kept { border-left-color: var(--kept); }
+  .idea.promoted { border-left-color: var(--promoted); }
+  .idea.dropped { opacity: 0.6; }
+  .summary { font-weight: 600; }
+  .state { float: right; color: var(--dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+  .empty { color: var(--dim); }
+  footer { margin-top: 28px; color: var(--dim); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ideas</h1>
+    <p class="who">shared with {{ viewer }}</p>
+  </div>
+</header>
+
+{# The other half of problem 5: a box to put an idea in. A plain form, no JavaScript — the person
+   opening this is on an unknown device and is not here to debug a console. #}
+<form method="post" action="/shared/{{ token }}/idea">
+  <label for="text">Have an idea? Put it here.</label>
+  <textarea id="text" name="text" rows="3" placeholder="it goes into the inbox, not into anybody's running work"></textarea>
+  <button type="submit">Add it</button>
+</form>
+
+{% if not ideas %}
+<p class="empty">Nothing in the inbox yet.</p>
+{% endif %}
+{% for idea in ideas %}
+<article class="idea {{ idea.state }}">
+  <span class="state">{{ idea.state }}</span>
+  <p class="summary">{{ idea.summary }}</p>
+  {# The thought, and nothing around it: no project, no branch, no session title, no drafts.
+     That was a disclosure decision, made once (docs/07-security.md). #}
+  <p class="text">{{ idea.text }}</p>
+</article>
+{% endfor %}
+
+<footer>Read-only apart from the box above. This page shows ideas and their state — nothing about
+the sessions, repositories or branches they came from.</footer>
+</body>
+</html>

@@ -32,11 +32,25 @@ async def _thread(store: Store) -> str:
 
 # --- schema -------------------------------------------------------------------------------
 @pytest.mark.unit
-async def test_opening_creates_the_file_and_records_the_version(store: Store) -> None:
+async def test_opening_applies_every_migration_exactly_once(store: Store) -> None:
+    """The recorded versions are the ones on disk — no more, no fewer, no duplicates.
+
+    Asserting against the files rather than against a number means a new migration does not have
+    to edit this test, while a migration that was skipped or applied twice still fails it.
+    """
+    from agent_desk.store.repo import _migrations
+
+    on_disk = [
+        version
+        for version, _ in _migrations(pathlib.Path(Store.__module__.replace(".", "/")).parent)
+    ]
     assert store.path.exists()
     async with store.engine.connect() as conn:
-        rows = await conn.execute(text("SELECT version FROM schema_version"))
-        assert [row[0] for row in rows] == [1]
+        rows = await conn.execute(text("SELECT version FROM schema_version ORDER BY version"))
+        assert [row[0] for row in rows] == on_disk
+    # Version 2 is the viewer table, which arrived with the shared view rather than with the
+    # first schema — the forward-only path working as designed (docs/adr/0003).
+    assert on_disk[:2] == [1, 2]
 
 
 @pytest.mark.unit
@@ -55,8 +69,10 @@ async def test_opening_twice_applies_nothing_twice(tmp_path: pathlib.Path) -> No
     store = Store(path)
     await store.open()
     async with store.engine.connect() as conn:
-        rows = await conn.execute(text("SELECT version FROM schema_version"))
-        assert [row[0] for row in rows] == [1]
+        rows = await conn.execute(text("SELECT version FROM schema_version ORDER BY version"))
+        versions = [row[0] for row in rows]
+        assert versions == sorted(set(versions))
+        assert versions[0] == 1
     await store.close()
 
 

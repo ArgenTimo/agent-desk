@@ -65,6 +65,46 @@ client that is not a process on this machine, what the paragraph above says it m
 
 No outbound network calls. The `claude` CLI makes its own; this tool makes none.
 
+## Phase 4, where the model changed
+
+The paragraph above holds for the console and stops holding the moment anything is served to
+somebody else. That day arrived, and this is what replaced it — decided once, deliberately, rather
+than arriving as a side effect of adding a login form.
+
+**Two applications, two binds, one process.** The console keeps loopback and keeps everything: the
+board, the input field, the blocks, the inbox with its context and drafts, and the one write path.
+The shared view is a *separate* ASGI application with two routes, served on its own port, which
+imports neither `observe` nor `peer` and therefore cannot reach a board or a session however it is
+called. A single application deciding per request whether a viewer may see the board would work,
+and would be one bad branch away from not working.
+
+**It is off unless somebody says otherwise.** `share_host` is empty by default, the second
+application is not constructed, and nothing is on the network. `make share SHARE_HOST=…` is a
+sentence a human types, and typing it is the moment this model becomes the one in force. Bind it
+to one interface rather than to all of them.
+
+**A named link per viewer.** 256 bits from the system generator, stored as a hash and shown once —
+so this database leaking is not the same event as the links leaking, and a lost link is replaced
+rather than recovered. Revocation is a timestamp rather than a delete, because the question an
+audit asks is "who could see this, and until when". Every open is logged by viewer name and idea
+count, never by content. A wrong link, a revoked link and a console that is not ready all answer
+identically: a viewer learns whether their own link works and nothing else.
+
+**The disclosure decision.** The shared page shows the summary, the text, the state and the date.
+Not the project, not the branch, not the session's generated title, not the drafts, and never a
+block. The context an idea carries is what makes it legible to its owner a week later — and it is
+also a list of what that person was working on, including work a teammate has no business seeing.
+
+**Everything it renders is scrubbed on the way out**, including the human's own words. The store
+keeps those verbatim on purpose ([05-ideas.md](05-ideas.md)); the rule that a surface a second
+person can open redacts before it renders is about this page, and the two are not in conflict
+because they are two different readers.
+
+**What it does not have, and the honest cost.** There is no TLS: the link travels in clear over
+whatever network it is served on, so this belongs on a trusted LAN or behind a tunnel, and not on
+the open internet. There are no accounts, no passwords and no sessions — the link *is* the
+identity, which is why it is long, hashed, revocable and named after one person.
+
 ## Phase 3, where the model changes
 
 Problem 5 of [01-vision.md](01-vision.md) — a view for teammates who do not write code — is the
