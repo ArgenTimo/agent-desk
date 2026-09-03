@@ -68,7 +68,7 @@ file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
 ## Status
 
-**Phases 1 and 2 are built. Neither is done.** The board reads the registry and the transcript
+**Phases 1 and 2 are built. Neither is done. Phase 3 is built up to a wall.** The board reads the registry and the transcript
 tails and pushes itself over server-sent events; the input field accepts a line and frees itself
 immediately; blocks answer on their own time through a headless `claude -p` that cannot write
 anywhere; ideas are captured before anything is generated and grow into drafts that stay in this
@@ -81,7 +81,13 @@ agent doing" is answered from the board and no terminal is opened to check. Phas
 captured mid-run in under ten seconds, still legible a week later with what was happening around
 it. Neither day has happened yet, and the count of times the board failed is the Phase 1 report.
 
-Four things a reader of the code should know before trusting it:
+Phase 3 is the one path that can write to a running session. Its human half exists — the button,
+the panel, the message shown in full beside the session it would reach — and the send reports
+`needs_toolchain`, because the installed CLI publishes no client for its cross-session socket and
+guessing that protocol would put a malformed prompt into somebody's working context. The panel
+hands the text back to be pasted instead ([`docs/09-roadmap.md`](docs/09-roadmap.md)).
+
+Five things a reader of the code should know before trusting it:
 
 - The live CLI writes a status value this specification did not record — `waiting`, at `2.1.259`.
   The board shows the word and concludes nothing from it, and
@@ -93,6 +99,9 @@ Four things a reader of the code should know before trusting it:
 - Answering a block runs the `claude` CLI, which costs whatever your account charges. Nothing runs
   it on a timer: a block runs because a line was typed, and the classifier runs once per line
   when there are open subjects to classify against.
+- `agent_desk/peer.py` opens nothing — no file, no socket, no subprocess — and a test asserts
+  that by reading its imports. It is the only module that could ever write to a session, and only
+  `web/` may import it.
 - The correction rate of the classifier is emitted as a log line on every override, not stored as
   a metric. Above roughly one in four, [`docs/04-threads-and-blocks.md`](docs/04-threads-and-blocks.md)
   says the classifier should be replaced by a default and a click.

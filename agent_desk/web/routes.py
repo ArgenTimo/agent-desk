@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
+from agent_desk import peer
 from agent_desk.config import settings
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
@@ -127,6 +128,19 @@ async def render_blocks() -> str:
     )
 
 
+def render_message(stage: str, session_id: str, text: str = "", detail: str = "") -> str:
+    """The one write path's surface: compose, confirm, and what happened.
+
+    Rendered outside the board on purpose. The board replaces itself whenever it changes, and a
+    panel inside it would vanish under a half-typed message every time a session went idle.
+    """
+    rows, _ = board()
+    row = next((r for r in rows if r.session.session_id == session_id), None)
+    return env.get_template("_message.html").render(
+        stage=stage if row is not None else "gone", row=row, text=text, detail=detail
+    )
+
+
 async def render_inbox() -> str:
     """Kept ideas, each carrying where it came from (docs/05-ideas.md)."""
     ideas = await store.ideas()
@@ -165,6 +179,41 @@ async def _form(request: Request) -> dict[str, str]:
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     return {key: values[0] for key, values in parse_qs(body, keep_blank_values=True).items()}
+
+
+@router.get("/sessions/{session_id}/message", response_class=HTMLResponse)
+async def compose_message(session_id: str) -> HTMLResponse:
+    """Open the compose panel for one named session. Nothing is sent by opening it."""
+    return HTMLResponse(await asyncio.to_thread(render_message, "compose", session_id))
+
+
+@router.post("/sessions/{session_id}/message/review", response_class=HTMLResponse)
+async def review_message(session_id: str, request: Request) -> HTMLResponse:
+    """Show it in full, against the name of the session it would go to (docs/adr/0002).
+
+    This step exists because the cost of the next one is somebody else's context. It is not a
+    confirmation dialog in the "are you sure" sense — it is the message, rendered as it would
+    arrive, beside the session that would receive it.
+    """
+    text = (await _form(request)).get("text", "").strip()
+    stage = "confirm" if text else "compose"
+    return HTMLResponse(await asyncio.to_thread(render_message, stage, session_id, text))
+
+
+@router.post("/sessions/{session_id}/message/send", response_class=HTMLResponse)
+async def send_message(session_id: str, request: Request) -> HTMLResponse:
+    """The click. It reaches `peer.send` and reports exactly what came back."""
+    text = (await _form(request)).get("text", "").strip()
+    rows, _ = await asyncio.to_thread(board)
+    row = next((r for r in rows if r.session.session_id == session_id), None)
+    if row is None or not text:
+        return HTMLResponse(await asyncio.to_thread(render_message, "gone", session_id))
+
+    delivery = peer.send(row.session, text)
+    stage = "delivered" if delivery.delivered else "refused"
+    return HTMLResponse(
+        await asyncio.to_thread(render_message, stage, session_id, text, delivery.detail)
+    )
 
 
 @router.post("/blocks", response_class=HTMLResponse)

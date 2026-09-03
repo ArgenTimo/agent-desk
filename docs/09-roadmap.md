@@ -46,13 +46,36 @@ Watch the classifier: log every override click. A correction rate above roughly 
 the classifier is costing more attention than it saves, and the right answer is to default to a
 new thread and let attaching be the click ([04-threads-and-blocks.md](04-threads-and-blocks.md)).
 
-## Phase 3 — The one write path · ~0.5 day
+## Phase 3 — The one write path · built, and blocked
 
 A button on a session row that sends a message to that session, showing it in full first
 ([adr/0002](adr/0002-read-first-never-interrupt.md)).
 
 **Done when:** it has been used, and the session that received it did not lose its thread. If it
 did, this phase is a mistake and reverting it is the finding.
+
+**That day cannot happen yet, and the reason is the finding.** Everything a human touches is
+built — the button, the panel, the message rendered in full beside the session it would reach, the
+click, and `peer.py` as the single place a write could ever originate. What is missing is
+delivery, and it is missing for a reason no amount of work here removes:
+
+- The installed `claude` CLI publishes **no client** for its cross-session messaging socket: no
+  subcommand, no flag, no SDK entry point. Checked at `2.1.259`.
+- The protocol is internal to the binary, versioned (`peerProtocol`) and undocumented, and a
+  message that arrives is routed into the receiving session's queue **as a prompt**. A guessed
+  frame does not fail quietly; it lands in the middle of somebody's work, which is the one thing
+  [adr/0002](adr/0002-read-first-never-interrupt.md) exists to prevent.
+- Reading the socket key would not have helped: the CLI identifies a connecting process by kernel
+  peer credentials, "never from the payload". The rule against opening those files
+  ([07-security.md](07-security.md)) costs this phase nothing.
+
+So `peer.send()` returns `needs_toolchain` and the panel says so, offering the text back to be
+pasted by a human at a moment they choose — which is [08-non-goals.md](08-non-goals.md) §2 and §3
+arriving at the same answer from the other direction.
+
+**Entry condition for finishing it:** a supported client — a CLI subcommand, an SDK call, or a
+published protocol. Not a reverse-engineered frame: that would be a write into another agent's
+context on the strength of a guess, and it needs an ADR arguing for it rather than a commit.
 
 ## Phase 4 — The shared view · ~1–2 days, gated
 

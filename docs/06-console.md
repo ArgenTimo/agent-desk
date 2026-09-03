@@ -79,3 +79,11 @@ The single exception is the one path in [adr/0002](adr/0002-read-first-never-int
 a message to a named session, shown in full before it goes, sent by a human clicking send. It is a
 message, not a command, and the session's own permission rules apply to it exactly as they do to
 anything its human types.
+
+Its surface is a `message…` button on the row and a panel below the board — outside it, because
+the board replaces itself whenever a session changes and a panel inside it would vanish under a
+half-typed message. The panel has three steps and no shortcut between them: compose, the message
+rendered in full beside the name and status of the session that would receive it, and what
+happened. **Today the last step always reports a refusal**, because the installed CLI publishes no
+client for its cross-session socket; the panel then offers the text back to be pasted by hand
+([09-roadmap.md](09-roadmap.md), Phase 3).

@@ -18,6 +18,10 @@
     <span class="branch">{{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</span>
     <span class="name">{{ row.session.name }}</span>
     {% if row.session.kind != "interactive" %}<span class="kind">{{ row.session.kind }}</span>{% endif %}
+    {# The one button in this console that could change somebody else's work. It opens a panel; it
+       sends nothing (docs/adr/0002, docs/06-console.md). #}
+    <button class="message-button" hx-get="/sessions/{{ row.session.session_id }}/message"
+            hx-target="#message" onclick="event.stopPropagation()">message…</button>
   </header>
 
   <div class="headline">

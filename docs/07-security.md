@@ -10,13 +10,20 @@ it finds on a screen. Two threats follow, and they are not the usual web ones.
 | Path | What it is | Rule |
 |---|---|---|
 | `~/.claude/.credentials.json` | the account token | never opened |
-| `~/.claude/sessions/*.key` | the auth key for a session's peer-messaging socket | never opened |
+| `~/.claude/sessions/*.key` | one per session, mode `600`, purpose unestablished | never opened |
 | any `.env` in an observed repository | client credentials | never opened |
 
 None of these is needed. The registry entries this tool reads are the `*.json` files; the `*.key`
-files sit beside them with the same stem and mode `600`. **The glob is `sessions/*.json`, never
-`sessions/*`** — a widened glob here reads an authentication key into a process whose entire job is
-to render things.
+files sit beside them with a matching pid prefix and mode `600`. **The glob is `sessions/*.json`,
+never `sessions/*`** — a widened glob here reads a credential into a process whose entire job is to
+render things.
+
+**Corrected 2026-09-03.** This page used to say those key files authenticate a session's
+peer-messaging socket. That was never verified and it appears to be wrong: the CLI's own schema
+describes the connecting process as identified by the kernel — "read from the connection
+(SO_PEERCRED / LOCAL_PEERPID) — never from the payload". What the files are for is not established
+here, and the rule does not depend on knowing: they are credentials of some kind, nothing needs
+them, and the one write path opens no file at all ([09-roadmap.md](09-roadmap.md), Phase 3).
 
 The mechanism is `.claude/settings.json`, which denies these paths to any session working in this
 repository. This paragraph explains the denial; it does not implement it. A rule that lives only in

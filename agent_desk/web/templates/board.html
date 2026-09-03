@@ -100,6 +100,34 @@
     border: 1px solid var(--line); padding: 1px 8px;
   }
   .block button:hover { color: var(--fg); border-color: var(--fg); }
+  #message:not(:empty) {
+    border: 1px solid var(--flag); border-left-width: 3px; padding: 8px 10px; margin: 8px 0;
+    background: var(--card);
+  }
+  #message header { margin-bottom: 6px; }
+  #message .target { color: var(--fg); font-weight: 600; }
+  #message .dim { color: var(--dim); }
+  #message textarea {
+    width: 100%; font: inherit; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); padding: 6px;
+  }
+  #message .full {
+    white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0;
+    padding: 6px 8px; background: var(--bg); border-left: 2px solid var(--line);
+  }
+  #message .detail { color: var(--flag); margin: 6px 0; }
+  #message footer { display: flex; gap: 6px; margin-top: 6px; }
+  #message button {
+    font: inherit; color: var(--dim); background: none; cursor: pointer;
+    border: 1px solid var(--line); padding: 1px 8px;
+  }
+  #message button:hover { color: var(--fg); border-color: var(--fg); }
+  #message button.send { color: var(--flag); border-color: var(--flag); }
+  .row .message-button {
+    font: inherit; font-size: 11px; color: var(--dim); background: none; cursor: pointer;
+    border: 1px solid var(--line); padding: 0 6px;
+  }
+  .row .message-button:hover { color: var(--fg); border-color: var(--fg); }
   .tail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
   .entries { list-style: none; margin: 0; padding: 0; }
   .entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
@@ -127,6 +155,10 @@
 </header>
 
 <div id="board">{{ board|safe }}</div>
+
+{# The one write path lives here, outside the board, because the board replaces itself whenever a
+   session changes and a panel inside it would vanish under a half-typed message (docs/adr/0002). #}
+<div id="message"></div>
 
 {# One field, always focused, never blocked. Submitting frees it immediately
    (docs/04-threads-and-blocks.md). #}

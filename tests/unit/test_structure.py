@@ -109,7 +109,14 @@ def test_only_observe_parses_the_on_disk_formats() -> None:
         source = path.read_text()
         # `json.load` is a prefix of `json.loads`, so one check covers both.
         uses_json = "json.load" in source and rel.as_posix() not in _NOT_AN_ON_DISK_FORMAT
-        touches_claude = ".claude/sessions" in source or ".claude/projects" in source
+        # Literals only, docstrings excluded — the same line the credential test draws, and for
+        # the same reason: naming a path in order to explain why this module never opens it is
+        # the documentation the rule wants, not a violation of it. A path named in *code* is an
+        # open() waiting to happen and still fails here.
+        literals = _string_literals(path)
+        touches_claude = any(
+            ".claude/sessions" in literal or ".claude/projects" in literal for literal in literals
+        )
         # config.py names the paths for everyone; naming is not parsing.
         if touches_claude and rel.name != "config.py":
             offenders.append(f"{rel} (references ~/.claude paths)")

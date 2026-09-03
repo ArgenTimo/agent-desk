@@ -1,0 +1,54 @@
+{# The one write path (docs/adr/0002). Four stages and no shortcuts between them: compose, the
+   message shown in full beside the session it would reach, and what actually happened. #}
+{% if stage == "gone" %}
+<p class="empty">that session is no longer on the board</p>
+
+{% elif stage == "compose" %}
+<form class="compose" hx-post="/sessions/{{ row.session.session_id }}/message/review" hx-target="#message">
+  <header>
+    message to <span class="target">{{ row.session.project }}</span>
+    <span class="dim">· {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }} · {{ row.session.name }}</span>
+  </header>
+  <textarea name="text" rows="3" autofocus placeholder="it lands in that session's context — write it as you would type it there"></textarea>
+  <footer>
+    <button type="submit">Review it</button>
+    <button type="button" onclick="document.getElementById('message').innerHTML = ''">Cancel</button>
+  </footer>
+</form>
+
+{% elif stage == "confirm" %}
+<div class="confirm">
+  <header>
+    this goes to <span class="target">{{ row.session.project }}</span>
+    <span class="dim">· {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }} · {{ row.session.name }} · {{ row.session.status }}</span>
+  </header>
+  {# In full, not summarised: what is shown here is what would arrive. #}
+  <pre class="full">{{ text }}</pre>
+  <form hx-post="/sessions/{{ row.session.session_id }}/message/send" hx-target="#message">
+    <input type="hidden" name="text" value="{{ text }}">
+    <footer>
+      <button type="submit" class="send">Send it</button>
+      <button type="button" onclick="document.getElementById('message').innerHTML = ''">Cancel</button>
+    </footer>
+  </form>
+</div>
+
+{% elif stage == "refused" %}
+<div class="refused">
+  <header>not delivered to <span class="target">{{ row.session.project }}</span></header>
+  <p class="detail">{{ detail }}</p>
+  {# The path that does work: the human is the transport, at a moment they choose. #}
+  <pre class="full" id="unsent">{{ text }}</pre>
+  <footer>
+    <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('unsent').textContent)">Copy it</button>
+    <button type="button" onclick="document.getElementById('message').innerHTML = ''">Close</button>
+  </footer>
+</div>
+
+{% else %}
+<div class="delivered">
+  <header>delivered to <span class="target">{{ row.session.project }}</span></header>
+  <pre class="full">{{ text }}</pre>
+  <footer><button type="button" onclick="document.getElementById('message').innerHTML = ''">Close</button></footer>
+</div>
+{% endif %}
