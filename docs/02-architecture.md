@@ -88,7 +88,7 @@ Every source can be absent, and none of them being absent is an error worth stop
 |---|---|
 | `~/.claude/sessions/` empty | the board is empty and says "no live sessions", not an error |
 | a transcript file unreadable | that session shows registry facts only, marked as such |
-| the `claude` CLI absent | blocks queue and report `needs_toolchain`; the board still works |
+| the `claude` CLI absent | a block fails with `needs_toolchain` and offers retry; the board still works |
 | the store file locked | the board still renders; capture reports the failure to the human |
 
 The board keeps working when the extras do not, because the board is the part that replaces

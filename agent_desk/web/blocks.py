@@ -24,6 +24,7 @@ from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox
 from agent_desk.observe.model import Session
+from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Block, DraftKind, Idea, Store
 
 if TYPE_CHECKING:
@@ -61,11 +62,46 @@ class Runs:
         self._group = group
 
     def start(self, block_id: str, coroutine: Coroutine[object, object, None]) -> None:
+        """Start one run, replacing any run already in flight for the same block.
+
+        Two things here are the difference between a console and a console that dies.
+
+        A second run for one block used to orphan the first: the map was overwritten, the first
+        task's callback then removed the *second* entry, and two `claude -p` processes raced to
+        write one row while `cancel` reported success over the wrong one. Reachable by moving a
+        block between threads while it was still running.
+
+        And a child that raises takes a `TaskGroup` down with it, which here means the input
+        field, every other run and the lifespan. One question going wrong must never do that, so
+        every run is wrapped: `CancelledError` propagates, everything else is logged against the
+        block it came from and stops there.
+        """
         if self._group is None:  # pragma: no cover - the app always attaches one
             raise RuntimeError("no task group is running")
-        task = self._group.create_task(coroutine)
+
+        previous = self._by_block.get(block_id)
+        if previous is not None and not previous.done():
+            previous.cancel()
+
+        task = self._group.create_task(self._contained(block_id, coroutine))
         self._by_block[block_id] = task
-        task.add_done_callback(lambda _: self._by_block.pop(block_id, None))
+        task.add_done_callback(lambda done: self._forget(block_id, done))
+
+    def _forget(self, block_id: str, done: asyncio.Task[None]) -> None:
+        """Only the task that is still the current one may remove itself."""
+        if self._by_block.get(block_id) is done:
+            del self._by_block[block_id]
+
+    @staticmethod
+    async def _contained(block_id: str, coroutine: Coroutine[object, object, None]) -> None:
+        try:
+            await coroutine
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # The block already carries its own failure where the failure was expected; this is
+            # for the ones that were not, and it exists so that the group survives them.
+            log.exception("a run raised outside its own error handling", block=block_id)
 
     def cancel(self, block_id: str) -> bool:
         task = self._by_block.get(block_id)
@@ -171,6 +207,9 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
         block_id=block.id,
     )
     await store.finish_block(block.id, "")
+    # An idea block asks nothing further, so its subject is not a candidate for a later question
+    # to be attached to — and an idea's summary makes a confusing thread title anyway.
+    await store.close_thread(thread.id)
     runs.start(f"summary:{idea.id}", _summarise(store, idea))
     return block
 
@@ -181,9 +220,9 @@ async def _summarise(store: Store, idea: Idea) -> None:
         parts = [chunk async for chunk in session.stream_answer(inbox.summary_prompt(idea.text))]
     except (session.AnswerFailed, OSError):
         return
-    line = "".join(parts).strip().splitlines()[0].strip() if any(parts) else ""
+    line = next((one for one in "".join(parts).splitlines() if one.strip()), "").strip()
     if line:
-        await store.set_idea_summary(idea.id, line[: inbox.SUMMARY_CHARS])
+        await store.set_idea_summary(idea.id, inbox.fallback_summary(line))
 
 
 async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:
@@ -262,6 +301,24 @@ async def _classify_then_run(
     to a thread after its answer was built would have been answered against the wrong background,
     which is the failure the attaching was meant to prevent.
     """
+    try:
+        await _classify_and_answer(store, block, rows, classify=classify)
+    except asyncio.CancelledError:
+        # Cancellation before `answer_block` is entered used to leave the block `queued` with no
+        # task behind it: the template offers cancel for queued and retry only for a settled
+        # block, and the crash rule deliberately leaves queued alone on restart. It was stuck for
+        # good. Classification is a full headless run, so this window is seconds wide.
+        await asyncio.shield(store.cancel_block(block.id))
+        raise
+
+
+async def _classify_and_answer(
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow],
+    *,
+    classify: bool,
+) -> None:
     thread_id = block.thread_id
     if classify:
         open_threads = [
@@ -285,7 +342,11 @@ async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) ->
             block,
             prompt,
             add_dirs=add_dirs,
-            on_chunk=lambda text: PARTIAL.__setitem__(block.id, text),
+            # Scrubbed here because this text never passes through the store, which is where
+            # docs/07-security.md puts the filter. The console used to render a running answer
+            # verbatim and the identical finished answer redacted — not a view that forgot to
+            # call a filter, but a second output path the document did not know existed.
+            on_chunk=lambda text: PARTIAL.__setitem__(block.id, scrub(text)),
         )
     finally:
         PARTIAL.pop(block.id, None)
@@ -308,6 +369,12 @@ async def set_thread(
     only, never the text of the question. And the block re-runs, because a block corrected into
     the right thread was answered against the wrong one.
     """
+    if thread_id is not None and thread_id == block.thread_id:
+        # The select was submitted unchanged. Recording that as a human correction would spend a
+        # run, flip `thread_set_by` away from the classifier, and quietly corrupt the one number
+        # docs/09-roadmap.md says decides whether the classifier should exist.
+        return
+
     target = thread_id
     if target is None:
         split = await store.create_thread(block.input[:60] or "untitled")

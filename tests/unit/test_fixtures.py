@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from agent_desk.observe.model import RECORDED_CLI_VERSION
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -73,6 +74,31 @@ def test_transcript_fixture_covers_the_line_types_v1_reads() -> None:
 
     # v1 reads the main chain and skips subagent work; the fixture must contain one to skip.
     assert any(line.get("isSidechain") for line in lines)
+
+
+@pytest.mark.unit
+def test_the_recorded_stream_is_the_shape_the_answer_engine_reads() -> None:
+    """The only fixture with no shape test, and it is the one the answer engine parses.
+
+    It carries the CLI version it came from, like the other three, and a `rate_limit_event` line
+    that v1 does not read — the line nobody would have invented, and the reason this directory
+    holds recordings rather than examples (docs/adr/0004).
+    """
+    lines = [
+        json.loads(line)
+        for line in (FIXTURES / "stream_json.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    types = [line["type"] for line in lines]
+
+    assert types[0] == "system"
+    assert "assistant" in types
+    assert "result" in types
+    assert "rate_limit_event" in types
+    system = next(line for line in lines if line["type"] == "system")
+    assert system["claude_code_version"] == RECORDED_CLI_VERSION
+    result = next(line for line in lines if line["type"] == "result")
+    assert result["is_error"] is False
 
 
 @pytest.mark.unit

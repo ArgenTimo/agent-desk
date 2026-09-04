@@ -297,3 +297,127 @@ async def test_what_the_human_typed_comes_back_exactly_as_typed(store: Store) ->
     stored = await store.idea(idea.id)
     assert stored is not None
     assert stored.text == looks_like_one
+
+
+# --- what a reviewer found by mutating this file ------------------------------------------------
+@pytest.mark.unit
+async def test_a_crash_between_a_migration_and_its_version_row_leaves_nothing_behind(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A half-applied migration used to brick the store permanently.
+
+    The driver commits DDL as it runs, so a crash after `CREATE TABLE` and before the
+    `schema_version` row left the tables in place and the version unrecorded — and every start
+    after that died with "table thread already exists". The only recovery was deleting the file.
+    """
+    from agent_desk.store import repo
+
+    path = tmp_path / "agent-desk.db"
+    real = repo._now_ms
+    calls = {"n": 0}
+
+    def explode() -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:  # the timestamp of the first version row
+            raise RuntimeError("killed between the tables and the version")
+        return real()
+
+    monkeypatch.setattr(repo, "_now_ms", explode)
+    store = Store(path)
+    with pytest.raises(RuntimeError):
+        await store.open()
+    await store.close()
+
+    monkeypatch.setattr(repo, "_now_ms", real)
+    reopened = Store(path)
+    await reopened.open()  # this is the assertion: it opens at all
+    async with reopened.engine.connect() as conn:
+        rows = await conn.execute(text("SELECT version FROM schema_version ORDER BY version"))
+        assert next(row[0] for row in rows) == 1
+    await reopened.close()
+
+
+@pytest.mark.unit
+def test_a_semicolon_inside_a_comment_or_a_string_is_not_the_end_of_a_statement() -> None:
+    """Both halves of this were bugs: the first shipped, the second was one migration away."""
+    from agent_desk.store.repo import _statements
+
+    script = """
+    -- a note with a semicolon; like this one
+    CREATE TABLE t (
+        a TEXT NOT NULL,          -- sha256 of a token; not stored
+        b TEXT NOT NULL DEFAULT 'a;b'
+    );
+    /* a block comment; with one too */
+    INSERT INTO t (a, b) VALUES ('x;y', 'z');
+    """
+    parsed = _statements(script)
+
+    assert len(parsed) == 2
+    assert parsed[0].startswith("CREATE TABLE t")
+    assert "'a;b'" in parsed[0]
+    assert parsed[1].startswith("INSERT INTO t")
+    assert "'x;y'" in parsed[1]
+
+
+@pytest.mark.unit
+def test_a_migration_numbered_one_is_refused_rather_than_silently_winning(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`001-anything.sql` sorts before `schema.sql`, and would take its version number with it."""
+    from agent_desk.store.repo import _migrations
+
+    (tmp_path / "schema.sql").write_text("CREATE TABLE a (id TEXT);")
+    (tmp_path / "001-early.sql").write_text("CREATE TABLE b (id TEXT);")
+
+    with pytest.raises(ValueError, match="number migrations from 002"):
+        _migrations(tmp_path)
+
+
+@pytest.mark.unit
+async def test_a_retried_block_does_not_keep_the_failure_it_recovered_from(store: Store) -> None:
+    block = await store.create_block(
+        thread_id=await _thread(store), kind="question", input="?", thread_set_by="human"
+    )
+    await store.fail_block(block.id, "claude exited 1")
+    await store.set_block_running(block.id)
+    await store.finish_block(block.id, "the real answer")
+
+    answered = await store.block(block.id)
+    assert answered is not None
+    assert answered.state == "answered"
+    assert answered.answer == "the real answer"
+    assert answered.error is None
+
+
+@pytest.mark.unit
+async def test_every_column_the_documents_call_redacted_is_redacted(store: Store) -> None:
+    """Three of the four had no test at all, and each survived being un-scrubbed.
+
+    docs/07-security.md names redaction at the store boundary as the mechanism; a mechanism that
+    only one column is asserted to have is a comment on the other three.
+    """
+    secret = "ghp_" + "w" * 36
+    thread = await _thread(store)
+
+    failed = await store.create_block(
+        thread_id=thread, kind="question", input="?", thread_set_by="human"
+    )
+    await store.fail_block(failed.id, f"the run printed {secret} before dying")
+    stored_block = await store.block(failed.id)
+    assert stored_block is not None
+    assert secret not in (stored_block.error or "")
+
+    idea = await store.create_idea(
+        text_="a thought",
+        summary="a thought",
+        source_kind="session",
+        context={"title": f"session working on {secret}"},
+    )
+    stored_idea = await store.idea(idea.id)
+    assert stored_idea is not None
+    assert secret not in str(stored_idea.context)
+
+    await store.create_draft(idea_id=idea.id, kind="proposal", body=f"it quotes {secret}")
+    (draft,) = await store.drafts_for(idea.id)
+    assert secret not in draft.body

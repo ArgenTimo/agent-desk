@@ -9,9 +9,12 @@
   <header>
     <span class="state">{{ block.state }}</span>
     <span class="asked">{{ block.input }}</span>
-    {# Every block shows the thread it landed in, as a control: move it, or split it off. A
+    {% if block.kind == "question" %}
+    {# Every question shows the thread it landed in, as a control: move it, or split it off. A
        misfile costs one click to correct, and the block re-runs against the right context
-       (docs/04-threads-and-blocks.md). #}
+       (docs/04-threads-and-blocks.md). An idea card does not get one: moving it would run the
+       thought through the answer engine, which is the second question docs/05-ideas.md says
+       capture never asks. #}
     <form class="thread" method="post" action="/blocks/{{ block.id }}/thread"
           hx-post="/blocks/{{ block.id }}/thread" hx-target="#blocks">
       <span class="set-by" title="who chose this thread">{{ block.thread_set_by }}</span>
@@ -25,6 +28,9 @@
          where it cannot. #}
       <button type="submit" title="move it">↵</button>
     </form>
+    {% else %}
+    <span class="thread"><span class="set-by">{{ block.thread_set_by }}</span></span>
+    {% endif %}
   </header>
 
   {% if block.kind == "idea" and block.id in ideas %}
@@ -35,12 +41,16 @@
     <p class="verbatim">{{ idea.text }}</p>
     <footer class="actions">
       {% if idea.state == "new" %}
+      {# `from` travels as a form field rather than as a header, so the card works the same way
+         with htmx and without it — a header only htmx sends made Keep navigate to the inbox. #}
       <form method="post" action="/ideas/{{ idea.id }}/keep"
-            hx-post="/ideas/{{ idea.id }}/keep" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">
+            hx-post="/ideas/{{ idea.id }}/keep" hx-target="#blocks">
+        <input type="hidden" name="from" value="card">
         <button type="submit">Keep</button>
       </form>
       <form method="post" action="/ideas/{{ idea.id }}/drop"
-            hx-post="/ideas/{{ idea.id }}/drop" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">
+            hx-post="/ideas/{{ idea.id }}/drop" hx-target="#blocks">
+        <input type="hidden" name="from" value="card">
         <button type="submit">Discard</button>
       </form>
       {% else %}

@@ -13,11 +13,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 import structlog
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from agent_desk import peer
@@ -227,7 +227,18 @@ async def mint_viewer(request: Request) -> Response:
 
     _, token = await store.create_viewer(name)
     log.info("viewer link minted", viewer=name)
-    return RedirectResponse(f"/viewers?minted={quote(token)}&name={quote(name)}", status_code=303)
+    # Rendered, not redirected. A token in a query string is a token in browser history, in the
+    # referer of the next request, and in any log that records a path — and this one is somebody's
+    # whole identity (docs/07-security.md).
+    return HTMLResponse(
+        env.get_template("viewers.html").render(
+            viewers=await store.viewers(),
+            minted=token,
+            minted_for=name,
+            share_host=settings.share_host,
+            share_port=settings.share_port,
+        )
+    )
 
 
 @router.post("/viewers/{viewer_id}/revoke", response_class=HTMLResponse)
@@ -331,10 +342,16 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
     if idea is None:
         return HTMLResponse(await render_inbox(), status_code=404)
 
+    form = await _form(request)
+    if action not in ("keep", "drop", "summary", *DRAFT_KINDS):
+        # An action this program does not have is a mistake somewhere, not something to redirect
+        # away from quietly — that is how a typo becomes a mystery.
+        return PlainTextResponse(f"no such action: {action}", status_code=404)
+
     if action in ("keep", "drop"):
         await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")
     elif action == "summary":
-        summary = (await _form(request)).get("summary", "").strip()
+        summary = form.get("summary", "").strip()
         if summary:
             await store.set_idea_summary(idea_id, summary)
     elif action in DRAFT_KINDS:
@@ -344,7 +361,9 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
         await block_runs.draft(store, idea, action)
         await store.set_idea_state(idea_id, "promoted")
 
-    from_the_card = request.headers.get("hx-target") == "blocks"
+    # A form field, not a header: the card must behave the same with htmx and without it, and
+    # `hx-headers` only travels when htmx is the one sending.
+    from_the_card = form.get("from") == "card"
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks() if from_the_card else await render_inbox())
     return RedirectResponse("/" if from_the_card else "/ideas", status_code=303)

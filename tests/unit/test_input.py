@@ -385,3 +385,130 @@ async def test_every_action_in_the_console_is_a_real_form(
 
     # And the one control that opens the write path is a link, which works everywhere.
     assert re.search(r'<a class="message-button" href="/sessions/[^"]+/message"', body)
+
+
+# --- what a reviewer found by probing the task group ------------------------------------------
+@pytest.mark.unit
+async def test_one_question_going_wrong_does_not_take_the_others_with_it(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """The module docstring claims this; until a reviewer probed it, it was not true.
+
+    A blank line from the summariser raised IndexError inside a TaskGroup child, which cancels
+    every sibling and propagates out of the lifespan — the input field, every run in flight, and
+    the console with them.
+    """
+    healthy = await blocks.submit(desk, "PLEASE_HANG while a sibling explodes", [])
+    await asyncio.sleep(0.3)
+
+    async def explode() -> None:
+        raise RuntimeError("a run that raises where nobody expected one")
+
+    blocks.runs.start("a-broken-run", explode())
+    await asyncio.sleep(0.3)
+
+    # The group is still standing and the other question is still being answered.
+    assert await _state(desk, healthy.id) == "running"
+    assert await blocks.submit(desk, "and the field still works", []) is not None
+
+
+@pytest.mark.unit
+async def test_a_blank_summary_reply_is_not_a_crash(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The specific trigger: `any([" "])` is True, and `" ".strip().splitlines()` is empty."""
+    binary = tmp_path / "blank" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        "#!/bin/sh\ncat > /dev/null\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"   "}]}}\\n\'\n'
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await blocks.capture_idea(desk, "a thought worth keeping", [])
+    await asyncio.sleep(1.0)
+
+    (idea,) = await desk.ideas()
+    assert idea.text == "a thought worth keeping"
+    assert idea.summary == "a thought worth keeping"  # the fallback survived
+    assert await _state(desk, block.id) == "answered"
+
+
+@pytest.mark.unit
+async def test_a_block_never_has_two_runs(desk: Store, fake_claude: pathlib.Path) -> None:
+    """Starting a second run for one block used to orphan the first: the map was overwritten, the
+    first task's callback removed the second entry, and `cancel` then reported success over a run
+    that was no longer there — two `claude -p` processes racing to write one row.
+    """
+    block = await blocks.submit(desk, "PLEASE_HANG one", [])
+    await asyncio.sleep(0.3)
+    first = blocks.runs._by_block[block.id]
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    await blocks.retry(desk, stored, [])
+    await asyncio.sleep(0.3)
+
+    assert len(blocks.runs) == 1
+    assert first.cancelled() or first.done()
+    assert blocks.cancel(block.id) is True
+
+
+@pytest.mark.unit
+async def test_moving_a_block_to_the_thread_it_is_already_in_is_not_a_correction(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Submitting the select unchanged used to spend a run and flip `thread_set_by` to `human`,
+    quietly corrupting the one number docs/09-roadmap.md says decides the classifier's fate."""
+    block = await blocks.submit(desk, "a question", [])
+    for _ in range(50):
+        if await _state(desk, block.id) == "answered":
+            break
+        await asyncio.sleep(0.1)
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    await blocks.set_thread(desk, stored, stored.thread_id, [])
+    await asyncio.sleep(0.2)
+
+    unchanged = await desk.block(block.id)
+    assert unchanged is not None
+    assert unchanged.thread_id == stored.thread_id
+    assert unchanged.state == "answered"
+    assert len(blocks.runs) == 0
+
+
+@pytest.mark.unit
+async def test_every_write_route_answers_a_browser_as_well_as_htmx(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Five of the seven had this contract in a document and nowhere else.
+
+    A reviewer removed the redirect from `/blocks/{id}/thread` — so a refresh would re-submit the
+    override and re-run the block — and the suite stayed green. docs/02-architecture.md says htmx
+    is an upgrade; that only means something if it is checked.
+    """
+    block = await blocks.submit(desk, "a question", [])
+    for _ in range(50):
+        if await _state(desk, block.id) == "answered":
+            break
+        await asyncio.sleep(0.1)
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    routes_under_test = [
+        ("/blocks", {"text": "another question"}),
+        (f"/blocks/{block.id}/cancel", {}),
+        (f"/blocks/{block.id}/retry", {}),
+        (f"/blocks/{block.id}/thread", {"thread_id": ""}),
+    ]
+
+    for path, fields in routes_under_test:
+        status, _, headers = await _post(path, fields)
+        assert status == 303, path
+        assert headers["location"] == "/", path
+
+        status, html, _ = await _post(path, fields, htmx=True)
+        assert status == 200, path
+        assert "<article" in html or "nothing asked yet" in html, path

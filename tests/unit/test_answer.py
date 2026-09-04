@@ -300,3 +300,67 @@ async def test_the_parser_reads_a_recorded_run_rather_than_an_idea_of_one(
     assert answered is not None
     assert answered.state == "answered"
     assert answered.answer == "ok"
+
+
+# --- the deny rules the run had lost --------------------------------------------------------
+@pytest.mark.unit
+def test_the_run_is_handed_the_deny_rules_restricted_mode_switched_off() -> None:
+    """docs/07-security.md names `.claude/settings.json` as the mechanism, not the prose.
+
+    `--restricted` says in its own help that it "ignores user, project and local settings files
+    (managed settings and --settings still apply)" — so the one process on this machine that
+    reads observed repositories, with `Read` pre-approved over every directory `--add-dir` hands
+    it, was the one process those deny rules did not reach. A block asking why a client fails to
+    authenticate could have read a `.env` and streamed it into its own answer.
+    """
+    import json as json_
+
+    command = session.argv()
+    assert "--strict-mcp-config" in command
+
+    denials = json_.loads(command[command.index("--settings") + 1])
+    denied = denials["permissions"]["deny"]
+    assert any(rule.startswith("Read(") and ".env" in rule for rule in denied)
+    assert any("credentials" in rule for rule in denied)
+    assert any("sessions/" in rule for rule in denied)
+
+
+@pytest.mark.unit
+async def test_the_deny_rules_reach_the_real_command_line(
+    fake_claude: pathlib.Path, store: Store
+) -> None:
+    """Not merely present in a helper: present in what was executed."""
+    await session.answer_block(store, await _block(store), "a question")
+    argv = _argv(fake_claude)
+
+    assert "--settings" in argv
+    assert ".env" in argv[argv.index("--settings") + 1]
+
+
+@pytest.mark.unit
+async def test_a_noisy_run_is_not_reported_as_a_silent_one(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """stderr used to be a pipe nobody read, so a run that wrote to it blocked on the kernel
+    buffer while this program waited on stdout — and the timeout stored "no answer" for a run
+    that had one. A status inferred from a silence this program caused itself.
+    """
+    binary = tmp_path / "noisy" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        "#!/bin/sh\ncat > /dev/null\n"
+        "i=0; while [ $i -lt 4000 ]; do printf 'mcp chatter %s\\n' \"$i\" >&2; i=$((i+1)); done\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"answered anyway"}]}}\\n\'\n'
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    answered = await store.block(block.id)
+    assert answered is not None
+    assert answered.state == "answered"
+    assert answered.answer == "answered anyway"

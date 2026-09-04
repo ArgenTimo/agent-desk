@@ -27,9 +27,12 @@ from collections.abc import Sequence
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.store.repo import Thread
 
-# The reply is one token. Anything else is a decision this module did not understand, and an
-# unparsed decision is a new thread rather than a guess at what the model meant.
-_CHOICE = re.compile(r"\b(\d{1,2}|new)\b", re.IGNORECASE)
+# The reply is one token, and it is read as one token. Searching the whole reply for a digit was
+# worse than useless: "This mentions 2 different files, so: new" attached the block to thread two,
+# and so did "Error: rate limited after 2 retries" — the model said new, twice, and was overruled
+# by its own prose. Attaching wrongly is the expensive mistake, so anything that is not exactly a
+# choice is a new subject.
+_CHOICE = re.compile(r"\A(\d{1,2}|new)\Z", re.IGNORECASE)
 
 
 def prompt(text: str, threads: Sequence[Thread]) -> str:
@@ -49,8 +52,15 @@ def prompt(text: str, threads: Sequence[Thread]) -> str:
 
 
 def read_choice(reply: str, threads: Sequence[Thread]) -> str | None:
-    """The thread id the reply names, or `None` for a new subject."""
-    match = _CHOICE.search(reply.strip())
+    """The thread id the reply names, or `None` for a new subject.
+
+    Only the first token is read, and it must be the whole answer once trailing punctuation is
+    off it. A reply that says anything else — a sentence, an apology, an error, a number inside a
+    sentence — is a decision this module did not understand, and an unparsed decision is a new
+    thread rather than a guess at what the model meant.
+    """
+    first = reply.strip().split(maxsplit=1)[0] if reply.strip() else ""
+    match = _CHOICE.match(first.strip(".,:;!?\"'"))
     if match is None or match.group(1).lower() == "new":
         return None
     index = int(match.group(1))

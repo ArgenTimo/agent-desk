@@ -232,3 +232,84 @@ def test_the_summary_prompt_forbids_inventing_what_the_human_did_not_say() -> No
     prompt = inbox.summary_prompt("cache the probes")
     assert "Do not add a rationale" in prompt
     assert "cache the probes" in prompt
+
+
+# --- the card's actions, which had markup and no behaviour --------------------------------------
+async def _card_post(path: str, fields: dict[str, str], *, htmx: bool = False) -> tuple[int, str]:
+    from tests.unit.test_input import _post
+
+    status, html, headers = await _post(path, fields, htmx=htmx)
+    return status, html if htmx else headers.get("location", "")
+
+
+@pytest.mark.unit
+async def test_keep_and_discard_do_different_things(desk: Store, fake_claude: pathlib.Path) -> None:
+    """A reviewer replaced the whole branch with `"dropped"` and the suite stayed green."""
+    await blocks.submit(desk, "/idea keep this one", [])
+    await blocks.submit(desk, "/idea drop this one", [])
+    dropped, kept = await desk.ideas()
+
+    await _card_post(f"/ideas/{kept.id}/keep", {"from": "card"})
+    await _card_post(f"/ideas/{dropped.id}/drop", {"from": "card"})
+
+    assert (await desk.idea(kept.id)).state == "kept"  # type: ignore[union-attr]
+    assert (await desk.idea(dropped.id)).state == "dropped"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_the_summary_can_be_edited_by_hand(desk: Store, fake_claude: pathlib.Path) -> None:
+    """ "Edit summary" is in the docs/04 action table and in the docs/05 card, and had no test."""
+    await blocks.submit(desk, "/idea a thought", [])
+    (idea,) = await desk.ideas()
+
+    await _card_post(f"/ideas/{idea.id}/summary", {"summary": "a line a human wrote"})
+
+    stored = await desk.idea(idea.id)
+    assert stored is not None
+    assert stored.summary == "a line a human wrote"
+    assert stored.text == "a thought"
+
+
+@pytest.mark.unit
+async def test_asking_for_a_draft_promotes_the_idea(desk: Store, fake_claude: pathlib.Path) -> None:
+    """`promoted` is one of the four states, and the second number docs/09 says is measured."""
+    await blocks.submit(desk, "/idea cache the probes", [])
+    (idea,) = await desk.ideas()
+
+    await _card_post(f"/ideas/{idea.id}/paste", {})
+
+    stored = await desk.idea(idea.id)
+    assert stored is not None
+    assert stored.state == "promoted"
+    assert [d.kind for d in await desk.drafts_for(idea.id)] == ["paste"]
+
+
+@pytest.mark.unit
+async def test_an_action_this_program_does_not_have_is_not_a_shrug(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """It used to answer 303 and do nothing, which is how a typo becomes a mystery."""
+    await blocks.submit(desk, "/idea a thought", [])
+    (idea,) = await desk.ideas()
+
+    status, _ = await _card_post(f"/ideas/{idea.id}/publish-to-github", {})
+    assert status == 404
+
+
+@pytest.mark.unit
+async def test_the_card_works_the_same_with_htmx_and_without(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Keep used to navigate to the inbox without htmx, because the origin travelled in a header
+    that only htmx sends."""
+    await blocks.submit(desk, "/idea one", [])
+    await blocks.submit(desk, "/idea two", [])
+    second, first = await desk.ideas()
+
+    status, location = await _card_post(f"/ideas/{first.id}/keep", {"from": "card"})
+    assert status == 303
+    assert location == "/"
+
+    status, html = await _card_post(f"/ideas/{second.id}/keep", {"from": "card"}, htmx=True)
+    assert status == 200
+    assert "Idea recorded" in html  # the block column, not the inbox

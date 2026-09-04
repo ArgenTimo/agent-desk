@@ -37,6 +37,25 @@ ALLOWED_TOOLS = ("Read", "Grep", "Glob")
 # one lock on it.
 DENIED_TOOLS = ("Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch")
 
+# The credential paths of docs/07-security.md, handed to the run as its own deny rules.
+#
+# This is not belt-and-braces, it is the belt. That page names `.claude/settings.json` as the
+# mechanism — "a rule that lives only in prose is a wish" — and `--restricted` says in its own
+# help text that it "ignores user, project and local settings files (managed settings and
+# --settings still apply)". So the one process on this machine that reads observed repositories
+# with `Read` pre-approved, over every directory `--add-dir` hands it, was the one process those
+# deny rules did not reach. `--settings` reaches it.
+DENIED_PATHS = (
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+    "Read(**/*.pem)",
+    "Read(**/id_rsa*)",
+    "Read(~/.claude/.credentials.json)",
+    "Read(~/.claude/sessions/*.key)",
+    "Read(~/.aws/**)",
+    "Read(~/.ssh/**)",
+)
+
 
 # How long to wait for a killed run to actually be gone before giving up on reaping it. The
 # process is dead by then; this bounds the wait on its pipes, not on it.
@@ -62,6 +81,11 @@ def _kill_run(process: asyncio.subprocess.Process) -> None:
         process.kill()
 
 
+def denials() -> str:
+    """The deny rules, as the JSON `--settings` takes."""
+    return json.dumps({"permissions": {"deny": list(DENIED_PATHS)}})
+
+
 def argv(*, add_dirs: Sequence[Path] = ()) -> list[str]:
     """The command line. The prompt is deliberately absent from it — it arrives on stdin."""
     command = [
@@ -71,6 +95,12 @@ def argv(*, add_dirs: Sequence[Path] = ()) -> list[str]:
         "stream-json",
         "--verbose",
         "--restricted",
+        # `--restricted` turns off the settings files that carry this project's deny rules, so
+        # they are handed back here, where they survive it.
+        "--settings",
+        denials(),
+        # The flag `--restricted`'s own help asks for when it says it does not skip MCP servers.
+        "--strict-mcp-config",
         "--permission-prompts",
         "none",
         "--allowedTools",
@@ -114,7 +144,11 @@ async def stream_answer(
             *argv(add_dirs=add_dirs),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            # Not a PIPE. Nothing here reads it, and a run that writes a megabyte of MCP chatter
+            # to stderr would block on it while this program blocks on stdout — with the timeout
+            # breaking the tie and storing "no answer" for a run that had one. That is a status
+            # inferred from a silence this program caused itself.
+            stderr=asyncio.subprocess.DEVNULL,
             # Its own process group, so the whole run can be ended in one call — see _kill_run.
             start_new_session=True,
         )

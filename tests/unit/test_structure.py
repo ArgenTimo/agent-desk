@@ -46,8 +46,32 @@ def _imported_names(path: Path) -> set[str]:
     return names
 
 
+# The one assignment whose strings name credential paths in order to *forbid* them. The run this
+# program starts has the project's settings file switched off by `--restricted`, so the deny rules
+# are handed to it on the command line — and a rule against naming a path cannot be allowed to
+# stop the code that denies it. Only the elements of this assignment are excused; every other
+# literal in that same file still fails these tests.
+_DENIAL_ASSIGNMENTS = {"DENIED_PATHS"}
+
+
+def _denial_literals(tree: ast.Module) -> set[int]:
+    excused: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id in _DENIAL_ASSIGNMENTS
+            for target in node.targets
+        ):
+            continue
+        for element in ast.walk(node.value):
+            if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                excused.add(id(element))
+    return excused
+
+
 def _string_literals(path: Path) -> list[str]:
-    """Every string constant in `path` except docstrings.
+    """Every string constant in `path` except docstrings and the deny rules.
 
     A path named in a docstring is an explanation; a path named in code is an open() waiting to
     happen. Only the second is what these rules are about.
@@ -62,12 +86,13 @@ def _string_literals(path: Path) -> list[str]:
         and isinstance(node.body[0].value, ast.Constant)
         and isinstance(node.body[0].value.value, str)
     }
+    excused = docstrings | _denial_literals(tree)
     return [
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
-        and id(node) not in docstrings
+        and id(node) not in excused
     ]
 
 

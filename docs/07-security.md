@@ -29,6 +29,17 @@ The mechanism is `.claude/settings.json`, which denies these paths to any sessio
 repository. This paragraph explains the denial; it does not implement it. A rule that lives only in
 prose is a wish.
 
+**And it did not reach the one process that most needed it.** The headless run that answers a block
+is started with `--restricted`, which — in the CLI's own words — "ignores user, project and local
+settings files (managed settings and `--settings` still apply)". So the deny list above was off for
+the single process on this machine that reads observed repositories, with `Read` pre-approved, over
+every directory `--add-dir` hands it. Verified by execution rather than by reading: a canary
+planted in an observed repository's `.env` came back verbatim inside the answer.
+
+`agent_desk/answer/session.py` therefore passes the same denials to every run on the command line,
+where `--restricted` cannot switch them off. Re-run against the same canary, the file is not
+merely refused — it is not there.
+
 ## 2. Transcripts contain everything the agent saw
 
 A transcript is the record of a working session: source code, command output, anything the human

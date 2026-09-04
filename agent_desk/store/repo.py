@@ -126,32 +126,49 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _strip_comment(line: str) -> str:
-    """Everything before a `--` that is not inside a quoted string.
-
-    Trailing comments have to go, not just whole comment lines. The second migration written
-    against this splitter carried a semicolon inside a trailing comment — "sha256 of a token; not
-    stored" — and the statement was cut in half at it. The error was `incomplete input`, which is
-    a stranger way to learn this than reading it here.
-    """
-    quoted = False
-    for index, character in enumerate(line):
-        if character == "'":
-            quoted = not quoted
-        elif character == "-" and not quoted and line[index + 1 : index + 2] == "-":
-            return line[:index]
-    return line
-
-
 def _statements(script: str) -> list[str]:
-    """One SQL statement per element.
+    """One SQL statement per element, split on the semicolons that actually end one.
 
-    The sqlite driver takes one statement per call, so a schema file is split here. Comments go
-    first — whole lines and trailing ones alike — which is what makes a `;` reliably the end of a
-    statement rather than the middle of a sentence.
+    The sqlite driver takes one statement per call, so a schema file is split here — and the split
+    has to know where it is. A `;` inside a comment already cut a `CREATE TABLE` in half once
+    ("sha256 of a token; not stored", which failed as `incomplete input`), and a `;` inside a
+    string literal would do the same to the first migration that seeds a row or writes a
+    `CHECK (x IN ('a;b'))`. So this walks the script once, tracking quotes and both kinds of
+    comment, rather than deleting comments and hoping.
     """
-    body = "\n".join(_strip_comment(line) for line in script.splitlines())
-    return [statement.strip() for statement in body.split(";") if statement.strip()]
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(script):
+        character = script[index]
+        pair = script[index : index + 2]
+
+        if quote is not None:
+            current.append(character)
+            if character == quote:
+                quote = None
+            index += 1
+        elif character in "'\"":
+            quote = character
+            current.append(character)
+            index += 1
+        elif pair == "--":
+            end = script.find("\n", index)
+            index = len(script) if end == -1 else end
+        elif pair == "/*":
+            end = script.find("*/", index + 2)
+            index = len(script) if end == -1 else end + 2
+        elif character == ";":
+            statements.append("".join(current))
+            current = []
+            index += 1
+        else:
+            current.append(character)
+            index += 1
+
+    statements.append("".join(current))
+    return [statement.strip() for statement in statements if statement.strip()]
 
 
 def _migrations(directory: Path) -> list[tuple[int, Path]]:
@@ -161,20 +178,39 @@ def _migrations(directory: Path) -> list[tuple[int, Path]]:
     (docs/adr/0003).
     """
     found = [(1, directory / "schema.sql")]
-    found += [(int(p.name[:3]), p) for p in sorted(directory.glob("[0-9][0-9][0-9]-*.sql"))]
+    for path in sorted(directory.glob("[0-9][0-9][0-9]-*.sql")):
+        version = int(path.name[:3])
+        if version <= 1:
+            # `001-anything.sql` would sort before `schema.sql`, apply, record version 1, and the
+            # baseline would then be skipped for ever. The glob invites exactly that filename, so
+            # it is refused loudly rather than resolved quietly.
+            raise ValueError(f"{path.name}: version 1 is schema.sql; number migrations from 002")
+        found.append((version, path))
     return sorted(found)
 
 
-def _enforce_foreign_keys(dbapi_connection: Any, _record: Any) -> None:
-    """SQLite ignores `REFERENCES` unless asked, once per connection.
+def _prepare_connection(dbapi_connection: Any, _record: Any) -> None:
+    """Two settings per connection, and the second one is why migrations are safe.
 
-    The schema declares foreign keys; a store that silently does not enforce them is a schema
-    documenting a guarantee it does not have. Registered on this engine rather than on every pool
-    in the process, because a global listener would be this module reaching outside itself.
+    SQLite ignores `REFERENCES` unless asked, so a schema declaring foreign keys without this is
+    a schema documenting a guarantee it does not have.
+
+    And the driver, left alone, commits DDL the moment it runs — which meant a crash between a
+    migration's `CREATE TABLE`s and its `schema_version` row left the tables in place and the
+    version unrecorded. Every subsequent start then tried to create them again and died with
+    "table thread already exists": the store was bricked, permanently, and the only recovery was
+    deleting the file. Handing transaction control back to us is what makes the two halves of a
+    migration one thing (design/02-data-model.md, "Migrations").
     """
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+    dbapi_connection.isolation_level = None
+
+
+def _begin_explicitly(conn: Any) -> None:
+    """With the driver's autocommit off, a transaction has to be asked for by name."""
+    conn.exec_driver_sql("BEGIN")
 
 
 class Store:
@@ -193,7 +229,8 @@ class Store:
     async def open(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
-        event.listen(self._engine.sync_engine, "connect", _enforce_foreign_keys)
+        event.listen(self._engine.sync_engine, "connect", _prepare_connection)
+        event.listen(self._engine.sync_engine, "begin", _begin_explicitly)
         await self._migrate()
         await self._recover_interrupted()
 
@@ -204,6 +241,12 @@ class Store:
 
     # --- schema ---------------------------------------------------------------------------
     async def _migrate(self) -> None:
+        """Apply what has not been applied, each file in one transaction with its own version row.
+
+        The transaction is the point. A file that fails halfway, or a process killed between its
+        statements and its `schema_version` row, must leave the database exactly as it found it —
+        otherwise the next start finds tables it is about to create and never opens again.
+        """
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
@@ -213,9 +256,11 @@ class Store:
             )
             rows = await conn.execute(text("SELECT version FROM schema_version"))
             applied = {row[0] for row in rows}
-            for version, path in _migrations(Path(__file__).parent):
-                if version in applied:
-                    continue
+
+        for version, path in _migrations(Path(__file__).parent):
+            if version in applied:
+                continue
+            async with self.engine.begin() as conn:
                 for statement in _statements(path.read_text()):
                     await conn.execute(text(statement))
                 await conn.execute(
@@ -252,14 +297,22 @@ class Store:
             )
         return thread
 
-    async def open_threads(self) -> list[Thread]:
-        """What a new block is classified against — closed subjects are not candidates."""
+    async def open_threads(self, *, limit: int = 20) -> list[Thread]:
+        """What a new block is classified against — closed subjects are not candidates.
+
+        Bounded, and the bound is not tidiness. Every open subject becomes an option in the thread
+        control of every block on the page: measured at 120 questions, that was 6050 options and
+        659 KiB re-rendered and pushed over the event stream every two seconds. It is also the
+        list the classifier is asked to choose from, and a choice between eighty subjects is not
+        a choice anybody should trust.
+        """
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT id, subject, created_at, closed_at FROM thread "
-                    "WHERE closed_at IS NULL ORDER BY created_at DESC"
-                )
+                    "WHERE closed_at IS NULL ORDER BY created_at DESC LIMIT :limit"
+                ),
+                {"limit": limit},
             )
             return [Thread(**row._mapping) for row in rows]
 
@@ -307,7 +360,15 @@ class Store:
         return block
 
     async def set_block_running(self, block_id: str) -> None:
-        await self._set_block_state(block_id, "running")
+        """Starting a run clears the last one's failure, which is no longer true of this block."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = 'running', error = NULL, finished_at = NULL "
+                    "WHERE id = :id"
+                ),
+                {"id": block_id},
+            )
 
     async def finish_block(self, block_id: str, answer: str) -> None:
         await self._set_block_state(block_id, "answered", answer=answer, finished=True)
