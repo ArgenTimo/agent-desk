@@ -312,3 +312,93 @@ def test_the_console_and_the_shared_view_are_two_applications() -> None:
     shared_paths = {getattr(route, "path", "") for route in shared.app.routes}
     for owner_path in ("/", "/blocks", "/ideas", "/viewers", "/events"):
         assert owner_path not in shared_paths
+
+
+# --- what a reviewer found by mutating this file ------------------------------------------------
+@pytest.mark.unit
+async def test_two_links_are_not_the_same_link(desk: Store) -> None:
+    """A reviewer replaced `new_token()` with fifty letter As and the whole suite stayed green.
+
+    The link is the entire security model — no accounts, no second factor, no TLS — and the only
+    assertions on it were its length and that its hash is its hash.
+    """
+    import re
+
+    _, first = await desk.create_viewer("one")
+    _, second = await desk.create_viewer("two")
+
+    assert first != second
+    for token in (first, second):
+        assert len(token) >= 43, "256 bits of urlsafe base64 is 43 characters"
+        assert re.fullmatch(r"[A-Za-z0-9_-]+", token)
+        # Not a constant, not a counter, not a name: enough distinct characters that a guess is
+        # not a plan (docs/07-security.md).
+        assert len(set(token)) > 16, token
+
+
+@pytest.mark.unit
+async def test_the_summary_is_scrubbed_as_well_as_the_text(desk: Store) -> None:
+    """`fallback_summary` takes the idea's first non-blank line verbatim, so a secret on line one
+    *is* the summary. The old test planted its secret only in the text and passed either way."""
+    _, token = await desk.create_viewer("a teammate")
+    secret = "ghp_" + "s" * 36
+    await desk.create_idea(text_="a thought", summary=f"rotate {secret} first", source_kind="typed")
+
+    _, html, _ = await _request("GET", f"/shared/{token}")
+    assert secret not in html
+    assert "[redacted]" in html
+
+
+@pytest.mark.unit
+async def test_the_page_says_when_each_idea_arrived(desk: Store) -> None:
+    """Three documents promise the date and the page rendered everything but."""
+    _, token = await desk.create_viewer("a teammate")
+    await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+
+    _, html, _ = await _request("GET", f"/shared/{token}")
+    (idea,) = await desk.ideas()
+    from agent_desk.web.shared import _when
+
+    assert _when(idea.created_at) in html
+
+
+@pytest.mark.unit
+async def test_the_state_of_each_idea_is_on_the_page(desk: Store) -> None:
+    """ "What happened to the ideas already there" is the half of problem 5 this page answers."""
+    _, token = await desk.create_viewer("a teammate")
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.set_idea_state(idea.id, "promoted")
+
+    _, html, _ = await _request("GET", f"/shared/{token}")
+    assert "promoted" in html
+
+
+@pytest.mark.unit
+async def test_a_console_that_is_not_open_yet_answers_like_a_wrong_link(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Both servers start together, so there is a window at every start — and one at every stop.
+
+    A viewer arriving in it used to get a RuntimeError out of a route whose whole promise is that
+    everything it cannot serve looks the same.
+    """
+    shared.app.state.store = Store(tmp_path / "not-open.db")
+    try:
+        status, html, _ = await _request("GET", "/shared/any-token-at-all")
+        assert status == 404
+        assert "does not open anything" in html
+    finally:
+        shared.app.state.store = None
+
+
+@pytest.mark.unit
+async def test_a_link_holder_cannot_post_an_idea_of_any_size(desk: Store) -> None:
+    """Authenticated is not the same as trusted with the owner's memory and disk."""
+    _, token = await desk.create_viewer("a teammate")
+
+    status, _, _ = await _request(
+        "POST", f"/shared/{token}/idea", fields={"text": "x" * (shared.MAX_SUBMISSION_BYTES + 1)}
+    )
+
+    assert status == 413
+    assert await desk.ideas() == []

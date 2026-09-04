@@ -7,6 +7,7 @@ PORT ?= 8787
 # Deliberately not 0.0.0.0 by default: `make share SHARE_HOST=0.0.0.0` is a sentence somebody has
 # to type, and typing it is the moment the security model changes.
 SHARE_HOST ?= 127.0.0.1
+SHARE_PORT ?= 8788
 
 # Poetry follows an active VIRTUAL_ENV. A shell with another project's venv sourced — which is
 # normal when several agents work several repositories on one machine — would otherwise install
@@ -54,8 +55,8 @@ run: ## The console on http://127.0.0.1:8787
 # puts an ideas list on the network, and what protects it is a named link per viewer
 # (docs/07-security.md, docs/09-roadmap.md Phase 4).
 share: ## The console, plus the shared ideas view on the network
-	@echo "the shared ideas list will be reachable on $(SHARE_HOST):8788 — links are minted at $(URL)/viewers"
-	AGENT_DESK_SHARE_HOST=$(SHARE_HOST) $(POETRY) run python -m agent_desk
+	@echo "the shared ideas list will be reachable on $(SHARE_HOST):$(SHARE_PORT) — links are minted at $(URL)/viewers"
+	AGENT_DESK_SHARE_HOST=$(SHARE_HOST) AGENT_DESK_SHARE_PORT=$(SHARE_PORT) $(POETRY) run python -m agent_desk
 
 overlay: ## The console in its own window, for a window rule to pin always-on-top
 	@browser=$$(command -v google-chrome || command -v chromium || command -v chromium-browser); \

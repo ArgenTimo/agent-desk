@@ -39,6 +39,7 @@
   .summary { font-weight: 600; }
   .state { float: right; color: var(--dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
   .text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+  .when { margin: 2px 0 0; color: var(--dim); font-size: 0.8rem; }
   .empty { color: var(--dim); }
   footer { margin-top: 28px; color: var(--dim); font-size: 0.8rem; }
 </style>
@@ -66,6 +67,9 @@
 <article class="idea {{ idea.state }}">
   <span class="state">{{ idea.state }}</span>
   <p class="summary">{{ idea.summary }}</p>
+  {# The date. Three documents promised it and the page rendered everything but — "what happened
+     to the ideas already there" is half an answer without when. #}
+  <p class="when">{{ idea.when }}</p>
   {# The thought, and nothing around it: no project, no branch, no session title, no drafts.
      That was a disclosure decision, made once (docs/07-security.md). #}
   <p class="text">{{ idea.text }}</p>

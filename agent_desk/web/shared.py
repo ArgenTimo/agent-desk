@@ -30,6 +30,7 @@ unknown device and is not here to debug a console.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -45,6 +46,10 @@ from agent_desk.web.origin import SameOriginOnly
 
 TEMPLATES = Path(__file__).parent / "templates" / "shared"
 
+# An idea is a sentence somebody typed. Sixteen kilobytes is generous for that, and small enough
+# that a link holder cannot exhaust the owner's memory with one post or their disk with a hundred.
+MAX_SUBMISSION_BYTES = 16 * 1024
+
 # Its own loader, rooted in its own directory: an owner fragment is not merely unused here, it is
 # unreachable.
 env = Environment(
@@ -57,15 +62,29 @@ env = Environment(
 
 log = structlog.get_logger("agent_desk.shared")
 
-app = FastAPI(title="agent-desk · ideas", openapi_url=None)
+
+def _when(created_at: int) -> str:
+    """A date a person reads, from the milliseconds this program stores."""
+    return datetime.fromtimestamp(created_at / 1000, tz=UTC).strftime("%d %b %Y")
+
+
+# `redirect_slashes=False`: that redirect echoes the request's own Host header back into an
+# absolute Location, and this bind answers to whatever hostname is pointed at it.
+app = FastAPI(title="agent-desk · ideas", openapi_url=None, redirect_slashes=False)
 # The same guard as the console's. A viewer's token is not a secret a foreign page has, but
 # a page that obtained one must not be able to post through the viewer's browser either.
 app.add_middleware(SameOriginOnly)
 
 
 def _store(request: Request) -> Store | None:
-    """The store the console opened. This application never opens or closes it."""
-    return getattr(request.app.state, "store", None)
+    """The store the console opened, if it has. This application never opens or closes it.
+
+    Both halves matter. The two servers start together, so on the way up this is a store that
+    exists and is not open yet; on the way down the console closes it while this bind is still
+    draining. Either way a viewer gets the answer a wrong link gets.
+    """
+    store = getattr(request.app.state, "store", None)
+    return store if isinstance(store, Store) and store.opened else None
 
 
 async def _viewer(request: Request, token: str) -> tuple[Store, Viewer] | None:
@@ -99,7 +118,7 @@ async def ideas_page(token: str, request: Request) -> Response:
                     "summary": scrub(idea.summary),
                     "text": scrub(idea.text),
                     "state": idea.state,
-                    "created_at": idea.created_at,
+                    "when": _when(idea.created_at),
                 }
                 for idea in ideas
             ],
@@ -120,6 +139,12 @@ async def submit_idea(token: str, request: Request) -> Response:
         return HTMLResponse(env.get_template("gone.html").render(), status_code=404)
 
     store, viewer = found
+    if int(request.headers.get("content-length") or 0) > MAX_SUBMISSION_BYTES:
+        # Refused before it is read. A link holder is authenticated, not trusted with the owner's
+        # memory and disk — "the token is unguessable" is an argument about who gets in, not about
+        # what they may do once they are.
+        return HTMLResponse(env.get_template("gone.html").render(), status_code=413)
+
     body = (await request.body()).decode("utf-8", errors="replace")
     text = (parse_qs(body, keep_blank_values=True).get("text", [""])[0] or "").strip()
     if text:

@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from starlette.responses import PlainTextResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
@@ -31,26 +31,52 @@ ALLOWED_SITES = frozenset({"same-origin", "none"})
 
 
 class SameOriginOnly:
-    """Refuse a state-changing request that a foreign page caused."""
+    """Refuse a state-changing request that a foreign page caused, and refuse to be framed.
+
+    The second half is not a separate concern. A form submitted from inside an `iframe` of this
+    page carries `Sec-Fetch-Site: same-origin`, because it is: the fix for a foreign *page* does
+    nothing about a foreign page wearing this one as a frame, so a click landing where the
+    attacker chose would pass every check above it.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] in SAFE_METHODS:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
+        if scope["method"] not in SAFE_METHODS:
+            await self._guard(scope, receive, send)
+            return
+        await self.app(scope, receive, self._unframed(send))
+
+    @staticmethod
+    def _unframed(send: Send) -> Send:
+        async def sending(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                message["headers"] = [
+                    *message["headers"],
+                    (b"x-frame-options", b"DENY"),
+                    (b"content-security-policy", b"frame-ancestors 'none'"),
+                ]
+            await send(message)
+
+        return sending
+
+    async def _guard(self, scope: Scope, receive: Receive, send: Send) -> None:
         headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
         site = headers.get("sec-fetch-site")
         if site is not None and site not in ALLOWED_SITES:
             response = PlainTextResponse(
                 "This console only accepts actions from its own pages.", status_code=403
             )
-            await response(scope, receive, send)
+            await response(scope, receive, self._unframed(send))
             return
 
-        await self.app(scope, receive, send)
+        await self.app(scope, receive, self._unframed(send))
 
 
 def guard(app: ASGIApp) -> Callable[[Scope, Receive, Send], Awaitable[None]]:

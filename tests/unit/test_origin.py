@@ -143,3 +143,47 @@ async def test_the_shared_view_is_guarded_the_same_way(desk: Store) -> None:
     )
     assert accepted == 303
     assert len(await desk.ideas()) == 1
+
+
+@pytest.mark.unit
+async def test_neither_surface_can_be_framed(desk: Store) -> None:
+    """A form submitted from inside a frame of this page carries `same-origin`, because it is.
+
+    So the check above does nothing about a foreign page wearing this one as a frame, and a click
+    landing where the attacker chose would pass every test in this file.
+    """
+    from agent_desk.web.app import app
+
+    for target, path in ((app, "/"), (shared.app, "/shared/nothing")):
+        sent: list[dict[str, Any]] = []
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: dict[str, Any], sink: list[dict[str, Any]] = sent) -> None:
+            sink.append(message)
+
+        await target(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0", "spec_version": "2.3"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode(),
+                "query_string": b"",
+                "root_path": "",
+                "headers": [(b"host", b"127.0.0.1:8787")],
+                "client": ("127.0.0.1", 1),
+                "server": ("127.0.0.1", 8787),
+            },
+            receive,
+            send,
+        )
+        headers = {
+            k.decode().lower(): v.decode()
+            for k, v in next(m for m in sent if m["type"] == "http.response.start")["headers"]
+        }
+        assert headers["x-frame-options"] == "DENY", path
+        assert "frame-ancestors 'none'" in headers["content-security-policy"], path

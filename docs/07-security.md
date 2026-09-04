@@ -105,7 +105,16 @@ to one interface rather than to all of them.
 
 **A named link per viewer.** 256 bits from the system generator, stored as a hash and shown once —
 so this database leaking is not the same event as the links leaking, and a lost link is replaced
-rather than recovered. Revocation is a timestamp rather than a delete, because the question an
+rather than recovered.
+
+That sentence was false for as long as this feature existed, and the place it was false is worth
+recording. A viewer's token is a path segment, and the default access log of the server writes the
+path: `"GET /shared/-rEm7_kLxJydW1is3YcDIVf2_PeTYFMU4boZhuus_oE HTTP/1.1" 200` — observed, not
+inferred — beside the structured line naming the viewer. The store went to real trouble to keep
+only a hash, and the log kept the token, in the artefact most likely to be tailed, piped, or pasted
+into a bug report. **The shared bind therefore runs with no access log at all**, and the minted
+token is rendered into a response rather than carried through a redirect, because a query string is
+browser history. What is logged about a viewer is their name and how many ideas they saw. Revocation is a timestamp rather than a delete, because the question an
 audit asks is "who could see this, and until when". Every open is logged by viewer name and idea
 count, never by content. A wrong link, a revoked link and a console that is not ready all answer
 identically: a viewer learns whether their own link works and nothing else.
@@ -119,6 +128,19 @@ also a list of what that person was working on, including work a teammate has no
 keeps those verbatim on purpose ([05-ideas.md](05-ideas.md)); the rule that a surface a second
 person can open redacts before it renders is about this page, and the two are not in conflict
 because they are two different readers.
+
+**Neither surface can be framed.** A form submitted from inside an `iframe` of this console carries
+`Sec-Fetch-Site: same-origin`, because it does — so the defence against a foreign page does nothing
+about a foreign page wearing this one as a frame. Both applications answer `X-Frame-Options: DENY`
+and `frame-ancestors 'none'`.
+
+**The fail-open in that check is a loopback argument, and the shared bind is not loopback.** A
+request with no fetch metadata on the console is a script run by the machine's owner; on the shared
+bind it is a stranger, or a browser behind a proxy that strips `Sec-*` headers — which is exactly
+the "unknown device" this page is for. It is left open deliberately: the token is in the path, so a
+foreign page has nothing to submit *with*, and refusing the request would lock out the older
+browsers this page exists to serve. Recorded here as a known cost rather than left as an assumption
+somebody inherits.
 
 **What it does not have, and the honest cost.** There is no TLS: the link travels in clear over
 whatever network it is served on, so this belongs on a trusted LAN or behind a tunnel, and not on

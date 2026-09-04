@@ -291,9 +291,12 @@ async def send_message(session_id: str, request: Request) -> Response:
     panel = await asyncio.to_thread(render_message, stage, session_id, text, delivery.detail)
     if _wants_fragment(request):
         return HTMLResponse(panel)
-    # The outcome is rendered so the text can be copied out of it. The day `peer.send` actually
-    # delivers, this branch owes the browser a redirect instead: a refresh here would send it
-    # twice, and twice into somebody's context is the failure adr/0002 is about.
+    # Two things this route owes the day `peer.send` actually delivers, and they close together.
+    # A redirect instead of a render: a refresh here would send the message twice, and twice into
+    # somebody's context is the failure adr/0002 is about. And a precondition rather than a
+    # template — nothing today stops a post going straight to /send without /review, which is
+    # harmless while the answer is a refusal and is not the "shown in full first" that adr/0002
+    # describes.
     return HTMLResponse(await render_page(panel))
 
 

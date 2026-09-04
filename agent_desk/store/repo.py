@@ -115,8 +115,9 @@ class Draft(BaseModel):
 def new_token() -> str:
     """A link that is somebody's whole identity, so it is long enough to be one.
 
-    256 bits from the system generator. Nothing about a viewer is guessable, which is why this
-    program does not rate-limit the shared route and does not need to.
+    256 bits from the system generator, so guessing one is not a plan and the shared route needs
+    no rate limit *against guessing*. That argument covers who gets in and nothing else: what a
+    link holder may do once they are in is bounded separately, by the size cap in `web/shared.py`.
     """
     return secrets.token_urlsafe(32)
 
@@ -219,6 +220,17 @@ class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._engine: AsyncEngine | None = None
+
+    @property
+    def opened(self) -> bool:
+        """Has the console opened this store yet?
+
+        The shared bind starts beside the console rather than after it, so there is a window at
+        every start — and another at every stop — in which this is false. A reader who asks in
+        that window used to get a RuntimeError out of a route whose whole promise is that it
+        answers identically to everything it cannot serve.
+        """
+        return self._engine is not None
 
     @property
     def engine(self) -> AsyncEngine:

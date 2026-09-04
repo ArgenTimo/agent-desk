@@ -22,11 +22,12 @@ from agent_desk.web import routes, shared
 from agent_desk.web.app import app as console
 
 
-def _config(target: FastAPI, host: str, port: int) -> uvicorn.Config:
+def _config(target: FastAPI, host: str, port: int, *, access_log: bool = True) -> uvicorn.Config:
     return uvicorn.Config(
         target,
         host=host,
         port=port,
+        access_log=access_log,
         # The console's event stream never ends by design, so a graceful stop that waits for open
         # responses waits forever. Measured once, in Phase 1, with a browser attached.
         timeout_graceful_shutdown=2,
@@ -39,8 +40,15 @@ async def serve() -> None:
     if settings.share_host:
         # The shared application never opens or closes the store; the console's lifespan owns it.
         shared.app.state.store = routes.store
+        # No access log on this bind, and the reason is the whole design of Phase 4. A viewer's
+        # token is a path segment, so every default access line writes it in clear — beside the
+        # structlog line naming the viewer, in the artefact most likely to be tailed, piped or
+        # pasted into a bug report. The store deliberately keeps only a hash of that token; a log
+        # that keeps the token itself undoes the care in one line (docs/07-security.md).
         servers.append(
-            uvicorn.Server(_config(shared.app, settings.share_host, settings.share_port))
+            uvicorn.Server(
+                _config(shared.app, settings.share_host, settings.share_port, access_log=False)
+            )
         )
 
     async with asyncio.TaskGroup() as group:

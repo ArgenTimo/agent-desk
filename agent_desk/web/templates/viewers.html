@@ -55,7 +55,7 @@
 <div class="note minted">
   <strong>The link for {{ minted_for }}, shown once.</strong> Only its hash is stored, so if this
   is lost the link is replaced rather than recovered.
-  <code class="link">http://{{ share_host or "&lt;this machine&gt;" }}:{{ share_port }}/shared/{{ minted }}</code>
+  <code class="link">http://{{ share_host or "this machine" }}:{{ share_port }}/shared/{{ minted }}</code>
 </div>
 {% endif %}
 
