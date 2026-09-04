@@ -46,6 +46,23 @@ def attaching_claude(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.fixture
+def fake_claude_new(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A classifier that answers `new`, so its decision to start a subject can be observed."""
+    binary = tmp_path / "cli-new" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        '#!/bin/sh\nprompt=$(cat)\ncase "$prompt" in\n'
+        '  *"Open subjects"*) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"new"}]}}\\n\' ;;\n'
+        '  *) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n\' ;;\n'
+        "esac\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=5.0)
+    )
+
+
+@pytest.fixture
 async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Store]:
     store = Store(tmp_path / "agent-desk.db")
     await store.open()
@@ -270,3 +287,69 @@ async def test_moving_one_block_never_takes_its_neighbours_with_it(
 
     remaining = await desk.blocks_in_thread(first.thread_id)
     assert {block.id for block in remaining} == {first.id, second.id}
+
+
+@pytest.mark.unit
+async def test_a_select_submitted_unchanged_leaves_the_classifier_credit_alone(
+    desk: Store, attaching_claude: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The old test could not tell the fix from the bug: with the target equal to the current
+    thread, the block cannot move, and its fake classified everything as `new` so `thread_set_by`
+    read `human` either way. This one starts from a block the classifier actually attached.
+    """
+    first = await blocks.submit(desk, "the first subject", [])
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "attached to it", [])
+    await _settled(desk, second.id)
+
+    attached = await desk.block(second.id)
+    assert attached is not None
+    assert attached.thread_set_by == "classifier"
+
+    capsys.readouterr()
+    await blocks.set_thread(desk, attached, attached.thread_id, [])
+    logged = capsys.readouterr().out
+
+    unchanged = await desk.block(second.id)
+    assert unchanged is not None
+    assert unchanged.thread_set_by == "classifier", "no run, no correction, no credit taken away"
+    assert "thread override" not in logged
+
+
+@pytest.mark.unit
+async def test_a_classifier_that_chooses_a_new_subject_is_still_recorded_as_deciding(
+    desk: Store, fake_claude_new: None
+) -> None:
+    """Leaving those blocks marked `human` took the classifier's own decisions out of the
+    denominator, and made a later human override look like somebody re-correcting themselves —
+    which is the direction docs/04 calls a follow-up stranded in its own thread.
+    """
+    first = await blocks.submit(desk, "a subject", [])
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "an unrelated subject", [])
+    await _settled(desk, second.id)
+
+    decided = await desk.block(second.id)
+    assert decided is not None
+    assert decided.thread_id != first.thread_id
+    assert decided.thread_set_by == "classifier"
+
+
+@pytest.mark.unit
+def test_a_reply_that_is_more_than_one_token_is_a_new_subject() -> None:
+    """The digit only moved: reading the first word overruled the model as thoroughly as searching
+    the whole reply did, and both cases end with the model saying `new`."""
+    threads = [
+        Thread(id="t1", subject="one", created_at=0),
+        Thread(id="t2", subject="two", created_at=0),
+    ]
+
+    for prose in (
+        "2 files mention this, so it is new",
+        "1 file changed, therefore new",
+        "2, but actually new",
+    ):
+        assert classifier.read_choice(prose, threads) is None, prose
+
+    # And a digit that is not an ASCII one is not a choice either.
+    assert classifier.read_choice("١", threads) is None

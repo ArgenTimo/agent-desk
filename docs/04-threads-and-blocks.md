@@ -44,9 +44,17 @@ answered against the wrong background.
 
 Two mechanisms, both cheap:
 
-- **A visible, one-click override.** Every block shows the thread it landed in, as a control:
+- **A visible, one-click override.** Every question shows the thread it landed in, as a control:
   move it, or split it off. Correcting a misfile costs one click, and after the correction the
   block re-runs against the right context.
+
+  Two boundaries on that sentence, both learned the hard way. The control lists the twenty most
+  recent open subjects — one is created per question, so the list grows without limit otherwise —
+  **plus the block's own, always, even when it has fallen outside that window**; without the
+  exception the control rendered with nothing selected, a browser showed the newest subject as
+  the block's, and the button beside it moved the block there. And an *idea* block has no such
+  control: moving one would run the thought through the answer engine, which is the second
+  question [05-ideas.md](05-ideas.md) says capture never asks.
 - **An explicit escape hatch on input.** A leading `/new` starts a thread outright, with no
   classification. When you already know, you should not have to hope.
 

@@ -1,7 +1,10 @@
-"""The board: what every session is doing, without opening a terminal.
+"""The console's routes: the board, the input field, the inbox, the viewers, and the one write path.
 
-Everything here is read-only. There is no form, no store and no model call in this phase; the one
-write path of docs/adr/0002 does not exist yet and this module does not import it.
+Written when this was a read-only board and left saying so for three phases, which is the failure
+mode CLAUDE.md names — a document that describes what a module used to be is worse than no
+document, because it is read and believed. What is actually here: nine routes that change state,
+a store, model calls behind two of them, and the single import of `peer` that docs/adr/0002
+permits to exist in `web/` and nowhere else.
 
 The ordering is the part worth reading twice. A board sorted by `updatedAt` puts a session that
 flickered between `idle` and `busy` above a long healthy run, which is exactly backwards for a
@@ -120,12 +123,21 @@ def render_tail(session_id: str) -> str:
 async def render_blocks() -> str:
     """The column under the input field: newest first, each showing its state and its thread."""
     rows = await store.blocks()
-    threads = {thread.id: thread for thread in await store.open_threads()}
+    open_threads = await store.open_threads()
+    known = {thread.id for thread in open_threads}
+    # A block's own thread is always an option, even when it has fallen outside the bound. Without
+    # this the select rendered with nothing selected, the browser picked the first entry — the
+    # newest subject — and the ↵ button posted *that*: the control for correcting a misfile made
+    # one, silently, and logged it as a human decision.
+    missing = [
+        thread
+        for thread in await store.threads_of({row.thread_id for row in rows} - known)
+        if thread.id not in known
+    ]
     ideas = {idea.block_id: idea for idea in await store.ideas() if idea.block_id}
     return env.get_template("_blocks.html").render(
         blocks=rows,
-        threads=threads,
-        open_threads=list(threads.values()),
+        open_threads=open_threads + missing,
         ideas=ideas,
         partial=block_runs.PARTIAL,
     )
@@ -190,8 +202,8 @@ async def _form(request: Request) -> dict[str, str]:
     """One urlencoded form, parsed with the standard library.
 
     Starlette's own `request.form()` asserts that `python-multipart` is installed before it will
-    read even an `application/x-www-form-urlencoded` body — and this console has exactly two
-    forms, each carrying one short field, and will never accept a file. Three lines of `urllib`
+    read even an `application/x-www-form-urlencoded` body — and every form in this console carries
+    one or two short fields and none of them will ever accept a file. Three lines of `urllib`
     against a dependency in the lock file forever is not a close call (CLAUDE.md, "Simplicity
     first"; the deliberately-absent list in pyproject.toml is the same argument).
     """
@@ -350,7 +362,9 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
     if action not in ("keep", "drop", "summary", *DRAFT_KINDS):
         # An action this program does not have is a mistake somewhere, not something to redirect
         # away from quietly — that is how a typo becomes a mystery.
-        return PlainTextResponse(f"no such action: {action}", status_code=404)
+        # The segment is not echoed back: reflecting an unvalidated path into a response is a
+        # habit worth not having, even where the content type makes it harmless.
+        return PlainTextResponse("no such action", status_code=404)
 
     if action in ("keep", "drop"):
         await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")
@@ -399,7 +413,7 @@ async def set_block_thread(block_id: str, request: Request) -> Response:
 @router.post("/blocks/{block_id}/cancel", response_class=HTMLResponse)
 async def cancel_block(block_id: str, request: Request) -> Response:
     """Stop a run that is no longer worth waiting for. The block stays, saying it was cancelled."""
-    block_runs.cancel(block_id)
+    await block_runs.cancel(store, block_id)
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     return RedirectResponse("/", status_code=303)

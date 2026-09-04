@@ -44,7 +44,7 @@ _HEARTBEAT = "event: heartbeat\ndata: checked\n\n"
 
 
 async def board_events() -> AsyncIterator[str]:
-    """The rendered board whenever it changes, and a comment when it does not.
+    """The rendered board whenever it changes, and a heartbeat when it does not.
 
     The heartbeat is not decoration. Without a write, a server never learns that the browser went
     away, and this generator would poll the filesystem for a window that closed an hour ago; and

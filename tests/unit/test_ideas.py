@@ -342,3 +342,23 @@ async def test_a_generated_summary_never_overwrites_one_a_human_wrote(
     stored = await desk.idea(idea.id)
     assert stored is not None
     assert stored.summary == "what I actually meant"
+
+
+@pytest.mark.unit
+async def test_an_idea_action_without_the_card_field_lands_in_the_inbox(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Replacing the whole branch with `True` left the suite green: no test posted without the
+    field and asserted where it ended up, so both directions of the same choice were unasserted.
+    """
+    await blocks.submit(desk, "/idea a thought", [])
+    (idea,) = await desk.ideas()
+
+    status, location = await _card_post(f"/ideas/{idea.id}/keep", {})
+    assert status == 303
+    assert location == "/ideas"
+
+    status, html = await _card_post(f"/ideas/{idea.id}/drop", {}, htmx=True)
+    assert status == 200
+    # The inbox fragment, not the block column.
+    assert "Idea recorded" not in html

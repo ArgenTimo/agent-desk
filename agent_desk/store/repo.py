@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import event, text
+from sqlalchemy import bindparam, event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from ulid import ULID
 
@@ -328,6 +328,24 @@ class Store:
             )
             return [Thread(**row._mapping) for row in rows]
 
+    async def threads_of(self, thread_ids: set[str]) -> list[Thread]:
+        """The threads these blocks belong to, whether or not they are still open.
+
+        `open_threads` is bounded, and a block older than that bound still has to be able to show
+        the subject it is in — and to be moved back into it.
+        """
+        if not thread_ids:
+            return []
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, subject, created_at, closed_at FROM thread "
+                    "WHERE id IN :ids ORDER BY created_at DESC"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": sorted(thread_ids)},
+            )
+            return [Thread(**row._mapping) for row in rows]
+
     async def rename_thread(self, thread_id: str, subject: str) -> None:
         async with self.engine.begin() as conn:
             await conn.execute(
@@ -376,8 +394,8 @@ class Store:
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    "UPDATE block SET state = 'running', error = NULL, finished_at = NULL "
-                    "WHERE id = :id"
+                    "UPDATE block SET state = 'running', answer = NULL, error = NULL, "
+                    "finished_at = NULL WHERE id = :id"
                 ),
                 {"id": block_id},
             )

@@ -37,7 +37,14 @@
   {# The card of docs/05-ideas.md. Keep or discard, one click, and never a second question. #}
   {% set idea = ideas[block.id] %}
   <div class="card">
-    <p class="recorded">Idea recorded. <span class="summary">{{ idea.summary }}</span>. Keep it?</p>
+    <p class="recorded">Idea recorded. Keep it?</p>
+    {# The summary is editable here, not only in the inbox: docs/04's action table gives an idea
+       block `keep · discard · edit summary`, and docs/05 draws the card with all three. #}
+    <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
+          hx-post="/ideas/{{ idea.id }}/summary" hx-target="#blocks">
+      <input type="hidden" name="from" value="card">
+      <input name="summary" value="{{ idea.summary }}" aria-label="the one-line summary">
+    </form>
     <p class="verbatim">{{ idea.text }}</p>
     <footer class="actions">
       {% if idea.state == "new" %}

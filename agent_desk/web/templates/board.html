@@ -94,6 +94,11 @@
   .answer, .failure { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .failure { color: var(--flag); }
   .caret { color: var(--busy); }
+  .card .rename input {
+    width: 100%; font: inherit; color: var(--fg); background: var(--bg);
+    border: none; border-bottom: 1px dotted var(--line); padding: 1px 0; margin: 4px 0;
+  }
+  .card .rename input:focus { outline: none; border-bottom-color: var(--fg); }
   .block footer { margin-top: 6px; }
   .block button {
     font: inherit; color: var(--dim); background: none; cursor: pointer;

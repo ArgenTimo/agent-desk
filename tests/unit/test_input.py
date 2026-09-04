@@ -169,7 +169,7 @@ async def test_cancelling_a_run_leaves_a_block_that_says_it_was_cancelled(
 ) -> None:
     block = await blocks.submit(desk, "PLEASE_HANG forever", [])
     await asyncio.sleep(0.3)
-    assert blocks.cancel(block.id)
+    assert await blocks.cancel(desk, block.id)
 
     for _ in range(50):
         if await _state(desk, block.id) == "cancelled":
@@ -404,7 +404,7 @@ async def test_one_question_going_wrong_does_not_take_the_others_with_it(
     async def explode() -> None:
         raise RuntimeError("a run that raises where nobody expected one")
 
-    blocks.runs.start("a-broken-run", explode())
+    blocks.runs.start("a-broken-run", explode)
     await asyncio.sleep(0.3)
 
     # The group is still standing and the other question is still being answered.
@@ -452,7 +452,7 @@ async def test_a_block_never_has_two_runs(desk: Store, fake_claude: pathlib.Path
 
     assert len(blocks.runs) == 1
     assert first.cancelled() or first.done()
-    assert blocks.cancel(block.id) is True
+    assert await blocks.cancel(desk, block.id) is True
 
 
 @pytest.mark.unit
@@ -512,3 +512,112 @@ async def test_every_write_route_answers_a_browser_as_well_as_htmx(
         status, html, _ = await _post(path, fields, htmx=True)
         assert status == 200, path
         assert "<article" in html or "nothing asked yet" in html, path
+
+
+# --- what the second confirmation round found ---------------------------------------------------
+@pytest.mark.unit
+async def test_a_run_cancelled_before_it_starts_still_leaves_a_settled_block(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """A task cancelled before its first step never enters the coroutine, so the shielded write
+    inside it never happened — and the block sat `queued` for ever, with nothing behind it, retry
+    offered only for settled blocks, and the crash rule deliberately leaving `queued` alone.
+    """
+    block = await blocks.submit(desk, "PLEASE_HANG and be cancelled at once", [])
+    assert await blocks.cancel(desk, block.id)
+
+    settled = await desk.block(block.id)
+    assert settled is not None
+    assert settled.state == "cancelled"
+
+
+@pytest.mark.unit
+async def test_a_retry_never_shows_a_cancelled_block_with_a_live_run(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """The old run's shielded `cancelled` used to land after the new run's `running`, so the
+    console showed a cancelled block with a subprocess behind it — and offered retry, which
+    cancelled the live run and repeated the cycle. Stopping before starting removes the race.
+    """
+    block = await blocks.submit(desk, "PLEASE_HANG one", [])
+    await asyncio.sleep(0.3)
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    await blocks.retry(desk, stored, [])
+    await asyncio.sleep(0.4)
+
+    after = await desk.block(block.id)
+    assert after is not None
+    assert after.state == "running", "the replacement run owns the block"
+    assert len(blocks.runs) == 1
+
+
+@pytest.mark.unit
+async def test_the_partial_answer_is_redacted_while_it_streams(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The console used to render a running answer verbatim and the identical finished answer
+    redacted. The scrub in the callback was the fix, and removing it left the suite green.
+    """
+    secret = "ghp_" + "v" * 36
+    binary = tmp_path / "leaky" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        "#!/bin/sh\ncat > /dev/null\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"the config had '
+        + secret
+        + " in it\"}]}}\\n'\nsleep 30\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+
+    block = await blocks.submit(desk, "what is in the config", [])
+    for _ in range(50):
+        if blocks.PARTIAL.get(block.id):
+            break
+        await asyncio.sleep(0.1)
+
+    assert secret not in blocks.PARTIAL[block.id]
+    assert "[redacted]" in blocks.PARTIAL[block.id]
+    assert secret not in await routes.render_blocks()
+
+
+@pytest.mark.unit
+async def test_a_block_whose_thread_fell_off_the_list_still_shows_it(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """One open subject is created per question, so twenty-one is ordinary use.
+
+    Past the bound the select rendered with nothing selected, a browser displayed the first entry
+    — the newest subject — as the block's thread, and the ↵ button posted that: the control for
+    correcting a misfile made one, and logged it as a human decision.
+    """
+    first = await blocks.submit(desk, "the oldest subject", [])
+    for _ in range(25):
+        await desk.create_thread("a later subject")
+
+    column = await routes.render_blocks()
+    thread = await desk.block(first.id)
+    assert thread is not None
+    assert f'value="{thread.thread_id}" selected' in column
+
+
+@pytest.mark.unit
+async def test_the_idea_card_carries_what_its_buttons_need(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Deleting the hidden field left the suite green while Keep navigated to the wrong page.
+
+    The route was tested by a test that posted the field by hand; nothing asserted that the card
+    that has to send it does.
+    """
+    await blocks.submit(desk, "/idea a thought", [])
+    card = await routes.render_blocks()
+
+    assert card.count('name="from" value="card"') >= 3, "keep, discard and the summary form"
+    assert 'action="/ideas/' in card
+    # docs/04's action table and docs/05's drawing both give the card an edit control.
+    assert 'name="summary"' in card

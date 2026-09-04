@@ -14,7 +14,8 @@ other five.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine, Sequence
+import contextlib
+from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,7 +62,7 @@ class Runs:
     def attach(self, group: asyncio.TaskGroup | None) -> None:
         self._group = group
 
-    def start(self, block_id: str, coroutine: Coroutine[object, object, None]) -> None:
+    def start(self, block_id: str, make: Callable[[], Coroutine[object, object, None]]) -> None:
         """Start one run, replacing any run already in flight for the same block.
 
         Two things here are the difference between a console and a console that dies.
@@ -81,9 +82,14 @@ class Runs:
 
         previous = self._by_block.get(block_id)
         if previous is not None and not previous.done():
+            # A defensive net only: the callers below await `stop` first, because cancelling here
+            # and starting the replacement in the same breath is a race the old run wins half the
+            # time — its shielded `cancelled` write lands after the new run's `running`, and the
+            # console then shows a cancelled block with a live subprocess behind it.
+            log.warning("a run was replaced without being stopped first", block=block_id)
             previous.cancel()
 
-        task = self._group.create_task(self._contained(block_id, coroutine))
+        task = self._group.create_task(self._contained(block_id, make))
         self._by_block[block_id] = task
         task.add_done_callback(lambda done: self._forget(block_id, done))
 
@@ -93,9 +99,14 @@ class Runs:
             del self._by_block[block_id]
 
     @staticmethod
-    async def _contained(block_id: str, coroutine: Coroutine[object, object, None]) -> None:
+    async def _contained(
+        block_id: str, make: Callable[[], Coroutine[object, object, None]]
+    ) -> None:
+        # The run is built here rather than at the call site, so that a task cancelled before its
+        # first step leaves no coroutine that was created and never awaited. The block's own state
+        # is written by `cancel`, which is the only place that knows it happened.
         try:
-            await coroutine
+            await make()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -110,14 +121,26 @@ class Runs:
         task.cancel()
         return True
 
-    def cancel_all(self) -> None:
-        """Shutdown ends runs rather than waiting for them.
+    async def stop(self, block_id: str) -> bool:
+        """Cancel a run and wait for it to be gone before anything replaces it."""
+        task = self._by_block.get(block_id)
+        if task is None:
+            return False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return True
+
+    def cancel_all(self) -> list[str]:
+        """Shutdown ends runs rather than waiting for them, and says which it ended.
 
         A console that will not stop while three questions are in the air is the shutdown hang
         this project already fixed once, in a different disguise.
         """
+        stopped = list(self._by_block)
         for task in list(self._by_block.values()):
             task.cancel()
+        return stopped
 
     def __len__(self) -> int:
         return len(self._by_block)
@@ -210,7 +233,7 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
     # An idea block asks nothing further, so its subject is not a candidate for a later question
     # to be attached to — and an idea's summary makes a confusing thread title anyway.
     await store.close_thread(thread.id)
-    runs.start(f"summary:{idea.id}", _summarise(store, idea))
+    runs.start(f"summary:{idea.id}", lambda: _summarise(store, idea))
     return block
 
 
@@ -235,7 +258,7 @@ async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:
         return
 
     DRAFTING.add(idea.id)
-    runs.start(f"draft:{idea.id}:{kind}", _draft(store, idea, kind))
+    runs.start(f"draft:{idea.id}:{kind}", lambda: _draft(store, idea, kind))
 
 
 async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
@@ -277,7 +300,7 @@ async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
     )
     runs.start(
         block.id,
-        _classify_then_run(store, block, rows, classify=not forced_new),
+        lambda: _classify_then_run(store, block, rows, classify=not forced_new),
     )
     return block
 
@@ -332,6 +355,12 @@ async def _classify_and_answer(
             await store.move_block(block.id, chosen, set_by="classifier")
             await store.close_thread(block.thread_id)
             thread_id = chosen
+        else:
+            # It ran, and it chose a new subject. Leaving the block marked `human` would take that
+            # decision out of the denominator of the correction rate and make a later human
+            # override look like somebody re-correcting themselves — the classifier is wrong in
+            # both directions, and only one of them was being counted.
+            await store.move_block(block.id, block.thread_id, set_by="classifier")
 
     history = await _thread_history(store, thread_id, exclude=block.id)
     prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
@@ -357,9 +386,11 @@ async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) ->
 
 async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A failed block offers retry, and retrying re-runs the same input (docs/04)."""
+    await runs.stop(block.id)
     history = await _thread_history(store, block.thread_id, exclude=block.id)
     prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
-    runs.start(block.id, _run(store, block, prompt, _add_dirs([row.session for row in rows])))
+    add_dirs = _add_dirs([row.session for row in rows])
+    runs.start(block.id, lambda: _run(store, block, prompt, add_dirs))
 
 
 async def set_thread(
@@ -372,10 +403,13 @@ async def set_thread(
     only, never the text of the question. And the block re-runs, because a block corrected into
     the right thread was answered against the wrong one.
     """
-    if thread_id is not None and thread_id == block.thread_id:
-        # The select was submitted unchanged. Recording that as a human correction would spend a
-        # run, flip `thread_set_by` away from the classifier, and quietly corrupt the one number
-        # docs/09-roadmap.md says decides whether the classifier should exist.
+    alone = len(await store.blocks_in_thread(block.thread_id)) == 1
+    if (thread_id is None and alone) or thread_id == block.thread_id:
+        # Nothing to do, in both directions of the same control: the select was submitted
+        # unchanged, or a block that is already alone in its subject was asked to be split off
+        # again. Either would spend a headless run, flip `thread_set_by` away from the classifier
+        # and log a correction — quietly corrupting the one number docs/09-roadmap.md says decides
+        # whether the classifier should exist.
         return
 
     target = thread_id
@@ -397,6 +431,16 @@ async def set_thread(
         await retry(store, moved, rows)
 
 
-def cancel(block_id: str) -> bool:
-    """Ask a run to stop. The block records itself as cancelled from inside its own task."""
-    return runs.cancel(block_id)
+async def cancel(store: Store, block_id: str) -> bool:
+    """Stop a run, and make sure the block says so.
+
+    The block used to record itself from inside its own task, which is true only once that task
+    has taken a step. A task cancelled before its first one never enters the coroutine at all, so
+    the write never happened and the block sat `queued` for ever — no run behind it, `retry`
+    offered only for settled blocks, and the crash rule deliberately leaving `queued` alone.
+    """
+    stopped = await runs.stop(block_id)
+    block = await store.block(block_id)
+    if block is not None and block.state in ("queued", "running"):
+        await store.cancel_block(block_id)
+    return stopped

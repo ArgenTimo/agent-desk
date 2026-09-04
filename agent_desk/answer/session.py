@@ -45,15 +45,34 @@ DENIED_TOOLS = ("Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch"
 # --settings still apply)". So the one process on this machine that reads observed repositories
 # with `Read` pre-approved, over every directory `--add-dir` hands it, was the one process those
 # deny rules did not reach. `--settings` reaches it.
+#
+# **The leading `//` is the whole point.** A pattern without it is anchored at the run's working
+# directory, and an observed repository does not arrive that way — it arrives through `--add-dir`.
+# Measured: with `Read(**/.env)`, a canary inside an added directory came back verbatim and the
+# run reported no permission denial at all; the same file inside the run's own cwd was refused.
+# The rule was real and it was covering the one place the danger was not.
+#
+# Both spellings of a home path are listed, the way `.claude/settings.json` lists them, because
+# whether `~` expands inside `--settings` is not something this program should be betting on.
 DENIED_PATHS = (
-    "Read(**/.env)",
-    "Read(**/.env.*)",
-    "Read(**/*.pem)",
-    "Read(**/id_rsa*)",
-    "Read(~/.claude/.credentials.json)",
-    "Read(~/.claude/sessions/*.key)",
+    "Read(//**/.env)",
+    "Read(//**/.env.*)",
+    "Read(//**/.envrc)",
+    "Read(//**/*.pem)",
+    "Read(//**/id_rsa*)",
+    "Read(//**/.netrc)",
+    "Read(//**/.git-credentials)",
+    "Read(//**/.npmrc)",
+    "Read(//**/.pypirc)",
+    "Read(//**/.docker/config.json)",
+    "Read(//**/.aws/**)",
+    "Read(//**/.ssh/**)",
+    "Read(//**/.claude/.credentials.json)",
+    "Read(//**/.claude/sessions/*.key)",
     "Read(~/.aws/**)",
     "Read(~/.ssh/**)",
+    "Read(~/.claude/.credentials.json)",
+    "Read(~/.claude/sessions/*.key)",
 )
 
 

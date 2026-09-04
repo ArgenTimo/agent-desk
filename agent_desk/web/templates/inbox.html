@@ -60,8 +60,15 @@
   <a href="/">← the board</a>
 </header>
 
+<p id="no-htmx" hidden>htmx is missing from agent_desk/web/static/, so this list does not refresh
+  by itself and every action reloads the page. Everything works; reload to see a draft arrive.</p>
+<script>if (!window.htmx) document.getElementById('no-htmx').hidden = false;</script>
+
 {# Drafts are written by a run, so the list refreshes while one is in flight. #}
-<div id="inbox" hx-get="/ideas/list" hx-trigger="every 3s" hx-swap="innerHTML">{{ inbox|safe }}</div>
+{# The poll is for a draft arriving, and it must not take the line somebody is typing with it:
+   the swap is skipped while the focus is inside this list or a selection is open. #}
+<div id="inbox" hx-get="/ideas/list" hx-trigger="every 3s" hx-swap="innerHTML"
+     hx-on::before-swap="if (this.contains(document.activeElement) || !document.getSelection().isCollapsed) event.preventDefault()">{{ inbox|safe }}</div>
 
 <script src="/static/htmx.min.js"></script>
 </body>

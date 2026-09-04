@@ -32,7 +32,9 @@ from agent_desk.store.repo import Thread
 # and so did "Error: rate limited after 2 retries" — the model said new, twice, and was overruled
 # by its own prose. Attaching wrongly is the expensive mistake, so anything that is not exactly a
 # choice is a new subject.
-_CHOICE = re.compile(r"\A(\d{1,2}|new)\Z", re.IGNORECASE)
+# `[0-9]` rather than `\d`, which in Python also matches Arabic-Indic and other Unicode digits —
+# `int()` accepts those, so `١` would have selected thread one.
+_CHOICE = re.compile(r"\A([0-9]{1,2}|new)\Z", re.IGNORECASE)
 
 
 def prompt(text: str, threads: Sequence[Thread]) -> str:
@@ -59,8 +61,13 @@ def read_choice(reply: str, threads: Sequence[Thread]) -> str | None:
     sentence — is a decision this module did not understand, and an unparsed decision is a new
     thread rather than a guess at what the model meant.
     """
-    first = reply.strip().split(maxsplit=1)[0] if reply.strip() else ""
-    match = _CHOICE.match(first.strip(".,:;!?\"'"))
+    words = reply.strip().split()
+    if len(words) != 1:
+        # One token, and the whole reply. "2 files mention this, so it is new" begins with a digit
+        # and ends with the model's actual answer; reading only the first word overruled it just
+        # as thoroughly as searching the whole text did.
+        return None
+    match = _CHOICE.match(words[0].strip(".,:;!?\"'"))
     if match is None or match.group(1).lower() == "new":
         return None
     index = int(match.group(1))

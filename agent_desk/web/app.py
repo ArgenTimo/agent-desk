@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -44,7 +44,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 yield
             finally:
-                blocks.runs.cancel_all()
+                # Every block still in flight is stopped and says so. Without the second half a
+                # run cancelled before its first step leaves a block `queued` with nothing behind
+                # it, which the crash rule deliberately does not clean up on the next start.
+                for block_id in blocks.runs.cancel_all():
+                    with suppress(Exception):
+                        await blocks.cancel(routes.store, block_id)
                 blocks.runs.attach(None)
     finally:
         await routes.store.close()
