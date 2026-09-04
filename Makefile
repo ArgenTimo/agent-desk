@@ -22,8 +22,11 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
+# The keyring lookup deadlocks on a headless machine — three separate agents hit it in a row,
+# each hanging in futex_wait with nothing installed. Nothing here needs a credential store: this
+# project has no private index.
 install: ## Dependencies, dev group included
-	$(POETRY) install --with dev
+	PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring $(POETRY) install --with dev
 
 lint: ## ruff
 	$(POETRY) run ruff check agent_desk tests scripts

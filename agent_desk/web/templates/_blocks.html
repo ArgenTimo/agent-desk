@@ -29,7 +29,10 @@
       <button type="submit" title="move it">↵</button>
     </form>
     {% else %}
-    <span class="thread"><span class="set-by">{{ block.thread_set_by }}</span></span>
+    <span class="thread">
+      <span class="set-by" title="who chose this thread">{{ block.thread_set_by }}</span>
+      <span class="dim">{{ threads_by_id[block.thread_id].subject if block.thread_id in threads_by_id else "—" }}</span>
+    </span>
     {% endif %}
   </header>
 

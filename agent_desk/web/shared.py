@@ -116,6 +116,8 @@ def _store(request: Request) -> Store | None:
 async def _viewer(request: Request, token: str) -> tuple[Store, Viewer] | None:
     store = _store(request)
     if store is None:
+        # Reachable at every start and every stop, and covered by a test — the two servers come up
+        # together, so a viewer can arrive before the console has opened the store.
         return None
     try:
         viewer = await store.viewer_for(token)

@@ -364,3 +364,73 @@ async def test_a_noisy_run_is_not_reported_as_a_silent_one(
     assert answered is not None
     assert answered.state == "answered"
     assert answered.answer == "answered anyway"
+
+
+@pytest.mark.unit
+async def test_a_failed_run_says_more_than_its_exit_code(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """Discarding stderr made every failure read "the run exited 3" and nothing else — which is a
+    console telling you something went wrong and refusing to say what."""
+    binary = tmp_path / "complaining" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        "#!/bin/sh\ncat > /dev/null\necho 'error: model provider returned 429' >&2\nexit 3\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert failed.state == "failed"
+    assert "exited 3" in (failed.error or "")
+    assert "429" in (failed.error or "")
+
+
+@pytest.mark.unit
+async def test_what_a_run_complains_about_is_scrubbed_too(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """A diagnostic line can quote anything the tool that printed it decided to print."""
+    secret = "ghp_" + "k" * 36
+    binary = tmp_path / "leaky-stderr" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(f"#!/bin/sh\ncat > /dev/null\necho 'auth failed for {secret}' >&2\nexit 4\n")
+    binary.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert secret not in (failed.error or "")
+
+
+@pytest.mark.unit
+async def test_a_noisy_run_still_does_not_deadlock(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """The reason stderr was discarded in the first place: a pipe nobody reads fills up."""
+    binary = tmp_path / "very-noisy" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        "#!/bin/sh\ncat > /dev/null\n"
+        "i=0; while [ $i -lt 8000 ]; do printf 'chatter %s\\n' \"$i\" >&2; i=$((i+1)); done\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"answered"}]}}\\n\'\n'
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    answered = await store.block(block.id)
+    assert answered is not None
+    assert answered.state == "answered"
+    assert answered.answer == "answered"

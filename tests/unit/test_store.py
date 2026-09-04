@@ -421,3 +421,20 @@ async def test_every_column_the_documents_call_redacted_is_redacted(store: Store
     await store.create_draft(idea_id=idea.id, kind="proposal", body=f"it quotes {secret}")
     (draft,) = await store.drafts_for(idea.id)
     assert secret not in draft.body
+
+
+@pytest.mark.unit
+def test_the_splitter_knows_every_way_sqlite_quotes_a_name() -> None:
+    """A `;` inside any of the four quotings is not the end of a statement."""
+    from agent_desk.store.repo import _statements
+
+    parsed = _statements(
+        """
+        CREATE TABLE "odd;name" (a TEXT DEFAULT 'x;y', `b;c` TEXT, [d;e] TEXT);
+        INSERT INTO "odd;name" (a) VALUES ('p;q');
+        """
+    )
+    assert len(parsed) == 2
+    assert parsed[0].startswith('CREATE TABLE "odd;name"')
+    assert "[d;e]" in parsed[0]
+    assert "`b;c`" in parsed[0]

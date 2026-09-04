@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from pathlib import Path
 
 from agent_desk.config import settings
+from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Block, Store
 
 # What a run may do: read. Nothing on this list can change a byte anywhere.
@@ -83,6 +84,28 @@ _REAP_SECONDS = 5.0
 
 class AnswerFailed(RuntimeError):
     """A run that did not produce an answer, with a reason a human can act on."""
+
+
+class _Tail:
+    """The last little of a run's stderr, kept so a failure can say more than its exit code.
+
+    Bounded, because the point of reading this stream is that nobody blocks on it. Scrubbed on the
+    way out, because a diagnostic line can quote a path, an environment variable or whatever the
+    tool it came from decided to print (docs/07-security.md).
+    """
+
+    LIMIT = 2000
+
+    def __init__(self) -> None:
+        self._text = ""
+
+    async def drain(self, stream: asyncio.StreamReader) -> None:
+        while chunk := await stream.read(4096):
+            self._text = (self._text + chunk.decode(errors="replace"))[-self.LIMIT :]
+
+    def summary(self) -> str:
+        last = next((line for line in reversed(self._text.splitlines()) if line.strip()), "")
+        return f" — {scrub(last.strip())[:200]}" if last.strip() else ""
 
 
 def _kill_run(process: asyncio.subprocess.Process) -> None:
@@ -163,11 +186,10 @@ async def stream_answer(
             *argv(add_dirs=add_dirs),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            # Not a PIPE. Nothing here reads it, and a run that writes a megabyte of MCP chatter
-            # to stderr would block on it while this program blocks on stdout — with the timeout
-            # breaking the tie and storing "no answer" for a run that had one. That is a status
-            # inferred from a silence this program caused itself.
-            stderr=asyncio.subprocess.DEVNULL,
+            # A pipe that is actually drained, into a bounded buffer. Discarding it made every
+            # failure read "the run exited 3" and nothing else; leaving it undrained made a noisy
+            # run deadlock until the timeout and then lie about being silent.
+            stderr=asyncio.subprocess.PIPE,
             # Its own process group, so the whole run can be ended in one call — see _kill_run.
             start_new_session=True,
         )
@@ -178,10 +200,15 @@ async def stream_answer(
 
     said_something = False
     result_text = ""
+    complaints = _Tail()
     try:
         stdin, stdout = process.stdin, process.stdout
         if stdin is None or stdout is None:  # pragma: no cover - both pipes were requested
             raise AnswerFailed("the answer engine started without pipes")
+
+        if process.stderr is not None:
+            drain = asyncio.create_task(complaints.drain(process.stderr))
+            drain.add_done_callback(lambda task: task.exception())
 
         # docs/07-security.md: transcript text never goes into a subprocess argument, and this
         # prompt is made of transcript tails. /proc/<pid>/cmdline is world-readable; stdin is not.
@@ -217,7 +244,7 @@ async def stream_answer(
 
             code = await process.wait()
             if code != 0 and not said_something:
-                raise AnswerFailed(f"the run exited {code}")
+                raise AnswerFailed(f"the run exited {code}{complaints.summary()}")
             if not said_something and result_text:
                 # Nothing streamed, but the run summarised itself. Better than an empty answer,
                 # and it is the same text.

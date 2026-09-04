@@ -150,8 +150,10 @@ def _statements(script: str) -> list[str]:
             if character == quote:
                 quote = None
             index += 1
-        elif character in "'\"":
-            quote = character
+        elif character in "'\"`[":
+            # SQLite accepts four quotings, and a `;` inside any of them is not the end of a
+            # statement: '…', "…", `…` and [ … ].
+            quote = "]" if character == "[" else character
             current.append(character)
             index += 1
         elif pair == "--":

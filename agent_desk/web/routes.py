@@ -42,6 +42,10 @@ router = APIRouter()
 
 log = structlog.get_logger("agent_desk.web")
 
+# A minted token, waiting for the one render that shows it. Memory only and popped on read: the
+# store keeps a hash, and this keeps nothing a second time.
+JUST_MINTED: dict[str, str] = {}
+
 # One process, one SQLite file (docs/adr/0003). The instance is opened by the application's
 # lifespan and replaced wholesale by a test that wants its own.
 store = Store(settings.db_path)
@@ -138,6 +142,7 @@ async def render_blocks() -> str:
     return env.get_template("_blocks.html").render(
         blocks=rows,
         open_threads=open_threads + missing,
+        threads_by_id={thread.id: thread for thread in open_threads + missing},
         ideas=ideas,
         partial=block_runs.PARTIAL,
     )
@@ -161,7 +166,9 @@ async def render_inbox() -> str:
     ideas = await store.ideas()
     drafts = {idea.id: await store.drafts_for(idea.id) for idea in ideas}
     return env.get_template("_inbox.html").render(
-        ideas=ideas, drafts=drafts, drafting=block_runs.DRAFTING
+        ideas=ideas,
+        drafts=drafts,
+        drafting={idea_id for idea_id, _ in block_runs.DRAFTING},
     )
 
 
@@ -212,19 +219,21 @@ async def _form(request: Request) -> dict[str, str]:
 
 
 @router.get("/viewers", response_class=HTMLResponse)
-async def viewers_page() -> HTMLResponse:
+async def viewers_page(shown: str = "") -> HTMLResponse:
     """Who may open the shared ideas list, and until when (docs/07-security.md, Phase 4).
 
-    Owner-only, like everything else on this bind, and it takes no parameters. It used to accept a
-    `minted` token in the query string — the shape the redirect left behind after the token moved
-    into the response body. Nothing generated that URL any more, and it still rendered a token
-    handed to it in a URL, on the bind that keeps an access log.
+    Owner-only, like everything else on this bind. `shown` is a viewer id, not a token: the token
+    itself is handed over once, out of a slot in memory that this render empties. It never appears
+    in a URL, which is where browser history, the referer of the next request and any log that
+    records a path would all have kept it.
     """
+    token = JUST_MINTED.pop(shown, "") if shown else ""
+    viewers = await store.viewers()
     return HTMLResponse(
         env.get_template("viewers.html").render(
-            viewers=await store.viewers(),
-            minted="",
-            minted_for="",
+            viewers=viewers,
+            minted=token,
+            minted_for=next((v.name for v in viewers if v.id == shown), ""),
             share_host=settings.share_host,
             share_port=settings.share_port,
         )
@@ -238,20 +247,14 @@ async def mint_viewer(request: Request) -> Response:
     if not name:
         return RedirectResponse("/viewers", status_code=303)
 
-    _, token = await store.create_viewer(name)
+    viewer, token = await store.create_viewer(name)
     log.info("viewer link minted", viewer=name)
-    # Rendered, not redirected. A token in a query string is a token in browser history, in the
-    # referer of the next request, and in any log that records a path — and this one is somebody's
-    # whole identity (docs/07-security.md).
-    return HTMLResponse(
-        env.get_template("viewers.html").render(
-            viewers=await store.viewers(),
-            minted=token,
-            minted_for=name,
-            share_host=settings.share_host,
-            share_port=settings.share_port,
-        )
-    )
+    # The token goes into a one-shot slot in memory and the browser is redirected to an id, not to
+    # a secret. Rendering it directly kept the token out of the URL but lost post/redirect/get, so
+    # a refresh minted a second credential for the same person — two links to revoke instead of
+    # one. A viewer id in a query string is not a secret; the token never appears in one.
+    JUST_MINTED[viewer.id] = token
+    return RedirectResponse(f"/viewers?shown={viewer.id}", status_code=303)
 
 
 @router.post("/viewers/{viewer_id}/revoke", response_class=HTMLResponse)
@@ -365,6 +368,17 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
         # The segment is not echoed back: reflecting an unvalidated path into a response is a
         # habit worth not having, even where the content type makes it harmless.
         return PlainTextResponse("no such action", status_code=404)
+
+    # The templates hide a button that does not apply; the route has to mean it. Keeping an idea
+    # that was already promoted quietly walked it backwards through its own four states.
+    allowed = {
+        "new": {"keep", "drop", "summary"},
+        "kept": {"drop", "summary", *DRAFT_KINDS},
+        "promoted": {"summary", *DRAFT_KINDS},
+        "dropped": {"keep", "summary"},
+    }[idea.state]
+    if action not in allowed:
+        return PlainTextResponse(f"an idea that is {idea.state} cannot do that", status_code=409)
 
     if action in ("keep", "drop"):
         await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")

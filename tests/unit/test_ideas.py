@@ -272,9 +272,14 @@ async def test_the_summary_can_be_edited_by_hand(desk: Store, fake_claude: pathl
 
 @pytest.mark.unit
 async def test_asking_for_a_draft_promotes_the_idea(desk: Store, fake_claude: pathlib.Path) -> None:
-    """`promoted` is one of the four states, and the second number docs/09 says is measured."""
+    """`promoted` is one of the four states, and the second number docs/09 says is measured.
+
+    A draft is offered to a *kept* idea: the inbox shows those buttons only after Keep, and the
+    route now agrees with the template rather than accepting a walk backwards through the states.
+    """
     await blocks.submit(desk, "/idea cache the probes", [])
     (idea,) = await desk.ideas()
+    await _card_post(f"/ideas/{idea.id}/keep", {"from": "card"})
 
     await _card_post(f"/ideas/{idea.id}/paste", {})
 
@@ -362,3 +367,29 @@ async def test_an_idea_action_without_the_card_field_lands_in_the_inbox(
     assert status == 200
     # The inbox fragment, not the block column.
     assert "Idea recorded" not in html
+
+
+@pytest.mark.unit
+async def test_an_idea_cannot_walk_backwards_through_its_states(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """The templates hide a button that does not apply; the route has to mean it.
+
+    Keeping an already promoted idea quietly reverted it, and a draft could be asked of an idea
+    nobody had kept — four states are only four states if something enforces them.
+    """
+    await blocks.submit(desk, "/idea a thought", [])
+    (idea,) = await desk.ideas()
+    await _card_post(f"/ideas/{idea.id}/keep", {"from": "card"})
+    await _card_post(f"/ideas/{idea.id}/paste", {})
+    assert (await desk.idea(idea.id)).state == "promoted"  # type: ignore[union-attr]
+
+    status, _ = await _card_post(f"/ideas/{idea.id}/keep", {"from": "card"})
+    assert status == 409
+    assert (await desk.idea(idea.id)).state == "promoted"  # type: ignore[union-attr]
+
+    await blocks.submit(desk, "/idea another thought", [])
+    fresh = (await desk.ideas())[0]
+    status, _ = await _card_post(f"/ideas/{fresh.id}/proposal", {})
+    assert status == 409, "a draft is for an idea somebody kept"
+    assert await desk.drafts_for(fresh.id) == []

@@ -38,7 +38,7 @@ PARTIAL: dict[str, str] = {}
 
 # Ideas whose draft is being written, so the inbox can say "drafting" instead of showing a click
 # that appeared to do nothing. Memory only, for the same reason as PARTIAL.
-DRAFTING: set[str] = set()
+DRAFTING: set[tuple[str, str]] = set()
 
 # Prefixes for when you already know what you want (docs/06-console.md). `/idea` skips
 # classification entirely; `/new` forces a new thread, which is what every question gets until the
@@ -257,7 +257,9 @@ async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:
         await store.create_draft(idea_id=idea.id, kind=kind, body=inbox.paste_body(idea))
         return
 
-    DRAFTING.add(idea.id)
+    # Keyed by idea *and* kind: a proposal and a ticket in flight together used to share one flag,
+    # so the first to finish told the inbox the second was done too.
+    DRAFTING.add((idea.id, kind))
     runs.start(f"draft:{idea.id}:{kind}", lambda: _draft(store, idea, kind))
 
 
@@ -274,7 +276,7 @@ async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
             body=f"The draft could not be written: {exc}\n\nThe idea itself is unharmed above.",
         )
     finally:
-        DRAFTING.discard(idea.id)
+        DRAFTING.discard((idea.id, kind))
 
 
 async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
@@ -353,7 +355,11 @@ async def _classify_and_answer(
         chosen = await classifier.classify(block.input, open_threads)
         if chosen is not None:
             await store.move_block(block.id, chosen, set_by="classifier")
-            await store.close_thread(block.thread_id)
+            # Only if it is now empty. Two questions submitted together each open a subject, and
+            # each classifier can attach to the other's — closing unconditionally left both blocks
+            # sitting in closed threads that no control could reach.
+            if not await store.blocks_in_thread(block.thread_id):
+                await store.close_thread(block.thread_id)
             thread_id = chosen
         else:
             # It ran, and it chose a new subject. Leaving the block marked `human` would take that
