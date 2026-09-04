@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -142,7 +143,7 @@ def test_the_session_that_may_be_waiting_sorts_above_the_one_that_is_working(hom
     assert "guess" in html
     # The class the stylesheet colours and the script counts for the window title. It lives in
     # three files and nothing else would notice them drifting apart.
-    assert "row flagged" in html
+    assert re.search(r'class="row [a-z]+ flagged"', html)
 
 
 @pytest.mark.unit
@@ -155,7 +156,7 @@ def test_a_session_with_no_transcript_says_so_rather_than_guessing(home: Home) -
 
 @pytest.mark.unit
 def test_an_empty_registry_is_an_empty_board(home: Home) -> None:
-    assert "no live sessions" in routes.render_board()
+    assert "No live sessions" in routes.render_board()
 
 
 @pytest.mark.unit
@@ -164,7 +165,7 @@ def test_a_dead_entry_leaves_the_board_empty_rather_than_showing_a_ghost(home: H
     (home.root / "sessions" / f"{entry['pid']}.json").write_text(
         json.dumps({**entry, "procStart": "1"})
     )
-    assert "no live sessions" in routes.render_board()
+    assert "No live sessions" in routes.render_board()
 
 
 @pytest.mark.unit
@@ -230,7 +231,7 @@ async def wired(
 @pytest.mark.unit
 async def test_the_page_serves_the_board_and_opens_one_stream(home: Home, wired: Store) -> None:
     body = (await routes.page()).body.decode()
-    assert "no live sessions" in body
+    assert "No live sessions" in body
     assert "new EventSource('/events')" in body
 
 
@@ -353,3 +354,50 @@ def test_a_transcript_that_cannot_be_read_leaves_the_row_marked(home: Home) -> N
 
     html = routes.render_board()
     assert "registry facts only" in html
+
+
+# --- the console as a thing a person uses -------------------------------------------------------
+@pytest.mark.unit
+async def test_the_console_is_reachable_without_a_mouse(home: Home, wired: Store) -> None:
+    """Three affordances that are easy to leave out and expensive to add back.
+
+    A session row is a native `<details>`, so opening one works from the keyboard and is announced
+    by a screen reader — it used to be a `div` with a click handler, which is neither. Every input
+    has a label. And the field can be reached from anywhere with one key, because this window
+    hovers over a terminal and reaching for the mouse is what it exists to save.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    body = (await routes.page()).body.decode()
+
+    assert '<details class="row' in body
+    assert "<summary>" in body
+    assert 'for="ask-text"' in body and 'id="ask-text"' in body
+    assert "event.key === '/'" in body
+    # And the row still works with no JavaScript at all: the disclosure is native and the tail has
+    # a plain link inside it until a script replaces it.
+    assert 'href="/sessions/aaaaaaaa-0000-4000-8000-000000000001/tail"' in body
+
+
+@pytest.mark.unit
+async def test_the_styles_are_one_file_rather_than_four_copies(home: Home, wired: Store) -> None:
+    """They were inline in four pages, which is how the four drifted apart."""
+    from agent_desk.web.routes import TEMPLATES
+
+    stylesheet = TEMPLATES.parent / "static" / "console.css"
+    assert stylesheet.is_file()
+
+    for page in ("board.html", "inbox.html", "viewers.html"):
+        markup = (TEMPLATES / page).read_text()
+        assert '<link rel="stylesheet" href="/static/console.css">' in markup, page
+        assert "<style>" not in markup, f"{page} still carries its own copy"
+
+
+@pytest.mark.unit
+async def test_an_empty_console_says_what_to_do_next(home: Home, wired: Store) -> None:
+    """An empty state that only says "empty" makes a first run feel broken."""
+    body = (await routes.page()).body.decode()
+
+    assert "No live sessions" in body
+    assert "claude" in body
+    assert "Nothing asked yet" in body
+    assert "/idea" in body

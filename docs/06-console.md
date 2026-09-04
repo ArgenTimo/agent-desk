@@ -42,9 +42,16 @@ that quietly froze looks exactly like a console on which nothing is happening, a
 same failure as a guessed status: something inferred from silence, rendered as a fact
 ([03-session-observation.md](03-session-observation.md)).
 
-A row expands to the tail of that session's transcript. That is the whole drill-down: v1 has no
-transcript viewer, no diff view and no tool-call browser. The board answers "should I go look",
-and the place to look is the terminal that is already open.
+A row expands to the tail of that session's transcript, and it scrolls inside itself rather than
+pushing the board off the screen. That is the whole drill-down: v1 has no transcript viewer, no
+diff view and no tool-call browser. The board answers "should I go look", and the place to look is
+the terminal that is already open.
+
+The row is a native disclosure, which is what makes it reachable from the keyboard, announced by a
+screen reader, and openable with no JavaScript at all — the tail then loads through a plain link
+instead of a fetch. `/` puts the cursor in the input field from anywhere and Escape closes the
+write-path panel, because this window hovers over a terminal and reaching for the mouse is the
+thing it exists to save.
 
 ## The input and the blocks
 

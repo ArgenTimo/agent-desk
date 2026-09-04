@@ -5,214 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-desk</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c1b19'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23e0a250'/%3E%3C/svg%3E">
-<style>
-  :root {
-    --bg: #f7f7f5; --fg: #1c1b19; --dim: #6b6862; --line: #e0ddd6;
-    --card: #ffffff; --busy: #b06500; --idle: #4a7a3f; --shell: #3f6a7a;
-    --flag: #a33; --warn: #8a5a00; --warn-bg: #fdf3e0;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #171614; --fg: #e8e5df; --dim: #8d8880; --line: #2c2a27;
-      --card: #1e1d1a; --busy: #e0a250; --idle: #86c06f; --shell: #6fb0c0;
-      --flag: #e07a7a; --warn: #e0b060; --warn-bg: #2a2313;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 10px; background: var(--bg); color: var(--fg);
-    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  #bar {
-    display: flex; gap: 8px; align-items: baseline; margin: 0 0 10px; color: var(--dim);
-  }
-  .brand { color: var(--fg); font-weight: 600; }
-  #stream-state { margin-left: auto; }
-  #stream-state.lost { color: var(--flag); }
-  #no-htmx {
-    margin: 0 0 10px; padding: 6px 8px; border-left: 3px solid var(--warn);
-    background: var(--warn-bg); color: var(--warn);
-  }
-  body.stale .row, body.stale .notices { opacity: 0.5; }
-  .notices { margin: 0 0 10px; }
-  .notice {
-    margin: 0 0 4px; padding: 6px 8px; border-left: 3px solid var(--warn);
-    background: var(--warn-bg); color: var(--warn);
-  }
-  .empty { color: var(--dim); padding: 20px 8px; }
-  .row {
-    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
-    padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
-  }
-  .row.flagged { border-left-color: var(--flag); }
-  header { display: flex; gap: 6px; align-items: baseline; color: var(--dim); }
-  .project { color: var(--fg); font-weight: 600; }
-  .name, .kind { margin-left: auto; font-size: 11px; }
-  .headline { display: flex; gap: 10px; align-items: baseline; margin-top: 3px; }
-  .status { text-transform: lowercase; min-width: 5ch; }
-  .status.busy { color: var(--busy); }
-  .status.idle { color: var(--idle); }
-  .status.shell { color: var(--shell); }
-  /* A status this program has no colour for is one it does not recognise. It is shown as the
-     session wrote it and marked as unread-by-us, rather than styled into looking understood. */
-  .status:not(.idle):not(.busy):not(.shell) { text-decoration: underline dotted; }
-  .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .title.unread { color: var(--dim); font-style: italic; }
-  .age { color: var(--dim); white-space: nowrap; }
-  .last {
-    display: grid; grid-template-columns: 5ch 1fr; gap: 0 8px;
-    margin: 4px 0 0; color: var(--dim); font-size: 12px;
-  }
-  .last dt { color: var(--dim); }
-  .last dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .who { color: var(--dim); }
-  .when { color: var(--dim); margin-right: 4px; }
-  .hint { margin: 6px 0 0; color: var(--flag); font-size: 12px; }
-  #ask { margin: 12px 0 8px; }
-  #ask input {
-    width: 100%; padding: 8px 10px; font: inherit; color: var(--fg);
-    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--busy);
-  }
-  #ask input:focus { outline: none; border-left-color: var(--fg); }
-  .block {
-    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
-    padding: 8px 10px; margin-bottom: 6px;
-  }
-  .block.running { border-left-color: var(--busy); }
-  .block.answered { border-left-color: var(--idle); }
-  .block.failed { border-left-color: var(--flag); }
-  .block header { display: flex; gap: 10px; align-items: baseline; }
-  .block .state { color: var(--dim); min-width: 9ch; }
-  .block .asked { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .block .thread { display: flex; gap: 6px; align-items: baseline; color: var(--dim); font-size: 11px; }
-  .block .set-by { color: var(--dim); }
-  .block .thread select {
-    font: inherit; font-size: 11px; color: var(--dim); background: var(--card);
-    border: 1px solid var(--line); max-width: 22ch;
-  }
-  .block .thread select:hover { color: var(--fg); }
-  .answer, .failure { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .failure { color: var(--flag); }
-  .caret { color: var(--busy); }
-  .card .rename input {
-    width: 100%; font: inherit; color: var(--fg); background: var(--bg);
-    border: none; border-bottom: 1px dotted var(--line); padding: 1px 0; margin: 4px 0;
-  }
-  .card .rename input:focus { outline: none; border-bottom-color: var(--fg); }
-  .block footer { margin-top: 6px; }
-  .block button {
-    font: inherit; color: var(--dim); background: none; cursor: pointer;
-    border: 1px solid var(--line); padding: 1px 8px;
-  }
-  .block button:hover { color: var(--fg); border-color: var(--fg); }
-  #message:not(:empty) {
-    border: 1px solid var(--flag); border-left-width: 3px; padding: 8px 10px; margin: 8px 0;
-    background: var(--card);
-  }
-  #message header { margin-bottom: 6px; }
-  #message .target { color: var(--fg); font-weight: 600; }
-  #message .dim { color: var(--dim); }
-  #message textarea {
-    width: 100%; font: inherit; color: var(--fg); background: var(--bg);
-    border: 1px solid var(--line); padding: 6px;
-  }
-  #message .full {
-    white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0;
-    padding: 6px 8px; background: var(--bg); border-left: 2px solid var(--line);
-  }
-  #message .detail { color: var(--flag); margin: 6px 0; }
-  #message footer { display: flex; gap: 6px; margin-top: 6px; }
-  #message button, #message .as-button {
-    font: inherit; color: var(--dim); background: none; cursor: pointer;
-    border: 1px solid var(--line); padding: 1px 8px;
-  }
-  #message button:hover, #message .as-button:hover { color: var(--fg); border-color: var(--fg); }
-  #message .as-button {
-    color: var(--dim); border: 1px solid var(--line); padding: 1px 8px; text-decoration: none;
-  }
-  .block footer form, .card .actions form { display: inline; }
-  #message button.send { color: var(--flag); border-color: var(--flag); }
-  .row .message-button {
-    font: inherit; font-size: 11px; color: var(--dim); background: none; cursor: pointer;
-    border: 1px solid var(--line); padding: 0 6px;
-  }
-  .row .message-button:hover { color: var(--fg); border-color: var(--fg); }
-  .tail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
-  .entries { list-style: none; margin: 0; padding: 0; }
-  .entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
-  /* Two lines per entry. The drill-down answers "what has this session been doing", and a single
-     pasted file in one entry used to answer it by filling the window. The place to read a
-     transcript in full is the terminal that is already open (docs/06-console.md). */
-  .entry .text {
-    white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden;
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
-  }
-  .entry.assistant .text { color: var(--fg); }
-  .entry.user .text { color: var(--dim); }
-</style>
+<link rel="stylesheet" href="/static/console.css">
 </head>
 <body>
-{# The one vendored file. If it is not there the buttons and the form do nothing, so the page
-   says so rather than looking fine and losing what you type into it. #}
-<p id="no-htmx" hidden>htmx is missing from agent_desk/web/static/, so every action reloads the
-  page instead of updating in place. Everything works; it just blinks.</p>
 
-<header id="bar">
+{# The one vendored file. Without it the forms still post and the pages still render; only the
+   in-place swaps are lost, and the page says so rather than looking broken. #}
+<p id="no-htmx" class="notice" hidden>htmx is missing from agent_desk/web/static/, so every action
+  reloads the page instead of updating in place. Everything works; it just blinks.</p>
+
+<header class="bar">
   <span class="brand">agent-desk</span>
+  <nav aria-label="sections">
+    <a href="/ideas">ideas</a>
+    <a href="/viewers">viewers</a>
+  </nav>
+  <span class="spacer"></span>
   <span id="asof">connecting…</span>
-  <span id="stream-state">·</span>
+  <span id="stream-state" aria-live="polite">·</span>
 </header>
 
-<div id="board">{{ board|safe }}</div>
+<main>
+  <section aria-labelledby="sessions-heading">
+    <div id="board">{{ board|safe }}</div>
+  </section>
 
-{# The one write path lives here, outside the board, because the board replaces itself whenever a
-   session changes and a panel inside it would vanish under a half-typed message (docs/adr/0002). #}
-<div id="message">{{ message|safe }}</div>
+  {# The write path lives outside the board, because the board replaces itself whenever a session
+     changes and a panel inside it would vanish under a half-typed message (docs/adr/0002). #}
+  <div id="message">{{ message|safe }}</div>
 
-{# One field, always focused, never blocked. Submitting frees it immediately
-   (docs/04-threads-and-blocks.md). #}
-{# A real form with a real action. htmx, when it is here, turns it into an in-place swap; when it
-   is not, the browser posts it and the console renders a whole page. Either way the field is
-   free the moment you press enter (docs/04-threads-and-blocks.md). #}
-<form id="ask" method="post" action="/blocks"
-      hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
-      hx-on::after-request="this.reset(); this.text.focus()">
-  <input name="text" autocomplete="off" autofocus
-         placeholder="ask anything — the field is free again the moment you press enter">
-</form>
+  {# One field, always focused, never blocked. Submitting frees it immediately
+     (docs/04-threads-and-blocks.md). It is sticky because the board above it is long and the
+     field is the thing you come back to. #}
+  <form class="ask" id="ask" method="post" action="/blocks"
+        hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
+        hx-on::after-request="this.reset(); this.text.focus()">
+    <label class="visually-hidden" for="ask-text">what do you want to ask, or record</label>
+    <input id="ask-text" name="text" autocomplete="off" autofocus
+           placeholder="ask anything — the field is free again the moment you press enter">
+    <span class="keys" aria-hidden="true">/idea · /new · press /</span>
+  </form>
 
-<div id="blocks">{{ blocks|safe }}</div>
+  <section aria-labelledby="blocks-heading">
+    <h2 class="section-title" id="blocks-heading">asked</h2>
+    <div id="blocks">{{ blocks|safe }}</div>
+  </section>
+</main>
 
 <script src="/static/htmx.min.js"></script>
 <script>
-// Twelve lines instead of a framework. The board is server-rendered; the browser does three
-// things — replace it when the server says it changed, expand one row on demand, and say plainly
-// when it has stopped hearing from the server. The third is not a nicety: a board that has quietly
-// stopped updating looks exactly like a board on which nothing is happening.
-// Without htmx the forms still post and the pages still render; only the swaps are lost.
+// Fourteen lines instead of a framework. The board is server-rendered; the browser replaces it
+// when the server says it changed, fills a row's transcript when somebody opens it, and says
+// plainly when it has stopped hearing from the server — a board that has quietly stopped updating
+// looks exactly like a board on which nothing is happening.
 if (!window.htmx) document.getElementById('no-htmx').hidden = false;
 
-const expanded = new Set();
 const asof = document.getElementById('asof');
 const state = document.getElementById('stream-state');
-
-async function fillTail(row) {
-  const box = row.querySelector('.tail');
-  box.hidden = false;
-  try {
-    const response = await fetch(`/sessions/${row.dataset.session}/tail`);
-    box.innerHTML = response.ok ? await response.text() : '<p class="empty">could not read the tail</p>';
-  } catch {
-    box.innerHTML = '<p class="empty">could not read the tail</p>';
-  }
-}
-
-function restore() {
-  for (const row of document.querySelectorAll('[data-session]')) {
-    if (expanded.has(row.dataset.session)) fillTail(row);
-  }
-}
-
+const opened = new Set();
 let lastChecked = 0;
 
 function checked() {
@@ -225,34 +75,46 @@ function checked() {
 
 function lost(why) {
   // The reconnect attempt and the silence timer both fire while the server is down, and each has
-  // a true thing to say; alternating them once a second is a board nobody can read. First one to
-  // notice keeps the floor until something arrives.
+  // a true thing to say; alternating them once a second is a board nobody can read.
   if (document.body.classList.contains('stale')) return;
   state.textContent = why;
   state.className = 'lost';
   document.body.classList.add('stale');
 }
 
-// A dropped connection fires onerror; a connection that stays open while nothing arrives fires
-// nothing at all, and that is the shape a saturated reader or a hanging stat() takes. Both end
-// the same way: the board says it is no longer being told anything.
-const silence = {{ poll }} * 3 * 1000;
-setInterval(() => {
-  if (lastChecked && Date.now() - lastChecked > silence) lost('no update — stream stalled');
-}, 1000);
+async function fillTail(row) {
+  const box = row.querySelector('.tail');
+  try {
+    const response = await fetch(`/sessions/${row.dataset.session}/tail`);
+    box.innerHTML = response.ok ? await response.text() : '<p class="empty">could not read the tail</p>';
+  } catch {
+    box.innerHTML = '<p class="empty">could not read the tail</p>';
+  }
+}
 
-document.addEventListener('click', (event) => {
+// A row is a <details>: keyboard, screen readers and no-JavaScript all come free, and the tail is
+// still fetched only when one is opened.
+document.addEventListener('toggle', (event) => {
   const row = event.target.closest('[data-session]');
   if (!row) return;
-  const id = row.dataset.session;
-  if (expanded.has(id)) {
-    expanded.delete(id);
-    const box = row.querySelector('.tail');
-    box.hidden = true;
-    box.innerHTML = '';
-  } else {
-    expanded.add(id);
-    fillTail(row);
+  if (row.open) { opened.add(row.dataset.session); fillTail(row); }
+  else opened.delete(row.dataset.session);
+}, true);
+
+function restore() {
+  for (const row of document.querySelectorAll('[data-session]')) {
+    if (opened.has(row.dataset.session)) { row.open = true; fillTail(row); }
+  }
+}
+
+// `/` puts the cursor in the field from anywhere; Escape closes the write-path panel. This window
+// hovers over a terminal, and reaching for the mouse is the thing it is supposed to save.
+document.addEventListener('keydown', (event) => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (event.key === '/' && !typing) { event.preventDefault(); document.getElementById('ask-text').focus(); }
+  if (event.key === 'Escape') {
+    if (document.getElementById('message').innerHTML.trim()) document.getElementById('message').innerHTML = '';
+    else document.activeElement.blur();
   }
 });
 
@@ -269,12 +131,18 @@ stream.addEventListener('blocks', (event) => {
   // Never while the reader is inside a block: replacing the column under a selection loses it,
   // and an answer is the one thing here anybody copies out.
   if (!document.getSelection().isCollapsed) return;
+  if (document.activeElement.closest('#blocks')) return;
   document.getElementById('blocks').innerHTML = event.data;
   if (window.htmx) htmx.process(document.getElementById('blocks'));
   checked();
 });
 stream.addEventListener('heartbeat', checked);
 stream.onerror = () => lost('stream lost — reconnecting');
+
+const silence = {{ poll }} * 3 * 1000;
+setInterval(() => {
+  if (lastChecked && Date.now() - lastChecked > silence) lost('no update — stream stalled');
+}, 1000);
 </script>
 </body>
 </html>

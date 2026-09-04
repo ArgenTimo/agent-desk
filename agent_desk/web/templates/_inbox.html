@@ -1,16 +1,19 @@
 {# Kept ideas, each carrying where it came from — "what was I doing when I thought this" is most
    of an idea's meaning a week later (docs/05-ideas.md). Four states, no priority, no assignee, no
    estimate: that is a backlog, and a backlog needs a process to stay honest. #}
+<h2 class="section-title">inbox <span class="count">{{ ideas | length }}</span></h2>
 {% if not ideas %}
-<p class="empty">no ideas captured yet</p>
+<p class="empty">No ideas captured yet. On the board, type <span class="hint-key">/idea</span>
+  followed by the thought — it is recorded before anything is generated, so it survives a machine
+  where nothing else works.</p>
 {% endif %}
 {% for idea in ideas %}
 <article class="idea {{ idea.state }}">
   <header>
     <span class="state">{{ idea.state }}</span>
-    <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
-          hx-post="/ideas/{{ idea.id }}/summary" hx-target="#inbox">
-      <input name="summary" value="{{ idea.summary }}" aria-label="summary">
+    <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary" hx-post="/ideas/{{ idea.id }}/summary" hx-target="#inbox">
+      <label class="visually-hidden" for="summary-{{ idea.id }}">the one-line summary</label>
+      <input id="summary-{{ idea.id }}" name="summary" value="{{ idea.summary }}">
     </form>
   </header>
   <p class="verbatim">{{ idea.text }}</p>
@@ -23,30 +26,30 @@
 
   <footer class="actions">
     {% if idea.state == "new" %}
-    <form method="post" action="/ideas/{{ idea.id }}/keep"
-          hx-post="/ideas/{{ idea.id }}/keep" hx-target="#inbox">
+    <form method="post" action="/ideas/{{ idea.id }}/keep" hx-post="/ideas/{{ idea.id }}/keep" hx-target="#inbox">
       <button type="submit">Keep</button>
     </form>
-    <form method="post" action="/ideas/{{ idea.id }}/drop"
-          hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">
+    <form method="post" action="/ideas/{{ idea.id }}/drop" hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">
       <button type="submit">Discard</button>
     </form>
-    {% elif idea.state == "kept" %}
+    {% elif idea.state in ("kept", "promoted") %}
     {# All three produce text in this tool. None writes into another repository. #}
-    <form method="post" action="/ideas/{{ idea.id }}/proposal"
-          hx-post="/ideas/{{ idea.id }}/proposal" hx-target="#inbox">
+    <form method="post" action="/ideas/{{ idea.id }}/proposal" hx-post="/ideas/{{ idea.id }}/proposal" hx-target="#inbox">
       <button type="submit">Draft a proposal</button>
     </form>
-    <form method="post" action="/ideas/{{ idea.id }}/ticket"
-          hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#inbox">
+    <form method="post" action="/ideas/{{ idea.id }}/ticket" hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#inbox">
       <button type="submit">Draft a ticket</button>
     </form>
-    <form method="post" action="/ideas/{{ idea.id }}/paste"
-          hx-post="/ideas/{{ idea.id }}/paste" hx-target="#inbox">
+    <form method="post" action="/ideas/{{ idea.id }}/paste" hx-post="/ideas/{{ idea.id }}/paste" hx-target="#inbox">
       <button type="submit">Copy for a session</button>
     </form>
     {% endif %}
-    {% if idea.id in drafting %}<span class="drafting">drafting…</span>{% endif %}
+    {% if idea.state == "kept" %}
+    <form method="post" action="/ideas/{{ idea.id }}/drop" hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">
+      <button type="submit">Discard</button>
+    </form>
+    {% endif %}
+    {% if idea.id in drafting %}<span class="drafting" aria-live="polite">drafting…</span>{% endif %}
   </footer>
 
   {% for draft in drafts.get(idea.id, []) %}

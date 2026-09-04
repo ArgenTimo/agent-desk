@@ -1,0 +1,486 @@
+/* The console's one stylesheet.
+ *
+ * It lived inline in four pages, which is how the four drifted. Serving it from `static/` also
+ * gives that directory a file to exist for: an empty directory is not in git, and the mount that
+ * would serve htmx depends on the directory being there.
+ *
+ * Three rules run through everything below.
+ *
+ * **Prose is prose and identifiers are identifiers.** A branch, a status, a session name, a time
+ * and an id are monospace, because their shape carries meaning and the eye compares them. A
+ * title, an answer, an idea and a question are somebody's sentences, and sentences are read
+ * faster in the font the reader's system chose for reading.
+ *
+ * **Colour says one thing: state.** Everything else is the neutral ramp, and a status is never
+ * only a colour — the word is beside it, which is what keeps the board legible to somebody who
+ * cannot tell the amber from the green.
+ *
+ * **This window hovers over the work** (docs/06-console.md). It is narrow, it is glanced at, and
+ * what it is glanced at for is "who needs me". Everything else gets out of the way.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --raised: #fbfbf9;
+  --fg: #1b1a18;
+  --fg-soft: #55524c;
+  --fg-dim: #837f78;
+  --line: #e2dfd8;
+  --line-strong: #cdc9c0;
+
+  --busy: #a35c00;
+  --idle: #3f6f34;
+  --shell: #35667a;
+  --flag: #a03028;
+  --warn: #7d5100;
+  --warn-bg: #fdf4e3;
+  --focus: #2f6ecf;
+
+  --radius: 5px;
+  --prose: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151412;
+    --surface: #1c1b19;
+    --raised: #232220;
+    --fg: #eae7e1;
+    --fg-soft: #b3aea6;
+    --fg-dim: #857f77;
+    --line: #2e2c28;
+    --line-strong: #423f3a;
+
+    --busy: #e2a55a;
+    --idle: #8cc474;
+    --shell: #74b6c8;
+    --flag: #e88880;
+    --warn: #e3b264;
+    --warn-bg: #2b2413;
+    --focus: #7aa8f0;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Present for a screen reader, absent for everyone else. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+body {
+  margin: 0;
+  padding: 10px 12px 40px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 var(--prose);
+}
+
+/* A line the eye can return from. Without a cap, a row on a wide monitor puts the title at one
+   edge and its age at the other, and an answer becomes a two-hundred-character measure — both of
+   which are read by moving your head. This window is usually narrow anyway; the cap is for the
+   day it is not. */
+.bar, main, #no-htmx { max-width: 1024px; margin-inline: auto; }
+.answer, .failure, .verbatim, .card .recorded, #message .full, .draft pre {
+  max-width: 78ch;
+}
+
+/* Everything that is an identifier rather than a sentence. */
+.mono, .status, .branch, .name, .age, .when, .who, code, pre, select, .set-by, .state {
+  font-family: var(--mono);
+}
+
+a { color: var(--fg-soft); }
+a:hover { color: var(--fg); }
+
+:where(a, button, summary, input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* --- the bar ------------------------------------------------------------------------------- */
+.bar {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.bar .brand { color: var(--fg); font-weight: 600; letter-spacing: -0.01em; }
+.bar nav { display: flex; gap: 10px; }
+.bar .spacer { margin-left: auto; }
+#stream-state.lost { color: var(--flag); }
+body.stale main { opacity: 0.55; }
+
+/* --- notices ------------------------------------------------------------------------------- */
+.notice {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+/* --- section headings ----------------------------------------------------------------------- */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.section-title .count { color: var(--fg-soft); }
+
+.empty {
+  margin: 0;
+  padding: 14px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+}
+.empty .hint-key { font-family: var(--mono); color: var(--fg-soft); }
+
+/* --- a session row -------------------------------------------------------------------------- */
+.row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+}
+.row.flagged { border-left-color: var(--flag); }
+.row.busy { border-left-color: var(--busy); }
+.row.idle { border-left-color: var(--idle); }
+.row.shell { border-left-color: var(--shell); }
+
+.row > summary { list-style: none; cursor: pointer; padding: 7px 10px; }
+.row > summary::-webkit-details-marker { display: none; }
+.row > summary:hover { background: var(--raised); border-radius: 3px; }
+
+.row-head { display: flex; align-items: baseline; gap: 8px; }
+.status {
+  min-width: 6ch;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+.status.busy { color: var(--busy); }
+.status.idle { color: var(--idle); }
+.status.shell { color: var(--shell); }
+/* A status this program does not recognise is shown as written and marked as unread by us. */
+.status:not(.idle):not(.busy):not(.shell) { text-decoration: underline dotted; }
+
+.row .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.row .title.unread { font-weight: 400; font-style: italic; color: var(--fg-dim); }
+.row .age { font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
+
+.row-where {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 2px;
+  padding-left: calc(6ch + 8px);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.row-where .project { color: var(--fg-soft); }
+.row-where .branch { color: var(--fg-soft); }
+/* Beside the session it belongs to, not banished to the far edge of a wide screen. */
+.row-where .message-link { margin-left: 4px; }
+.row-where .spacer { margin-left: auto; }
+
+.last {
+  display: grid;
+  grid-template-columns: 5ch 1fr;
+  gap: 0 8px;
+  margin: 4px 0 0;
+  padding-left: calc(6ch + 8px);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.last dt { font-family: var(--mono); font-size: 11px; }
+.last dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hint {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 5px 0 0;
+  padding-left: calc(6ch + 8px);
+  font-size: 11px;
+  color: var(--flag);
+}
+.hint .evidence { color: var(--fg-dim); }
+
+.tail {
+  border-top: 1px solid var(--line);
+  margin: 0 10px;
+  padding: 6px 0 8px;
+  /* The drill-down scrolls inside itself. Forty transcript entries inlined into the page push the
+     rest of the board off the screen, and the board is the thing you opened this for. */
+  max-height: 42vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.entries { list-style: none; margin: 0; padding: 0; }
+.entry { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; font-size: 12px; }
+.entry .who { min-width: 9ch; font-size: 11px; color: var(--fg-dim); }
+.entry .when { font-size: 11px; color: var(--fg-dim); }
+.entry .text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.entry.user .text { color: var(--fg-dim); }
+
+/* --- the input ------------------------------------------------------------------------------ */
+.ask {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  margin: 14px 0 4px;
+  background: linear-gradient(var(--bg) 70%, transparent);
+}
+.ask input {
+  flex: 1;
+  padding: 9px 11px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.ask input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent); }
+.ask .keys { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
+
+/* --- a block -------------------------------------------------------------------------------- */
+.block {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.block.running { border-left-color: var(--busy); }
+.block.answered { border-left-color: var(--idle); }
+.block.failed, .block.cancelled { border-left-color: var(--flag); }
+
+.block-head { display: flex; align-items: baseline; gap: 8px; }
+.block .state { min-width: 9ch; font-size: 11px; color: var(--fg-dim); }
+.block.failed .state, .block.cancelled .state { color: var(--flag); }
+.block .asked { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.answer, .failure {
+  margin: 6px 0 0;
+  padding-left: calc(9ch + 8px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.failure { color: var(--flag); font-size: 12px; }
+.caret { color: var(--busy); }
+
+.card { padding-left: calc(9ch + 8px); }
+.card .recorded { margin: 6px 0 2px; color: var(--fg-soft); }
+.card .verbatim { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.card .rename input {
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted var(--line-strong);
+  padding: 2px 0;
+}
+.card .rename input:focus { outline: none; border-bottom-color: var(--focus); }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  padding-left: calc(9ch + 8px);
+}
+.actions form { display: contents; }
+.block > .actions { padding-left: calc(9ch + 8px); }
+
+/* --- controls -------------------------------------------------------------------------------- */
+button, .as-button {
+  min-height: 26px;
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-soft);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-decoration: none;
+}
+button:hover, .as-button:hover { color: var(--fg); border-color: var(--fg-dim); }
+button:active { transform: translateY(1px); }
+button[disabled] { opacity: 0.5; cursor: default; }
+.danger { color: var(--flag); border-color: color-mix(in srgb, var(--flag) 40%, var(--line-strong)); }
+
+.thread { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-dim); }
+.thread select {
+  max-width: 24ch;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--fg-soft);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.thread .set-by { color: var(--fg-dim); }
+
+/* --- the write path -------------------------------------------------------------------------- */
+#message:not(:empty) {
+  border: 1px solid var(--flag);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+#message header { margin-bottom: 6px; color: var(--fg-soft); }
+#message .target { color: var(--fg); font-weight: 600; }
+#message textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+#message .full {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 3px 3px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--prose);
+}
+#message .detail { color: var(--flag); margin: 6px 0; }
+#message footer { display: flex; gap: 8px; margin-top: 8px; }
+
+/* --- the inbox -------------------------------------------------------------------------------- */
+.idea {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.idea.kept { border-left-color: var(--idle); }
+.idea.promoted { border-left-color: var(--busy); }
+.idea.dropped { opacity: 0.6; }
+.idea header { display: flex; gap: 10px; align-items: baseline; }
+.idea .verbatim { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-soft); }
+.context {
+  display: grid;
+  grid-template-columns: 9ch 1fr;
+  gap: 0 8px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.context dt { font-family: var(--mono); }
+.context dd { margin: 0; overflow-wrap: anywhere; }
+.drafting { color: var(--busy); font-size: 12px; }
+.draft { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.draft summary { cursor: pointer; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.draft pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; font-family: var(--prose); font-size: 12px; }
+
+/* --- viewers ---------------------------------------------------------------------------------- */
+.mint { display: flex; gap: 8px; margin-bottom: 12px; }
+.mint input {
+  flex: 1;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.viewer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--idle);
+  border-radius: var(--radius);
+  padding: 7px 11px;
+  margin-bottom: 6px;
+}
+.viewer.revoked { border-left-color: var(--line-strong); opacity: 0.6; }
+.viewer .name { flex: 1; }
+.viewer .when { font-size: 11px; color: var(--fg-dim); }
+.minted { border-left-color: var(--idle); background: var(--surface); color: var(--fg); }
+.link {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* --- narrow, which is how this window is meant to be used ------------------------------------- */
+@media (max-width: 520px) {
+  .row-where, .last, .hint, .answer, .failure, .card, .actions { padding-left: 0; }
+  .last { grid-template-columns: 4ch 1fr; }
+  .thread select { max-width: 14ch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  button:active { transform: none; }
+}

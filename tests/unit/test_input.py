@@ -384,7 +384,7 @@ async def test_every_action_in_the_console_is_a_real_form(
         assert "action=" in form, form
 
     # And the one control that opens the write path is a link, which works everywhere.
-    assert re.search(r'<a class="message-button" href="/sessions/[^"]+/message"', body)
+    assert re.search(r'<a class="message-button[^"]*" href="/sessions/[^"]+/message"', body)
 
 
 # --- what a reviewer found by probing the task group ------------------------------------------
