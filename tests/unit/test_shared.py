@@ -64,7 +64,7 @@ async def _request(
     async def send(message: dict[str, Any]) -> None:
         sent.append(message)
 
-    await shared.app(scope, receive, send)
+    await shared.asgi(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     html = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
     headers = {k.decode(): v.decode() for k, v in start.get("headers", [])}
@@ -402,3 +402,143 @@ async def test_a_link_holder_cannot_post_an_idea_of_any_size(desk: Store) -> Non
 
     assert status == 413
     assert await desk.ideas() == []
+
+
+# --- what the confirmation round found in the fixes ---------------------------------------------
+async def _chunked(path: str, body: bytes, token_headers: bool = True) -> int:
+    """A POST that declares no length, the way chunked encoding does not.
+
+    The first version of the size cap read `Content-Length` and the test that covered it sent an
+    honest one — a test that passed against a broken implementation. 128 KB went through with a
+    303 and was stored whole.
+    """
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"desk.example:8788"),
+            (b"content-type", b"application/x-www-form-urlencoded"),
+            (b"transfer-encoding", b"chunked"),
+        ],
+        "client": ("192.168.1.50", 41234),
+        "server": ("192.168.1.10", 8788),
+    }
+    pieces = [body[i : i + 8192] for i in range(0, len(body), 8192)]
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        if pieces:
+            return {"type": "http.request", "body": pieces.pop(0), "more_body": bool(pieces)}
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await shared.asgi(scope, receive, send)
+    return int(next(m for m in sent if m["type"] == "http.response.start")["status"])
+
+
+@pytest.mark.unit
+async def test_a_body_with_no_declared_length_is_bounded_too(desk: Store) -> None:
+    _, token = await desk.create_viewer("a teammate")
+    huge = b"text=" + b"x" * (shared.MAX_SUBMISSION_BYTES * 8)
+
+    assert await _chunked(f"/shared/{token}/idea", huge) == 413
+    assert await desk.ideas() == []
+
+
+@pytest.mark.unit
+async def test_a_small_chunked_body_still_works(desk: Store) -> None:
+    """The cap counts; it does not refuse everything that declines to declare itself."""
+    _, token = await desk.create_viewer("a teammate")
+
+    assert await _chunked(f"/shared/{token}/idea", b"text=a+small+thought") == 303
+    (idea,) = await desk.ideas()
+    assert idea.text == "a small thought"
+
+
+@pytest.mark.unit
+async def test_a_stray_byte_in_a_header_is_not_a_way_to_crash_the_process(desk: Store) -> None:
+    """The guard runs before authentication, so this needed no token at all.
+
+    Decoding every header as UTF-8 to read one of them made `X-Junk: \\xff` an unauthenticated
+    remote 500 on the network bind, with a traceback per hit.
+    """
+    scope: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/shared/whatever/idea",
+        "raw_path": b"/shared/whatever/idea",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"desk.example:8788"),
+            (b"content-type", b"application/x-www-form-urlencoded"),
+            (b"content-length", b"9"),
+            (b"x-junk", b"\xff\xfe"),
+        ],
+        "client": ("192.168.1.50", 41234),
+        "server": ("192.168.1.10", 8788),
+    }
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"text=hmm", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await shared.asgi(scope, receive, send)
+    status = int(next(m for m in sent if m["type"] == "http.response.start")["status"])
+    assert status == 404, "a wrong token, answered without raising"
+
+
+@pytest.mark.unit
+async def test_the_store_closing_mid_request_answers_like_a_wrong_link(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The shutdown half of the window: the check passes, then `close()` lands at the await."""
+    store = Store(tmp_path / "closing.db")
+    await store.open()
+    _, token = await store.create_viewer("a teammate")
+    shared.app.state.store = store
+    try:
+        await store.close()
+        status, html, _ = await _request("GET", f"/shared/{token}")
+        assert status == 404
+        assert "does not open anything" in html
+    finally:
+        shared.app.state.store = None
+
+
+@pytest.mark.unit
+async def test_the_token_comes_from_the_system_generator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Length, alphabet and spread all hold for a seeded PRNG, which is why they are not enough.
+
+    A reviewer replaced `secrets.token_urlsafe` with `random.Random(seed)` over the same alphabet —
+    entirely predictable — and the suite stayed green. The source is the property.
+    """
+    from agent_desk.store import repo
+
+    asked: list[int] = []
+    real = repo.secrets.token_urlsafe
+
+    def watched(nbytes: int | None = None) -> str:
+        asked.append(nbytes or 0)
+        return real(nbytes)
+
+    monkeypatch.setattr(repo.secrets, "token_urlsafe", watched)
+    token = repo.new_token()
+
+    assert asked == [32], "256 bits, from `secrets`, and from nowhere else"
+    assert len(token) >= 43

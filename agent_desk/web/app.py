@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_desk.web import blocks, routes, sse
-from agent_desk.web.origin import SameOriginOnly
+from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
 
@@ -57,13 +57,15 @@ app = FastAPI(title="agent-desk", openapi_url=None, lifespan=lifespan)
 # it here would let a changed bind silently widen the one check docs/07-security.md says never to
 # widen. A non-loopback bind is outside the v1 security model altogether.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
-# A form on any website can post here without asking CORS, and the Host check passes because
-# the request really is going to loopback. Fetch metadata is what separates this console's
-# own pages from somebody else's (agent_desk/web/origin.py).
-app.add_middleware(SameOriginOnly)
 if STATIC.is_dir():
     # HTMX, vendored rather than fetched: a local tool that needs the network to render a list of
     # five sessions has lost the argument (docs/adr/0003).
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.include_router(routes.router)
 app.include_router(sse.router)
+
+# A form on any website can post here without asking CORS, and the Host check passes because the
+# request really is going to loopback. Fetch metadata is what separates this console's own pages
+# from somebody else's — and the guard wraps the application from *outside*, so that a 500 raised
+# anywhere within it still carries the frame headers (agent_desk/web/origin.py).
+asgi = guard(app)

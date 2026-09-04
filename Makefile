@@ -47,8 +47,8 @@ check-links: ## Prove every relative link in docs/ and design/ resolves
 # design — so Ctrl-C on a running console with a board open hangs forever, and SIGTERM does not
 # end it either. Found by killing the server with a browser attached.
 run: ## The console on http://127.0.0.1:8787
-	$(POETRY) run uvicorn agent_desk.web.app:app --host 127.0.0.1 --port $(PORT) --reload \
-	  --timeout-graceful-shutdown 2
+	$(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
+	  --timeout-graceful-shutdown 2 --no-access-log
 
 # The one target that changes the security model of this tool. Everything else binds to
 # loopback, where "anything that can reach the port can already read ~/.claude/" holds; this one

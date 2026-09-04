@@ -13,21 +13,41 @@ applications cannot be got wrong that way.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import uvicorn
-from fastapi import FastAPI
+from starlette.types import ASGIApp
 
 from agent_desk.config import settings
 from agent_desk.web import routes, shared
-from agent_desk.web.app import app as console
+from agent_desk.web.app import asgi as console
 
 
-def _config(target: FastAPI, host: str, port: int, *, access_log: bool = True) -> uvicorn.Config:
+def silence_access_logging() -> None:
+    """Turn the request log off for this process, and mean it.
+
+    `access_log=False` on one server is not a property of that server: uvicorn implements it by
+    stripping the handlers off the process-wide `uvicorn.access` logger when a config loads, and
+    every connection then asks that one logger whether it has any. Two servers therefore fight,
+    and the winner is whichever loaded last — so the token stayed out of the log because of the
+    order two list entries happened to be in, with nothing saying so.
+
+    A viewer's token is a path segment and the access log writes paths. That is reason enough to
+    have no request log at all: what this program wants recorded, it records itself, by name and
+    by count (docs/07-security.md).
+    """
+    access = logging.getLogger("uvicorn.access")
+    access.handlers.clear()
+    access.propagate = False
+    access.disabled = True
+
+
+def _config(target: ASGIApp, host: str, port: int) -> uvicorn.Config:
     return uvicorn.Config(
         target,
         host=host,
         port=port,
-        access_log=access_log,
+        access_log=False,
         # The console's event stream never ends by design, so a graceful stop that waits for open
         # responses waits forever. Measured once, in Phase 1, with a browser attached.
         timeout_graceful_shutdown=2,
@@ -35,20 +55,14 @@ def _config(target: FastAPI, host: str, port: int, *, access_log: bool = True) -
 
 
 async def serve() -> None:
+    silence_access_logging()
     servers = [uvicorn.Server(_config(console, settings.host, settings.port))]
 
     if settings.share_host:
         # The shared application never opens or closes the store; the console's lifespan owns it.
         shared.app.state.store = routes.store
-        # No access log on this bind, and the reason is the whole design of Phase 4. A viewer's
-        # token is a path segment, so every default access line writes it in clear — beside the
-        # structlog line naming the viewer, in the artefact most likely to be tailed, piped or
-        # pasted into a bug report. The store deliberately keeps only a hash of that token; a log
-        # that keeps the token itself undoes the care in one line (docs/07-security.md).
         servers.append(
-            uvicorn.Server(
-                _config(shared.app, settings.share_host, settings.share_port, access_log=False)
-            )
+            uvicorn.Server(_config(shared.asgi, settings.share_host, settings.share_port))
         )
 
     async with asyncio.TaskGroup() as group:

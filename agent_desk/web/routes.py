@@ -200,18 +200,19 @@ async def _form(request: Request) -> dict[str, str]:
 
 
 @router.get("/viewers", response_class=HTMLResponse)
-async def viewers_page(minted: str = "", name: str = "") -> HTMLResponse:
+async def viewers_page() -> HTMLResponse:
     """Who may open the shared ideas list, and until when (docs/07-security.md, Phase 4).
 
-    Owner-only, like everything else on this bind. `minted` carries a token exactly once, on the
-    response to the click that created it: the store keeps only a hash, so a link that is lost is
-    replaced rather than recovered.
+    Owner-only, like everything else on this bind, and it takes no parameters. It used to accept a
+    `minted` token in the query string — the shape the redirect left behind after the token moved
+    into the response body. Nothing generated that URL any more, and it still rendered a token
+    handed to it in a URL, on the bind that keeps an access log.
     """
     return HTMLResponse(
         env.get_template("viewers.html").render(
             viewers=await store.viewers(),
-            minted=minted,
-            minted_for=name,
+            minted="",
+            minted_for="",
             share_host=settings.share_host,
             share_port=settings.share_port,
         )

@@ -280,7 +280,7 @@ async def _post(
     """
     from urllib.parse import urlencode
 
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
     body = urlencode(fields).encode()
     scope = {
@@ -310,7 +310,7 @@ async def _post(
     async def send(message: dict[str, object]) -> None:
         sent.append(message)
 
-    await app(scope, receive, send)
+    await asgi(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     html = b"".join(bytes(m.get("body", b"")) for m in sent if m["type"] == "http.response.body")
     headers = {k.decode(): v.decode() for k, v in start.get("headers", [])}  # type: ignore[union-attr]

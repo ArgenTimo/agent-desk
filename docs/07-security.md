@@ -112,9 +112,12 @@ recording. A viewer's token is a path segment, and the default access log of the
 path: `"GET /shared/-rEm7_kLxJydW1is3YcDIVf2_PeTYFMU4boZhuus_oE HTTP/1.1" 200` — observed, not
 inferred — beside the structured line naming the viewer. The store went to real trouble to keep
 only a hash, and the log kept the token, in the artefact most likely to be tailed, piped, or pasted
-into a bug report. **The shared bind therefore runs with no access log at all**, and the minted
-token is rendered into a response rather than carried through a redirect, because a query string is
-browser history. What is logged about a viewer is their name and how many ideas they saw. Revocation is a timestamp rather than a delete, because the question an
+into a bug report. **This process therefore runs with no request log at all** — not the shared bind alone, because
+`access_log=False` is not a property of one server: the library implements it by stripping the
+handlers off one process-wide logger, so two servers fight and the last one to load wins. It is
+switched off explicitly, after every server is built, and a test asserts it. The minted token is
+rendered into a response rather than carried through a redirect, because a query string is browser
+history. What is logged about a viewer is their name and how many ideas they saw. Revocation is a timestamp rather than a delete, because the question an
 audit asks is "who could see this, and until when". Every open is logged by viewer name and idea
 count, never by content. A wrong link, a revoked link and a console that is not ready all answer
 identically: a viewer learns whether their own link works and nothing else.
@@ -124,15 +127,19 @@ Not the project, not the branch, not the session's generated title, not the draf
 block. The context an idea carries is what makes it legible to its owner a week later — and it is
 also a list of what that person was working on, including work a teammate has no business seeing.
 
-**Everything it renders is scrubbed on the way out**, including the human's own words. The store
+**Every idea it renders is scrubbed on the way out**, including the human's own words. The store
 keeps those verbatim on purpose ([05-ideas.md](05-ideas.md)); the rule that a surface a second
 person can open redacts before it renders is about this page, and the two are not in conflict
-because they are two different readers.
+because they are two different readers. The viewer's own name is not scrubbed — the owner typed it
+into the mint form, and it is the one string on that page they wrote themselves.
 
 **Neither surface can be framed.** A form submitted from inside an `iframe` of this console carries
 `Sec-Fetch-Site: same-origin`, because it does — so the defence against a foreign page does nothing
-about a foreign page wearing this one as a frame. Both applications answer `X-Frame-Options: DENY`
-and `frame-ancestors 'none'`.
+about a foreign page wearing this one as a frame. Both applications answer `X-Frame-Options: DENY`,
+`frame-ancestors 'none'` and `Referrer-Policy: no-referrer`, on every response including the ones
+they refuse: the guard wraps each application from *outside* rather than sitting in its middleware,
+because inside it a 500 answered with none of them — and a 500 is the response an attacker can most
+easily provoke.
 
 **The fail-open in that check is a loopback argument, and the shared bind is not loopback.** A
 request with no fetch metadata on the console is a script run by the machine's owner; on the shared
@@ -145,7 +152,11 @@ somebody inherits.
 **What it does not have, and the honest cost.** There is no TLS: the link travels in clear over
 whatever network it is served on, so this belongs on a trusted LAN or behind a tunnel, and not on
 the open internet. There are no accounts, no passwords and no sessions — the link *is* the
-identity, which is why it is long, hashed, revocable and named after one person.
+identity, which is why it is long, hashed, revocable and named after one person. One submission is
+capped at 16 KB, counted as it arrives rather than read off a header a chunked request never sends;
+the *number* of submissions is not capped, and a link holder who wanted to fill the owner's disk
+one idea at a time could. Revocation is the answer to that, which is the same answer as for anyone
+who abuses a link they were given.
 
 ## Phase 3, where the model changes
 

@@ -18,8 +18,6 @@ own sake.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -28,6 +26,20 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # `same-origin` is this page; `none` is a typed URL or a bookmark. `cross-site` and `same-site`
 # are somebody else's page, and neither has business changing anything here.
 ALLOWED_SITES = frozenset({"same-origin", "none"})
+
+
+def _header(scope: Scope, wanted: bytes) -> str | None:
+    """One header, read without assuming anything about the others.
+
+    Decoding every header as UTF-8 to find one of them made a single stray byte an unauthenticated
+    remote 500 — on the network bind, in the layer that runs *before* a token is checked, with a
+    traceback per hit. Header values are bytes on the wire; `latin-1` is the mapping that cannot
+    fail, and this only ever compares the result to a known word.
+    """
+    for key, value in scope["headers"]:
+        if bytes(key).lower() == wanted:
+            return str(bytes(value).decode("latin-1")).lower()
+    return None
 
 
 class SameOriginOnly:
@@ -61,17 +73,20 @@ class SameOriginOnly:
                     *message["headers"],
                     (b"x-frame-options", b"DENY"),
                     (b"content-security-policy", b"frame-ancestors 'none'"),
+                    # The shared view's token is in the URL, so a link out of that page would
+                    # hand it to whoever the link points at. There are no links today; this is
+                    # the cheap insurance against the first one.
+                    (b"referrer-policy", b"no-referrer"),
                 ]
             await send(message)
 
         return sending
 
     async def _guard(self, scope: Scope, receive: Receive, send: Send) -> None:
-        headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
-        site = headers.get("sec-fetch-site")
+        site = _header(scope, b"sec-fetch-site")
         if site is not None and site not in ALLOWED_SITES:
             response = PlainTextResponse(
-                "This console only accepts actions from its own pages.", status_code=403
+                "This page only accepts actions from its own forms.", status_code=403
             )
             await response(scope, receive, self._unframed(send))
             return
@@ -79,5 +94,11 @@ class SameOriginOnly:
         await self.app(scope, receive, self._unframed(send))
 
 
-def guard(app: ASGIApp) -> Callable[[Scope, Receive, Send], Awaitable[None]]:
+def guard(app: ASGIApp) -> SameOriginOnly:
+    """Wrap an application so the guard is the *outermost* layer.
+
+    Added as middleware it sat inside Starlette's error handler, so a 500 answered with neither
+    frame header — the one response an attacker can most easily provoke. Outside it, every byte
+    this process sends passes through here.
+    """
     return SameOriginOnly(app)

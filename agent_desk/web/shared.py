@@ -42,7 +42,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 from agent_desk.ideas import inbox
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Store, Viewer
-from agent_desk.web.origin import SameOriginOnly
+from agent_desk.web.origin import guard
 
 TEMPLATES = Path(__file__).parent / "templates" / "shared"
 
@@ -63,6 +63,35 @@ env = Environment(
 log = structlog.get_logger("agent_desk.shared")
 
 
+async def _bounded_body(request: Request) -> bytes | None:
+    """The request body, or `None` if it is too big — counted as it arrives.
+
+    The first version of this cap read `Content-Length`, which chunked encoding does not send:
+    a 128 KB body went straight through with a `303` and was stored whole. A header is a claim
+    about a body, and this is the body.
+    """
+    declared = _declared_length(request)
+    if declared is not None and declared > MAX_SUBMISSION_BYTES:
+        return None
+
+    chunks: list[bytes] = []
+    seen = 0
+    async for chunk in request.stream():
+        seen += len(chunk)
+        if seen > MAX_SUBMISSION_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _declared_length(request: Request) -> int | None:
+    """The cheap early-out, kept for the honest client that sends one."""
+    try:
+        return int(request.headers.get("content-length", ""))
+    except ValueError:
+        return None
+
+
 def _when(created_at: int) -> str:
     """A date a person reads, from the milliseconds this program stores."""
     return datetime.fromtimestamp(created_at / 1000, tz=UTC).strftime("%d %b %Y")
@@ -71,9 +100,6 @@ def _when(created_at: int) -> str:
 # `redirect_slashes=False`: that redirect echoes the request's own Host header back into an
 # absolute Location, and this bind answers to whatever hostname is pointed at it.
 app = FastAPI(title="agent-desk · ideas", openapi_url=None, redirect_slashes=False)
-# The same guard as the console's. A viewer's token is not a secret a foreign page has, but
-# a page that obtained one must not be able to post through the viewer's browser either.
-app.add_middleware(SameOriginOnly)
 
 
 def _store(request: Request) -> Store | None:
@@ -89,9 +115,15 @@ def _store(request: Request) -> Store | None:
 
 async def _viewer(request: Request, token: str) -> tuple[Store, Viewer] | None:
     store = _store(request)
-    if store is None:  # pragma: no cover - the console opens it at startup
+    if store is None:
         return None
-    viewer = await store.viewer_for(token)
+    try:
+        viewer = await store.viewer_for(token)
+    except RuntimeError:
+        # The console closed the store between the check above and this await — the shutdown half
+        # of the same window. A viewer gets the answer a wrong link gets, which is what this route
+        # promises about everything it cannot serve.
+        return None
     return None if viewer is None else (store, viewer)
 
 
@@ -139,13 +171,14 @@ async def submit_idea(token: str, request: Request) -> Response:
         return HTMLResponse(env.get_template("gone.html").render(), status_code=404)
 
     store, viewer = found
-    if int(request.headers.get("content-length") or 0) > MAX_SUBMISSION_BYTES:
-        # Refused before it is read. A link holder is authenticated, not trusted with the owner's
-        # memory and disk — "the token is unguessable" is an argument about who gets in, not about
-        # what they may do once they are.
+    body_bytes = await _bounded_body(request)
+    if body_bytes is None:
+        # A link holder is authenticated, not trusted with the owner's memory and disk — and "the
+        # token is unguessable" is an argument about who gets in, not about what they may do once
+        # they are in.
         return HTMLResponse(env.get_template("gone.html").render(), status_code=413)
 
-    body = (await request.body()).decode("utf-8", errors="replace")
+    body = body_bytes.decode("utf-8", errors="replace")
     text = (parse_qs(body, keep_blank_values=True).get("text", [""])[0] or "").strip()
     if text:
         await inbox.capture(
@@ -158,3 +191,9 @@ async def submit_idea(token: str, request: Request) -> Response:
 
     # A redirect rather than a rendered response, so a refresh does not submit again.
     return RedirectResponse(f"/shared/{token}", status_code=303)
+
+
+# The guard wraps this application from outside rather than sitting in its middleware stack, so
+# that a 500 raised anywhere inside still carries the frame and referrer headers. It is also the
+# layer a stranger reaches first on this bind, which is why it must not be able to raise.
+asgi = guard(app)

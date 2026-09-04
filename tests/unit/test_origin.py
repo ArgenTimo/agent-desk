@@ -69,9 +69,9 @@ async def _send(
 @pytest.mark.unit
 async def test_a_foreign_page_cannot_ask_a_question_through_your_console(desk: Store) -> None:
     """The cheapest version of the attack: a form on any website, submitted by your browser."""
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
-    status = await _send(app, "POST", "/blocks", site="cross-site", fields={"text": "not mine"})
+    status = await _send(asgi, "POST", "/blocks", site="cross-site", fields={"text": "not mine"})
 
     assert status == 403
     assert await desk.blocks() == []
@@ -81,10 +81,10 @@ async def test_a_foreign_page_cannot_ask_a_question_through_your_console(desk: S
 async def test_the_worst_version_of_it_is_refused_too(desk: Store) -> None:
     """The one path that writes to a session is a POST like any other, and it is the one that
     matters (docs/adr/0002)."""
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
     status = await _send(
-        app,
+        asgi,
         "POST",
         "/sessions/aaaaaaaa-0000-4000-8000-000000000001/message/send",
         site="cross-site",
@@ -96,17 +96,17 @@ async def test_the_worst_version_of_it_is_refused_too(desk: Store) -> None:
 @pytest.mark.unit
 async def test_a_same_site_page_is_still_somebody_elses_page(desk: Store) -> None:
     """`same-site` is a sibling origin, not this one. Only `same-origin` is this console."""
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
-    assert await _send(app, "POST", "/blocks", site="same-site", fields={"text": "x"}) == 403
+    assert await _send(asgi, "POST", "/blocks", site="same-site", fields={"text": "x"}) == 403
 
 
 @pytest.mark.unit
 async def test_the_consoles_own_pages_still_work(desk: Store) -> None:
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
     for site in ("same-origin", "none"):
-        status = await _send(app, "POST", "/blocks", site=site, fields={"text": "   "})
+        status = await _send(asgi, "POST", "/blocks", site=site, fields={"text": "   "})
         assert status in (200, 303), site
 
 
@@ -114,18 +114,18 @@ async def test_the_consoles_own_pages_still_work(desk: Store) -> None:
 async def test_a_local_script_is_not_a_browser_and_is_left_alone(desk: Store) -> None:
     """No fetch metadata means no browser: curl, a test, or a script run by the same user — who
     can already read `~/.claude/` directly and does not need a form to do harm."""
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
-    status = await _send(app, "POST", "/blocks", site=None, fields={"text": "   "})
+    status = await _send(asgi, "POST", "/blocks", site=None, fields={"text": "   "})
     assert status in (200, 303)
 
 
 @pytest.mark.unit
 async def test_reading_the_board_is_never_refused(desk: Store) -> None:
     """Nothing here changes state on a GET, which is a rule worth keeping for its own sake."""
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
-    assert await _send(app, "GET", "/", site="cross-site") == 200
+    assert await _send(asgi, "GET", "/", site="cross-site") == 200
 
 
 @pytest.mark.unit
@@ -133,13 +133,13 @@ async def test_the_shared_view_is_guarded_the_same_way(desk: Store) -> None:
     _, token = await desk.create_viewer("a teammate")
 
     refused = await _send(
-        shared.app, "POST", f"/shared/{token}/idea", site="cross-site", fields={"text": "spam"}
+        shared.asgi, "POST", f"/shared/{token}/idea", site="cross-site", fields={"text": "spam"}
     )
     assert refused == 403
     assert await desk.ideas() == []
 
     accepted = await _send(
-        shared.app, "POST", f"/shared/{token}/idea", site="same-origin", fields={"text": "mine"}
+        shared.asgi, "POST", f"/shared/{token}/idea", site="same-origin", fields={"text": "mine"}
     )
     assert accepted == 303
     assert len(await desk.ideas()) == 1
@@ -152,9 +152,9 @@ async def test_neither_surface_can_be_framed(desk: Store) -> None:
     So the check above does nothing about a foreign page wearing this one as a frame, and a click
     landing where the attacker chose would pass every test in this file.
     """
-    from agent_desk.web.app import app
+    from agent_desk.web.app import asgi
 
-    for target, path in ((app, "/"), (shared.app, "/shared/nothing")):
+    for target, path in ((asgi, "/"), (shared.asgi, "/shared/nothing")):
         sent: list[dict[str, Any]] = []
 
         async def receive() -> dict[str, Any]:
@@ -187,3 +187,72 @@ async def test_neither_surface_can_be_framed(desk: Store) -> None:
         }
         assert headers["x-frame-options"] == "DENY", path
         assert "frame-ancestors 'none'" in headers["content-security-policy"], path
+
+
+@pytest.mark.unit
+async def test_the_frame_headers_are_on_a_refusal_and_on_a_write(desk: Store) -> None:
+    """Deleting the wrapper from the guard's own paths used to leave the whole suite green.
+
+    The old test only issued GETs, so the 403 the guard returns and every state-changing response
+    were unasserted — the two responses an attacker is most likely to be looking at.
+    """
+    from agent_desk.web.app import asgi
+
+    async def headers_of(method: str, path: str, site: str | None) -> dict[str, str]:
+        body = b""
+        scope: dict[str, Any] = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"127.0.0.1:8787"),
+                (b"content-type", b"application/x-www-form-urlencoded"),
+                (b"content-length", b"0"),
+                *([(b"sec-fetch-site", site.encode())] if site else []),
+            ],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8787),
+        }
+        sent: list[dict[str, Any]] = []
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        await asgi(scope, receive, send)
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        return {k.decode().lower(): v.decode() for k, v in start["headers"]}
+
+    refused = await headers_of("POST", "/blocks", "cross-site")
+    assert refused["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in refused["content-security-policy"]
+    assert refused["referrer-policy"] == "no-referrer"
+
+    allowed = await headers_of("POST", "/blocks", "same-origin")
+    assert allowed["x-frame-options"] == "DENY"
+
+
+@pytest.mark.unit
+def test_the_request_log_is_off_for_this_process_and_not_by_luck() -> None:
+    """uvicorn implements `access_log=False` by stripping handlers off one process-wide logger, so
+    two servers fight over it and the last config to load wins. The token stayed out of the log
+    because of the order two list entries happened to be in.
+    """
+    import logging
+
+    from agent_desk.__main__ import silence_access_logging
+
+    logging.getLogger("uvicorn.access").addHandler(logging.NullHandler())
+    silence_access_logging()
+
+    access = logging.getLogger("uvicorn.access")
+    assert access.disabled
+    assert not access.hasHandlers() or access.handlers == []
