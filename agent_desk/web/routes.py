@@ -645,6 +645,9 @@ async def ask(request: Request) -> Response:
             # dropped. Empty is the ordinary case and means the whole board (docs/06-console.md).
             targets=[one for one in form.get("targets", "").split(",") if one],
             thread_id=form.get("thread", "").strip(),
+            # The earlier exchanges attached to this one, in the order they were attached. Empty
+            # is not "everything": it means this page named nothing, and the thread is used.
+            history=[one for one in form.get("history", "").split(",") if one],
         )
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())

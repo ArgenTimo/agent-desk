@@ -55,6 +55,10 @@
   {% endif %}
 
   <footer class="actions">
+    {% if block.answer and block.state == "answered" %}
+    <button type="button" class="attach" data-block="{{ block.id }}"
+            title="carry this question and its answer into the next message">use as context</button>
+    {% endif %}
     {% if block.kind == "idea" and block.id in ideas %}
     {% set idea = ideas[block.id] %}
     {% if idea.state == "new" %}

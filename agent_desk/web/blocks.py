@@ -279,36 +279,78 @@ async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
         DRAFTING.discard((idea.id, kind))
 
 
-def _targets(rows: Sequence[BoardRow], dropped: Sequence[str]) -> tuple[list[BoardRow], str]:
-    """The rows named by the cards sitting in the output field, in the order they were dropped.
+def _rows_named(rows: Sequence[BoardRow], kind: str, ident: str) -> tuple[list[BoardRow], str]:
+    """The sessions one card stands for, and what to call it.
 
-    A card is `kind:id`, which is what the tree renders and what the middle carries back. Four
-    kinds resolve to sessions, because a session is the only thing there is evidence about: an
-    agent names the session it runs inside, an instance names a checkout, a project names a
-    repository key. A card whose session has since ended resolves to nothing and is skipped —
+    Four kinds resolve to sessions, because a session is the only thing there is evidence about:
+    an agent names the console it runs inside, an instance names a checkout, a project names a
+    repository. A card whose session has since ended resolves to nothing and is skipped —
     silently, because a question asked a second after a session ended should still be answered.
     """
+    if kind in ("session", "agent"):
+        found = [row for row in rows if row.session.session_id == ident]
+        return found, f"{found[0].session.project} · {found[0].session.name}" if found else ""
+    if kind == "instance":
+        found = [row for row in rows if row.session.cwd == ident]
+        return found, found[0].session.project if found else ""
+    if kind == "project":
+        found = [row for row in rows if row.project_key == ident]
+        return found, found[0].project_name if found else ""
+    return [], ""
+
+
+def _card(target: str) -> tuple[str, str, bool]:
+    """One dropped card: `kind:id`, or `kind:id:full` when its whole transcript was asked for."""
+    kind, _, rest = target.partition(":")
+    if rest.endswith(":full"):
+        return kind, rest[: -len(":full")], True
+    return kind, rest, False
+
+
+def _targets(rows: Sequence[BoardRow], dropped: Sequence[str]) -> tuple[list[BoardRow], str]:
+    """The rows named by the cards sitting in the output field, in the order they were dropped."""
     chosen: list[BoardRow] = []
     labels: list[str] = []
     for target in dropped:
-        kind, _, ident = target.partition(":")
-        if kind in ("session", "agent"):
-            found = [row for row in rows if row.session.session_id == ident]
-            label = f"{found[0].session.project} · {found[0].session.name}" if found else ""
-        elif kind == "instance":
-            found = [row for row in rows if row.session.cwd == ident]
-            label = found[0].session.project if found else ""
-        elif kind == "project":
-            found = [row for row in rows if row.project_key == ident]
-            label = found[0].project_name if found else ""
-        else:
-            continue
+        kind, ident, _ = _card(target)
+        found, label = _rows_named(rows, kind, ident)
         for row in found:
             if row not in chosen:
                 chosen.append(row)
         if label and label not in labels:
             labels.append(label)
     return chosen, ", ".join(labels)
+
+
+# How much of one transcript a card marked `full` is allowed to contribute. The tail itself is
+# already bounded when it is read (docs/03-session-observation.md); this bounds what three of them
+# together can do to one prompt.
+DEEP_ENTRIES = 40
+
+
+def transcripts(rows: Sequence[BoardRow], dropped: Sequence[str]) -> list[str]:
+    """The whole of what was read for the cards somebody asked the whole of.
+
+    A card contributes one line by default — enough to know what it is, and cheap enough that ten
+    of them cost nothing. Asking for its transcript is a separate act with a visible control,
+    because the difference between the two is the size of the prompt and how long the answer
+    takes ([docs/04-threads-and-blocks.md](../../docs/04-threads-and-blocks.md)).
+    """
+    lines: list[str] = []
+    seen: set[str] = set()
+    for target in dropped:
+        kind, ident, deep = _card(target)
+        if not deep:
+            continue
+        for row in _rows_named(rows, kind, ident)[0]:
+            if row.session.session_id in seen or row.tail is None:
+                continue
+            seen.add(row.session.session_id)
+            lines.append("")
+            lines.append(f"### {row.session.project} · {row.session.name}")
+            for entry in row.tail.entries[-DEEP_ENTRIES:]:
+                lines.append(f"{entry.role}: {entry.text}")
+    return lines
 
 
 def aim(
@@ -352,6 +394,7 @@ async def submit(
     session: str = "",
     targets: Sequence[str] = (),
     thread_id: str = "",
+    history: Sequence[str] = (),
 ) -> Block:
     """Accept one line of input and start working on it.
 
@@ -381,10 +424,13 @@ async def submit(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
     aimed, about = aim(rows, project, session, targets)
+    deep = transcripts(rows, targets)
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
-        lambda: _work(store, block, aimed, classify=classify, about=about),
+        lambda: _work(
+            store, block, aimed, classify=classify, about=about, deep=deep, history=list(history)
+        ),
     )
     return block
 
@@ -410,6 +456,8 @@ async def _work(
     *,
     classify: bool,
     about: str = "",
+    deep: Sequence[str] = (),
+    history: Sequence[str] = (),
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
 
@@ -425,7 +473,9 @@ async def _work(
         if kind == "instruction":
             await _prepare_directive(store, block, rows)
             return
-        await _classify_and_answer(store, block, rows, classify=classify, about=about)
+        await _classify_and_answer(
+            store, block, rows, classify=classify, about=about, deep=deep, history=history
+        )
     except asyncio.CancelledError:
         # Cancellation before `answer_block` is entered used to leave the block `queued` with no
         # task behind it: the template offers cancel for queued and retry only for a settled
@@ -504,8 +554,29 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
     )
 
 
+async def _attached(store: Store, block_ids: Sequence[str]) -> list[tuple[str, str]]:
+    """The earlier messages somebody attached to this one, in the order they attached them.
+
+    Nothing is carried by default. Every call to the model is built from exactly what was asked
+    for — the question, the cards in the output field, and whichever earlier exchanges were
+    attached — which is what makes the cost of a question predictable and its answer explainable
+    (docs/04-threads-and-blocks.md).
+    """
+    attached: list[tuple[str, str]] = []
+    for block_id in block_ids:
+        earlier = await store.block(block_id)
+        if earlier is not None and earlier.answer:
+            attached.append((earlier.input, earlier.answer))
+    return attached
+
+
 async def _thread_history(store: Store, thread_id: str, exclude: str) -> list[tuple[str, str]]:
-    """The thread's previous questions and answers, which a continuation inherits (docs/04)."""
+    """The thread's previous questions and answers, for a block that named no attachments.
+
+    This is the path a page with no JavaScript takes, and the one the thread classifier of
+    docs/04-threads-and-blocks.md was written for: attaching a follow-up to a subject is only
+    worth anything if the subject then travels with it.
+    """
     return [
         (block.input, block.answer or "")
         for block in await store.blocks_in_thread(thread_id)
@@ -520,6 +591,8 @@ async def _classify_and_answer(
     *,
     classify: bool,
     about: str = "",
+    deep: Sequence[str] = (),
+    history: Sequence[str] = (),
 ) -> None:
     thread_id = block.thread_id
     if classify:
@@ -542,9 +615,19 @@ async def _classify_and_answer(
             # both directions, and only one of them was being counted.
             await store.move_block(block.id, block.thread_id, set_by="classifier")
 
-    history = await _thread_history(store, thread_id, exclude=block.id)
+    # Attached beats inherited: a page that could say exactly what to carry said it, and a page
+    # that could not gets the thread it was classified into.
+    earlier = (
+        await _attached(store, history)
+        if history
+        else await _thread_history(store, thread_id, exclude=block.id)
+    )
     prompt = session.build_prompt(
-        block.input, board=board_lines(rows), history=history, about=about
+        block.input,
+        board=board_lines(rows),
+        history=earlier,
+        about=about,
+        transcripts=deep,
     )
     await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
 

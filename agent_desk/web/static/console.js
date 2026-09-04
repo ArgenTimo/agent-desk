@@ -313,19 +313,44 @@ document.addEventListener('dragend', () => {
 // out undoes both.
 function pinnedTargets() {
   return [...pins.querySelectorAll('[data-kind]')]
-    .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}`)
+    .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
+    .join(',');
+}
+
+// Which earlier exchanges travel with the next message. Nothing does by default: every call is
+// built from exactly what was asked for, which is what makes what it costs predictable and what
+// it answered from explainable.
+function attachedBlocks() {
+  return [...document.querySelectorAll('#blocks .attach.on')]
+    .map((button) => button.dataset.block)
     .join(',');
 }
 
 function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
+  document.getElementById('say-history').value = attachedBlocks();
+  const attached = document.querySelectorAll('#blocks .attach.on').length;
+  const carried = pins.children.length + attached;
+  const deep = pins.querySelectorAll('.pin.deep').length;
+  document.getElementById('context-count').textContent = carried
+    ? `carrying ${pins.children.length} card${pins.children.length === 1 ? '' : 's'}` +
+      `${deep ? ` (${deep} in full)` : ''}` +
+      `${attached ? ` and ${attached} earlier answer${attached === 1 ? '' : 's'}` : ''}`
+    : '';
+  document.querySelector('.context-strip').classList.toggle('on', carried > 0);
   showActiveThread();
 }
 
 function clearPins() {
   pins.innerHTML = '';
+  for (const button of document.querySelectorAll('#blocks .attach.on')) {
+    button.classList.remove('on');
+    button.textContent = 'use as context';
+  }
   syncTargets();
 }
+
+document.getElementById('clear-context').addEventListener('click', clearPins);
 
 async function pin(card) {
   if (pins.querySelector(`[data-id="${CSS.escape(card.id)}"][data-kind="${card.kind}"]`)) return;
@@ -334,8 +359,10 @@ async function pin(card) {
   holder.dataset.kind = card.kind;
   holder.dataset.id = card.id;
   holder.draggable = true;
+  holder.dataset.deep = 'no';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
+    <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
     <div class="pin-body">reading…</div>`;
   holder.querySelector('.pin-label').textContent = card.label || card.id;
@@ -357,6 +384,27 @@ async function pin(card) {
 document.addEventListener('click', (event) => {
   if (event.target.classList.contains('pin-off')) {
     event.target.closest('.pin').remove();
+    syncTargets();
+    return;
+  }
+
+  // Brief by default, and the whole transcript only when somebody says so: the difference is the
+  // size of the prompt and how long the answer takes.
+  if (event.target.classList.contains('pin-deep')) {
+    const holder = event.target.closest('.pin');
+    const deep = holder.dataset.deep !== 'yes';
+    holder.dataset.deep = deep ? 'yes' : 'no';
+    holder.classList.toggle('deep', deep);
+    event.target.textContent = deep ? 'full' : 'brief';
+    syncTargets();
+    return;
+  }
+
+  if (event.target.classList.contains('attach')) {
+    event.target.classList.toggle('on');
+    event.target.textContent = event.target.classList.contains('on')
+      ? 'in context'
+      : 'use as context';
     syncTargets();
     return;
   }
@@ -460,6 +508,7 @@ document.addEventListener('keydown', (event) => {
 // is about whatever is dropped in after this answer, which is what "the last blocks" means.
 document.getElementById('ask').addEventListener('submit', () => {
   document.getElementById('say-targets').value = pinnedTargets();
+  document.getElementById('say-history').value = attachedBlocks();
   setTimeout(clearPins, 0);
 });
 

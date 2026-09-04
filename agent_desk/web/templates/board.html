@@ -43,6 +43,14 @@
         thought without interrupting anything.</p>
     </div>
 
+    {# What the next message will carry, said out loud. Every call to the model is built from
+       exactly this and nothing else — the question, the cards in the output, and whichever
+       earlier exchanges were attached. #}
+    <div class="context-strip">
+      <span id="context-count"></span>
+      <button type="button" id="clear-context">carry nothing</button>
+    </div>
+
     <div id="message">{{ message|safe }}</div>
 
     <form class="say" id="ask" method="post" action="/blocks"
@@ -50,6 +58,7 @@
           hx-on::after-request="this.reset(); this.text.focus()">
       <input type="hidden" name="thread" id="say-thread" value="{{ threads[0].id if threads else '' }}">
       <input type="hidden" name="targets" id="say-targets" value="">
+      <input type="hidden" name="history" id="say-history" value="">
       <label class="visually-hidden" for="ask-text">what do you want to say</label>
       <input id="ask-text" name="text" autocomplete="off" autofocus
              placeholder="ask, or record an idea, or say what should happen">

@@ -85,11 +85,25 @@ the human makes it.
 
 ## What a question is answered *from*
 
-A block's answer is produced by a headless `claude -p` run started by this tool, with:
+A block's answer is produced by a headless `claude -p` run started by this tool, with **exactly
+what was asked for and nothing else**:
 
-- the thread's previous blocks,
+- the cards sitting in the output field when it was sent — one line each, or the whole transcript
+  for a card switched to `full`,
+- the earlier questions and answers that were attached to it, one at a time, in the order they
+  were attached,
 - the board state relevant to it — sessions, their statuses, recent transcript tails,
-- read access to the repositories being observed.
+- read access to the repositories being observed, one per session it was pointed at.
+
+Cards from different projects combine: two sessions in two repositories dropped into the output
+are two sessions the run is given and two checkouts it may read, which is what makes "how would I
+put this one into that one" a question this tool can answer at all.
+
+**Nothing is carried by default**, and the console says what is being carried before it is sent.
+A call built from a subject's whole history is a call whose cost nobody can predict and whose
+answer nobody can explain; naming what travels makes both obvious. The exception is a page that
+cannot name anything — no JavaScript, or a submission from elsewhere — which inherits the thread
+it was classified into, and that is what the classifier is for.
 
 It is **not** produced by asking a running session. That would cost the session its context, which
 is problem 2 of [01-vision.md](01-vision.md), and the whole reason this tool exists is to answer

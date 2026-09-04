@@ -267,6 +267,7 @@ def build_prompt(
     board: Iterable[str],
     history: Iterable[tuple[str, str]],
     about: str = "",
+    transcripts: Iterable[str] = (),
 ) -> str:
     """What a block is answered *from* (docs/04-threads-and-blocks.md).
 
@@ -307,6 +308,12 @@ def build_prompt(
         lines += ["", "## Earlier in this thread"]
         for asked, answered in previous:
             lines += [f"Q: {asked}", f"A: {answered}", ""]
+
+    read = list(transcripts)
+    if read:
+        # Asked for card by card, never by default: one line a session is what the board costs,
+        # and this is what it costs to read one properly.
+        lines += ["", "## The transcripts you were given, in full", *read]
 
     lines += ["", "## The question", question]
     return "\n".join(lines)

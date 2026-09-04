@@ -883,3 +883,92 @@ async def test_an_instruction_that_names_no_session_prepares_nothing(
     assert await desk.directives() == []
     after = await desk.block(block.id)
     assert after is not None and "could not tell which session" in (after.answer or "")
+
+
+# --- what one call to the model is built from ---------------------------------------------------
+@pytest.mark.unit
+def test_cards_from_two_projects_are_one_question() -> None:
+    """ "How would I put this into the other one" is the question this exists for.
+
+    Nothing about a card ties it to its neighbours: two sessions in two repositories dropped into
+    the output are two sessions the run is given, and both checkouts are opened for it to read.
+    """
+    api = make_row("api", "main")
+    app = make_row("ios-app", "main")
+
+    aimed, about = blocks.aim(
+        [api, app], targets=["session:session-api", "session:session-ios-app"]
+    )
+
+    assert [row.session.project for row in aimed] == ["api", "ios-app"]
+    assert "api" in about and "ios-app" in about
+    # The run reads both working directories, which is what makes an integration question
+    # answerable at all. They do not exist on this machine, so the list is what it is; the
+    # deduplication and the order are what this asserts.
+    assert blocks._add_dirs([row.session for row in aimed]) == []
+
+
+@pytest.mark.unit
+def test_a_card_is_one_line_until_somebody_asks_for_the_whole_transcript() -> None:
+    """The default is cheap enough that ten cards cost nothing; `full` is a separate act."""
+    row = make_row("alpha", "main")
+
+    assert blocks.transcripts([row], ["session:session-alpha"]) == []
+
+    deep = blocks.transcripts([row], ["session:session-alpha:full"])
+    assert any("doing something" in line for line in deep)
+    assert any("alpha" in line for line in deep)
+
+    # And a repository key has colons in it, so the suffix is read from the right end only.
+    assert blocks._card("project:git:/home/dev/api/.git") == (
+        "project",
+        "git:/home/dev/api/.git",
+        False,
+    )
+    assert blocks._card("project:git:/home/dev/api/.git:full") == (
+        "project",
+        "git:/home/dev/api/.git",
+        True,
+    )
+
+
+@pytest.mark.unit
+async def test_a_question_carries_exactly_what_was_attached_to_it(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Nothing travels by default, and what does is named one message at a time.
+
+    The thread is still there and still means something — a page with no JavaScript uses it — but
+    a page that can say exactly what to carry says it, and then the call is built from that.
+    """
+    tab = await desk.create_thread("a subject")
+    first = await blocks.submit(desk, "the first question", [], thread_id=tab.id)
+    await _settled(desk, first.id)
+    second = await blocks.submit(desk, "an unrelated one", [], thread_id=tab.id)
+    await _settled(desk, second.id)
+
+    # Attached: exactly the one named.
+    assert await blocks._attached(desk, [first.id]) == [("the first question", "an answer")]
+    assert await blocks._attached(desk, []) == []
+    # A block that never answered carries nothing, rather than carrying half of itself.
+    empty = await desk.create_block(
+        thread_id=tab.id, kind="question", input="still running", thread_set_by="human"
+    )
+    assert await blocks._attached(desk, [empty.id]) == []
+
+    # And the thread still holds both, for the page that cannot name anything.
+    inherited = await blocks._thread_history(desk, tab.id, exclude=second.id)
+    assert [asked for asked, _ in inherited] == ["the first question"]
+
+
+@pytest.mark.unit
+def test_the_prompt_says_which_transcripts_it_was_handed() -> None:
+    """A section that only exists when somebody asked for it, so its absence is also a fact."""
+    plain = session.build_prompt("what now", board=["- alpha"], history=[])
+    assert "in full" not in plain
+
+    with_reading = session.build_prompt(
+        "what now", board=["- alpha"], history=[], transcripts=["### alpha", "assistant: hello"]
+    )
+    assert "## The transcripts you were given, in full" in with_reading
+    assert "assistant: hello" in with_reading
