@@ -1,0 +1,24 @@
+{# The chats. One by default, `+` starts another and `×` closes one, and a new one is empty —
+   which is what an interaction area should be until somebody has asked something. A tab is a
+   subject, and typing in one is how a human says which subject this is, so nothing has to guess
+   it (docs/04-threads-and-blocks.md).
+
+   Closing is closing, not deleting: the thread is marked closed and its questions and answers
+   stay in the store. A question that vanished is a question you ask again. #}
+<div class="tabs" role="tablist">
+  {% for thread in threads %}
+  <div class="tab{% if loop.first %} on{% endif %}" data-thread="{{ thread.id }}" draggable="true">
+    <button type="button" class="tab-name" role="tab" title="{{ thread.subject }}">{{ thread.subject }}</button>
+    {% if threads | length > 1 %}
+    <form method="post" action="/threads/{{ thread.id }}/close" class="tab-close"
+          hx-post="/threads/{{ thread.id }}/close" hx-target="closest .tabs" hx-swap="outerHTML">
+      <button type="submit" class="tab-off" title="close this chat" aria-label="close {{ thread.subject }}">×</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <form method="post" action="/threads" class="tab-new"
+        hx-post="/threads" hx-target="closest .tabs" hx-swap="outerHTML">
+    <button type="submit" title="a new chat" aria-label="a new chat">+</button>
+  </form>
+</div>

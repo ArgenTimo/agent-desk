@@ -7,272 +7,100 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c1b19'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23e0a250'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/console.css">
 </head>
-<body>
+<body class="desk">
 
-{# The one vendored file. Without it the forms still post and the pages still render; only the
-   in-place swaps are lost, and the page says so rather than looking broken. #}
-<p id="no-htmx" class="notice" hidden>htmx is missing from agent_desk/web/static/, so every action
-  reloads the page instead of updating in place. Everything works; it just blinks.</p>
+<p id="no-htmx" class="notice" hidden>htmx is missing from agent_desk/web/static/. Everything
+  works — the script below does the same swaps itself — but nothing else on this page can use
+  <code>hx-</code> attributes until it is vendored.</p>
 
-<header class="bar">
-  <span class="brand">agent-desk</span>
-  <nav aria-label="sections">
-    <a href="/ideas">ideas</a>
-    <a href="/viewers">viewers</a>
-  </nav>
-  <span class="spacer"></span>
-  <span id="asof">connecting…</span>
-  <span id="stream-state" aria-live="polite">·</span>
-</header>
+{# Three columns, full width: what is running, what you are asking, and what is in the way. #}
+<div class="desk-grid">
 
-<main class="split">
-  {# Left: what you ask and what comes back, in as few words as the answer can be given in. Right:
-     what is running. The question field is here rather than under the board because it is the
-     half of this window a person touches. #}
-  <div class="column asking">
-    <section aria-labelledby="ask-heading" id="ask-panel">
-      <h2 class="section-title" id="ask-heading">ask</h2>
+  <aside class="col-left" aria-label="what is running">
+    <header class="col-head">
+      <span class="brand">agent-desk</span>
+      <span class="spacer"></span>
+      <span id="asof" class="tiny">connecting…</span>
+      <span id="stream-state" class="tiny" aria-live="polite">·</span>
+    </header>
+    <div id="board" class="tree">{{ board|safe }}</div>
+    <nav class="col-foot"><a href="/ideas">ideas</a><a href="/viewers">viewers</a></nav>
+  </aside>
 
-      <form class="ask" id="ask" method="post" action="/blocks"
-            hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
-            hx-on::after-request="this.reset(); this.text.focus()">
-        {# Three ways a question can be aimed, and the third is the default: about a project,
-           about one session, or about nothing in particular — in which case the run works it out
-           from the board it is given. Dropping a card here fills these in. #}
-        <div class="target" id="target">
-          <label for="target-project">project</label>
-          <select id="target-project" name="project">
-            <option value="">— anything —</option>
-            {% for project in projects %}
-            <option value="{{ project.key }}">{{ project.name }}</option>
-            {% endfor %}
-          </select>
+  <div class="gutter" data-gutter="left" role="separator" aria-orientation="vertical"
+       tabindex="0" title="drag to resize · double-click to reset"></div>
 
-          <label for="target-session">session</label>
-          <select id="target-session" name="session">
-            <option value="">— anything —</option>
-            {% for project in projects %}
-            {% for instance in project.instances %}
-            {% for row in instance.rows %}
-            <option value="{{ row.session.session_id }}" data-project="{{ project.key }}">
-              {{ row.tail.title if row.tail and row.tail.title else row.session.name }}
-            </option>
-            {% endfor %}
-            {% endfor %}
-            {% endfor %}
-          </select>
-          <span class="drop-here" aria-hidden="true">or drop a card here</span>
-        </div>
+  <main class="col-mid" aria-label="asking">
+    {% include "_tabs.html" %}
 
-        <label class="visually-hidden" for="ask-text">what do you want to ask, or record</label>
-        <div class="ask-line">
-          <input id="ask-text" name="text" autocomplete="off" autofocus
-                 placeholder="ask in plain words — the field is free again the moment you press enter">
-          <button type="submit">Ask</button>
-        </div>
-        <span class="keys" aria-hidden="true">/idea to record a thought · /new for a new subject · press /</span>
-      </form>
-
-      {# The write path lives outside the board, because the board replaces itself whenever a
-         session changes and a panel inside it would vanish under a half-typed message. #}
-      <div id="message">{{ message|safe }}</div>
-
-      <h2 class="section-title" id="blocks-heading">answers</h2>
+    {# The output. Empty by default; every message hangs here and its answer appears under it.
+       Drop a card in to see it and to point what you ask next at it; drag it out to stop. #}
+    <div id="out" class="out" data-drop="out">
+      <div id="pins" class="pins" aria-label="what the next message is about"></div>
       <div id="blocks">{{ blocks|safe }}</div>
-    </section>
-  </div>
+      <p class="out-empty">Nothing asked yet. Ask a question, drop a card in here to talk
+        about that one thing, or start with <span class="hint-key">/idea</span> to record a
+        thought without interrupting anything.</p>
+    </div>
 
-  <div class="column watching">
-    <section aria-labelledby="sessions-heading">
-      <div id="board">{{ board|safe }}</div>
-    </section>
-  </div>
-</main>
+    <div id="message">{{ message|safe }}</div>
+
+    <form class="say" id="ask" method="post" action="/blocks"
+          hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
+          hx-on::after-request="this.reset(); this.text.focus()">
+      <input type="hidden" name="thread" id="say-thread" value="{{ threads[0].id if threads else '' }}">
+      <input type="hidden" name="targets" id="say-targets" value="">
+      <label class="visually-hidden" for="ask-text">what do you want to say</label>
+      <input id="ask-text" name="text" autocomplete="off" autofocus
+             placeholder="ask, or record an idea, or say what should happen">
+      <button type="submit">Send</button>
+    </form>
+  </main>
+
+  <div class="gutter" data-gutter="right" role="separator" aria-orientation="vertical"
+       tabindex="0" title="drag to resize · double-click to reset"></div>
+
+  <aside class="col-right" aria-label="what is in the way">
+    <header class="col-head"><span class="col-title">blockers</span></header>
+    {# Stubs, and labelled as stubs. Nothing on disk says what is blocking a session; inventing a
+       blocker would be the guessed status this board refuses to render. #}
+    <div class="blockers">
+      <div class="card blocker stub">
+        <div class="card-head">
+          <span class="dot idle" aria-hidden="true"></span>
+          <span class="card-name">waiting on a person</span>
+          <span class="pill quiet">soon</span>
+        </div>
+        <div class="card-body"><p class="small">A session that has asked something and had no
+          answer. Nothing on disk says this yet.</p></div>
+      </div>
+      <div class="card blocker stub">
+        <div class="card-head">
+          <span class="dot busy" aria-hidden="true"></span>
+          <span class="card-name">waiting on a run</span>
+          <span class="pill quiet">soon</span>
+        </div>
+        <div class="card-body"><p class="small">Tests, a build, something long. Visible from a
+          transcript, not yet read out of one.</p></div>
+      </div>
+      <div class="card blocker stub">
+        <div class="card-head">
+          <span class="dot flag" aria-hidden="true"></span>
+          <span class="card-name">failed and unattended</span>
+          <span class="pill quiet">soon</span>
+        </div>
+        <div class="card-body"><p class="small">Something went wrong and nobody has looked at it
+          since.</p></div>
+      </div>
+      <p class="empty small">These three are placeholders, drawn so the column has a shape. None
+        of them is computed, and a blocker this program cannot observe is one it will not
+        invent.</p>
+    </div>
+  </aside>
+</div>
 
 <script src="/static/htmx.min.js"></script>
-<script>
-// Fourteen lines instead of a framework. The board is server-rendered; the browser replaces it
-// when the server says it changed, fills a row's transcript when somebody opens it, and says
-// plainly when it has stopped hearing from the server — a board that has quietly stopped updating
-// looks exactly like a board on which nothing is happening.
-if (!window.htmx) document.getElementById('no-htmx').hidden = false;
-
-const asof = document.getElementById('asof');
-const state = document.getElementById('stream-state');
-const opened = new Set();
-let lastChecked = 0;
-
-function checked() {
-  lastChecked = Date.now();
-  asof.textContent = `checked ${new Date().toLocaleTimeString()}`;
-  state.textContent = '·';
-  state.className = '';
-  document.body.classList.remove('stale');
-}
-
-function lost(why) {
-  // The reconnect attempt and the silence timer both fire while the server is down, and each has
-  // a true thing to say; alternating them once a second is a board nobody can read.
-  if (document.body.classList.contains('stale')) return;
-  state.textContent = why;
-  state.className = 'lost';
-  document.body.classList.add('stale');
-}
-
-async function fillTail(row) {
-  const box = row.querySelector('.tail');
-  try {
-    const response = await fetch(`/sessions/${row.dataset.session}/tail`);
-    box.innerHTML = response.ok ? await response.text() : '<p class="empty">could not read the tail</p>';
-  } catch {
-    box.innerHTML = '<p class="empty">could not read the tail</p>';
-  }
-}
-
-// A row is a <details>: keyboard, screen readers and no-JavaScript all come free, and the tail is
-// still fetched only when one is opened.
-document.addEventListener('toggle', (event) => {
-  const row = event.target.closest('[data-session]');
-  if (!row) return;
-  if (row.open) { opened.add(row.dataset.session); fillTail(row); }
-  else opened.delete(row.dataset.session);
-}, true);
-
-function restore() {
-  for (const row of document.querySelectorAll('[data-session]')) {
-    if (opened.has(row.dataset.session)) { row.open = true; fillTail(row); }
-  }
-}
-
-// `/` puts the cursor in the field from anywhere; Escape closes the write-path panel. This window
-// hovers over a terminal, and reaching for the mouse is the thing it is supposed to save.
-document.addEventListener('keydown', (event) => {
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-  if (event.key === '/' && !typing) { event.preventDefault(); document.getElementById('ask-text').focus(); }
-  if (event.key === 'Escape') {
-    if (document.getElementById('message').innerHTML.trim()) document.getElementById('message').innerHTML = '';
-    else document.activeElement.blur();
-  }
-});
-
-// --- dragging a card ---------------------------------------------------------------------------
-// Two things a card can be dropped on: the question field, which points a question at it, and
-// another project card, which says the two are one project. Both are plain HTML5 drag events —
-// the cards are server-rendered and the board replaces itself, so nothing here may hold state
-// about a particular card between renders.
-let dragged = null;
-
-document.addEventListener('dragstart', (event) => {
-  const card = event.target.closest('[data-kind]');
-  if (!card) return;
-  dragged = { kind: card.dataset.kind, id: card.dataset.id, label: card.dataset.label,
-              project: card.closest('.project')?.dataset.project };
-  event.dataTransfer.setData('text/plain', card.dataset.label || '');
-  event.dataTransfer.effectAllowed = 'link';
-  card.classList.add('dragging');
-  document.body.classList.add('dragging-card');
-});
-
-document.addEventListener('dragend', (event) => {
-  event.target.closest?.('[data-kind]')?.classList.remove('dragging');
-  document.body.classList.remove('dragging-card');
-  dragged = null;
-});
-
-function dropZone(event) {
-  return event.target.closest('#target, [data-drop="project"]');
-}
-
-document.addEventListener('dragover', (event) => {
-  const zone = dropZone(event);
-  if (!zone || !dragged) return;
-  event.preventDefault();
-  zone.classList.add('drop-target');
-});
-
-document.addEventListener('dragleave', (event) => {
-  dropZone(event)?.classList.remove('drop-target');
-});
-
-document.addEventListener('drop', (event) => {
-  const zone = dropZone(event);
-  if (!zone || !dragged) return;
-  event.preventDefault();
-  zone.classList.remove('drop-target');
-
-  if (zone.id === 'target') { aimAt(dragged); return; }
-
-  // Onto a project card: the dropped card's project joins this one. A project is a set of
-  // repositories, so what travels is the repository the card belongs to.
-  const into = zone.dataset.project;
-  const from = dragged.kind === 'project' ? dragged.id : dragged.project;
-  if (!into || !from || into === from) return;
-  const body = new URLSearchParams({ repo_key: from });
-  fetch(`/projects/${encodeURIComponent(into)}/members`, {
-    method: 'POST', headers: { 'HX-Request': 'true' }, body,
-  }).then((response) => response.ok ? response.text() : null)
-    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
-});
-
-// Pointing a question: the selects and a dropped card are the same act, so they end in the same
-// place. A session implies its project; a project on its own leaves the session free.
-function aimAt(card) {
-  const projects = document.getElementById('target-project');
-  const sessions = document.getElementById('target-session');
-  if (card.kind === 'session') {
-    sessions.value = card.id;
-    if (card.project) projects.value = card.project;
-  } else if (card.kind === 'project') {
-    projects.value = card.id;
-    sessions.value = '';
-  } else if (card.project) {
-    projects.value = card.project;
-    sessions.value = '';
-  }
-  filterSessions();
-  document.getElementById('ask-text').focus();
-}
-
-// Choosing a project narrows the session list to that project's sessions, which is the whole
-// reason the two are separate controls rather than one long list.
-function filterSessions() {
-  const chosen = document.getElementById('target-project').value;
-  const sessions = document.getElementById('target-session');
-  for (const option of sessions.options) {
-    if (!option.value) continue;
-    const belongs = !chosen || option.dataset.project === chosen;
-    option.hidden = !belongs;
-    if (!belongs && sessions.value === option.value) sessions.value = '';
-  }
-}
-document.getElementById('target-project').addEventListener('change', filterSessions);
-filterSessions();
-
-const stream = new EventSource('/events');
-stream.addEventListener('board', (event) => {
-  document.getElementById('board').innerHTML = event.data;
-  restore();
-  checked();
-  // The window title is the part of an always-on-top window you can read without focusing it.
-  const waiting = document.querySelectorAll('.row.flagged').length;
-  document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
-});
-stream.addEventListener('blocks', (event) => {
-  // Never while the reader is inside a block: replacing the column under a selection loses it,
-  // and an answer is the one thing here anybody copies out.
-  if (!document.getSelection().isCollapsed) return;
-  if (document.activeElement.closest('#blocks')) return;
-  document.getElementById('blocks').innerHTML = event.data;
-  if (window.htmx) htmx.process(document.getElementById('blocks'));
-  checked();
-});
-stream.addEventListener('heartbeat', checked);
-stream.onerror = () => lost('stream lost — reconnecting');
-
-const silence = {{ poll }} * 3 * 1000;
-setInterval(() => {
-  if (lastChecked && Date.now() - lastChecked > silence) lost('no update — stream stalled');
-}, 1000);
-</script>
+<script>window.POLL_SECONDS = {{ poll }};</script>
+<script src="/static/console.js"></script>
 </body>
 </html>

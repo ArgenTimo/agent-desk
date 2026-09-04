@@ -26,7 +26,7 @@ from agent_desk.answer import session
 from agent_desk.ideas import inbox
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
-from agent_desk.store.repo import Block, DraftKind, Idea, Store
+from agent_desk.store.repo import Block, DraftKind, Idea, Store, Thread
 
 if TYPE_CHECKING:
     from agent_desk.web.routes import BoardRow
@@ -279,19 +279,58 @@ async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
         DRAFTING.discard((idea.id, kind))
 
 
+def _targets(rows: Sequence[BoardRow], dropped: Sequence[str]) -> tuple[list[BoardRow], str]:
+    """The rows named by the cards sitting in the output field, in the order they were dropped.
+
+    A card is `kind:id`, which is what the tree renders and what the middle carries back. Four
+    kinds resolve to sessions, because a session is the only thing there is evidence about: an
+    agent names the session it runs inside, an instance names a checkout, a project names a
+    repository key. A card whose session has since ended resolves to nothing and is skipped —
+    silently, because a question asked a second after a session ended should still be answered.
+    """
+    chosen: list[BoardRow] = []
+    labels: list[str] = []
+    for target in dropped:
+        kind, _, ident = target.partition(":")
+        if kind in ("session", "agent"):
+            found = [row for row in rows if row.session.session_id == ident]
+            label = f"{found[0].session.project} · {found[0].session.name}" if found else ""
+        elif kind == "instance":
+            found = [row for row in rows if row.session.cwd == ident]
+            label = found[0].session.project if found else ""
+        elif kind == "project":
+            found = [row for row in rows if row.project_key == ident]
+            label = found[0].project_name if found else ""
+        else:
+            continue
+        for row in found:
+            if row not in chosen:
+                chosen.append(row)
+        if label and label not in labels:
+            labels.append(label)
+    return chosen, ", ".join(labels)
+
+
 def aim(
-    rows: Sequence[BoardRow], project: str = "", session: str = ""
+    rows: Sequence[BoardRow],
+    project: str = "",
+    session: str = "",
+    targets: Sequence[str] = (),
 ) -> tuple[Sequence[BoardRow], str]:
     """Narrow the board to what the question was pointed at, and say so in a line.
 
-    Three cases, and the third is the default (docs/06-console.md). A session: that console only.
-    A project: the sessions in it. Neither: the whole board, and the run works out from it what
-    the question is about — which is what somebody who has not chosen wants, rather than an error
-    asking them to choose.
+    Three cases, and the third is the default (docs/06-console.md). Cards dropped into the output
+    field: those, in the order they were dropped. A session or a project named outright: that one.
+    Neither: the whole board, and the run works out from it what the question is about — which is
+    what somebody who has not chosen wants, rather than an error asking them to choose.
 
     A target that no longer exists falls back to the whole board rather than to nothing: sessions
     end, and a question asked a second after one did should still be answered.
     """
+    if targets:
+        chosen, label = _targets(rows, targets)
+        if chosen:
+            return chosen, f"what was dropped in: {label}"
     if session:
         chosen = [row for row in rows if row.session.session_id == session]
         if chosen:
@@ -311,33 +350,158 @@ async def submit(
     *,
     project: str = "",
     session: str = "",
+    targets: Sequence[str] = (),
+    thread_id: str = "",
 ) -> Block:
-    """Accept one line of input and start answering it.
+    """Accept one line of input and start working on it.
 
-    `/idea` captures instead of asking. `/new` forces a new thread, which is what a question gets
-    anyway until the classifier of docs/04-threads-and-blocks.md exists to propose otherwise — so
-    the thread is recorded as set by a human, because it was.
+    `/idea` records instead of asking, in one step and with no model call in the way. `/new`
+    forces a subject of its own.
+
+    Everything else goes to a run that first decides *what was typed* — a question, a thought, or
+    an instruction to a session — because those three want three different responses and the
+    person typing should not have to say which they meant (docs/04-threads-and-blocks.md).
+
+    `thread_id` is the tab it was typed in. A tab is a subject somebody chose by typing in it, so
+    a block that arrives with one is not classified: that is the "default and a click" docs/09
+    names as what should replace the classifier if it costs more attention than it saves.
     """
     text = typed.strip()
     if text.startswith(IDEA_PREFIX):
         return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows)
-    if text.startswith(NEW_PREFIX):
+    forced_new = text.startswith(NEW_PREFIX)
+    if forced_new:
         text = text[len(NEW_PREFIX) :].strip()
 
     # The block exists before anything is classified or answered, and the field is free the moment
-    # it does. Its thread starts as the default — a subject of its own — and says so: `human`,
-    # because nobody but the person who typed it has decided anything yet.
-    forced_new = typed.strip().startswith(NEW_PREFIX)
-    thread = await store.create_thread(text[:60] or "untitled")
+    # it does. It starts as a question because that is the safe reading of an unread line, and the
+    # run corrects it in a second if it was something else.
+    thread = await _thread_for(store, thread_id, text)
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
-    aimed, about = aim(rows, project, session)
+    aimed, about = aim(rows, project, session, targets)
+    classify = not forced_new and not thread_id
     runs.start(
         block.id,
-        lambda: _classify_then_run(store, block, aimed, classify=not forced_new, about=about),
+        lambda: _work(store, block, aimed, classify=classify, about=about),
     )
     return block
+
+
+async def _thread_for(store: Store, thread_id: str, text: str) -> Thread:
+    """The tab this was typed in, or a subject of its own.
+
+    A tab that has been closed or that never existed — a stale page posting an id the store has
+    forgotten — falls back to a new subject rather than to an error: the input field's first
+    promise is that typing costs nothing.
+    """
+    if thread_id:
+        for thread in await store.open_threads():
+            if thread.id == thread_id:
+                return thread
+    return await store.create_thread(text[:60] or "untitled")
+
+
+async def _work(
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow],
+    *,
+    classify: bool,
+    about: str = "",
+) -> None:
+    """Read what was typed, then do the one thing it asked for.
+
+    Three kinds, three endings: a question is answered, a thought is recorded and says so, and an
+    instruction is turned into a message that waits for a click. The one thing none of them does
+    is write into a running session (docs/adr/0002).
+    """
+    try:
+        kind = await classifier.kind(block.input)
+        if kind == "idea":
+            await _record_idea(store, block, rows)
+            return
+        if kind == "instruction":
+            await _prepare_directive(store, block, rows)
+            return
+        await _classify_and_answer(store, block, rows, classify=classify, about=about)
+    except asyncio.CancelledError:
+        # Cancellation before `answer_block` is entered used to leave the block `queued` with no
+        # task behind it: the template offers cancel for queued and retry only for a settled
+        # block, and the crash rule deliberately leaves queued alone on restart. It was stuck for
+        # good. Deciding the kind is a full headless run, so this window is seconds wide.
+        await asyncio.shield(store.cancel_block(block.id))
+        raise
+
+
+async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+    """A thought, recognised as one: recorded, said so, and never asked a second question.
+
+    docs/05-ideas.md is explicit that capture ends here. The block is answered the moment the row
+    exists, because it is — what runs afterwards only improves the summary line.
+    """
+    source_kind, source_ref, context = _capture_context(rows)
+    await store.set_block_kind(block.id, "idea")
+    idea = await inbox.capture(
+        store,
+        block.input,
+        source_kind=source_kind,  # type: ignore[arg-type]
+        source_ref=source_ref,
+        context=context,
+        block_id=block.id,
+    )
+    await store.finish_block(block.id, "")
+    runs.start(f"summary:{idea.id}", lambda: _summarise(store, idea))
+
+
+def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
+    """The sessions, numbered, for a reply that has to name one of them."""
+    return [
+        f"{index}. {row.session.name} — {row.session.project} · {row.session.status}"
+        f' · "{(row.tail.title if row.tail else None) or "no title read"}"'
+        for index, row in enumerate(rows, start=1)
+    ]
+
+
+async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+    """An instruction to a session: written out, addressed, and left for a human to send.
+
+    This is the whole of what this program does with "tell Biba to test it again". It does not
+    send it, and it does not wait for a good moment to send it: there is no queue here that
+    decides that (docs/08-non-goals.md §2), and the one write path is a button somebody presses
+    (docs/adr/0002). What arrives is an acknowledgement and a message ready to go.
+    """
+    await store.set_block_kind(block.id, "instruction")
+    await store.set_block_running(block.id)
+    prompt = session.build_prompt_for_directive(block.input, sessions=_session_lines(rows))
+    try:
+        reply = "".join([chunk async for chunk in session.stream_answer(prompt)])
+    except (session.AnswerFailed, OSError) as exc:
+        await store.fail_block(block.id, f"the message could not be written: {exc}")
+        return
+
+    index, message = session.read_directive(reply, len(rows))
+    if index is None or not message.strip():
+        await store.finish_block(
+            block.id,
+            "Understood, but I could not tell which session this is for. Drop its card into this "
+            "field, or name it, and I will write the message.",
+        )
+        return
+
+    row = rows[index - 1]
+    await store.record_directive(
+        block_id=block.id,
+        session_id=row.session.session_id,
+        session_name=f"{row.session.project} · {row.session.name}",
+        text_=message.strip(),
+    )
+    await store.finish_block(
+        block.id,
+        f"Understood — a message to {row.session.project} · {row.session.name} is written and "
+        "waiting below. Nothing reaches that session until you send it.",
+    )
 
 
 async def _thread_history(store: Store, thread_id: str, exclude: str) -> list[tuple[str, str]]:
@@ -347,31 +511,6 @@ async def _thread_history(store: Store, thread_id: str, exclude: str) -> list[tu
         for block in await store.blocks_in_thread(thread_id)
         if block.id != exclude and block.state == "answered" and block.answer
     ]
-
-
-async def _classify_then_run(
-    store: Store,
-    block: Block,
-    rows: Sequence[BoardRow],
-    *,
-    classify: bool,
-    about: str = "",
-) -> None:
-    """Decide the subject first, then answer against it.
-
-    The order matters and it is the reason classification is not a separate task: a block attached
-    to a thread after its answer was built would have been answered against the wrong background,
-    which is the failure the attaching was meant to prevent.
-    """
-    try:
-        await _classify_and_answer(store, block, rows, classify=classify, about=about)
-    except asyncio.CancelledError:
-        # Cancellation before `answer_block` is entered used to leave the block `queued` with no
-        # task behind it: the template offers cancel for queued and retry only for a settled
-        # block, and the crash rule deliberately leaves queued alone on restart. It was stuck for
-        # good. Classification is a full headless run, so this window is seconds wide.
-        await asyncio.shield(store.cancel_block(block.id))
-        raise
 
 
 async def _classify_and_answer(

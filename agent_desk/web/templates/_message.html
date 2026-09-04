@@ -28,6 +28,7 @@
   <form method="post" action="/sessions/{{ row.session.session_id }}/message/send"
         hx-post="/sessions/{{ row.session.session_id }}/message/send" hx-target="#message">
     <input type="hidden" name="text" value="{{ text }}">
+    <input type="hidden" name="directive" value="{{ directive_id }}">
     <footer>
       <button type="submit" class="send">Send it</button>
       <a class="as-button" href="/">Cancel</a>

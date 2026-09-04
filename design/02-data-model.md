@@ -16,7 +16,7 @@ CREATE TABLE thread (
 CREATE TABLE block (
     id          TEXT PRIMARY KEY,
     thread_id   TEXT NOT NULL REFERENCES thread(id),
-    kind        TEXT NOT NULL,          -- question | idea | observation
+    kind        TEXT NOT NULL,          -- question | idea | instruction | observation
     state       TEXT NOT NULL,          -- queued | running | answered | failed | cancelled
     input       TEXT NOT NULL,          -- verbatim, never replaced by a summary
     answer      TEXT,
@@ -46,6 +46,22 @@ CREATE TABLE draft (
     kind        TEXT NOT NULL,          -- proposal | ticket | paste
     body        TEXT NOT NULL,
     created_at  INTEGER NOT NULL
+);
+```
+
+```sql
+-- A message somebody asked for, waiting for the click that sends it. "Tell Biba to test it again"
+-- is not a question and not an idea: it is an instruction, and the honest thing to do with one is
+-- to prepare it and stop (docs/adr/0002, docs/08-non-goals.md §2). `sent_at` records the click if
+-- it ever comes, and only on an actual delivery — a refused message is still waiting.
+CREATE TABLE directive (
+    id           TEXT PRIMARY KEY,
+    block_id     TEXT NOT NULL REFERENCES block(id),
+    session_id   TEXT NOT NULL,          -- the registry's id, never a copy of the session
+    session_name TEXT NOT NULL,          -- what it was called then, for reading a week later
+    text         TEXT NOT NULL,          -- verbatim, ready for the panel
+    created_at   INTEGER NOT NULL,
+    sent_at      INTEGER
 );
 ```
 

@@ -22,7 +22,23 @@ the kind changes what it looks like and what it can do:
 |---|---|---|
 | `question` | the question, then the answer as it streams | retry · follow up · discard |
 | `idea` | "Idea recorded. \<one-line summary\>. Keep it?" | keep · discard · edit summary ([05-ideas.md](05-ideas.md)) |
+| `instruction` | "Understood — a message to \<session\> is written and waiting below." | read it and send ([adr/0002](adr/0002-read-first-never-interrupt.md)) |
 | `observation` | a rendered fact from the board, no model call | pin |
+
+**The kind is decided by a run, not by the person typing.** Three things arrive through one field
+— "what did the migration do", "cache the probe results", "tell Biba to test it again" — and
+asking which of the three it was would be the second question capture is not allowed to ask
+([05-ideas.md](05-ideas.md)). So a short run reads the line and says `question`, `idea` or `do`,
+and `question` is what an unreadable answer produces: a thought answered as a question loses
+nothing, because the text is in the block verbatim and recording it is one click away.
+
+**An instruction is prepared and then stops.** The run writes the message and names the session it
+is for, by number, from the board it was given; anything else in the reply names no session, and
+no message is prepared rather than a guess at which console to interrupt. What is written is a row
+in `directive` and a button — nothing dispatches it, and nothing here decides that a moment is a
+good one to interrupt an agent ([08-non-goals.md](08-non-goals.md) §2). The button leads to the
+same three-step panel every other message goes through
+([adr/0002](adr/0002-read-first-never-interrupt.md)).
 
 States: `queued → running → answered`, or `failed`, or `cancelled`. A block that fails says why and
 offers retry; it does not disappear, because a question that vanished is a question you ask again.
@@ -33,9 +49,15 @@ Blocks are independent. Several run at once, in whatever order they finish. Noth
 
 A block belongs to a thread. A thread is a subject.
 
-On submission, the input is classified against the open threads: **continuation of one, or a new
-subject.** Continuation attaches the block to that thread, which is what makes "and what about the
-other one" work — the block inherits the thread's context.
+A thread is a tab in the console, and typing in one is how a human says which subject this is. A
+block submitted from a tab is not classified at all and is recorded as `human`: they chose it.
+That is the "default and a click" [09-roadmap.md](09-roadmap.md) names as what should replace the
+classifier if it ever costs more attention than it saves, and the tabs are that click.
+
+Where no tab is named — a page with no JavaScript, or a submission from somewhere else — the input
+is classified against the open threads: **continuation of one, or a new subject.** Continuation
+attaches the block to that thread, which is what makes "and what about the other one" work — the
+block inherits the thread's context.
 
 **The classifier is wrong sometimes, and the design assumes it.** It is a small model call on
 short text with no ground truth, and the failure is annoying in both directions: a follow-up

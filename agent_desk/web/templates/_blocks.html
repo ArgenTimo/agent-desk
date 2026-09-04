@@ -1,16 +1,15 @@
 {# The column under the input field: newest first, each showing its state and its thread
    (docs/06-console.md). A block never disappears on failure — a question that vanished is a
    question you ask again (docs/04-threads-and-blocks.md). #}
-{% if not blocks %}
-<p class="empty">Nothing asked yet. Type a question and press enter, or start with
-  <span class="hint-key">/idea</span> to record a thought without interrupting anything.</p>
-{% endif %}
-{% for block in blocks %}
-<article class="block {{ block.state }}" data-block="{{ block.id }}">
-  <div class="block-head">
-    <span class="state">{{ block.state }}</span>
-    <span class="asked">{{ block.input }}</span>
-  </div>
+{# Oldest first: an answer appears under the message that asked for it, and the newest is next to
+   the field that produced it. The store hands them over newest first, because every other reader
+   of that list wants them that way. #}
+{% for block in blocks | reverse %}
+{# `data-thread` is what makes the tabs work without the server knowing which tab this browser is
+   looking at: every block is rendered, and the page shows one subject's worth. #}
+<article class="block {{ block.state }} {{ block.kind }}" data-block="{{ block.id }}"
+         data-thread="{{ block.thread_id }}">
+  <div class="said">{{ block.input }}</div>
 
   {% if block.kind == "idea" and block.id in ideas %}
   {# The card of docs/05-ideas.md. Keep or discard, one click, and never a second question. #}
@@ -26,10 +25,31 @@
     </form>
     <p class="verbatim">{{ idea.text }}</p>
   </div>
-  {% elif block.state == "running" %}
+  {% elif block.state in ("queued", "running") %}
   <div class="answer streaming">{{ partial.get(block.id, "") }}<span class="caret" aria-hidden="true">▍</span></div>
   {% elif block.answer %}
-  <div class="answer">{{ block.answer }}</div>
+  <div class="answer">{{ block.answer | prose }}</div>
+  {% if block.id in directives %}
+  {# An instruction ends here and goes no further on its own. What was asked for is written out,
+     addressed to one session, and waiting for the click that is the only way anything in this
+     program reaches a running agent (docs/adr/0002). #}
+  {% set directive = directives[block.id] %}
+  <div class="directive{% if directive.sent_at %} sent{% endif %}">
+    <div class="directive-head">
+      <span class="dim">ready for</span> <span class="target">{{ directive.session_name }}</span>
+      {% if directive.sent_at %}<span class="state">sent</span>{% endif %}
+    </div>
+    <pre class="full">{{ directive.text }}</pre>
+    {% if not directive.sent_at %}
+    <form method="post" action="/sessions/{{ directive.session_id }}/message/review"
+          hx-post="/sessions/{{ directive.session_id }}/message/review" hx-target="#message">
+      <input type="hidden" name="text" value="{{ directive.text }}">
+      <input type="hidden" name="directive" value="{{ directive.id }}">
+      <button type="submit">Read it and send…</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
   {% elif block.error %}
   <p class="failure">{{ block.error }}</p>
   {% endif %}

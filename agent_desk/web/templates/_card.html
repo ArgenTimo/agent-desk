@@ -1,0 +1,45 @@
+{# What a card contains, shown where somebody asked for it: in the middle, after they dragged it
+   there. Everything here is deliberately absent from the left column. #}
+{% if not rows %}
+<p class="empty small">that one is not on the board any more</p>
+{% else %}
+{% for row in rows %}
+<div class="card-detail">
+  <div class="card-line">
+    <span class="dot {{ row.session.status }}"></span>
+    <span class="card-title">{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</span>
+    <span class="tiny">{{ row.session.updated_at | ago }}</span>
+  </div>
+  {% if not row.tail %}
+  <p class="hint small"><span aria-hidden="true">·</span> registry facts only — no transcript was
+    read for this one, so what it is doing is not known here.</p>
+  {% endif %}
+  <dl class="card-facts">
+    <dt>where</dt>
+    <dd>{{ row.session.project }} · {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</dd>
+    <dt>asked</dt>
+    <dd>{{ row.tail.last_prompt if row.tail and row.tail.last_prompt else "—" }}</dd>
+    <dt>did</dt>
+    <dd>
+      {% if row.tail and row.tail.last_entry %}
+      {{ row.tail.last_entry.at | clock }} {{ row.tail.last_entry.role }} · {{ row.tail.last_entry.text or "—" }}
+      {% else %}—{% endif %}
+    </dd>
+    {% if row.tail and row.tail.agents %}
+    <dt>agents</dt>
+    <dd>
+      {% for agent in row.tail.agents[:5] %}
+      <span class="agent-chip{% if agent.running %} working{% endif %}">{{ agent.kind }}: {{ agent.description or "—" }}</span>
+      {% endfor %}
+    </dd>
+    {% endif %}
+  </dl>
+  {% if row.hint.waiting %}
+  <p class="hint small"><span aria-hidden="true">⚑</span> may be waiting for you
+    <span class="evidence">— {{ row.hint.observation }}; a guess, not a signal</span></p>
+  {% endif %}
+  <a class="message-button message-link" href="/sessions/{{ row.session.session_id }}/message"
+     hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message">message this session…</a>
+</div>
+{% endfor %}
+{% endif %}

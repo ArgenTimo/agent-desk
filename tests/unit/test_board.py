@@ -68,6 +68,12 @@ def _entry(role: str, text: str, branch: str = "main") -> dict[str, Any]:
     }
 
 
+def _script() -> str:
+    """The console's browser half. It is one file, served from `static/`, and it is asserted
+    against directly: what used to be inline in the page is still the page's behaviour."""
+    return (Path(routes.TEMPLATES).parent / "static" / "console.js").read_text()
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Home:
     """Point every module that resolves a path at the fake tree, and poll without waiting."""
@@ -84,7 +90,13 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Home:
 
 @pytest.mark.unit
 def test_one_page_answers_what_every_agent_is_doing(home: Home) -> None:
-    """docs/01-vision.md, problems 1 and 4: project, branch, status, title, asked, did."""
+    """docs/01-vision.md, problems 1 and 4: project, branch, status, title, asked, did.
+
+    Across two surfaces now, and deliberately. The tree names the thing and says what state it is
+    in; the branch, the question and the last thing it did are one click or one drag away, in the
+    card. A left column that said all six about every session is a left column nobody reads
+    (docs/06-console.md) — but each of the six is still on this page, which is what problem 1 is.
+    """
     now = int(time.time() * 1000)
     home.session(
         os.getpid(),
@@ -104,11 +116,15 @@ def test_one_page_answers_what_every_agent_is_doing(home: Home) -> None:
 
     html = routes.render_board()
     assert "alpha" in html
-    assert "boba/duck-129" in html
     assert "busy" in html
     assert "Docker client for the supervisor" in html
-    assert "what about timeouts" in html
-    assert "reading the client" in html
+
+    card = routes.render_card("session", "aaaaaaaa-0000-4000-8000-000000000001")
+    assert "alpha" in card
+    assert "boba/duck-129" in card
+    assert "Docker client for the supervisor" in card
+    assert "what about timeouts" in card
+    assert "reading the client" in card
 
 
 @pytest.mark.unit
@@ -138,20 +154,26 @@ def test_the_session_that_may_be_waiting_sorts_above_the_one_that_is_working(hom
     html = routes.render_board()
     # Sorted by what the human is deciding, not by updatedAt — which would put alpha first.
     assert html.index("beta") < html.index("alpha")
-    assert "may be waiting for you" in html
-    assert "idle 14m · last entry: assistant" in html
-    assert "guess" in html
     # The class the stylesheet colours and the script counts for the window title. It lives in
     # three files and nothing else would notice them drifting apart.
-    assert re.search(r'class="row [a-z]+ flagged"', html)
+    assert re.search(r'class="node card session [a-z]+ flagged"', html)
+
+    # The inference itself is never a bare flag: the card carries the observation it was made
+    # from and the word that says it is a guess (CLAUDE.md, the fifth rule).
+    card = routes.render_card("session", "bbbbbbbb-0000-4000-8000-000000000002")
+    assert "may be waiting for you" in card
+    assert "idle 14m · last entry: assistant" in card
+    assert "guess" in card
 
 
 @pytest.mark.unit
 def test_a_session_with_no_transcript_says_so_rather_than_guessing(home: Home) -> None:
     """docs/02-architecture.md, failure posture: registry facts only, marked as such."""
     home.session(os.getpid(), "cccccccc-0000-4000-8000-000000000003")
-    html = routes.render_board()
-    assert "registry facts only" in html
+    assert "registry only" in routes.render_board()
+    assert "registry facts only" in routes.render_card(
+        "session", "cccccccc-0000-4000-8000-000000000003"
+    )
 
 
 @pytest.mark.unit
@@ -232,7 +254,11 @@ async def wired(
 async def test_the_page_serves_the_board_and_opens_one_stream(home: Home, wired: Store) -> None:
     body = (await routes.page()).body.decode()
     assert "No live sessions" in body
-    assert "new EventSource('/events')" in body
+    assert '<script src="/static/console.js">' in body
+    # One stream, opened by the one script. It moved out of the page when the page grew a third
+    # column; what must not happen is a second EventSource anywhere.
+    assert _script().count("new EventSource(") == 1
+    assert "new EventSource('/events')" in _script()
 
 
 @pytest.mark.unit
@@ -267,10 +293,13 @@ async def test_the_page_says_when_it_last_heard_from_the_server(home: Home, wire
     """
     body = (await routes.page()).body.decode()
     assert 'id="asof"' in body
-    assert "stream lost" in body
-    assert "heartbeat" in body
-    assert "stream stalled" in body
-    assert "const silence = 0.0 * 3 * 1000;" in body
+    # The number is still interpolated into JavaScript, and it is still the thing that must not
+    # be empty: `window.POLL_SECONDS = ;` is a syntax error that takes the whole script with it,
+    # and a page frozen at first paint still renders a plausible board.
+    assert "window.POLL_SECONDS = 0.0;" in body
+    assert "stream lost" in _script()
+    assert "heartbeat" in _script()
+    assert "stream stalled" in _script()
 
 
 @pytest.mark.unit
@@ -290,15 +319,16 @@ async def _request(path: str, host: str) -> tuple[int, str]:
     """
     from agent_desk.web.app import app
 
+    route, _, query = path.partition("?")
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
         "method": "GET",
         "scheme": "http",
-        "path": path,
-        "raw_path": path.encode(),
-        "query_string": b"",
+        "path": route,
+        "raw_path": route.encode(),
+        "query_string": query.encode(),
         "root_path": "",
         "headers": [(b"host", host.encode())],
         "client": ("127.0.0.1", 54321),
@@ -352,8 +382,10 @@ def test_a_transcript_that_cannot_be_read_leaves_the_row_marked(home: Home) -> N
     directory.mkdir(parents=True)
     (directory / "aaaaaaaa-0000-4000-8000-000000000001.jsonl").write_text("torn\n")
 
-    html = routes.render_board()
-    assert "registry facts only" in html
+    assert "registry only" in routes.render_board()
+    assert "registry facts only" in routes.render_card(
+        "session", "aaaaaaaa-0000-4000-8000-000000000001"
+    )
 
 
 # --- the console as a thing a person uses -------------------------------------------------------
@@ -369,10 +401,10 @@ async def test_the_console_is_reachable_without_a_mouse(home: Home, wired: Store
     home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
     body = (await routes.page()).body.decode()
 
-    assert '<details class="row' in body
-    assert "<summary>" in body
+    assert '<details class="node card' in body
+    assert "<summary class=" in body
     assert 'for="ask-text"' in body and 'id="ask-text"' in body
-    assert "event.key === '/'" in body
+    assert "event.key === '/'" in _script()
     # And the row still works with no JavaScript at all: the disclosure is native and the tail has
     # a plain link inside it until a script replaces it.
     assert 'href="/sessions/aaaaaaaa-0000-4000-8000-000000000001/tail"' in body
@@ -401,3 +433,89 @@ async def test_an_empty_console_says_what_to_do_next(home: Home, wired: Store) -
     assert "claude" in body
     assert "Nothing asked yet" in body
     assert "/idea" in body
+
+
+# --- the middle column's two routes -------------------------------------------------------------
+@pytest.mark.unit
+async def test_dropping_a_card_in_the_middle_opens_what_it_contains(
+    home: Home, wired: Store
+) -> None:
+    """The left column says a name and a state; this is where the rest of it is."""
+    now = int(time.time() * 1000)
+    home.session(
+        os.getpid(),
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        cwd="/home/dev/projects/alpha",
+        updatedAt=now,
+        statusUpdatedAt=now,
+    )
+    home.transcript(
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        {"type": "ai-title", "aiTitle": "Docker client for the supervisor"},
+        _entry("assistant", "reading the client", branch="boba/duck-129"),
+    )
+
+    status, body = await _request(
+        "/cards/session?id=aaaaaaaa-0000-4000-8000-000000000001", "127.0.0.1"
+    )
+    assert status == 200
+    assert "boba/duck-129" in body
+    assert "reading the client" in body
+
+    # An instance and a project are dragged the same way a session is, and both are identified by
+    # something with slashes in it — a checkout path, a repository key. That is why the id travels
+    # as a query parameter: a percent-encoded slash does not survive a path segment.
+    status, body = await _request(
+        "/cards/instance?id=%2Fhome%2Fdev%2Fprojects%2Falpha", "127.0.0.1"
+    )
+    assert status == 200
+    assert "boba/duck-129" in body
+
+    # A kind that is not one of the four is not a card, and saying so is not a 200.
+    status, _ = await _request("/cards/nonsense?id=whatever", "127.0.0.1")
+    assert status == 404
+
+    # A card whose session has ended says that, rather than rendering an empty shape.
+    status, body = await _request(
+        "/cards/session?id=dddddddd-0000-4000-8000-000000000009", "127.0.0.1"
+    )
+    assert status == 200
+    assert "not on the board" in body
+
+
+@pytest.mark.unit
+async def test_the_middle_starts_with_one_chat_and_the_plus_adds_another(
+    home: Home, wired: Store
+) -> None:
+    """A tab is a subject, and there is always at least one: an interaction area with no tab has
+    nowhere to put an answer."""
+    body = (await routes.page()).body.decode()
+    assert body.count('class="tab ') + body.count('class="tab"') == 1
+
+    status, fragment, _ = await _post_form("/threads", {})
+    assert status == 200
+    assert fragment.count("data-thread=") == 2
+    # And the page agrees with the fragment.
+    assert (await routes.page()).body.decode().count("data-thread=") == 2
+
+
+async def _post_form(path: str, fields: dict[str, str]) -> tuple[int, str, dict[str, str]]:
+    from tests.unit.test_input import _post
+
+    return await _post(path, fields, htmx=True)
+
+
+@pytest.mark.unit
+def test_an_answer_is_rendered_as_prose_and_never_as_markup() -> None:
+    """The two marks a model reaches for become what they mean; everything else stays text.
+
+    The escape runs first and the tags are added to the escaped string, so the only markup that
+    can reach the page is the two tags this function writes. An answer is built from transcripts,
+    which hold whatever an agent read — including somebody else's HTML.
+    """
+    rendered = str(routes._prose("a **bold** claim about <script>alert(1)</script> and `x`"))
+
+    assert "<strong>bold</strong>" in rendered
+    assert "<code>x</code>" in rendered
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered

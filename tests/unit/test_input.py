@@ -24,8 +24,10 @@ FAKE = """#!/bin/sh
 here=$(dirname "$0")
 prompt=$(cat)
 case "$prompt" in
-  # The classifier asks first, and it must be matched first: its prompt quotes the subjects of the
-  # open threads, so every marker in this file appears inside it too.
+  # Two classifiers ask before the answer does, and both must be matched first: their prompts
+  # quote the line that was typed, so every marker in this file appears inside them too. What
+  # kind it is comes first of all, because it decides whether the rest happens at all.
+  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"question"}]}}\n' ;;
   *"Open subjects"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"new"}]}}\n' ;;
   *PLEASE_HANG*)
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"thinking"}]}}\\n'
@@ -384,8 +386,13 @@ async def test_every_action_in_the_console_is_a_real_form(
         assert 'method="post"' in form, form
         assert "action=" in form, form
 
-    # And the one control that opens the write path is a link, which works everywhere.
-    assert re.search(r'<a class="message-button[^"]*" href="/sessions/[^"]+/message"', body)
+    # And the one control that opens the write path is a link, which works everywhere. It lives
+    # on the card now rather than on the board — the left column carries names and states, and
+    # everything you can *do* to a session is on the card it opens (docs/06-console.md).
+    card = routes.env.get_template("_card.html").render(
+        kind="session", rows=[make_row("alpha", "main")], card_id="session-alpha"
+    )
+    assert re.search(r'<a class="message-button[^"]*" href="/sessions/[^"]+/message"', card)
 
 
 # --- what a reviewer found by probing the task group ------------------------------------------
@@ -564,11 +571,14 @@ async def test_the_partial_answer_is_redacted_while_it_streams(
     secret = "ghp_" + "v" * 36
     binary = tmp_path / "leaky" / "claude"
     binary.parent.mkdir()
+    # It answers the kind question honestly and then leaks into the answer itself: this test is
+    # about what the console renders while a run is streaming, not about classification.
     binary.write_text(
-        "#!/bin/sh\ncat > /dev/null\n"
-        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"the config had '
-        + secret
-        + " in it\"}]}}\\n'\nsleep 30\n"
+        '#!/bin/sh\nprompt=$(cat)\ncase "$prompt" in\n'
+        '  *"which of three things"*) printf \'{"type":"assistant","message":{"content":'
+        '[{"type":"text","text":"question"}]}}\\n\' ;;\n'
+        '  *) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":'
+        '"the config had ' + secret + " in it\"}]}}\\n'\n     sleep 30 ;;\nesac\n"
     )
     binary.chmod(0o755)
     monkeypatch.setattr(
@@ -691,3 +701,185 @@ def test_the_answer_is_asked_for_in_words_a_person_can_use() -> None:
     assert "Two or three sentences" in prompt
     assert "does not read code" in prompt
     assert "name the session" in prompt
+
+
+# --- what the middle column does with what is dropped into it -----------------------------------
+@pytest.mark.unit
+def test_a_card_dropped_into_the_output_is_what_the_next_question_is_about() -> None:
+    """The output field carries the cards, and the cards decide what the run reads.
+
+    Four kinds arrive from the tree and three of them are not sessions, because a session is the
+    only thing there is evidence about: an agent names the console it runs inside, an instance
+    names a checkout, a project names a repository.
+    """
+    alpha = make_row("alpha", "main")
+    beta = make_row("beta", "topic")
+    rows = [alpha, beta]
+
+    aimed, about = blocks.aim(rows, targets=["session:session-alpha"])
+    assert [row.session.session_id for row in aimed] == ["session-alpha"]
+    assert "alpha" in about
+
+    # An agent card is its session: the agent is a thing that session farmed out.
+    aimed, _ = blocks.aim(rows, targets=["agent:session-beta"])
+    assert [row.session.session_id for row in aimed] == ["session-beta"]
+
+    # Two cards are two subjects, in the order they were dropped, and neither is dropped twice.
+    aimed, about = blocks.aim(rows, targets=["session:session-beta", "session:session-alpha"])
+    assert [row.session.session_id for row in aimed] == ["session-beta", "session-alpha"]
+
+    # A card whose session has ended falls back to the whole board rather than to nothing: a
+    # question asked a second after a session ended should still be answered.
+    aimed, about = blocks.aim(rows, targets=["session:gone"])
+    assert list(aimed) == rows
+    assert about == ""
+
+    # And an instance is a checkout, which is what the tree hangs sessions under.
+    aimed, _ = blocks.aim(rows, targets=[f"instance:{alpha.session.cwd}"])
+    assert [row.session.session_id for row in aimed] == ["session-alpha"]
+
+
+@pytest.mark.unit
+async def test_a_question_typed_in_a_tab_stays_in_that_tab(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """A tab is a subject somebody chose by typing in it, so nothing classifies it afterwards.
+
+    docs/09-roadmap.md says that if the classifier costs more attention than it saves, the right
+    answer is a default and a click. The tabs are that click, and this is what it means: the
+    thread is the one the human was looking at, and it is recorded as theirs.
+    """
+    tab = await desk.create_thread("the migration")
+    block = await blocks.submit(desk, "what did it end up doing", [], thread_id=tab.id)
+
+    assert block.thread_id == tab.id
+    assert block.thread_set_by == "human"
+    await _settled(desk, block.id)
+    after = await desk.block(block.id)
+    assert after is not None and after.thread_id == tab.id
+
+
+@pytest.mark.unit
+async def test_a_tab_that_no_longer_exists_does_not_lose_the_question(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """A stale page posting a forgotten tab id gets a subject of its own, not an error: the input
+    field's first promise is that typing costs nothing."""
+    block = await blocks.submit(desk, "still a question", [], thread_id="no-such-thread")
+    assert block.thread_id
+    assert await desk.block(block.id) is not None
+
+
+async def _settled(store: Store, block_id: str) -> str:
+    for _ in range(100):
+        state = await _state(store, block_id)
+        if state in ("answered", "failed", "cancelled"):
+            return state
+        await asyncio.sleep(0.05)
+    raise AssertionError("the block never settled")
+
+
+# --- three things arrive through one field ------------------------------------------------------
+KINDS = """#!/bin/sh
+prompt=$(cat)
+case "$prompt" in
+  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$KIND" ;;
+  *"## The sessions"*)
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"session: 1\\\\nrun the tests again, all of them"}]}}\\n' ;;
+  *) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n' ;;
+esac
+"""
+
+
+@pytest.fixture
+def kinds(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """A CLI that says what kind of line it was told to say, and writes a message when asked."""
+    binary = tmp_path / "kinds" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(KINDS)
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+    return binary
+
+
+@pytest.mark.unit
+async def test_a_thought_typed_without_a_prefix_is_still_recorded_as_one(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docs/05-ideas.md: capture asks no second question — including "was that an idea?".
+
+    `/idea` is for when you already know. This is for when you just typed the thought.
+    """
+    monkeypatch.setenv("KIND", "idea")
+    block = await blocks.submit(desk, "cache the probe results", [])
+    assert await _settled(desk, block.id) == "answered"
+
+    after = await desk.block(block.id)
+    assert after is not None and after.kind == "idea"
+    ideas = await desk.ideas()
+    assert [idea.text for idea in ideas] == ["cache the probe results"]
+    # Verbatim, never replaced by the generated line (design/02-data-model.md).
+    assert ideas[0].block_id == block.id
+
+
+@pytest.mark.unit
+async def test_an_instruction_is_written_out_and_then_waits_for_a_human(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Tell Biba to test it again" prepares a message and stops.
+
+    This is docs/adr/0002 with the one door it leaves open: the message exists, addressed, in
+    full, and the only thing that can send it is somebody pressing the button. Nothing here
+    decides that a moment is a good one to interrupt an agent (docs/08-non-goals.md §2).
+    """
+    monkeypatch.setenv("KIND", "do")
+    rows = [make_row("alpha", "main")]
+    block = await blocks.submit(desk, "tell alpha-d0 to test everything again", rows)
+    assert await _settled(desk, block.id) == "answered"
+
+    after = await desk.block(block.id)
+    assert after is not None
+    assert after.kind == "instruction"
+    assert after.answer and "waiting" in after.answer
+
+    directives = await desk.directives()
+    assert len(directives) == 1
+    assert directives[0].session_id == "session-alpha"
+    assert directives[0].text == "run the tests again, all of them"
+    # Nothing was sent. `sent_at` is written by the route behind the button, and only when the
+    # delivery actually happened.
+    assert directives[0].sent_at is None
+
+    # And the console offers it as the write path offers everything else: as a form to a route
+    # that shows it in full first.
+    column = await routes.render_blocks()
+    assert "run the tests again, all of them" in column
+    assert 'action="/sessions/session-alpha/message/review"' in column
+
+
+@pytest.mark.unit
+async def test_an_instruction_that_names_no_session_prepares_nothing(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable answer produces no message rather than a guess at which console to interrupt."""
+    binary = tmp_path / "vague" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(
+        '#!/bin/sh\nprompt=$(cat)\ncase "$prompt" in\n'
+        '  *"which of three things"*) printf \'{"type":"assistant","message":{"content":'
+        '[{"type":"text","text":"do"}]}}\\n\' ;;\n'
+        '  *) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":'
+        '"I think session 1 should probably do it"}]}}\\n\' ;;\nesac\n'
+    )
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+
+    block = await blocks.submit(desk, "somebody should run the tests", [make_row("alpha", "main")])
+    assert await _settled(desk, block.id) == "answered"
+    assert await desk.directives() == []
+    after = await desk.block(block.id)
+    assert after is not None and "could not tell which session" in (after.answer or "")

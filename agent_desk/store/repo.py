@@ -27,7 +27,7 @@ from ulid import ULID
 
 from agent_desk.store.redact import scrub, scrub_optional
 
-BlockKind = Literal["question", "idea", "observation"]
+BlockKind = Literal["question", "idea", "observation", "instruction"]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 IdeaState = Literal["new", "kept", "promoted", "dropped"]
 SourceKind = Literal["session", "typed", "meeting"]
@@ -71,6 +71,20 @@ class Block(BaseModel):
     thread_set_by: ThreadSetBy
     created_at: int
     finished_at: int | None = None
+
+
+class Directive(BaseModel):
+    """A message to a session that a human asked for and has not yet sent."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    block_id: str
+    session_id: str
+    session_name: str
+    text: str
+    created_at: int
+    sent_at: int | None = None
 
 
 class Idea(BaseModel):
@@ -402,6 +416,14 @@ class Store:
             )
         return block
 
+    async def set_block_kind(self, block_id: str, kind: BlockKind) -> None:
+        """What one line of input turned out to be, once a run has read it (docs/04)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET kind = :kind WHERE id = :id"),
+                {"kind": kind, "id": block_id},
+            )
+
     async def set_block_running(self, block_id: str) -> None:
         """Starting a run clears the last one's failure, which is no longer true of this block."""
         async with self.engine.begin() as conn:
@@ -509,6 +531,48 @@ class Store:
         fields["answer"] = scrub_optional(fields["answer"])
         fields["error"] = scrub_optional(fields["error"])
         return Block(**fields)
+
+    # --- directives -------------------------------------------------------------------------
+    async def record_directive(
+        self, *, block_id: str, session_id: str, session_name: str, text_: str
+    ) -> Directive:
+        """Write down what would be sent, and to whom. Sending is a separate, human act."""
+        directive = Directive(
+            id=_new_id(),
+            block_id=block_id,
+            session_id=session_id,
+            session_name=session_name,
+            text=text_,
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO directive (id, block_id, session_id, session_name, text, "
+                    "created_at, sent_at) VALUES (:id, :block_id, :session_id, :session_name, "
+                    ":text, :created_at, NULL)"
+                ),
+                directive.model_dump(exclude={"sent_at"}),
+            )
+        return directive
+
+    async def directives(self, *, limit: int = 50) -> list[Directive]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, session_id, session_name, text, created_at, sent_at "
+                    "FROM directive ORDER BY created_at DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
+            return [Directive(**row._mapping) for row in rows]
+
+    async def mark_directive_sent(self, directive_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE directive SET sent_at = :t WHERE id = :id AND sent_at IS NULL"),
+                {"t": _now_ms(), "id": directive_id},
+            )
 
     # --- ideas ----------------------------------------------------------------------------
     async def create_idea(

@@ -1,38 +1,49 @@
 # Console
 
-One window, two regions: a board of sessions, and a column of blocks under an input field.
+One window, full screen, three columns: what is running, what you are asking, and what is in the
+way.
 
 ```
-┌─ agent-desk ───────────────────────────────────────────────────┐
-│  llm-developer-2 · boba/duck-129-docker-api                    │
-│  ● busy   "Docker client for the supervisor"      2m ago       │
-│                                                                │
-│  llm-developer-1 · main                                        │
-│  ○ idle   "Lane ports security review"           14m ago  ⚑    │
-│                                                                │
-│  Project Zomboid My Mods · —                                   │
-│  ○ idle   "Sandbox options parsing"               3h ago       │
-├────────────────────────────────────────────────────────────────┤
-│  › what did the docker client end up doing about timeouts_     │
-├────────────────────────────────────────────────────────────────┤
-│  ▸ running   what did the docker client end up …               │
-│  ▸ answered  is duck-129 pushed?              → thread: duck   │
-│  ▸ idea      cache the probe results          [Keep] [Discard] │
-└────────────────────────────────────────────────────────────────┘
+┌─ agent-desk ─────────┬─ chat 1 │ the migration │ + ──────────┬─ blockers ───────┐
+│ ▾ DuckyFlow      3 ⚑ │                                       │ ○ waiting on a   │
+│   ▾ llm-developer-2  │  ┌ session · Docker client ────────┐   │   person   soon  │
+│     ● Docker client  │  │ where  llm-developer-2 · duck-1 │   │ ● waiting on a   │
+│       working  2m    │  │ asked  what about timeouts      │   │   run      soon  │
+│       user [Bash]    │  │ did    22:01 assistant reading… │   │ ● failed and     │
+│       what it is do… │  └─────────────────────────────────┘   │   unattended     │
+│   ▾ llm-developer-1  │                                       │                  │
+│     ○ Lane ports   ⚑ │  what did it end up doing about tim…  │  placeholders,    │
+│       idle 14m       │  ┌ it kept the ninety-second timeout │  and drawn as     │
+│       may want you   │  │ and logged the retry. …           │  placeholders     │
+│ ▸ agent-desk      1  │                                       │                  │
+│ [new project…]    +  │  › ask, record an idea, or say what   │                  │
+└──────────────────────┴───────────────────────────────────────┴──────────────────┘
 ```
 
-## The two halves
+## The three columns
 
-The window is split: what you ask on the left, what is running on the right. The left half is for
-somebody watching work they are not doing — often somebody who does not read code — so an answer
-there is two or three sentences of ordinary words with the answer in the first one, and never a
-wall of technical prose. That instruction is in the prompt, not in a hope
+**Left: what is running**, as cards inside cards — a project holds checkouts, a checkout holds
+consoles, a console holds what it farmed out. A card carries what somebody who does not read code
+needs in order to decide whether to look: what it is called, whether it is working, when it last
+moved, one line of what it last did, and whether it may want them. Everything else is *detail*,
+and detail belongs where somebody asked for it.
+
+**Middle: what you are asking.** Empty until you ask something. Chat tabs across the top, one by
+default and `+` for another; under them the output, where every message hangs with its answer
+underneath it; under that a small input field. Clicking a card, or dragging one into the output,
+opens what it contains *there* — and while it sits there, that is what the next message is about.
+Dragging it back out undoes both. With nothing in the output the run is given the whole board and
+works out from it what the question is about, which is what somebody who has not chosen wants
+rather than an error asking them to choose.
+
+**Right: what is in the way.** Mirrors the left column's cards. Every card in it is a placeholder
+today and says so: nothing on disk states what is blocking a session, and a blocker this program
+cannot observe is one it will not invent.
+
+The middle is for somebody watching work they are not doing — often somebody who does not read
+code — so an answer there is two or three sentences of ordinary words with the answer in the first
+one, and never a wall of technical prose. That instruction is in the prompt, not in a hope
 ([04-threads-and-blocks.md](04-threads-and-blocks.md)).
-
-A question can be pointed at one of three things, and the third is the default: a project, one
-session, or nothing in particular — in which case the run is given the whole board and works out
-from it what the question is about. Dragging a card into the question field points it there, which
-is the same act as choosing from the two lists beside it.
 
 ## The board
 
@@ -58,8 +69,11 @@ board refuses to render ([03-session-observation.md](03-session-observation.md),
 known"). What a card shows instead is what is true: the status the session wrote, what it last did
 and when, and which subagents are still out.
 
-Each row: status, the session's own generated title, how long since anything changed, its branch
-and name, and what it has farmed out.
+Each card: the status as a word anybody can read — `busy` is rendered "working", `shell` is
+"running a command", and the registry's own word is on the tooltip, because this renders a fact
+rather than replacing one — the session's own generated title, how long since anything changed,
+and one line of what it last did. The branch, the question it was asked, the full last entry and
+what it farmed out are on the card that opens in the middle.
 
 **Sorted by what needs a human, not by recency.** Sessions inferred to be waiting first, then
 `busy`, then `idle`. Sorting by `updatedAt` puts a session that flickered twice above a long
@@ -76,27 +90,38 @@ that quietly froze looks exactly like a console on which nothing is happening, a
 same failure as a guessed status: something inferred from silence, rendered as a fact
 ([03-session-observation.md](03-session-observation.md)).
 
-A row expands to the tail of that session's transcript, and it scrolls inside itself rather than
-pushing the board off the screen. That is the whole drill-down: v1 has no transcript viewer, no
-diff view and no tool-call browser. The board answers "should I go look", and the place to look is
-the terminal that is already open.
+Clicking a card opens it in the middle, which is the whole drill-down: v1 has no transcript
+viewer, no diff view and no tool-call browser. The board answers "should I go look", and the place
+to look is the terminal that is already open.
 
-The row is a native disclosure, which is what makes it reachable from the keyboard, announced by a
-screen reader, and openable with no JavaScript at all — the tail then loads through a plain link
-instead of a fetch. `/` puts the cursor in the input field from anywhere and Escape closes the
+The card is a native disclosure, which is what makes it reachable from the keyboard, announced by
+a screen reader, and openable with no JavaScript at all — the tail then loads through a plain link
+inside it instead of a fetch. `/` puts the cursor in the input field from anywhere and Escape closes the
 write-path panel, because this window hovers over a terminal and reaching for the mouse is the
 thing it exists to save.
 
-## The input and the blocks
+## The input and the output
 
-One field, always focused, never blocked, and a plain HTML form underneath — htmx makes the
-submission update the column in place, and without it the page reloads and the field is free just
-the same. Submitting frees it immediately
-([04-threads-and-blocks.md](04-threads-and-blocks.md)). Blocks appear below, newest first, each
-showing its state and its thread. An idea block shows its card ([05-ideas.md](05-ideas.md)).
+One field, always focused, never blocked, and a plain HTML form underneath. Submitting frees it
+immediately ([04-threads-and-blocks.md](04-threads-and-blocks.md)). What was typed appears in the
+output above it and its answer arrives underneath it, on its own time; the next thing can be typed
+while it does.
+
+Three things arrive through that one field and each gets what it asked for: a question is
+answered, a thought is recorded and says so, and an instruction to a session is written out as a
+message and waits for the click that sends it. Which of the three it was is decided by a run
+rather than by the person typing ([04-threads-and-blocks.md](04-threads-and-blocks.md)).
+
+A tab is a subject. Typing in one is how a human says which subject this is, so nothing has to
+guess it — which is the "default and a click" [09-roadmap.md](09-roadmap.md) names as what should
+replace the thread classifier if it ever costs more attention than it saves.
 
 Prefixes for when you already know what you want: `/new` forces a new thread, `/idea` forces
 capture and skips classification entirely.
+
+htmx makes every swap happen in place; when it is not vendored the console's own script does the
+same posts itself, and with no JavaScript at all every control is still a form with a method and
+an action that answers a whole page.
 
 ## The overlay
 
@@ -123,7 +148,7 @@ a message to a named session, shown in full before it goes, sent by a human clic
 message, not a command, and the session's own permission rules apply to it exactly as they do to
 anything its human types.
 
-Its surface is a `message…` button on the row and a panel below the board — outside it, because
+Its surface is a `message this session…` link on the card and a panel under the output — outside it, because
 the board replaces itself whenever a session changes and a panel inside it would vanish under a
 half-typed message. The panel has three steps and no shortcut between them: compose, the message
 rendered in full beside the name and status of the session that would receive it, and what

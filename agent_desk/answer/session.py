@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import signal
 from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from pathlib import Path
@@ -309,6 +310,52 @@ def build_prompt(
 
     lines += ["", "## The question", question]
     return "\n".join(lines)
+
+
+def build_prompt_for_directive(instruction: str, *, sessions: Iterable[str]) -> str:
+    """Turn "tell Biba to test it again" into a message, and into which session it is for.
+
+    What comes back is *prepared*, not sent: docs/adr/0002 puts the one write path behind a human
+    click, and this run is not a human. The reply is read strictly — a first line naming a session
+    by number, then the message — and an unreadable reply produces no session rather than a guess
+    at which console to interrupt.
+    """
+    lines = [
+        "Somebody watching several Claude Code sessions has told you to have one of them do",
+        "something. Write the message that should be sent to it. You are not sending anything:",
+        "a person reads it and clicks send, or does not.",
+        "",
+        "## How to answer",
+        "- The first line is exactly `session: N`, the number of the session below it is for,",
+        "  or `session: none` if the instruction does not clearly name one. Nothing else on it.",
+        "- Every line after that is the message itself, addressed to that session, in the words",
+        "  its developer would use. Two or three sentences at most, no preamble, no sign-off.",
+        "- Say what to do, not who asked. The session receiving it has no idea this tool exists.",
+        "",
+        "## The sessions",
+    ]
+    listed = list(sessions)
+    lines += listed or ["(none are running)"]
+    lines += ["", "## What you were told", instruction]
+    return "\n".join(lines)
+
+
+def read_directive(reply: str, count: int) -> tuple[int | None, str]:
+    """The session number the reply names and the message under it, or `(None, ...)`.
+
+    Strict on purpose, and in the same shape as the classifier: the first line must be the whole
+    decision. A reply that opens with prose has not named a session, and preparing a message to
+    the wrong console is exactly the mistake this program is built not to make.
+    """
+    head, _, rest = reply.strip().partition("\n")
+    body = rest.strip()
+    match = re.match(r"\Asession:\s*([0-9]{1,2}|none)\Z", head.strip(), re.IGNORECASE)
+    if match is None:
+        return None, reply.strip()
+    chosen = match.group(1).lower()
+    if chosen == "none" or not (1 <= int(chosen) <= count):
+        return None, body
+    return int(chosen), body
 
 
 async def answer_block(

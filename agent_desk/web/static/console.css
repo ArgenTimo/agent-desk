@@ -91,18 +91,78 @@ body {
    day it is not. */
 .bar, main, #no-htmx { max-width: 1500px; margin-inline: auto; }
 
-/* Two columns: what you ask on the left, what is running on the right. They stack on a narrow
-   window, which is the shape this thing is most often used in. */
-.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 18px; }
-.column { min-width: 0; }
-.asking { position: sticky; top: 10px; align-self: start; max-height: calc(100vh - 24px); overflow-y: auto; }
-@media (max-width: 900px) {
-  .split { grid-template-columns: 1fr; }
-  .asking { position: static; max-height: none; overflow: visible; }
+/* Three columns, and the whole screen. Left: what is running, as little as each thing can be
+   said in. Middle: what you are asking, and it is empty until you ask. Right: what is in the way.
+   Each column scrolls inside itself, so the middle never pushes the tree off the screen and the
+   input field never moves (docs/06-console.md). */
+/* The board is the one page that owns the whole window rather than scrolling in it. A column,
+   not a block: the notice above the grid takes the height it needs and the grid takes the rest,
+   which is what stops the input field being pushed off the bottom of the screen by it. */
+body.desk { height: 100vh; overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+
+/* Three columns and two handles. The widths are variables because the right width for them is
+   the one the person using it wants: the middle is where the reading happens, and how much of the
+   screen that deserves depends on the screen and on the day. Dragging a handle sets them, a
+   double-click puts them back, and the browser remembers. */
+.desk-grid {
+  --left: 320px;
+  --right: 300px;
+  display: grid;
+  grid-template-columns: var(--left) 8px minmax(0, 1fr) 8px var(--right);
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
 }
+
+.gutter {
+  align-self: stretch;
+  border-radius: 3px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s;
+}
+.gutter:hover, .gutter:focus-visible, .gutter.pulling { background: var(--line-strong); }
+body.pulling { cursor: col-resize; user-select: none; }
+.col-left, .col-mid, .col-right { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.col-left, .col-right { overflow: hidden; }
+.col-head {
+  display: flex; align-items: baseline; gap: 8px;
+  padding-bottom: 6px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+}
+.col-head .brand { color: var(--fg); font-weight: 600; letter-spacing: -0.01em; }
+.col-head .col-title { letter-spacing: 0.08em; text-transform: uppercase; }
+.col-head .spacer { margin-left: auto; }
+.col-foot {
+  display: flex; gap: 10px;
+  padding-top: 6px; margin-top: 6px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px;
+}
+.tree, .blockers { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Two columns on a laptop in a side-by-side, one on anything narrower. The middle is the one that
+   survives, because it is the one being used. */
+@media (max-width: 1100px) {
+  .desk-grid { grid-template-columns: var(--left) 8px minmax(0, 1fr); }
+  .col-right, .gutter[data-gutter="right"] { display: none; }
+}
+@media (max-width: 760px) {
+  body.desk { height: auto; overflow: auto; }
+  .desk-grid { grid-template-columns: 1fr; }
+  .gutter { display: none; }
+  .col-left { max-height: 40vh; }
+}
+
 .answer, .failure, .verbatim, .card .recorded, #message .full, .draft pre {
-  max-width: 78ch;
+  max-width: 96ch;
 }
+/* Except in the middle column, whose width is somebody's own decision: they set it by dragging
+   the handle, and a cap two thirds of the way across a column they widened on purpose is a hole
+   they cannot close. */
+.col-mid .answer, .col-mid .failure, .col-mid .verbatim, .col-mid .recorded { max-width: none; }
 
 /* Everything that is an identifier rather than a sentence. */
 .mono, .status, .branch, .name, .age, .when, .who, code, pre, select, .set-by, .state {
@@ -170,85 +230,6 @@ body.stale main { opacity: 0.55; }
 }
 .empty .hint-key { font-family: var(--mono); color: var(--fg-soft); }
 
-/* --- a session row -------------------------------------------------------------------------- */
-.row {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
-  border-radius: var(--radius);
-  margin-bottom: 6px;
-}
-.row.flagged { border-left-color: var(--flag); }
-.row.busy { border-left-color: var(--busy); }
-.row.idle { border-left-color: var(--idle); }
-.row.shell { border-left-color: var(--shell); }
-
-.row > summary { list-style: none; cursor: pointer; padding: 7px 10px; }
-.row > summary::-webkit-details-marker { display: none; }
-.row > summary:hover { background: var(--raised); border-radius: 3px; }
-
-.row-head { display: flex; align-items: baseline; gap: 8px; }
-.status {
-  min-width: 6ch;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--fg-dim);
-}
-.status.busy { color: var(--busy); }
-.status.idle { color: var(--idle); }
-.status.shell { color: var(--shell); }
-/* A status this program does not recognise is shown as written and marked as unread by us. */
-.status:not(.idle):not(.busy):not(.shell) { text-decoration: underline dotted; }
-
-.row .title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-.row .title.unread { font-weight: 400; font-style: italic; color: var(--fg-dim); }
-.row .age { font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
-
-.row-where {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 2px;
-  padding-left: calc(6ch + 8px);
-  font-size: 11px;
-  color: var(--fg-dim);
-}
-.row-where .project { color: var(--fg-soft); }
-.row-where .branch { color: var(--fg-soft); }
-/* Beside the session it belongs to, not banished to the far edge of a wide screen. */
-.row-where .message-link { margin-left: 4px; }
-.row-where .spacer { margin-left: auto; }
-
-.last {
-  display: grid;
-  grid-template-columns: 5ch 1fr;
-  gap: 0 8px;
-  margin: 4px 0 0;
-  padding-left: calc(6ch + 8px);
-  font-size: 12px;
-  color: var(--fg-dim);
-}
-.last dt { font-family: var(--mono); font-size: 11px; }
-.last dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.hint {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-  margin: 5px 0 0;
-  padding-left: calc(6ch + 8px);
-  font-size: 11px;
-  color: var(--flag);
-}
-.hint .evidence { color: var(--fg-dim); }
-
 .tail {
   border-top: 1px solid var(--line);
   margin: 0 10px;
@@ -274,19 +255,9 @@ body.stale main { opacity: 0.55; }
 }
 .entry.user .text { color: var(--fg-dim); }
 
-/* --- the input ------------------------------------------------------------------------------ */
-.ask {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 0;
-  margin: 14px 0 4px;
-  background: linear-gradient(var(--bg) 70%, transparent);
-}
-.ask input {
+/* --- the small field under the output ---------------------------------------------------------- */
+.say { display: flex; gap: 8px; align-items: center; padding-top: 8px; }
+.say input {
   flex: 1;
   padding: 9px 11px;
   font: inherit;
@@ -295,39 +266,47 @@ body.stale main { opacity: 0.55; }
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
 }
-.ask input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent); }
-.ask .keys { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); white-space: nowrap; }
+.say input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent); }
 
-/* --- a block -------------------------------------------------------------------------------- */
+/* --- what you said, and what came back ---------------------------------------------------------- */
+/* Each message hangs in the output on its own and its answer appears under it. They are not a
+   conversation: they are unrelated errands typed by the same person in the same minute, and
+   nothing here waits for anything else (docs/04-threads-and-blocks.md). */
 .block {
-  background: var(--surface);
+  margin: 0 0 12px;
+  padding: 8px 10px 10px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--line-strong);
   border-radius: var(--radius);
-  padding: 8px 10px;
-  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--surface) 45%, var(--bg));
 }
-.block.running { border-left-color: var(--busy); }
+.block.running, .block.queued { border-left-color: var(--busy); }
 .block.answered { border-left-color: var(--idle); }
 .block.failed, .block.cancelled { border-left-color: var(--flag); }
-
-.block-head { display: flex; align-items: baseline; gap: 8px; }
-.block .state { min-width: 9ch; font-size: 11px; color: var(--fg-dim); }
-.block.failed .state, .block.cancelled .state { color: var(--flag); }
-.block .asked { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.answer, .failure {
-  margin: 6px 0 0;
-  padding-left: calc(9ch + 8px);
+.block.idea { border-left-color: var(--idle); }
+.block.instruction { border-left-color: var(--flag); }
+.said {
+  display: block;
+  padding: 0 0 2px;
+  font-weight: 600;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.failure { color: var(--flag); font-size: 12px; }
+.answer, .failure {
+  margin: 6px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.block.answered .answer { border-left-color: var(--idle); }
+.block.running .answer, .block.queued .answer { border-left-color: var(--busy); color: var(--fg-soft); }
+.failure { color: var(--flag); font-size: 12px; border-left-color: var(--flag); }
 .caret { color: var(--busy); }
 
-.card { padding-left: calc(9ch + 8px); }
-.card .recorded { margin: 6px 0 2px; color: var(--fg-soft); }
-.card .verbatim { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.block .card { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--idle); border-radius: 0; background: none; }
+.card .recorded { margin: 0 0 2px; color: var(--fg-soft); }
+.card .verbatim { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-dim); font-size: 12px; }
 .card .rename input {
   width: 100%;
   font: inherit;
@@ -340,16 +319,30 @@ body.stale main { opacity: 0.55; }
 }
 .card .rename input:focus { outline: none; border-bottom-color: var(--focus); }
 
+/* An instruction ends as a message that has not been sent. It is bordered like the write path
+   everywhere else in this program, because that is what it is (docs/adr/0002). */
+.directive { margin: 6px 0 0; padding: 6px 0 0 10px; border-left: 2px solid var(--flag); }
+.directive.sent { border-left-color: var(--idle); }
+.directive-head { font-size: 11px; color: var(--fg-dim); font-family: var(--mono); }
+.directive .target { color: var(--fg); font-weight: 600; }
+.directive .full {
+  margin: 4px 0 6px;
+  padding: 7px 10px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--prose);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  margin-top: 8px;
-  padding-left: calc(9ch + 8px);
+  margin: 8px 0 0;
 }
 .actions form { display: contents; }
-.block > .actions { padding-left: calc(9ch + 8px); }
 
 /* --- controls -------------------------------------------------------------------------------- */
 button, .as-button {
@@ -483,11 +476,10 @@ button[disabled] { opacity: 0.5; cursor: default; }
   user-select: all;
 }
 
-/* --- narrow, which is how this window is meant to be used ------------------------------------- */
+/* --- narrow ------------------------------------------------------------------------------------ */
 @media (max-width: 520px) {
-  .row-where, .last, .hint, .answer, .failure, .card, .actions { padding-left: 0; }
-  .last { grid-template-columns: 4ch 1fr; }
   .thread select { max-width: 14ch; }
+  .said { max-width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -495,80 +487,240 @@ button[disabled] { opacity: 0.5; cursor: default; }
   button:active { transform: none; }
 }
 
-/* --- the cards ------------------------------------------------------------------------------ */
-.board-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.board-head .section-title { margin-right: auto; }
-.flagged-count { color: var(--flag); }
-.new-project { display: flex; gap: 6px; }
-.new-project input {
-  width: 15ch; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--fg);
-  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius);
-}
+/* --- the cards ---------------------------------------------------------------------------- */
+/* Cards inside cards: a project holds checkouts, a checkout holds consoles, a console holds what
+   it farmed out. Each one says a name, a state and a count and then stops — the branch, the last
+   thing it did and the guess about whether it wants somebody are detail, and detail opens in the
+   middle when the card is clicked or dropped there (docs/06-console.md).
 
-.project {
+   Everything here is sized in `rem` off one variable, so the whole column scales with the window
+   rather than leaving a margin of dead space on a large screen. */
+.tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+.tree-head { display: flex; gap: 8px; align-items: baseline; padding: 0 2px; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.flagged-count { color: var(--flag); }
+
+.card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--surface) 45%, var(--bg));
-  padding: 8px;
-  margin-bottom: 12px;
+  background: var(--surface);
+  overflow: hidden;
 }
-.project.flagged { border-color: color-mix(in srgb, var(--flag) 45%, var(--line)); }
-.project.drop-target { border-color: var(--focus); background: color-mix(in srgb, var(--focus) 8%, var(--bg)); }
-.project-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 6px; }
-.project-name { margin: 0; font-size: 13px; }
-.tally { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
-.flag-tally { color: var(--flag); }
-.quiet button { border-color: transparent; background: none; padding: 1px 6px; font-size: 11px; }
+/* Sized to their content, never stretched: a card pulled taller than what is in it is a card
+   with a hole in the middle of it. What fills the column is that every card is open — the state,
+   what it farmed out, and the way in are all on the face of it. */
+.tree > .card.project { flex: 0 0 auto; }
+.card.project { background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
+.card.project.flagged { border-color: color-mix(in srgb, var(--flag) 45%, var(--line)); }
 
-.instance { border-left: 2px solid var(--line); margin: 0 0 6px 4px; padding-left: 8px; }
-.instance-head { display: flex; align-items: baseline; gap: 8px; font-size: 11px; color: var(--fg-dim); }
-.instance-head .folder { color: var(--fg-soft); font-weight: 600; }
-.instance-head .path { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.12s;
+}
+.card-head::-webkit-details-marker { display: none; }
+.card-head:hover { background: color-mix(in srgb, var(--focus) 7%, transparent); }
+.card.project > .card-head { font-weight: 600; }
+.card-body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.card .card .card-head { padding: 6px 8px; }
 
-.grip { color: var(--line-strong); cursor: grab; font-size: 11px; }
-[draggable="true"]:active .grip { cursor: grabbing; }
+.card.instance { background: var(--bg); }
+.card.instance > .card-head { font-size: 12px; color: var(--fg-soft); }
+
+/* The one card a person actually acts on. It carries the colour of its state on the edge, which
+   is the only place colour means anything in this program. */
+.card.session { background: var(--surface); border-left: 3px solid var(--line-strong); }
+.card.session.busy { border-left-color: var(--busy); }
+.card.session.idle { border-left-color: var(--idle); }
+.card.session.shell { border-left-color: var(--shell); }
+.card.session.flagged { border-left-color: var(--flag); border-color: color-mix(in srgb, var(--flag) 35%, var(--line)); }
+.card.session > .card-head { font-size: 12px; }
+
+.twist { width: 10px; flex: none; color: var(--fg-dim); font-family: var(--mono); }
+.twist::before { content: "\25B8"; display: inline-block; transition: transform 0.12s; }
+.card[open] > .card-head .twist::before { transform: rotate(90deg); }
+
+.card-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.age { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); flex: none; }
+
+.pill {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg-dim) 14%, transparent);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-soft);
+  white-space: nowrap;
+}
+.pill.flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
+.pill.quiet { background: none; border: 1px dashed var(--line-strong); color: var(--fg-dim); }
+.pill.state.busy { background: color-mix(in srgb, var(--busy) 18%, transparent); color: var(--busy); }
+.pill.state.idle { background: color-mix(in srgb, var(--idle) 18%, transparent); color: var(--idle); }
+.pill.state.shell { background: color-mix(in srgb, var(--shell) 18%, transparent); color: var(--shell); }
+.state-line { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+
+.dot {
+  width: 8px; height: 8px; flex: none;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.dot.busy { background: var(--busy); }
+.dot.idle { background: var(--idle); }
+.dot.shell { background: var(--shell); }
+.dot.flag { background: var(--flag); }
+.dot.done { background: var(--line-strong); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  display: flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--raised);
+  font-size: 11px;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.chip:hover { color: var(--fg); border-color: var(--fg-dim); }
+.chip .node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.working { color: var(--busy); border-color: color-mix(in srgb, var(--busy) 40%, var(--line)); }
+.last-line {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+  /* Two lines and no more: this is a glance, and the whole entry is one click further on. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.last-line .who { font-family: var(--mono); font-size: 10px; color: var(--fg-soft); }
+.node-open { display: inline-block; font-size: 11px; }
+
 .dragging { opacity: 0.45; }
-
 .drop-hint {
-  margin: 4px 2px 0;
-  padding: 5px 8px;
+  margin: 0;
+  padding: 6px 8px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
   font-size: 11px;
   color: var(--fg-dim);
   text-align: center;
-  visibility: hidden;
+  display: none;
 }
-body.dragging-card .drop-hint, .drop-hint.standing { visibility: visible; }
+body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .drop-hint.standing { border-color: var(--focus); color: var(--fg-soft); }
+.drop-target { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: var(--radius); }
 
-/* --- what a session farmed out --------------------------------------------------------------- */
-.agents { list-style: none; margin: 5px 0 0; padding-left: calc(6ch + 8px); }
-.agent { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--fg-dim); }
-.agent-kind { font-family: var(--mono); color: var(--fg-soft); min-width: 10ch; }
-.agent-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-state { font-family: var(--mono); }
-.agent.working .agent-state { color: var(--busy); }
+.new-project { display: flex; gap: 6px; padding: 8px 2px 0; }
+.new-project input {
+  width: 100%; min-width: 0; padding: 4px 9px; font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
 
-/* --- aiming a question ------------------------------------------------------------------------ */
-.target {
+/* --- the middle ------------------------------------------------------------------------------- */
+.tabs { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.tab {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  border: 1px dashed var(--line-strong);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  font-size: 11px;
+}
+.tab.on { background: var(--surface); border-color: var(--line-strong); }
+.tab-name {
+  max-width: 20ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-color: transparent;
+  background: none;
+}
+.tab.on .tab-name { color: var(--fg); }
+.tab-close { display: flex; }
+.tab-off {
+  min-height: 18px;
+  padding: 0 6px 1px;
+  border-color: transparent;
+  background: none;
   color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1;
 }
-.target.drop-target { border-color: var(--focus); border-style: solid; background: color-mix(in srgb, var(--focus) 8%, var(--bg)); }
-.target label { font-family: var(--mono); }
-.target select {
-  max-width: 20ch; padding: 2px 4px; font-size: 11px; color: var(--fg-soft);
-  background: var(--raised); border: 1px solid var(--line); border-radius: 3px;
+.tab-off:hover { color: var(--flag); }
+.tab-new { display: flex; }
+
+.out {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 4px 4px;
 }
-.target .drop-here { margin-left: auto; }
-.ask-line { display: flex; gap: 8px; }
-.ask { position: static; display: block; background: none; margin: 0 0 10px; }
+.out.drop-target { outline-offset: -2px; }
+.out-empty { display: none; margin: auto; padding: 20px; color: var(--fg-dim); text-align: center; }
+.out.is-empty { display: flex; }
+.out.is-empty .out-empty { display: block; }
+
+/* A card carried into the middle. It shows what the card contains, and while it is here it is
+   what the next message is about. Dragging it back out undoes both. */
+.pins { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.pin {
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--focus);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 7px 10px;
+  cursor: grab;
+}
+.pin-head { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.pin-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--prose); }
+.pin-off { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
+.pin-body { margin-top: 4px; }
+
+.card-detail + .card-detail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.card-line { display: flex; align-items: center; gap: 8px; }
+.card-title { font-weight: 600; }
+.card-facts { display: grid; grid-template-columns: 7ch 1fr; gap: 2px 8px; margin: 6px 0 0; font-size: 12px; }
+.card-facts dt { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.card-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* Three lines. A transcript entry can be a page long, and a card that unrolls one has stopped
+     being a card — the whole tail is one click further on, at /sessions/<id>/tail. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.agent-chip { display: inline-block; margin: 0 4px 3px 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 10px; font-size: 11px; color: var(--fg-dim); }
+.agent-chip.working { color: var(--busy); border-color: color-mix(in srgb, var(--busy) 40%, var(--line)); }
+.hint { display: flex; gap: 6px; align-items: baseline; margin: 6px 0 0; font-size: 11px; color: var(--flag); }
+.hint .evidence { color: var(--fg-dim); }
+.message-link { display: inline-block; margin-top: 6px; font-size: 11px; }
+
+/* --- the right column --------------------------------------------------------------------------- */
+/* Stubs, drawn as stubs. Nothing on disk says what is blocking a session, and a blocker this
+   program cannot observe is one it will not invent (CLAUDE.md, the fifth rule). */
+.blockers { display: flex; flex-direction: column; gap: 8px; padding: 0 2px 4px; }
+.blocker { border-style: dashed; }
+.blocker .card-head { cursor: default; }
+.blocker .card-head:hover { background: none; }
+.blocker .card-body p { margin: 0; color: var(--fg-dim); }
+.small { font-size: 11px; }
+.tiny { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); }
+#stream-state.lost { color: var(--flag); }
+body.stale .col-left { opacity: 0.55; }

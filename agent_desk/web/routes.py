@@ -14,6 +14,7 @@ surface whose job is triage (docs/06-console.md).
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -22,6 +23,7 @@ import structlog
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from markupsafe import Markup, escape
 
 from agent_desk import peer
 from agent_desk.config import settings
@@ -36,7 +38,7 @@ from agent_desk.observe.model import (
     triage_rank,
 )
 from agent_desk.observe.shape import repository_of
-from agent_desk.store.repo import DRAFT_KINDS, Group, Store
+from agent_desk.store.repo import DRAFT_KINDS, Group, Store, Thread
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -85,6 +87,34 @@ env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+
+def _prose(text: str) -> Markup:
+    """An answer, as the model actually writes it.
+
+    The prompt asks for plain sentences and mostly gets them, but a model reaches for `**` and
+    backticks the way anybody does, and printing those characters at a reader is the tool showing
+    its own plumbing. Two marks are turned into the thing they mean and nothing else is: this is
+    not a markdown renderer, and the escape happens first, so what is added here is the only
+    markup that can reach the page.
+    """
+    out = str(escape(text))
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out, flags=re.S)
+    out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+    return Markup(out)
+
+
+# The registry's three words, said the way somebody who does not use a terminal would say them.
+# The word itself stays on the tooltip: this renders a fact, it does not replace one.
+PLAINLY = {"busy": "working", "idle": "idle", "shell": "running a command"}
+
+
+def _plainly(status: str) -> str:
+    return PLAINLY.get(status, status)
+
+
+env.filters["plainly"] = _plainly
+env.filters["prose"] = _prose
 env.filters["ago"] = _ago
 env.filters["clock"] = _clock
 
@@ -248,6 +278,30 @@ def render_board(groups: list[Group] | None = None) -> str:
     )
 
 
+def render_card(kind: str, card_id: str, groups: list[Group] | None = None) -> str:
+    """What a card actually contains, for when somebody opens one or drags it into the middle.
+
+    This is where the detail the left column deliberately does not show lives: the branch, what a
+    session last did, what it farmed out, and whether this program thinks it may want somebody. A
+    tree that said all of that about every session would be a tree nobody reads
+    (docs/06-console.md), and a tree that said none of it anywhere would be a board you still
+    have to open a terminal to use.
+    """
+    rows, _ = board()
+    projects = shape(rows, groups or [])
+    stamped = [row for project in projects for i in project.instances for row in i.rows]
+
+    if kind in ("session", "agent"):
+        chosen = [row for row in stamped if row.session.session_id == card_id]
+    elif kind == "instance":
+        chosen = [row for row in stamped if row.session.cwd == card_id]
+    elif kind == "project":
+        chosen = [row for row in stamped if row.project_key == card_id]
+    else:
+        return ""
+    return env.get_template("_card.html").render(kind=kind, rows=chosen, card_id=card_id)
+
+
 def render_tail(session_id: str) -> str:
     """The drill-down: the tail of one transcript, and nothing else (docs/06-console.md)."""
     tail = transcript.read_tail(session_id)
@@ -269,16 +323,20 @@ async def render_blocks() -> str:
         if thread.id not in known
     ]
     ideas = {idea.block_id: idea for idea in await store.ideas() if idea.block_id}
+    directives = {d.block_id: d for d in await store.directives()}
     return env.get_template("_blocks.html").render(
         blocks=rows,
         open_threads=open_threads + missing,
         threads_by_id={thread.id: thread for thread in open_threads + missing},
         ideas=ideas,
+        directives=directives,
         partial=block_runs.PARTIAL,
     )
 
 
-def render_message(stage: str, session_id: str, text: str = "", detail: str = "") -> str:
+def render_message(
+    stage: str, session_id: str, text: str = "", detail: str = "", directive_id: str = ""
+) -> str:
     """The one write path's surface: compose, confirm, and what happened.
 
     Rendered outside the board on purpose. The board replaces itself whenever it changes, and a
@@ -287,7 +345,11 @@ def render_message(stage: str, session_id: str, text: str = "", detail: str = ""
     rows, _ = board()
     row = next((r for r in rows if r.session.session_id == session_id), None)
     return env.get_template("_message.html").render(
-        stage=stage if row is not None else "gone", row=row, text=text, detail=detail
+        stage=stage if row is not None else "gone",
+        row=row,
+        text=text,
+        detail=detail,
+        directive_id=directive_id,
     )
 
 
@@ -325,6 +387,19 @@ def _wants_fragment(request: Request) -> bool:
     return request.headers.get("hx-request") == "true"
 
 
+async def open_chats() -> list[Thread]:
+    """The tabs across the top of the middle column.
+
+    One by default and always at least one: an interaction area with no tab has nowhere to put an
+    answer, and a page that renders zero of them would make the `+` the only way to start.
+    """
+    threads = await store.open_threads()
+    if not threads:
+        threads = [await store.create_thread("chat 1")]
+    # Oldest first, so a tab keeps its place as new ones are added to the right of it.
+    return list(reversed(threads))
+
+
 async def render_page(message: str = "") -> str:
     """The whole console: the board, the write-path panel when one is open, and the blocks.
 
@@ -335,6 +410,7 @@ async def render_page(message: str = "") -> str:
     rows, notices = await asyncio.to_thread(board)
     projects = shape(rows, groups)
     return env.get_template("board.html").render(
+        threads=await open_chats(),
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,
@@ -359,6 +435,36 @@ async def _form(request: Request) -> dict[str, str]:
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     return {key: values[0] for key, values in parse_qs(body, keep_blank_values=True).items()}
+
+
+@router.post("/threads", response_class=HTMLResponse)
+async def new_thread(request: Request) -> Response:
+    """`+` on the tab bar. A new chat is empty, which is what an interaction area should be."""
+    await store.create_thread(f"chat {len(await store.open_threads()) + 1}")
+    if _wants_fragment(request):
+        return HTMLResponse(env.get_template("_tabs.html").render(threads=await open_chats()))
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/threads/{thread_id}/close", response_class=HTMLResponse)
+async def close_thread(thread_id: str, request: Request) -> Response:
+    """`×` on a tab. Closing is not deleting: the subject is marked closed and everything asked in
+    it stays in the store, because a question that vanished is a question you ask again
+    (docs/04-threads-and-blocks.md)."""
+    if len(await store.open_threads()) > 1:
+        await store.close_thread(thread_id)
+    if _wants_fragment(request):
+        return HTMLResponse(env.get_template("_tabs.html").render(threads=await open_chats()))
+    return RedirectResponse("/", status_code=303)
+
+
+@router.get("/cards/{kind}", response_class=HTMLResponse)
+async def card(kind: str, id: str = "") -> HTMLResponse:
+    """What one card contains. The id is a query parameter because two of the four kinds are
+    identified by a filesystem path, and a path does not fit in a path segment."""
+    groups = await store.groups()
+    markup = await asyncio.to_thread(render_card, kind, id, groups)
+    return HTMLResponse(markup, status_code=200 if markup else 404)
 
 
 @router.post("/projects", response_class=HTMLResponse)
@@ -467,9 +573,12 @@ async def review_message(session_id: str, request: Request) -> Response:
     confirmation dialog in the "are you sure" sense — it is the message, rendered as it would
     arrive, beside the session that would receive it.
     """
-    text = (await _form(request)).get("text", "").strip()
+    form = await _form(request)
+    text = form.get("text", "").strip()
     stage = "confirm" if text else "compose"
-    panel = await asyncio.to_thread(render_message, stage, session_id, text)
+    panel = await asyncio.to_thread(
+        render_message, stage, session_id, text, "", form.get("directive", "").strip()
+    )
     if _wants_fragment(request):
         return HTMLResponse(panel)
     # Rendered rather than redirected: reviewing has no side effect, and the message must survive
@@ -480,7 +589,9 @@ async def review_message(session_id: str, request: Request) -> Response:
 @router.post("/sessions/{session_id}/message/send", response_class=HTMLResponse)
 async def send_message(session_id: str, request: Request) -> Response:
     """The click. It reaches `peer.send` and reports exactly what came back."""
-    text = (await _form(request)).get("text", "").strip()
+    form = await _form(request)
+    text = form.get("text", "").strip()
+    directive_id = form.get("directive", "").strip()
     rows, _ = await asyncio.to_thread(board)
     row = next((r for r in rows if r.session.session_id == session_id), None)
     if row is None or not text:
@@ -489,7 +600,14 @@ async def send_message(session_id: str, request: Request) -> Response:
 
     delivery = peer.send(row.session, text)
     stage = "delivered" if delivery.delivered else "refused"
-    panel = await asyncio.to_thread(render_message, stage, session_id, text, delivery.detail)
+    # Only on delivery. A refused message is still waiting to be sent, and a block that said it
+    # had been sent because somebody pressed the button would be the tool lying about the one
+    # thing it is careful about (docs/adr/0002).
+    if delivery.delivered and directive_id:
+        await store.mark_directive_sent(directive_id)
+    panel = await asyncio.to_thread(
+        render_message, stage, session_id, text, delivery.detail, directive_id
+    )
     if _wants_fragment(request):
         return HTMLResponse(panel)
     # Two things this route owes the day `peer.send` actually delivers, and they close together.
@@ -523,6 +641,10 @@ async def ask(request: Request) -> Response:
             stamped,
             project=form.get("project", "").strip(),
             session=form.get("session", "").strip(),
+            # The cards sitting in the output field when Send was pressed, in the order they were
+            # dropped. Empty is the ordinary case and means the whole board (docs/06-console.md).
+            targets=[one for one in form.get("targets", "").split(",") if one],
+            thread_id=form.get("thread", "").strip(),
         )
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
