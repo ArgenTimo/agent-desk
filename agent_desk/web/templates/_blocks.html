@@ -11,6 +11,19 @@
          data-thread="{{ block.thread_id }}">
   <div class="said">{{ block.input }}</div>
 
+  {% if block.context %}
+  {# What this one was sent with. A block that cannot say what it carried is a block whose answer
+     cannot be explained afterwards (docs/04-threads-and-blocks.md). #}
+  <details class="carried">
+    <summary>carried {{ block.context.splitlines() | length }} thing{{ "" if block.context.splitlines() | length == 1 else "s" }}</summary>
+    <ul>
+      {% for line in block.context.splitlines() %}
+      <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
   {% if block.kind == "idea" and block.id in ideas %}
   {# The card of docs/05-ideas.md. Keep or discard, one click, and never a second question. #}
   {% set idea = ideas[block.id] %}
@@ -78,7 +91,17 @@
     <span class="state">{{ idea.state }}</span>
     {% endif %}
     <a class="as-button" href="/ideas">the inbox</a>
+    <form method="post" action="/blocks/{{ block.id }}/delete"
+          hx-post="/blocks/{{ block.id }}/delete" hx-target="#blocks">
+      {# The idea itself stays in the inbox; what goes is the message that captured it. #}
+      <button type="submit" class="danger" title="remove this message — the idea stays in the inbox">delete</button>
+    </form>
     {% else %}
+
+    <form method="post" action="/blocks/{{ block.id }}/delete"
+          hx-post="/blocks/{{ block.id }}/delete" hx-target="#blocks">
+      <button type="submit" class="danger" title="throw this message away">delete</button>
+    </form>
 
     {% if block.state in ("queued", "running") %}
     <form method="post" action="/blocks/{{ block.id }}/cancel"

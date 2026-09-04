@@ -660,6 +660,21 @@ async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
 
 
+@router.post("/blocks/{block_id}/delete", response_class=HTMLResponse)
+async def delete_block(block_id: str, request: Request) -> Response:
+    """Throw one message away, at a human's asking.
+
+    Nothing here removes a block on its own: a question that vanished is a question you ask again
+    (docs/04-threads-and-blocks.md). This is the other case — somebody looked at it and decided it
+    was noise — and then it goes for real, including the run still working on it.
+    """
+    await block_runs.runs.stop(block_id)
+    await store.delete_block(block_id)
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
+
+
 @router.post("/blocks/{block_id}/retry", response_class=HTMLResponse)
 async def retry_block(block_id: str, request: Request) -> Response:
     """A block that failed does not disappear; it offers this (docs/04)."""

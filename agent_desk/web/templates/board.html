@@ -36,7 +36,6 @@
     {# The output. Empty by default; every message hangs here and its answer appears under it.
        Drop a card in to see it and to point what you ask next at it; drag it out to stop. #}
     <div id="out" class="out" data-drop="out">
-      <div id="pins" class="pins" aria-label="what the next message is about"></div>
       <div id="blocks">{{ blocks|safe }}</div>
       <p class="out-empty">Nothing asked yet. Ask a question, drop a card in here to talk
         about that one thing, or start with <span class="hint-key">/idea</span> to record a
@@ -46,6 +45,8 @@
     {# What the next message will carry, said out loud. Every call to the model is built from
        exactly this and nothing else — the question, the cards in the output, and whichever
        earlier exchanges were attached. #}
+    <div id="pins" class="pins" aria-label="what the next message is about"></div>
+
     <div class="context-strip">
       <span id="context-count"></span>
       <button type="button" id="clear-context">carry nothing</button>

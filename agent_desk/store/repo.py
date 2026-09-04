@@ -71,6 +71,8 @@ class Block(BaseModel):
     thread_set_by: ThreadSetBy
     created_at: int
     finished_at: int | None = None
+    # What this one was built from, one line a thing, as the console described it at the time.
+    context: str | None = None
 
 
 class Directive(BaseModel):
@@ -416,6 +418,31 @@ class Store:
             )
         return block
 
+    async def set_block_context(self, block_id: str, context: str) -> None:
+        """What this block's run was given, recorded once, at submission."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET context = :context WHERE id = :id"),
+                {"context": context, "id": block_id},
+            )
+
+    async def delete_block(self, block_id: str) -> None:
+        """Remove one block from the console, at a human's asking.
+
+        A block never disappears on its own — a question that vanished is a question you ask again
+        (docs/04-threads-and-blocks.md) — but a person may throw one away, and then it goes for
+        real. What it leaves behind is what outlives it: an idea keeps its text and loses only the
+        pointer to the message that captured it, and a prepared message goes with the instruction
+        that asked for it, because nothing should offer to send a message nobody can see the
+        reason for.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET block_id = NULL WHERE block_id = :id"), {"id": block_id}
+            )
+            await conn.execute(text("DELETE FROM directive WHERE block_id = :id"), {"id": block_id})
+            await conn.execute(text("DELETE FROM block WHERE id = :id"), {"id": block_id})
+
     async def set_block_kind(self, block_id: str, kind: BlockKind) -> None:
         """What one line of input turned out to be, once a run has read it (docs/04)."""
         async with self.engine.begin() as conn:
@@ -495,7 +522,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -507,7 +534,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -518,7 +545,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at FROM block WHERE id = :id"
+                    "created_at, finished_at, context FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )
@@ -530,6 +557,10 @@ class Store:
         fields = dict(row)
         fields["answer"] = scrub_optional(fields["answer"])
         fields["error"] = scrub_optional(fields["error"])
+        # It quotes what was typed into earlier messages, and what somebody typed can be a token
+        # they pasted. Redaction is at the store boundary, and this is the store boundary
+        # (docs/07-security.md).
+        fields["context"] = scrub_optional(fields["context"])
         return Block(**fields)
 
     # --- directives -------------------------------------------------------------------------

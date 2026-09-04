@@ -972,3 +972,73 @@ def test_the_prompt_says_which_transcripts_it_was_handed() -> None:
     )
     assert "## The transcripts you were given, in full" in with_reading
     assert "assistant: hello" in with_reading
+
+
+@pytest.mark.unit
+async def test_a_block_says_what_it_was_sent_with(desk: Store, fake_claude: pathlib.Path) -> None:
+    """Written before the run starts, so a block still answering can already be asked.
+
+    "Why did it say that" is a question about the context, and the context was a decision made in
+    a second and already forgotten (docs/04-threads-and-blocks.md).
+    """
+    row = make_row("alpha", "main")
+    tab = await desk.create_thread("a subject")
+    first = await blocks.submit(desk, "the first question", [row], thread_id=tab.id)
+    await _settled(desk, first.id)
+
+    second = await blocks.submit(
+        desk,
+        "and what about the branch",
+        [row],
+        thread_id=tab.id,
+        targets=["session:session-alpha:full"],
+        history=[first.id],
+    )
+    written = await desk.block(second.id)
+    assert written is not None and written.context is not None
+    carried = written.context.splitlines()
+    assert carried[0].startswith("session · alpha")
+    assert "whole transcript" in carried[0]
+    assert carried[1] == "earlier · the first question"
+
+    # A question sent with nothing says nothing, rather than saying "nothing".
+    bare = await blocks.submit(desk, "on its own", [row], thread_id=tab.id)
+    plain = await desk.block(bare.id)
+    assert plain is not None and plain.context is None
+
+
+@pytest.mark.unit
+async def test_a_message_can_be_thrown_away(desk: Store, fake_claude: pathlib.Path) -> None:
+    """A block never vanishes on its own; this is the other case, and then it goes for real.
+
+    What outlives it is what was captured from it: an idea keeps its text and loses the pointer to
+    the message, because the thought is the thing the inbox is for (docs/05-ideas.md).
+    """
+    block = await blocks.submit(desk, "/idea a thought worth keeping", [])
+    await _settled(desk, block.id)
+    ideas = await desk.ideas()
+    assert [idea.block_id for idea in ideas] == [block.id]
+
+    status, _, _ = await _post(f"/blocks/{block.id}/delete", {}, htmx=True)
+
+    assert status == 200
+    assert await desk.block(block.id) is None
+    kept = await desk.ideas()
+    assert [idea.text for idea in kept] == ["a thought worth keeping"]
+    assert kept[0].block_id is None
+
+
+@pytest.mark.unit
+async def test_deleting_a_message_takes_the_run_and_the_prepared_message_with_it(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing should offer to send a message whose reason nobody can see any more."""
+    monkeypatch.setenv("KIND", "do")
+    block = await blocks.submit(desk, "tell alpha-d0 to test it again", [make_row("alpha", "main")])
+    await _settled(desk, block.id)
+    assert len(await desk.directives()) == 1
+
+    status, _, _ = await _post(f"/blocks/{block.id}/delete", {}, htmx=True)
+
+    assert status == 200
+    assert await desk.directives() == []

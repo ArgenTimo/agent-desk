@@ -423,6 +423,9 @@ async def submit(
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
+    carried = await _context_lines(store, rows, targets, history)
+    if carried:
+        await store.set_block_context(block.id, "\n".join(carried))
     aimed, about = aim(rows, project, session, targets)
     deep = transcripts(rows, targets)
     classify = not forced_new and not thread_id
@@ -433,6 +436,36 @@ async def submit(
         ),
     )
     return block
+
+
+async def _context_lines(
+    store: Store,
+    rows: Sequence[BoardRow],
+    targets: Sequence[str],
+    history: Sequence[str],
+) -> list[str]:
+    """What this question is being sent with, in the words the console used for it.
+
+    Written before the run starts, so that a block that is still answering can already say what it
+    was given. "Why did it say that" is a question about the context, and the context was a
+    decision somebody made in a second and has already forgotten.
+    """
+    lines: list[str] = []
+    for target in targets:
+        kind, ident, deep = _card(target)
+        found, label = _rows_named(rows, kind, ident)
+        if not found:
+            lines.append(f"{kind} · no longer on the board")
+            continue
+        whole = " · whole transcript" if deep else ""
+        lines.append(
+            f"{kind} · {label} ({len(found)} session{'' if len(found) == 1 else 's'}){whole}"
+        )
+    for block_id in history:
+        earlier = await store.block(block_id)
+        if earlier is not None:
+            lines.append(f"earlier · {earlier.input[:80]}")
+    return lines
 
 
 async def _thread_for(store: Store, thread_id: str, text: str) -> Thread:

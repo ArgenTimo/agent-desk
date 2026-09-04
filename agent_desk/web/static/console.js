@@ -206,7 +206,7 @@ function showActiveThread() {
     block.hidden = block.dataset.thread !== current;
   }
   const said = [...document.querySelectorAll('#blocks [data-thread]')].some((b) => !b.hidden);
-  out.classList.toggle('is-empty', !said && !pins.children.length);
+  out.classList.toggle('is-empty', !said);
   const field = document.getElementById('say-thread');
   if (field) field.value = current;
 }
@@ -450,7 +450,9 @@ document.addEventListener('dragend', (event) => {
 });
 
 function zoneOf(event) {
-  return event.target.closest('#out, [data-drop="project"]');
+  // The output and the staging area under it are one target: dropping a card anywhere in the
+  // middle means "this is what the next message is about".
+  return event.target.closest('#out, #pins, [data-drop="project"]');
 }
 
 document.addEventListener('dragover', (event) => {
@@ -469,7 +471,7 @@ document.addEventListener('drop', (event) => {
   zone.classList.remove('drop-target');
   dragged.handled = true;
 
-  if (zone.id === 'out') {
+  if (zone.id === 'out' || zone.id === 'pins') {
     if (!dragged.fromPins) pin(dragged);
     document.getElementById('ask-text').focus();
     return;

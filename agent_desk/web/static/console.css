@@ -141,7 +141,13 @@ body.pulling { cursor: col-resize; user-select: none; }
   border-top: 1px solid var(--line);
   font-family: var(--mono); font-size: 11px;
 }
-.tree, .blockers { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.tree, .blockers {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
 
 /* Two columns on a laptop in a side-by-side, one on anything narrower. The middle is the one that
    survives, because it is the one being used. */
@@ -684,6 +690,10 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* The gutter is always there, whether or not there is enough to scroll. Without it the moment
+     a message makes the column overflow, every block in it jumps narrower by the width of a
+     scrollbar — text reflows under somebody's eyes for no reason they can see. */
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: 12px 4px 4px;
 }
@@ -694,7 +704,18 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 
 /* A card carried into the middle. It shows what the card contains, and while it is here it is
    what the next message is about. Dragging it back out undoes both. */
-.pins { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+/* The staging area: what the next message will be sent with, sitting where it can be seen while
+   it is typed. It scrolls on its own — five cards must not push the input field off the screen. */
+.pins {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  margin-top: 8px;
+}
+.pins:not(:empty) { padding-top: 2px; }
 .pin {
   border: 1px solid var(--line-strong);
   border-left: 3px solid var(--focus);
@@ -707,6 +728,11 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .pin-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--prose); }
 .pin-off { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
 .pin-body { margin-top: 4px; }
+
+.carried { margin: 4px 0 0; font-size: 11px; color: var(--fg-dim); }
+.carried > summary { cursor: pointer; font-family: var(--mono); }
+.carried ul { margin: 3px 0 0; padding-left: 18px; }
+.carried li { overflow-wrap: anywhere; }
 
 .card-detail + .card-detail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
 .card-line { display: flex; align-items: center; gap: 8px; }
