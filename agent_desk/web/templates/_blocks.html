@@ -12,7 +12,8 @@
     {# Every block shows the thread it landed in, as a control: move it, or split it off. A
        misfile costs one click to correct, and the block re-runs against the right context
        (docs/04-threads-and-blocks.md). #}
-    <form class="thread" hx-post="/blocks/{{ block.id }}/thread" hx-target="#blocks">
+    <form class="thread" method="post" action="/blocks/{{ block.id }}/thread"
+          hx-post="/blocks/{{ block.id }}/thread" hx-target="#blocks">
       <span class="set-by" title="who chose this thread">{{ block.thread_set_by }}</span>
       <select name="thread_id" onchange="this.form.requestSubmit()">
         {% for thread in open_threads %}
@@ -20,6 +21,9 @@
         {% endfor %}
         <option value="">— split into a new thread —</option>
       </select>
+      {# Redundant where a change event can submit the form, and the only way to move a block
+         where it cannot. #}
+      <button type="submit" title="move it">↵</button>
     </form>
   </header>
 
@@ -31,8 +35,14 @@
     <p class="verbatim">{{ idea.text }}</p>
     <footer class="actions">
       {% if idea.state == "new" %}
-      <button hx-post="/ideas/{{ idea.id }}/keep" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">Keep</button>
-      <button hx-post="/ideas/{{ idea.id }}/drop" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">Discard</button>
+      <form method="post" action="/ideas/{{ idea.id }}/keep"
+            hx-post="/ideas/{{ idea.id }}/keep" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">
+        <button type="submit">Keep</button>
+      </form>
+      <form method="post" action="/ideas/{{ idea.id }}/drop"
+            hx-post="/ideas/{{ idea.id }}/drop" hx-headers='{"hx-target": "blocks"}' hx-target="#blocks">
+        <button type="submit">Discard</button>
+      </form>
       {% else %}
       <span class="state">{{ idea.state }}</span>
       {% endif %}
@@ -49,9 +59,15 @@
 
   <footer>
     {% if block.state in ("queued", "running") %}
-    <button hx-post="/blocks/{{ block.id }}/cancel" hx-target="#blocks">cancel</button>
+    <form method="post" action="/blocks/{{ block.id }}/cancel"
+          hx-post="/blocks/{{ block.id }}/cancel" hx-target="#blocks">
+      <button type="submit">cancel</button>
+    </form>
     {% elif block.state in ("failed", "cancelled") %}
-    <button hx-post="/blocks/{{ block.id }}/retry" hx-target="#blocks">retry</button>
+    <form method="post" action="/blocks/{{ block.id }}/retry"
+          hx-post="/blocks/{{ block.id }}/retry" hx-target="#blocks">
+      <button type="submit">retry</button>
+    </form>
     {% endif %}
   </footer>
 </article>

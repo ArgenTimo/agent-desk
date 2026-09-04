@@ -117,11 +117,15 @@
   }
   #message .detail { color: var(--flag); margin: 6px 0; }
   #message footer { display: flex; gap: 6px; margin-top: 6px; }
-  #message button {
+  #message button, #message .as-button {
     font: inherit; color: var(--dim); background: none; cursor: pointer;
     border: 1px solid var(--line); padding: 1px 8px;
   }
-  #message button:hover { color: var(--fg); border-color: var(--fg); }
+  #message button:hover, #message .as-button:hover { color: var(--fg); border-color: var(--fg); }
+  #message .as-button {
+    color: var(--dim); border: 1px solid var(--line); padding: 1px 8px; text-decoration: none;
+  }
+  .block footer form, .card .actions form { display: inline; }
   #message button.send { color: var(--flag); border-color: var(--flag); }
   .row .message-button {
     font: inherit; font-size: 11px; color: var(--dim); background: none; cursor: pointer;
@@ -145,8 +149,8 @@
 <body>
 {# The one vendored file. If it is not there the buttons and the form do nothing, so the page
    says so rather than looking fine and losing what you type into it. #}
-<p id="no-htmx" hidden>htmx is missing — put htmx.min.js in agent_desk/web/static/ (see README).
-  Until then the input field and the block buttons do nothing.</p>
+<p id="no-htmx" hidden>htmx is missing from agent_desk/web/static/, so every action reloads the
+  page instead of updating in place. Everything works; it just blinks.</p>
 
 <header id="bar">
   <span class="brand">agent-desk</span>
@@ -158,11 +162,15 @@
 
 {# The one write path lives here, outside the board, because the board replaces itself whenever a
    session changes and a panel inside it would vanish under a half-typed message (docs/adr/0002). #}
-<div id="message"></div>
+<div id="message">{{ message|safe }}</div>
 
 {# One field, always focused, never blocked. Submitting frees it immediately
    (docs/04-threads-and-blocks.md). #}
-<form id="ask" hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
+{# A real form with a real action. htmx, when it is here, turns it into an in-place swap; when it
+   is not, the browser posts it and the console renders a whole page. Either way the field is
+   free the moment you press enter (docs/04-threads-and-blocks.md). #}
+<form id="ask" method="post" action="/blocks"
+      hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
       hx-on::after-request="this.reset(); this.text.focus()">
   <input name="text" autocomplete="off" autofocus
          placeholder="ask anything — the field is free again the moment you press enter">
@@ -176,10 +184,8 @@
 // things — replace it when the server says it changed, expand one row on demand, and say plainly
 // when it has stopped hearing from the server. The third is not a nicety: a board that has quietly
 // stopped updating looks exactly like a board on which nothing is happening.
-if (!window.htmx) {
-  document.getElementById('no-htmx').hidden = false;
-  document.querySelector('#ask input').disabled = true;
-}
+// Without htmx the forms still post and the pages still render; only the swaps are lost.
+if (!window.htmx) document.getElementById('no-htmx').hidden = false;
 
 const expanded = new Set();
 const asof = document.getElementById('asof');

@@ -4,7 +4,8 @@
 <p class="empty">that session is no longer on the board</p>
 
 {% elif stage == "compose" %}
-<form class="compose" hx-post="/sessions/{{ row.session.session_id }}/message/review" hx-target="#message">
+<form class="compose" method="post" action="/sessions/{{ row.session.session_id }}/message/review"
+      hx-post="/sessions/{{ row.session.session_id }}/message/review" hx-target="#message">
   <header>
     message to <span class="target">{{ row.session.project }}</span>
     <span class="dim">· {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }} · {{ row.session.name }}</span>
@@ -12,7 +13,7 @@
   <textarea name="text" rows="3" autofocus placeholder="it lands in that session's context — write it as you would type it there"></textarea>
   <footer>
     <button type="submit">Review it</button>
-    <button type="button" onclick="document.getElementById('message').innerHTML = ''">Cancel</button>
+    <a class="as-button" href="/">Cancel</a>
   </footer>
 </form>
 
@@ -24,11 +25,12 @@
   </header>
   {# In full, not summarised: what is shown here is what would arrive. #}
   <pre class="full">{{ text }}</pre>
-  <form hx-post="/sessions/{{ row.session.session_id }}/message/send" hx-target="#message">
+  <form method="post" action="/sessions/{{ row.session.session_id }}/message/send"
+        hx-post="/sessions/{{ row.session.session_id }}/message/send" hx-target="#message">
     <input type="hidden" name="text" value="{{ text }}">
     <footer>
       <button type="submit" class="send">Send it</button>
-      <button type="button" onclick="document.getElementById('message').innerHTML = ''">Cancel</button>
+      <a class="as-button" href="/">Cancel</a>
     </footer>
   </form>
 </div>
@@ -41,7 +43,7 @@
   <pre class="full" id="unsent">{{ text }}</pre>
   <footer>
     <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('unsent').textContent)">Copy it</button>
-    <button type="button" onclick="document.getElementById('message').innerHTML = ''">Close</button>
+    <a class="as-button" href="/">Close</a>
   </footer>
 </div>
 
@@ -49,6 +51,6 @@
 <div class="delivered">
   <header>delivered to <span class="target">{{ row.session.project }}</span></header>
   <pre class="full">{{ text }}</pre>
-  <footer><button type="button" onclick="document.getElementById('message').innerHTML = ''">Close</button></footer>
+  <footer><a class="as-button" href="/">Close</a></footer>
 </div>
 {% endif %}

@@ -268,7 +268,9 @@ def test_the_board_reaches_the_run_as_facts_and_not_as_a_guess() -> None:
     assert "may be waiting" not in line
 
 
-async def _post(path: str, fields: dict[str, str]) -> tuple[int, str]:
+async def _post(
+    path: str, fields: dict[str, str], *, htmx: bool = False
+) -> tuple[int, str, dict[str, str]]:
     """One urlencoded POST through the real ASGI stack — middleware, routing and form parsing.
 
     Every other test in this file calls `submit()` directly, and that is exactly how a route-level
@@ -295,7 +297,8 @@ async def _post(path: str, fields: dict[str, str]) -> tuple[int, str]:
             (b"host", b"127.0.0.1:8787"),
             (b"content-type", b"application/x-www-form-urlencoded"),
             (b"content-length", str(len(body)).encode()),
-        ],
+        ]
+        + ([(b"hx-request", b"true")] if htmx else []),
         "client": ("127.0.0.1", 54321),
         "server": ("127.0.0.1", 8787),
     }
@@ -308,16 +311,18 @@ async def _post(path: str, fields: dict[str, str]) -> tuple[int, str]:
         sent.append(message)
 
     await app(scope, receive, send)
-    status = next(int(m["status"]) for m in sent if m["type"] == "http.response.start")  # type: ignore[arg-type]
+    start = next(m for m in sent if m["type"] == "http.response.start")
     html = b"".join(bytes(m.get("body", b"")) for m in sent if m["type"] == "http.response.body")
-    return status, html.decode()
+    headers = {k.decode(): v.decode() for k, v in start.get("headers", [])}  # type: ignore[union-attr]
+    return int(start["status"]), html.decode(), headers  # type: ignore[arg-type]
 
 
 @pytest.mark.unit
 async def test_a_typed_line_survives_the_route_and_not_only_the_function(
     desk: Store, fake_claude: pathlib.Path
 ) -> None:
-    status, html = await _post("/blocks", {"text": "what about timeouts"})
+    """The htmx path: the column comes back as a fragment and the page never moves."""
+    status, html, _ = await _post("/blocks", {"text": "what about timeouts"}, htmx=True)
 
     assert status == 200
     assert "what about timeouts" in html
@@ -325,11 +330,58 @@ async def test_a_typed_line_survives_the_route_and_not_only_the_function(
 
 
 @pytest.mark.unit
+async def test_a_typed_line_works_with_no_htmx_at_all(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """The same form, submitted by a browser that never loaded the library.
+
+    A console that cannot be used without a vendored file has the dependency the wrong way round,
+    and this repository has spent three days without that file.
+    """
+    status, _, headers = await _post("/blocks", {"text": "what about timeouts"})
+
+    # Post/redirect/get: a refresh after asking must not ask again.
+    assert status == 303
+    assert headers["location"] == "/"
+    assert len(await desk.blocks()) == 1
+
+    page = (await routes.page()).body.decode()
+    assert "what about timeouts" in page
+
+
+@pytest.mark.unit
 async def test_an_empty_line_is_accepted_and_produces_nothing(
     desk: Store, fake_claude: pathlib.Path
 ) -> None:
     """Pressing enter on an empty field is not an error and is not a block."""
-    status, _ = await _post("/blocks", {"text": "   "})
+    status, _, _ = await _post("/blocks", {"text": "   "}, htmx=True)
 
     assert status == 200
     assert await desk.blocks() == []
+
+
+@pytest.mark.unit
+async def test_every_action_in_the_console_is_a_real_form(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """htmx upgrades this console; it does not enable it.
+
+    A `hx-post` with no `action` is a control that does nothing when a vendored file is missing,
+    and a page full of those is a page that lies about being usable. Every one of them carries a
+    method and an action too, and the routes answer a fragment or a page depending on who asked.
+    """
+    import re
+
+    await blocks.submit(desk, "a question", [])
+    await blocks.submit(desk, "/idea a thought", [])
+    body = (await routes.page()).body.decode()
+
+    forms = re.findall(r"<form[^>]*>", body)
+    posting = [form for form in forms if "hx-post" in form]
+    assert posting, "the page has no actions at all"
+    for form in posting:
+        assert 'method="post"' in form, form
+        assert "action=" in form, form
+
+    # And the one control that opens the write path is a link, which works everywhere.
+    assert re.search(r'<a class="message-button" href="/sessions/[^"]+/message"', body)

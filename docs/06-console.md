@@ -48,7 +48,9 @@ and the place to look is the terminal that is already open.
 
 ## The input and the blocks
 
-One field, always focused, never blocked. Submitting frees it immediately
+One field, always focused, never blocked, and a plain HTML form underneath — htmx makes the
+submission update the column in place, and without it the page reloads and the field is free just
+the same. Submitting frees it immediately
 ([04-threads-and-blocks.md](04-threads-and-blocks.md)). Blocks appear below, newest first, each
 showing its state and its thread. An idea block shows its card ([05-ideas.md](05-ideas.md)).
 

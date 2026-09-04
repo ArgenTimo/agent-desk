@@ -20,8 +20,9 @@
     {% if row.session.kind != "interactive" %}<span class="kind">{{ row.session.kind }}</span>{% endif %}
     {# The one button in this console that could change somebody else's work. It opens a panel; it
        sends nothing (docs/adr/0002, docs/06-console.md). #}
-    <button class="message-button" hx-get="/sessions/{{ row.session.session_id }}/message"
-            hx-target="#message" onclick="event.stopPropagation()">message…</button>
+    <a class="message-button" href="/sessions/{{ row.session.session_id }}/message"
+       hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message"
+       onclick="event.stopPropagation()">message…</a>
   </header>
 
   <div class="headline">

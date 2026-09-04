@@ -179,7 +179,7 @@ async def test_the_route_reaches_the_write_path_and_reports_the_refusal(console:
     """End to end through the real ASGI stack: the click, and what came back from it."""
     from tests.unit.test_input import _post
 
-    status, html = await _post(
+    status, html, _ = await _post(
         f"/sessions/{console}/message/send", {"text": "have you pushed duck-129?"}
     )
 
@@ -194,7 +194,7 @@ async def test_an_empty_message_never_reaches_the_write_path(console: str) -> No
     """A blank submit is not a message, and the confirm step is not skippable by sending one."""
     from tests.unit.test_input import _post
 
-    status, html = await _post(f"/sessions/{console}/message/review", {"text": "   "})
+    status, html, _ = await _post(f"/sessions/{console}/message/review", {"text": "   "})
 
     assert status == 200
     assert "Send it" not in html

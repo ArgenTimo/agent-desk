@@ -58,10 +58,14 @@ context). See [08-non-goals.md](08-non-goals.md).
 
 ## web
 
-FastAPI, Jinja2 templates, HTMX for interaction, server-sent events for the live board. HTMX
-arrives with the input field in Phase 2; the Phase 1 board is the same server-rendered page driven
-by a dozen lines of plain JavaScript, because the library could not be fetched on the machine it
-was built on and a board does not need it ([09-roadmap.md](09-roadmap.md)). Bound to
+FastAPI, Jinja2 templates, HTMX for interaction, server-sent events for the live board.
+
+**HTMX is an upgrade here, not a dependency.** Every action is a real form with a real action, and
+every route answers a fragment when htmx asked and a whole page when a browser did. With the
+library the console updates in place; without it the same clicks reload the page and everything
+still works. That is not a concession to a missing file — it is what "server-rendered, no build
+step" means when it is taken seriously ([adr/0003](adr/0003-sqlite-and-one-process.md)), and it is
+why the shared view of Phase 4 could be written with no JavaScript at all. Bound to
 `127.0.0.1` and to one operating-system user by default. The overlay is the same page in a
 dedicated always-on-top browser window ([06-console.md](06-console.md)).
 

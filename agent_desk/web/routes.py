@@ -155,20 +155,35 @@ async def render_inbox() -> str:
 
 @router.get("/", response_class=HTMLResponse)
 async def page() -> HTMLResponse:
-    board_html = await asyncio.to_thread(render_board)
-    return HTMLResponse(
-        env.get_template("board.html").render(
-            board=board_html,
-            blocks=await render_blocks(),
-            poll=settings.registry_poll_seconds,
-        )
-    )
+    return HTMLResponse(await render_page())
 
 
 @router.get("/sessions/{session_id}/tail", response_class=HTMLResponse)
 async def session_tail(session_id: str) -> HTMLResponse:
     """A row expands to the tail of its transcript. That is the whole drill-down in v1."""
     return HTMLResponse(await asyncio.to_thread(render_tail, session_id))
+
+
+def _wants_fragment(request: Request) -> bool:
+    """Did htmx ask for this, or did a browser submit a form?
+
+    Every action in this console is a real form with a real action, and htmx — when it is there —
+    upgrades it into an in-place swap. When it is not, the same route answers with a whole page.
+    The console is server-rendered either way (docs/adr/0003); what the library adds is that the
+    page does not blink, and a tool that cannot be used without it would have the dependency the
+    wrong way round.
+    """
+    return request.headers.get("hx-request") == "true"
+
+
+async def render_page(message: str = "") -> str:
+    """The whole console: the board, the write-path panel when one is open, and the blocks."""
+    return env.get_template("board.html").render(
+        board=await asyncio.to_thread(render_board),
+        message=message,
+        blocks=await render_blocks(),
+        poll=settings.registry_poll_seconds,
+    )
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -224,13 +239,16 @@ async def revoke_viewer(viewer_id: str) -> Response:
 
 
 @router.get("/sessions/{session_id}/message", response_class=HTMLResponse)
-async def compose_message(session_id: str) -> HTMLResponse:
+async def compose_message(session_id: str, request: Request) -> Response:
     """Open the compose panel for one named session. Nothing is sent by opening it."""
-    return HTMLResponse(await asyncio.to_thread(render_message, "compose", session_id))
+    panel = await asyncio.to_thread(render_message, "compose", session_id)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/sessions/{session_id}/message/review", response_class=HTMLResponse)
-async def review_message(session_id: str, request: Request) -> HTMLResponse:
+async def review_message(session_id: str, request: Request) -> Response:
     """Show it in full, against the name of the session it would go to (docs/adr/0002).
 
     This step exists because the cost of the next one is somebody else's context. It is not a
@@ -239,27 +257,37 @@ async def review_message(session_id: str, request: Request) -> HTMLResponse:
     """
     text = (await _form(request)).get("text", "").strip()
     stage = "confirm" if text else "compose"
-    return HTMLResponse(await asyncio.to_thread(render_message, stage, session_id, text))
+    panel = await asyncio.to_thread(render_message, stage, session_id, text)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    # Rendered rather than redirected: reviewing has no side effect, and the message must survive
+    # the round trip to be read in full — which is the whole point of the step.
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/sessions/{session_id}/message/send", response_class=HTMLResponse)
-async def send_message(session_id: str, request: Request) -> HTMLResponse:
+async def send_message(session_id: str, request: Request) -> Response:
     """The click. It reaches `peer.send` and reports exactly what came back."""
     text = (await _form(request)).get("text", "").strip()
     rows, _ = await asyncio.to_thread(board)
     row = next((r for r in rows if r.session.session_id == session_id), None)
     if row is None or not text:
-        return HTMLResponse(await asyncio.to_thread(render_message, "gone", session_id))
+        panel = await asyncio.to_thread(render_message, "gone", session_id)
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
     delivery = peer.send(row.session, text)
     stage = "delivered" if delivery.delivered else "refused"
-    return HTMLResponse(
-        await asyncio.to_thread(render_message, stage, session_id, text, delivery.detail)
-    )
+    panel = await asyncio.to_thread(render_message, stage, session_id, text, delivery.detail)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    # The outcome is rendered so the text can be copied out of it. The day `peer.send` actually
+    # delivers, this branch owes the browser a redirect instead: a refresh here would send it
+    # twice, and twice into somebody's context is the failure adr/0002 is about.
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/blocks", response_class=HTMLResponse)
-async def ask(request: Request) -> HTMLResponse:
+async def ask(request: Request) -> Response:
     """One line of input, accepted and answered on its own time.
 
     The response is the column, and the field is cleared by the page the moment this returns —
@@ -269,7 +297,10 @@ async def ask(request: Request) -> HTMLResponse:
     if typed:
         rows, _ = await asyncio.to_thread(board)
         await block_runs.submit(store, typed, rows)
-    return HTMLResponse(await render_blocks())
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    # Post/redirect/get: a refresh after asking must not ask again.
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/blocks", response_class=HTMLResponse)
@@ -278,17 +309,19 @@ async def block_column() -> HTMLResponse:
 
 
 @router.post("/blocks/{block_id}/retry", response_class=HTMLResponse)
-async def retry_block(block_id: str) -> HTMLResponse:
+async def retry_block(block_id: str, request: Request) -> Response:
     """A block that failed does not disappear; it offers this (docs/04)."""
     block = await store.block(block_id)
     if block is not None and block.state in ("failed", "cancelled"):
         rows, _ = await asyncio.to_thread(board)
         await block_runs.retry(store, block, rows)
-    return HTMLResponse(await render_blocks())
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/ideas/{idea_id}/{action}", response_class=HTMLResponse)
-async def idea_action(idea_id: str, action: str, request: Request) -> HTMLResponse:
+async def idea_action(idea_id: str, action: str, request: Request) -> Response:
     """Keep, discard, edit the summary, or produce one of the three drafts (docs/05-ideas.md).
 
     Nothing here writes outside this program's own store. That is the rule the ideas page exists
@@ -311,9 +344,10 @@ async def idea_action(idea_id: str, action: str, request: Request) -> HTMLRespon
         await block_runs.draft(store, idea, action)
         await store.set_idea_state(idea_id, "promoted")
 
-    if request.headers.get("hx-target") == "blocks":
-        return HTMLResponse(await render_blocks())
-    return HTMLResponse(await render_inbox())
+    from_the_card = request.headers.get("hx-target") == "blocks"
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks() if from_the_card else await render_inbox())
+    return RedirectResponse("/" if from_the_card else "/ideas", status_code=303)
 
 
 @router.get("/ideas", response_class=HTMLResponse)
@@ -327,18 +361,22 @@ async def inbox_list() -> HTMLResponse:
 
 
 @router.post("/blocks/{block_id}/thread", response_class=HTMLResponse)
-async def set_block_thread(block_id: str, request: Request) -> HTMLResponse:
+async def set_block_thread(block_id: str, request: Request) -> Response:
     """Correcting a misfile costs one click, and the block re-runs against the right context."""
     block = await store.block(block_id)
     if block is not None:
         chosen = (await _form(request)).get("thread_id", "").strip()
         rows, _ = await asyncio.to_thread(board)
         await block_runs.set_thread(store, block, chosen or None, rows)
-    return HTMLResponse(await render_blocks())
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/blocks/{block_id}/cancel", response_class=HTMLResponse)
-async def cancel_block(block_id: str) -> HTMLResponse:
+async def cancel_block(block_id: str, request: Request) -> Response:
     """Stop a run that is no longer worth waiting for. The block stays, saying it was cancelled."""
     block_runs.cancel(block_id)
-    return HTMLResponse(await render_blocks())
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)

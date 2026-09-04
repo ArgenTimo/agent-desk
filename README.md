@@ -104,8 +104,9 @@ Six things a reader of the code should know before trusting it:
   [`docs/03-session-observation.md`](docs/03-session-observation.md) records the observation. What
   it means is a human's call, not the reader's.
 - **`agent_desk/web/static/htmx.min.js` is not in the repository** and is not fetched at runtime.
-  Drop the file there and the input field and buttons work; without it the page says so plainly
-  rather than looking fine and losing what you type.
+  Nothing depends on it: every action is a real form with a real action, and the routes answer a
+  fragment to htmx and a whole page to a browser. Drop the file in and the page stops reloading
+  on every click; leave it out and the console still works, it just blinks.
 - Answering a block runs the `claude` CLI, which costs whatever your account charges. Nothing runs
   it on a timer: a block runs because a line was typed, and the classifier runs once per line
   when there are open subjects to classify against.

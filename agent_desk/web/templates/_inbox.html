@@ -8,7 +8,8 @@
 <article class="idea {{ idea.state }}">
   <header>
     <span class="state">{{ idea.state }}</span>
-    <form class="rename" hx-post="/ideas/{{ idea.id }}/summary" hx-target="#inbox">
+    <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
+          hx-post="/ideas/{{ idea.id }}/summary" hx-target="#inbox">
       <input name="summary" value="{{ idea.summary }}" aria-label="summary">
     </form>
   </header>
@@ -22,13 +23,28 @@
 
   <footer class="actions">
     {% if idea.state == "new" %}
-    <button hx-post="/ideas/{{ idea.id }}/keep" hx-target="#inbox">Keep</button>
-    <button hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">Discard</button>
+    <form method="post" action="/ideas/{{ idea.id }}/keep"
+          hx-post="/ideas/{{ idea.id }}/keep" hx-target="#inbox">
+      <button type="submit">Keep</button>
+    </form>
+    <form method="post" action="/ideas/{{ idea.id }}/drop"
+          hx-post="/ideas/{{ idea.id }}/drop" hx-target="#inbox">
+      <button type="submit">Discard</button>
+    </form>
     {% elif idea.state == "kept" %}
     {# All three produce text in this tool. None writes into another repository. #}
-    <button hx-post="/ideas/{{ idea.id }}/proposal" hx-target="#inbox">Draft a proposal</button>
-    <button hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#inbox">Draft a ticket</button>
-    <button hx-post="/ideas/{{ idea.id }}/paste" hx-target="#inbox">Copy for a session</button>
+    <form method="post" action="/ideas/{{ idea.id }}/proposal"
+          hx-post="/ideas/{{ idea.id }}/proposal" hx-target="#inbox">
+      <button type="submit">Draft a proposal</button>
+    </form>
+    <form method="post" action="/ideas/{{ idea.id }}/ticket"
+          hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#inbox">
+      <button type="submit">Draft a ticket</button>
+    </form>
+    <form method="post" action="/ideas/{{ idea.id }}/paste"
+          hx-post="/ideas/{{ idea.id }}/paste" hx-target="#inbox">
+      <button type="submit">Copy for a session</button>
+    </form>
     {% endif %}
     {% if idea.id in drafting %}<span class="drafting">drafting…</span>{% endif %}
   </footer>
