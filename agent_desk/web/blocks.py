@@ -222,7 +222,10 @@ async def _summarise(store: Store, idea: Idea) -> None:
         return
     line = next((one for one in "".join(parts).splitlines() if one.strip()), "").strip()
     if line:
-        await store.set_idea_summary(idea.id, inbox.fallback_summary(line))
+        # Only if the fallback is still there. A human editing the card while this run was in
+        # flight has said what they want the line to be, and a generated one arriving afterwards
+        # does not get to disagree.
+        await store.set_idea_summary(idea.id, inbox.fallback_summary(line), only_if=idea.summary)
 
 
 async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:

@@ -313,3 +313,32 @@ async def test_the_card_works_the_same_with_htmx_and_without(
     status, html = await _card_post(f"/ideas/{second.id}/keep", {"from": "card"}, htmx=True)
     assert status == 200
     assert "Idea recorded" in html  # the block column, not the inbox
+
+
+@pytest.mark.unit
+async def test_a_generated_summary_never_overwrites_one_a_human_wrote(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Found by a test that failed only sometimes, which is the bug talking.
+
+    Capture stores a fallback line and starts a run to improve it. A human can edit the card in
+    the seconds that takes, and the generated line used to land afterwards and win. docs/05-ideas
+    is explicit that the summary is the human's to edit; a tool that overwrites the person it is
+    for has the relationship backwards.
+    """
+    await blocks.submit(
+        desk, "/idea cache the probe results per project so onboarding is quick", []
+    )
+    (idea,) = await desk.ideas()
+
+    await desk.set_idea_summary(idea.id, "what I actually meant")
+
+    async def generated_arrived() -> bool:
+        return len(blocks.runs) == 0
+
+    await _settle(generated_arrived)
+    await asyncio.sleep(0.3)
+
+    stored = await desk.idea(idea.id)
+    assert stored is not None
+    assert stored.summary == "what I actually meant"

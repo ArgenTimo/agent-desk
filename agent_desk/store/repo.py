@@ -507,13 +507,29 @@ class Store:
                 {"id": idea_id, "state": state},
             )
 
-    async def set_idea_summary(self, idea_id: str, summary: str) -> None:
-        """The summary is editable; `text` is not, and there is no statement here that writes it."""
+    async def set_idea_summary(
+        self, idea_id: str, summary: str, *, only_if: str | None = None
+    ) -> None:
+        """The summary is editable; `text` is not, and no statement here writes it.
+
+        `only_if` is a compare-and-set, and it exists because the two writers of this column race.
+        A capture stores a fallback line and starts a run to improve it; a human can edit the line
+        in the seconds that run takes. Without the guard the generated summary lands last and the
+        human's words are gone — the tool overwriting the person it is for.
+        """
         async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE idea SET summary = :summary WHERE id = :id"),
-                {"id": idea_id, "summary": summary},
-            )
+            if only_if is None:
+                await conn.execute(
+                    text("UPDATE idea SET summary = :summary WHERE id = :id"),
+                    {"id": idea_id, "summary": summary},
+                )
+            else:
+                await conn.execute(
+                    text(
+                        "UPDATE idea SET summary = :summary WHERE id = :id AND summary = :only_if"
+                    ),
+                    {"id": idea_id, "summary": summary, "only_if": only_if},
+                )
 
     async def ideas(self, *, state: IdeaState | None = None, limit: int = 200) -> list[Idea]:
         async with self.engine.connect() as conn:
