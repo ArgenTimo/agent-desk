@@ -102,6 +102,17 @@ class Viewer(BaseModel):
         return self.revoked_at is None
 
 
+class Group(BaseModel):
+    """A project somebody declared, over the top of what the repositories say."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    created_at: int
+    repo_keys: list[str] = []
+
+
 class Draft(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -637,6 +648,70 @@ class Store:
                 text("UPDATE viewer SET revoked_at = :t WHERE id = :id AND revoked_at IS NULL"),
                 {"id": viewer_id, "t": _now_ms()},
             )
+
+    # --- projects a human declared ---------------------------------------------------------
+    async def create_group(self, name: str) -> Group:
+        """Start a project that is more than one repository."""
+        group = Group(id=_new_id(), name=name, created_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO project_group (id, name, created_at) "
+                    "VALUES (:id, :name, :created_at)"
+                ),
+                group.model_dump(exclude={"repo_keys"}),
+            )
+        return group
+
+    async def add_to_group(self, group_id: str, repo_key: str) -> None:
+        """A repository belongs to at most one declared project; the newest claim wins.
+
+        Two groups claiming one repository would put the same sessions in two places on the board,
+        and a board that shows a session twice is a board you count twice.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM project_member WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO project_member (group_id, repo_key, added_at) "
+                    "VALUES (:group_id, :repo_key, :added_at)"
+                ),
+                {"group_id": group_id, "repo_key": repo_key, "added_at": _now_ms()},
+            )
+
+    async def remove_from_group(self, repo_key: str) -> None:
+        """Ungrouping returns a repository to being its own project. Nothing is lost."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM project_member WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
+
+    async def delete_group(self, group_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM project_member WHERE group_id = :id"), {"id": group_id}
+            )
+            await conn.execute(text("DELETE FROM project_group WHERE id = :id"), {"id": group_id})
+
+    async def groups(self) -> list[Group]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, name, created_at FROM project_group ORDER BY created_at")
+            )
+            found = [Group(**row._mapping) for row in rows]
+            members = await conn.execute(
+                text("SELECT group_id, repo_key FROM project_member ORDER BY added_at")
+            )
+            by_group: dict[str, list[str]] = {}
+            for group_id, repo_key in members:
+                by_group.setdefault(group_id, []).append(repo_key)
+        return [
+            group.model_copy(update={"repo_keys": by_group.get(group.id, [])}) for group in found
+        ]
 
     # --- drafts ---------------------------------------------------------------------------
     async def create_draft(self, *, idea_id: str, kind: DraftKind, body: str) -> Draft:

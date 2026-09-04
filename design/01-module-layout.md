@@ -6,7 +6,8 @@ agent_desk/
     registry.py    ~/.claude/sessions/*.json  ·  liveness via pid + procStart
     transcript.py  tail of ~/.claude/projects/*/<sessionId>.jsonl
     signals.py     hook posts arriving at /api/signal
-    model.py       Session, TranscriptTail, Signal — the types everything downstream sees
+    shape.py       which repository a checkout belongs to — a worktree's pointer, a git config
+    model.py       Session, TranscriptTail, AgentCall, Signal — the types everything downstream sees
   store/         SQLite: threads, blocks, ideas, drafts, viewers  ·  redaction at this boundary
     schema.sql     tables, applied in order at startup
     repo.py        every SQL statement in the program lives here

@@ -260,21 +260,46 @@ async def stream_answer(
                 await asyncio.wait_for(process.wait(), _REAP_SECONDS)
 
 
-def build_prompt(question: str, *, board: Iterable[str], history: Iterable[tuple[str, str]]) -> str:
+def build_prompt(
+    question: str,
+    *,
+    board: Iterable[str],
+    history: Iterable[tuple[str, str]],
+    about: str = "",
+) -> str:
     """What a block is answered *from* (docs/04-threads-and-blocks.md).
 
-    The board, the thread so far, and the question. The instruction at the end is the one the
-    document insists on: an answer built from what agents left on disk can be out of date or wrong
-    about intent, and where it cannot tell it says so and names the session to go and look at.
+    The board, the thread so far, what the question was pointed at, and the question. Two
+    instructions matter as much as the evidence.
+
+    The first is the document's: an answer built from what agents left on disk can be out of date
+    or wrong about intent, and where it cannot tell it says so and names the session to look at.
+
+    The second is who is reading. This window is for somebody watching work they are not doing
+    themselves, and often for somebody who does not read code at all — an answer that arrives as
+    four paragraphs of technical prose has not answered them, it has given them a second thing to
+    read. So: two or three sentences, ordinary words, and the answer first.
     """
     lines = [
-        "You are answering one question for a developer who is watching several Claude Code",
-        "sessions run in parallel. You cannot talk to those sessions. Everything below was read",
-        "off disk, so it is evidence of what they did, never a statement of what they intend.",
+        "You are answering one question for somebody watching several Claude Code sessions run in",
+        "parallel. You cannot talk to those sessions. Everything below was read off disk, so it is",
+        "evidence of what they did, never a statement of what they intend.",
+        "",
+        "## How to answer",
+        "- Two or three sentences. Never a list, never a heading, never a code block.",
+        "- Ordinary words. Say 'the tests pass' rather than naming the runner; say 'it is waiting",
+        "  for you' rather than quoting a status field. Assume the reader does not read code and",
+        "  does not want to.",
+        "- The answer first, in the first sentence. Any caveat goes after it, or nowhere.",
+        "- If the evidence does not settle it, say so plainly in one sentence and name the session",
+        "  worth opening a terminal for. Do not guess and do not pad.",
         "",
         "## The sessions on the board right now",
     ]
     lines += list(board) or ["(no live sessions)"]
+
+    if about:
+        lines += ["", "## What this question is about", about]
 
     previous = list(history)
     if previous:
@@ -282,14 +307,7 @@ def build_prompt(question: str, *, board: Iterable[str], history: Iterable[tuple
         for asked, answered in previous:
             lines += [f"Q: {asked}", f"A: {answered}", ""]
 
-    lines += [
-        "",
-        "## The question",
-        question,
-        "",
-        "Answer in a few sentences. Where the evidence does not settle it, say so plainly and",
-        "name the session worth opening a terminal for, rather than guessing.",
-    ]
+    lines += ["", "## The question", question]
     return "\n".join(lines)
 
 

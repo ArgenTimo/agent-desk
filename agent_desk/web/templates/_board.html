@@ -1,9 +1,9 @@
-{# The board fragment: the page holds it once, and every server-sent event replaces it whole.
+{# The board: projects, the checkouts inside them, the consoles inside those, and what each
+   console has farmed out. Four levels, none of them declared — a level somebody had to maintain
+   by hand would be wrong the first time they forgot (docs/03-session-observation.md).
 
-   A row is a `<details>` on purpose. The drill-down used to be a click handler on a div — not
-   reachable by keyboard, invisible to a screen reader, and gone entirely without JavaScript.
-   Native disclosure gives all three back, and the tail is still fetched only when somebody opens
-   one (docs/06-console.md: the board answers "should I go look"). #}
+   Every card is draggable, and there are two places to drop one: another project card, which
+   merges them, and the question field, which points a question at it. #}
 {% if notices %}
 <section class="notices" aria-label="what could not be read">
   {% for notice in notices %}
@@ -12,75 +12,135 @@
 </section>
 {% endif %}
 
-<h2 class="section-title" id="sessions-heading">
-  sessions <span class="count">{{ rows | length }}</span>
-</h2>
+<div class="board-head">
+  <h2 class="section-title" id="sessions-heading">
+    sessions <span class="count">{{ rows | length }}</span>
+    {% if flagged %}<span class="count flagged-count">{{ flagged }} may want you</span>{% endif %}
+  </h2>
+  <form method="post" action="/projects" class="new-project">
+    <label class="visually-hidden" for="project-name">name for a project</label>
+    <input id="project-name" name="name" placeholder="name a project" autocomplete="off">
+    <button type="submit">Combine into a project</button>
+  </form>
+</div>
 
-{% if not rows %}
+{% if not projects %}
 <p class="empty">No live sessions. Start one by running <span class="hint-key">claude</span> in any
   project and this board will show it within two seconds.</p>
-{% else %}
-{% for row in rows %}
-<details class="row {{ row.session.status }}{% if row.hint.waiting %} flagged{% endif %}"
-         data-session="{{ row.session.session_id }}">
-  <summary>
-    <div class="row-head">
-      <span class="status {{ row.session.status }}">{{ row.session.status }}</span>
-      {% if row.tail %}
-      <span class="title">{{ row.tail.title or "—" }}</span>
-      {% else %}
-      {# docs/02-architecture.md, failure posture: registry facts only, and marked as such. #}
-      <span class="title unread">no transcript read — registry facts only</span>
-      {% endif %}
-      <span class="age">{{ row.session.updated_at | ago }}</span>
-    </div>
-
-    <div class="row-where">
-      <span class="project">{{ row.session.project }}</span>
-      <span aria-hidden="true">·</span>
-      <span class="branch">{{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</span>
-      <span class="name">{{ row.session.name }}</span>
-      {% if row.session.kind != "interactive" %}<span class="kind">{{ row.session.kind }}</span>{% endif %}
-      {# The one control in this console that could change somebody else's work. It opens a panel;
-         it sends nothing (docs/adr/0002, docs/06-console.md). #}
-      <a class="message-button message-link" href="/sessions/{{ row.session.session_id }}/message"
-         hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message"
-         onclick="event.stopPropagation()">message…</a>
-      <span class="spacer"></span>
-    </div>
-
-    {% if row.tail %}
-    {# docs/01-vision.md, problem 4: the last thing asked and the last thing done, with a time. #}
-    <dl class="last">
-      <dt>asked</dt>
-      <dd>{{ row.tail.last_prompt or "—" }}</dd>
-      <dt>did</dt>
-      <dd>
-        {% if row.tail.last_entry %}
-        <span class="when">{{ row.tail.last_entry.at | clock }}</span>
-        <span class="who">{{ row.tail.last_entry.role }}</span>
-        {{ row.tail.last_entry.text or "—" }}
-        {% else %}
-        —
-        {% endif %}
-      </dd>
-    </dl>
-    {% endif %}
-
-    {% if row.hint.waiting %}
-    {# Never a bare claim: the flag carries the observation it was inferred from
-       (docs/03-session-observation.md, "What cannot be known"). #}
-    <p class="hint">
-      <span aria-hidden="true">⚑</span>
-      <span>may be waiting for you</span>
-      <span class="evidence">— inferred from {{ row.hint.observation }}; no hook signal for this session, so this is a guess</span>
-    </p>
-    {% endif %}
-  </summary>
-
-  <div class="tail">
-    <a href="/sessions/{{ row.session.session_id }}/tail">load the last of this transcript</a>
-  </div>
-</details>
-{% endfor %}
 {% endif %}
+
+{% for project in projects %}
+<section class="project{% if project.flagged %} flagged{% endif %}"
+         data-drop="project" data-project="{{ project.key }}"
+         data-kind="project" data-id="{{ project.key }}" data-label="{{ project.name }}"
+         draggable="true">
+  <header class="project-head">
+    <span class="grip" aria-hidden="true">⠿</span>
+    <h3 class="project-name">{{ project.name }}</h3>
+    <span class="tally">{{ project.sessions }} session{{ "" if project.sessions == 1 else "s" }}</span>
+    {% if project.flagged %}<span class="tally flag-tally">{{ project.flagged }} ⚑</span>{% endif %}
+    {% if project.group_id %}
+    <form method="post" action="/projects/{{ project.group_id }}/dissolve" class="quiet">
+      <button type="submit" title="return these repositories to being their own projects">ungroup</button>
+    </form>
+    {% endif %}
+  </header>
+
+  {% for instance in project.instances %}
+  <div class="instance" data-kind="instance" data-id="{{ instance.path }}"
+       data-label="{{ instance.name }}" draggable="true">
+    <header class="instance-head">
+      <span class="grip" aria-hidden="true">⠿</span>
+      <span class="folder">{{ instance.name }}</span>
+      <span class="path mono">{{ instance.path }}</span>
+    </header>
+
+    {% for row in instance.rows %}
+    <details class="row {{ row.session.status }}{% if row.hint.waiting %} flagged{% endif %}"
+             data-session="{{ row.session.session_id }}"
+             data-kind="session" data-id="{{ row.session.session_id }}"
+             data-label="{{ row.tail.title if row.tail and row.tail.title else row.session.name }}"
+             draggable="true">
+      <summary>
+        <div class="row-head">
+          <span class="status {{ row.session.status }}">{{ row.session.status }}</span>
+          {% if row.tail %}
+          <span class="title">{{ row.tail.title or "—" }}</span>
+          {% else %}
+          {# docs/02-architecture.md, failure posture: registry facts only, and marked as such. #}
+          <span class="title unread">no transcript read — registry facts only</span>
+          {% endif %}
+          <span class="age">{{ row.session.updated_at | ago }}</span>
+        </div>
+
+        <div class="row-where">
+          <span class="branch">{{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</span>
+          <span class="name">{{ row.session.name }}</span>
+          {% if row.session.kind != "interactive" %}<span class="kind">{{ row.session.kind }}</span>{% endif %}
+          {# The one control in this console that could change somebody else's work. It opens a
+             panel; it sends nothing (docs/adr/0002, docs/06-console.md). #}
+          <a class="message-button message-link" href="/sessions/{{ row.session.session_id }}/message"
+             hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message"
+             onclick="event.stopPropagation()">message…</a>
+          <span class="spacer"></span>
+        </div>
+
+        {% if row.tail %}
+        {# docs/01-vision.md, problem 4: the last thing asked and the last thing done, with a time. #}
+        <dl class="last">
+          <dt>asked</dt>
+          <dd>{{ row.tail.last_prompt or "—" }}</dd>
+          <dt>did</dt>
+          <dd>
+            {% if row.tail.last_entry %}
+            <span class="when">{{ row.tail.last_entry.at | clock }}</span>
+            <span class="who">{{ row.tail.last_entry.role }}</span>
+            {{ row.tail.last_entry.text or "—" }}
+            {% else %}
+            —
+            {% endif %}
+          </dd>
+        </dl>
+        {% endif %}
+
+        {% if row.tail and row.tail.agents %}
+        {# What this console has farmed out. There is no progress bar here and there will not be
+           one: nothing on disk says how far along a subagent is, and a bar that moves without
+           knowing is the guessed status this project refuses to render
+           (docs/03-session-observation.md, "What cannot be known"). #}
+        <ul class="agents">
+          {% for agent in row.tail.agents[:4] %}
+          <li class="agent{% if agent.running %} working{% endif %}">
+            <span class="agent-kind">{{ agent.kind }}</span>
+            <span class="agent-what">{{ agent.description or "—" }}</span>
+            <span class="agent-state">{{ "working" if agent.running else "done" }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if row.hint.waiting %}
+        {# Never a bare claim: the flag carries the observation it was inferred from. #}
+        <p class="hint">
+          <span aria-hidden="true">⚑</span>
+          <span>may be waiting for you</span>
+          <span class="evidence">— inferred from {{ row.hint.observation }}; no hook signal for this session, so this is a guess</span>
+        </p>
+        {% endif %}
+      </summary>
+
+      <div class="tail">
+        <a href="/sessions/{{ row.session.session_id }}/tail">load the last of this transcript</a>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  {# Always visible while it is empty: the button that declares a project exists to produce
+     somewhere to drag cards into, and an empty card that showed nothing would be a button that
+     appeared to do nothing. #}
+  <p class="drop-hint{% if not project.instances %} standing{% endif %}">
+    drop a card here to make it part of {{ project.name }}</p>
+</section>
+{% endfor %}

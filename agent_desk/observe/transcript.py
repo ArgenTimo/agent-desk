@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_desk.config import settings
-from agent_desk.observe.model import TailEntry, TranscriptTail
+from agent_desk.observe.model import AgentCall, TailEntry, TranscriptTail
 
 # A session id reaches this module from a URL path, and it is interpolated into a glob. Anything
 # that is not a session id is not sanitised into one — it is refused.
@@ -115,6 +115,41 @@ def _flatten(message: Any) -> str:
     return " ".join(p for p in parts if p)[:_MAX_ENTRY_CHARS]
 
 
+def _agent_calls(message: Any) -> list[tuple[str, str, str]]:
+    """Every `Agent` tool call in one entry: its id, the kind of agent, and what it was asked for.
+
+    The prompt it was given is deliberately not read. A card wants to say "Explore · inventory the
+    skills", and the rest is the session's business.
+    """
+    content = message.get("content") if isinstance(message, dict) else None
+    found = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        if block.get("name") != "Agent":
+            continue
+        raw = block.get("input")
+        arguments: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        found.append(
+            (
+                str(block.get("id", "")),
+                str(arguments.get("subagent_type") or "agent"),
+                str(arguments.get("description") or "").strip(),
+            )
+        )
+    return found
+
+
+def _tool_results(message: Any) -> set[str]:
+    """The ids of calls that have come back."""
+    content = message.get("content") if isinstance(message, dict) else None
+    return {
+        str(block["tool_use_id"])
+        for block in (content if isinstance(content, list) else [])
+        if isinstance(block, dict) and block.get("type") == "tool_result" and "tool_use_id" in block
+    }
+
+
 def read_tail(
     session_id: str,
     *,
@@ -144,6 +179,10 @@ def read_tail(
     last_prompt: str | None = None
     git_branch: str | None = None
     entries: list[TailEntry] = []
+    # A subagent is two lines apart: the call that started it and the result that ended it, so
+    # both halves are collected and matched once the window has been read.
+    calls: list[tuple[str, str, str]] = []
+    returned: set[str] = set()
 
     for raw in window:
         try:
@@ -163,6 +202,8 @@ def read_tail(
         elif kind in ("user", "assistant"):
             # gitBranch is what makes the board legible across worktrees of one repository.
             git_branch = line.get("gitBranch") or git_branch
+            calls.extend(_agent_calls(line.get("message")))
+            returned.update(_tool_results(line.get("message")))
             entries.append(
                 TailEntry(
                     role=kind, text=_flatten(line.get("message")), at=_at(line.get("timestamp"))
@@ -181,4 +222,9 @@ def read_tail(
         last_prompt=last_prompt,
         git_branch=git_branch,
         entries=entries[-lines:],
+        # Most recent first, which is the order a card reads them in.
+        agents=[
+            AgentCall(kind=kind, description=description, finished=call_id in returned)
+            for call_id, kind, description in reversed(calls)
+        ],
     )

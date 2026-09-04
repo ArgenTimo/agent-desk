@@ -25,31 +25,68 @@
   <span id="stream-state" aria-live="polite">·</span>
 </header>
 
-<main>
-  <section aria-labelledby="sessions-heading">
-    <div id="board">{{ board|safe }}</div>
-  </section>
+<main class="split">
+  {# Left: what you ask and what comes back, in as few words as the answer can be given in. Right:
+     what is running. The question field is here rather than under the board because it is the
+     half of this window a person touches. #}
+  <div class="column asking">
+    <section aria-labelledby="ask-heading" id="ask-panel">
+      <h2 class="section-title" id="ask-heading">ask</h2>
 
-  {# The write path lives outside the board, because the board replaces itself whenever a session
-     changes and a panel inside it would vanish under a half-typed message (docs/adr/0002). #}
-  <div id="message">{{ message|safe }}</div>
+      <form class="ask" id="ask" method="post" action="/blocks"
+            hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
+            hx-on::after-request="this.reset(); this.text.focus()">
+        {# Three ways a question can be aimed, and the third is the default: about a project,
+           about one session, or about nothing in particular — in which case the run works it out
+           from the board it is given. Dropping a card here fills these in. #}
+        <div class="target" id="target">
+          <label for="target-project">project</label>
+          <select id="target-project" name="project">
+            <option value="">— anything —</option>
+            {% for project in projects %}
+            <option value="{{ project.key }}">{{ project.name }}</option>
+            {% endfor %}
+          </select>
 
-  {# One field, always focused, never blocked. Submitting frees it immediately
-     (docs/04-threads-and-blocks.md). It is sticky because the board above it is long and the
-     field is the thing you come back to. #}
-  <form class="ask" id="ask" method="post" action="/blocks"
-        hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
-        hx-on::after-request="this.reset(); this.text.focus()">
-    <label class="visually-hidden" for="ask-text">what do you want to ask, or record</label>
-    <input id="ask-text" name="text" autocomplete="off" autofocus
-           placeholder="ask anything — the field is free again the moment you press enter">
-    <span class="keys" aria-hidden="true">/idea · /new · press /</span>
-  </form>
+          <label for="target-session">session</label>
+          <select id="target-session" name="session">
+            <option value="">— anything —</option>
+            {% for project in projects %}
+            {% for instance in project.instances %}
+            {% for row in instance.rows %}
+            <option value="{{ row.session.session_id }}" data-project="{{ project.key }}">
+              {{ row.tail.title if row.tail and row.tail.title else row.session.name }}
+            </option>
+            {% endfor %}
+            {% endfor %}
+            {% endfor %}
+          </select>
+          <span class="drop-here" aria-hidden="true">or drop a card here</span>
+        </div>
 
-  <section aria-labelledby="blocks-heading">
-    <h2 class="section-title" id="blocks-heading">asked</h2>
-    <div id="blocks">{{ blocks|safe }}</div>
-  </section>
+        <label class="visually-hidden" for="ask-text">what do you want to ask, or record</label>
+        <div class="ask-line">
+          <input id="ask-text" name="text" autocomplete="off" autofocus
+                 placeholder="ask in plain words — the field is free again the moment you press enter">
+          <button type="submit">Ask</button>
+        </div>
+        <span class="keys" aria-hidden="true">/idea to record a thought · /new for a new subject · press /</span>
+      </form>
+
+      {# The write path lives outside the board, because the board replaces itself whenever a
+         session changes and a panel inside it would vanish under a half-typed message. #}
+      <div id="message">{{ message|safe }}</div>
+
+      <h2 class="section-title" id="blocks-heading">answers</h2>
+      <div id="blocks">{{ blocks|safe }}</div>
+    </section>
+  </div>
+
+  <div class="column watching">
+    <section aria-labelledby="sessions-heading">
+      <div id="board">{{ board|safe }}</div>
+    </section>
+  </div>
 </main>
 
 <script src="/static/htmx.min.js"></script>
@@ -117,6 +154,99 @@ document.addEventListener('keydown', (event) => {
     else document.activeElement.blur();
   }
 });
+
+// --- dragging a card ---------------------------------------------------------------------------
+// Two things a card can be dropped on: the question field, which points a question at it, and
+// another project card, which says the two are one project. Both are plain HTML5 drag events —
+// the cards are server-rendered and the board replaces itself, so nothing here may hold state
+// about a particular card between renders.
+let dragged = null;
+
+document.addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-kind]');
+  if (!card) return;
+  dragged = { kind: card.dataset.kind, id: card.dataset.id, label: card.dataset.label,
+              project: card.closest('.project')?.dataset.project };
+  event.dataTransfer.setData('text/plain', card.dataset.label || '');
+  event.dataTransfer.effectAllowed = 'link';
+  card.classList.add('dragging');
+  document.body.classList.add('dragging-card');
+});
+
+document.addEventListener('dragend', (event) => {
+  event.target.closest?.('[data-kind]')?.classList.remove('dragging');
+  document.body.classList.remove('dragging-card');
+  dragged = null;
+});
+
+function dropZone(event) {
+  return event.target.closest('#target, [data-drop="project"]');
+}
+
+document.addEventListener('dragover', (event) => {
+  const zone = dropZone(event);
+  if (!zone || !dragged) return;
+  event.preventDefault();
+  zone.classList.add('drop-target');
+});
+
+document.addEventListener('dragleave', (event) => {
+  dropZone(event)?.classList.remove('drop-target');
+});
+
+document.addEventListener('drop', (event) => {
+  const zone = dropZone(event);
+  if (!zone || !dragged) return;
+  event.preventDefault();
+  zone.classList.remove('drop-target');
+
+  if (zone.id === 'target') { aimAt(dragged); return; }
+
+  // Onto a project card: the dropped card's project joins this one. A project is a set of
+  // repositories, so what travels is the repository the card belongs to.
+  const into = zone.dataset.project;
+  const from = dragged.kind === 'project' ? dragged.id : dragged.project;
+  if (!into || !from || into === from) return;
+  const body = new URLSearchParams({ repo_key: from });
+  fetch(`/projects/${encodeURIComponent(into)}/members`, {
+    method: 'POST', headers: { 'HX-Request': 'true' }, body,
+  }).then((response) => response.ok ? response.text() : null)
+    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
+});
+
+// Pointing a question: the selects and a dropped card are the same act, so they end in the same
+// place. A session implies its project; a project on its own leaves the session free.
+function aimAt(card) {
+  const projects = document.getElementById('target-project');
+  const sessions = document.getElementById('target-session');
+  if (card.kind === 'session') {
+    sessions.value = card.id;
+    if (card.project) projects.value = card.project;
+  } else if (card.kind === 'project') {
+    projects.value = card.id;
+    sessions.value = '';
+  } else if (card.project) {
+    projects.value = card.project;
+    sessions.value = '';
+  }
+  filterSessions();
+  document.getElementById('ask-text').focus();
+}
+
+// Choosing a project narrows the session list to that project's sessions, which is the whole
+// reason the two are separate controls rather than one long list.
+function filterSessions() {
+  const chosen = document.getElementById('target-project').value;
+  const sessions = document.getElementById('target-session');
+  for (const option of sessions.options) {
+    if (!option.value) continue;
+    const belongs = !chosen || option.dataset.project === chosen;
+    option.hidden = !belongs;
+    if (!belongs && sessions.value === option.value) sessions.value = '';
+  }
+}
+document.getElementById('target-project').addEventListener('change', filterSessions);
+filterSessions();
 
 const stream = new EventSource('/events');
 stream.addEventListener('board', (event) => {

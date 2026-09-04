@@ -74,6 +74,28 @@ class RegistryRead(BaseModel):
     notices: list[str] = []
 
 
+class AgentCall(BaseModel):
+    """A subagent a session started, seen in its transcript.
+
+    The session farms work out with the `Agent` tool and the tail carries both halves: the call,
+    with the type and the one-line description it was given, and the result that says it came
+    back. A call whose result has not arrived is still running — as far as this window can see,
+    which is the same limit everything else here has (docs/03-session-observation.md).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: str
+    description: str
+    finished: bool
+
+    @property
+    def running(self) -> bool:
+        """As far as this window can see. A call whose result scrolled out of the tail looks like
+        one that has not come back, which is the same limit every other reading here has."""
+        return not self.finished
+
+
 class TailEntry(BaseModel):
     """One entry of the main chain, flattened to what a board row can show."""
 
@@ -94,6 +116,7 @@ class TranscriptTail(BaseModel):
     last_prompt: str | None = None
     git_branch: str | None = None
     entries: list[TailEntry] = []
+    agents: list[AgentCall] = []
 
     @property
     def last_entry(self) -> TailEntry | None:

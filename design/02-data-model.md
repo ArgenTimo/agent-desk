@@ -60,6 +60,29 @@ CREATE TABLE viewer (
 );
 ```
 
+```sql
+-- A project a human declared, over the top of what the repositories say. By default a project IS
+-- a repository and nobody has to say anything; this is for the case that default cannot know —
+-- an API and an app in two repositories that are one product.
+CREATE TABLE project_group (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE project_member (
+    group_id    TEXT NOT NULL REFERENCES project_group(id),
+    repo_key    TEXT NOT NULL,          -- `origin:owner/repo`, or a path when there is no remote
+    added_at    INTEGER NOT NULL,
+    PRIMARY KEY (group_id, repo_key)
+);
+```
+
+Note what these two tables do *not* hold: sessions, instances, or which session belongs where.
+Those are read fresh from the registry every time, for the same reason there is no session table —
+a second copy of a fact goes wrong quietly. A declared project stores only the part nobody can
+derive: that a human said two repositories are one thing.
+
 ## What is deliberately not stored
 
 **No transcript content.** Tails are read on demand and rendered. A copy would be large, stale, and

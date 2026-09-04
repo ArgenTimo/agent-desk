@@ -14,7 +14,7 @@ surface whose job is triage (docs/06-console.md).
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -35,7 +35,8 @@ from agent_desk.observe.model import (
     since,
     triage_rank,
 )
-from agent_desk.store.repo import DRAFT_KINDS, Store
+from agent_desk.observe.shape import repository_of
+from agent_desk.store.repo import DRAFT_KINDS, Group, Store
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -95,6 +96,129 @@ class BoardRow:
     session: Session
     tail: TranscriptTail | None
     hint: AttentionHint
+    # Which card this row sits under, so that a question aimed at one can find its sessions
+    # without the shape being rebuilt to answer the question.
+    project_key: str = ""
+    project_name: str = ""
+
+
+@dataclass(frozen=True)
+class Instance:
+    """One working directory, and the consoles open in it."""
+
+    path: str
+    name: str
+    rows: list[BoardRow]
+
+    @property
+    def busy(self) -> int:
+        return sum(1 for row in self.rows if row.session.status == "busy")
+
+    @property
+    def flagged(self) -> int:
+        return sum(1 for row in self.rows if row.hint.waiting)
+
+
+@dataclass(frozen=True)
+class Project:
+    """One repository, or several that a human said were one thing."""
+
+    key: str
+    name: str
+    instances: list[Instance]
+    group_id: str | None = None
+    repo_keys: tuple[str, ...] = ()
+
+    @property
+    def sessions(self) -> int:
+        return sum(len(instance.rows) for instance in self.instances)
+
+    @property
+    def flagged(self) -> int:
+        return sum(instance.flagged for instance in self.instances)
+
+
+def shape(rows: list[BoardRow], groups: list[Group]) -> list[Project]:
+    """Fold the flat list of sessions into what a person actually has.
+
+    Sessions belong to a working directory, directories belong to a repository, and repositories
+    belong to a project — which is the repository itself unless somebody said otherwise. Nothing
+    is declared that can be derived: a level that had to be maintained by hand would be wrong the
+    first time somebody forgot (docs/adr/0004, about a different file, for the same reason).
+
+    The order is the board's order: whoever needs a human first.
+    """
+    by_directory: dict[str, list[BoardRow]] = {}
+    for row in rows:
+        by_directory.setdefault(row.session.cwd, []).append(row)
+
+    instances = [
+        Instance(path=path, name=Path(path).name or path, rows=rows_here)
+        for path, rows_here in by_directory.items()
+    ]
+    repos = {instance.path: repository_of(instance.path) for instance in instances}
+
+    claimed = {key: group for group in groups for key in group.repo_keys}
+    buckets: dict[str, list[Instance]] = {}
+    labels: dict[str, tuple[str, str | None, tuple[str, ...]]] = {}
+    for instance in instances:
+        repo = repos[instance.path]
+        group = claimed.get(repo.key)
+        bucket = group.id if group else repo.key
+        buckets.setdefault(bucket, []).append(instance)
+        labels[bucket] = (
+            (group.name, group.id, tuple(group.repo_keys))
+            if group
+            else (repo.name, None, (repo.key,))
+        )
+
+    projects = []
+    for bucket, held in buckets.items():
+        name, group_id, keys = labels[bucket]
+        # Stamped here rather than looked up later: a question aimed at a card has to find its
+        # sessions, and rebuilding the shape to answer that would be a second chance to disagree
+        # with the board the human is looking at.
+        stamped = [
+            Instance(
+                path=instance.path,
+                name=instance.name,
+                rows=[replace(row, project_key=bucket, project_name=name) for row in instance.rows],
+            )
+            for instance in held
+        ]
+        projects.append(
+            Project(key=bucket, name=name, instances=stamped, group_id=group_id, repo_keys=keys)
+        )
+    # A project is as urgent as its most urgent session, and the rows arrive in that order. The
+    # position is looked up by session id rather than by the row object, because stamping made new
+    # objects — which is the kind of thing that fails loudly once and quietly ever after.
+    # A project somebody has just declared has no members yet, and it still has to appear — the
+    # button that made it exists to produce a place to drag cards into. An empty one sorts last,
+    # after everything that is actually running.
+    for group in groups:
+        if group.id not in buckets:
+            projects.append(
+                Project(
+                    key=group.id,
+                    name=group.name,
+                    instances=[],
+                    group_id=group.id,
+                    repo_keys=tuple(group.repo_keys),
+                )
+            )
+
+    position = {row.session.session_id: index for index, row in enumerate(rows)}
+    projects.sort(
+        key=lambda project: min(
+            (
+                position[row.session.session_id]
+                for instance in project.instances
+                for row in instance.rows
+            ),
+            default=len(rows),
+        )
+    )
+    return projects
 
 
 def board() -> tuple[list[BoardRow], list[str]]:
@@ -112,10 +236,16 @@ def board() -> tuple[list[BoardRow], list[str]]:
     return rows, read.notices
 
 
-def render_board() -> str:
+def render_board(groups: list[Group] | None = None) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
-    return env.get_template("_board.html").render(rows=rows, notices=notices)
+    projects = shape(rows, groups or [])
+    return env.get_template("_board.html").render(
+        rows=rows,
+        projects=projects,
+        notices=notices,
+        flagged=sum(1 for row in rows if row.hint.waiting),
+    )
 
 
 def render_tail(session_id: str) -> str:
@@ -196,9 +326,22 @@ def _wants_fragment(request: Request) -> bool:
 
 
 async def render_page(message: str = "") -> str:
-    """The whole console: the board, the write-path panel when one is open, and the blocks."""
+    """The whole console: the board, the write-path panel when one is open, and the blocks.
+
+    The board is read once and used twice — as the rendered cards, and as the list the question
+    field offers when you point a question at a project or a session.
+    """
+    groups = await store.groups()
+    rows, notices = await asyncio.to_thread(board)
+    projects = shape(rows, groups)
     return env.get_template("board.html").render(
-        board=await asyncio.to_thread(render_board),
+        board=env.get_template("_board.html").render(
+            rows=rows,
+            projects=projects,
+            notices=notices,
+            flagged=sum(1 for row in rows if row.hint.waiting),
+        ),
+        projects=projects,
         message=message,
         blocks=await render_blocks(),
         poll=settings.registry_poll_seconds,
@@ -216,6 +359,48 @@ async def _form(request: Request) -> dict[str, str]:
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     return {key: values[0] for key, values in parse_qs(body, keep_blank_values=True).items()}
+
+
+@router.post("/projects", response_class=HTMLResponse)
+async def create_project(request: Request) -> Response:
+    """Declare a project that is more than one repository.
+
+    The default needs no button: every checkout of one origin is already one project. This is for
+    the case the default cannot know — an API and an app in two repositories that are obviously
+    one product.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    if name:
+        group = await store.create_group(name)
+        log.info("project declared", project=group.name)
+        # A project declared by dropping one card onto another arrives with its first member.
+        first = form.get("repo_key", "").strip()
+        if first:
+            await store.add_to_group(group.id, first)
+        if _wants_fragment(request):
+            return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/projects/{group_id}/members", response_class=HTMLResponse)
+async def add_to_project(group_id: str, request: Request) -> Response:
+    """What a card dropped onto a project card does."""
+    repo_key = (await _form(request)).get("repo_key", "").strip()
+    if repo_key:
+        await store.add_to_group(group_id, repo_key)
+    if _wants_fragment(request):
+        return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/projects/{group_id}/dissolve", response_class=HTMLResponse)
+async def dissolve_project(group_id: str, request: Request) -> Response:
+    """Ungrouping returns every repository in it to being its own project. Nothing is lost."""
+    await store.delete_group(group_id)
+    if _wants_fragment(request):
+        return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/viewers", response_class=HTMLResponse)
@@ -323,10 +508,22 @@ async def ask(request: Request) -> Response:
     The response is the column, and the field is cleared by the page the moment this returns —
     submitting frees it, and nothing here waits for an answer (docs/04-threads-and-blocks.md).
     """
-    typed = (await _form(request)).get("text", "").strip()
+    form = await _form(request)
+    typed = form.get("text", "").strip()
     if typed:
         rows, _ = await asyncio.to_thread(board)
-        await block_runs.submit(store, typed, rows)
+        # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
+        # the target the human picked is a card, and only a row that has been through `shape`
+        # knows which card it is under.
+        projects = shape(rows, await store.groups())
+        stamped = [row for p in projects for i in p.instances for row in i.rows]
+        await block_runs.submit(
+            store,
+            typed,
+            stamped,
+            project=form.get("project", "").strip(),
+            session=form.get("session", "").strip(),
+        )
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     # Post/redirect/get: a refresh after asking must not ask again.

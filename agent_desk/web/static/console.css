@@ -89,7 +89,17 @@ body {
    edge and its age at the other, and an answer becomes a two-hundred-character measure — both of
    which are read by moving your head. This window is usually narrow anyway; the cap is for the
    day it is not. */
-.bar, main, #no-htmx { max-width: 1024px; margin-inline: auto; }
+.bar, main, #no-htmx { max-width: 1500px; margin-inline: auto; }
+
+/* Two columns: what you ask on the left, what is running on the right. They stack on a narrow
+   window, which is the shape this thing is most often used in. */
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 18px; }
+.column { min-width: 0; }
+.asking { position: sticky; top: 10px; align-self: start; max-height: calc(100vh - 24px); overflow-y: auto; }
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; }
+  .asking { position: static; max-height: none; overflow: visible; }
+}
 .answer, .failure, .verbatim, .card .recorded, #message .full, .draft pre {
   max-width: 78ch;
 }
@@ -484,3 +494,81 @@ button[disabled] { opacity: 0.5; cursor: default; }
   * { transition: none !important; animation: none !important; }
   button:active { transform: none; }
 }
+
+/* --- the cards ------------------------------------------------------------------------------ */
+.board-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.board-head .section-title { margin-right: auto; }
+.flagged-count { color: var(--flag); }
+.new-project { display: flex; gap: 6px; }
+.new-project input {
+  width: 15ch; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+
+.project {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 45%, var(--bg));
+  padding: 8px;
+  margin-bottom: 12px;
+}
+.project.flagged { border-color: color-mix(in srgb, var(--flag) 45%, var(--line)); }
+.project.drop-target { border-color: var(--focus); background: color-mix(in srgb, var(--focus) 8%, var(--bg)); }
+.project-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 6px; }
+.project-name { margin: 0; font-size: 13px; }
+.tally { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.flag-tally { color: var(--flag); }
+.quiet button { border-color: transparent; background: none; padding: 1px 6px; font-size: 11px; }
+
+.instance { border-left: 2px solid var(--line); margin: 0 0 6px 4px; padding-left: 8px; }
+.instance-head { display: flex; align-items: baseline; gap: 8px; font-size: 11px; color: var(--fg-dim); }
+.instance-head .folder { color: var(--fg-soft); font-weight: 600; }
+.instance-head .path { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.grip { color: var(--line-strong); cursor: grab; font-size: 11px; }
+[draggable="true"]:active .grip { cursor: grabbing; }
+.dragging { opacity: 0.45; }
+
+.drop-hint {
+  margin: 4px 2px 0;
+  padding: 5px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--fg-dim);
+  text-align: center;
+  visibility: hidden;
+}
+body.dragging-card .drop-hint, .drop-hint.standing { visibility: visible; }
+.drop-hint.standing { border-color: var(--focus); color: var(--fg-soft); }
+
+/* --- what a session farmed out --------------------------------------------------------------- */
+.agents { list-style: none; margin: 5px 0 0; padding-left: calc(6ch + 8px); }
+.agent { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--fg-dim); }
+.agent-kind { font-family: var(--mono); color: var(--fg-soft); min-width: 10ch; }
+.agent-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-state { font-family: var(--mono); }
+.agent.working .agent-state { color: var(--busy); }
+
+/* --- aiming a question ------------------------------------------------------------------------ */
+.target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.target.drop-target { border-color: var(--focus); border-style: solid; background: color-mix(in srgb, var(--focus) 8%, var(--bg)); }
+.target label { font-family: var(--mono); }
+.target select {
+  max-width: 20ch; padding: 2px 4px; font-size: 11px; color: var(--fg-soft);
+  background: var(--raised); border: 1px solid var(--line); border-radius: 3px;
+}
+.target .drop-here { margin-left: auto; }
+.ask-line { display: flex; gap: 8px; }
+.ask { position: static; display: block; background: none; margin: 0 0 10px; }

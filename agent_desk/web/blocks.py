@@ -279,7 +279,39 @@ async def _draft(store: Store, idea: Idea, kind: DraftKind) -> None:
         DRAFTING.discard((idea.id, kind))
 
 
-async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
+def aim(
+    rows: Sequence[BoardRow], project: str = "", session: str = ""
+) -> tuple[Sequence[BoardRow], str]:
+    """Narrow the board to what the question was pointed at, and say so in a line.
+
+    Three cases, and the third is the default (docs/06-console.md). A session: that console only.
+    A project: the sessions in it. Neither: the whole board, and the run works out from it what
+    the question is about — which is what somebody who has not chosen wants, rather than an error
+    asking them to choose.
+
+    A target that no longer exists falls back to the whole board rather than to nothing: sessions
+    end, and a question asked a second after one did should still be answered.
+    """
+    if session:
+        chosen = [row for row in rows if row.session.session_id == session]
+        if chosen:
+            row = chosen[0]
+            return chosen, f"one session: {row.session.project} · {row.session.name}"
+    if project:
+        chosen = [row for row in rows if row.project_key == project]
+        if chosen:
+            return chosen, f"one project: {chosen[0].project_name}"
+    return rows, ""
+
+
+async def submit(
+    store: Store,
+    typed: str,
+    rows: Sequence[BoardRow],
+    *,
+    project: str = "",
+    session: str = "",
+) -> Block:
     """Accept one line of input and start answering it.
 
     `/idea` captures instead of asking. `/new` forces a new thread, which is what a question gets
@@ -300,9 +332,10 @@ async def submit(store: Store, typed: str, rows: Sequence[BoardRow]) -> Block:
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
+    aimed, about = aim(rows, project, session)
     runs.start(
         block.id,
-        lambda: _classify_then_run(store, block, rows, classify=not forced_new),
+        lambda: _classify_then_run(store, block, aimed, classify=not forced_new, about=about),
     )
     return block
 
@@ -322,6 +355,7 @@ async def _classify_then_run(
     rows: Sequence[BoardRow],
     *,
     classify: bool,
+    about: str = "",
 ) -> None:
     """Decide the subject first, then answer against it.
 
@@ -330,7 +364,7 @@ async def _classify_then_run(
     which is the failure the attaching was meant to prevent.
     """
     try:
-        await _classify_and_answer(store, block, rows, classify=classify)
+        await _classify_and_answer(store, block, rows, classify=classify, about=about)
     except asyncio.CancelledError:
         # Cancellation before `answer_block` is entered used to leave the block `queued` with no
         # task behind it: the template offers cancel for queued and retry only for a settled
@@ -346,6 +380,7 @@ async def _classify_and_answer(
     rows: Sequence[BoardRow],
     *,
     classify: bool,
+    about: str = "",
 ) -> None:
     thread_id = block.thread_id
     if classify:
@@ -369,7 +404,9 @@ async def _classify_and_answer(
             await store.move_block(block.id, block.thread_id, set_by="classifier")
 
     history = await _thread_history(store, thread_id, exclude=block.id)
-    prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
+    prompt = session.build_prompt(
+        block.input, board=board_lines(rows), history=history, about=about
+    )
     await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
 
 

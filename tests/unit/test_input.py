@@ -11,6 +11,7 @@ import asyncio
 import pathlib
 import time
 from collections.abc import AsyncIterator
+from dataclasses import replace
 
 import pytest
 from agent_desk.answer import session
@@ -621,3 +622,72 @@ async def test_the_idea_card_carries_what_its_buttons_need(
     assert 'action="/ideas/' in card
     # docs/04's action table and docs/05's drawing both give the card an edit control.
     assert 'name="summary"' in card
+
+
+# --- pointing a question at a card ---------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_question_can_be_about_one_session_one_project_or_nothing(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """The three cases of docs/06-console.md, and the third is the default.
+
+    Nothing chosen means the run gets the whole board and works out what the question is about,
+    which is what somebody who has not chosen wants — rather than a form telling them to choose.
+    """
+    from agent_desk.web.blocks import aim
+
+    alpha = make_row("alpha", "main")
+    beta = make_row("beta", "staging")
+    rows = [
+        replace(alpha, project_key="p-alpha", project_name="alpha"),
+        replace(beta, project_key="p-beta", project_name="beta"),
+    ]
+
+    aimed, about = aim(rows)
+    assert len(aimed) == 2 and about == ""
+
+    aimed, about = aim(rows, project="p-beta")
+    assert [row.session.project for row in aimed] == ["beta"]
+    assert "one project: beta" == about
+
+    aimed, about = aim(rows, session=alpha.session.session_id)
+    assert [row.session.project for row in aimed] == ["alpha"]
+    assert about.startswith("one session: alpha")
+
+
+@pytest.mark.unit
+async def test_a_target_that_has_gone_falls_back_to_the_whole_board(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Sessions end. A question asked a second after one did is still a question."""
+    from agent_desk.web.blocks import aim
+
+    rows = [replace(make_row("alpha", "main"), project_key="p-alpha", project_name="alpha")]
+
+    aimed, about = aim(rows, session="a-session-that-ended")
+    assert aimed == rows
+    assert about == ""
+
+
+@pytest.mark.unit
+async def test_what_the_question_is_about_reaches_the_run(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """Choosing in the interface has to change the prompt, or the control is decoration."""
+    prompt = session.build_prompt(
+        "is it done", board=["- alpha · main · busy"], history=[], about="one project: alpha"
+    )
+    assert "What this question is about" in prompt
+    assert "one project: alpha" in prompt
+
+
+@pytest.mark.unit
+def test_the_answer_is_asked_for_in_words_a_person_can_use() -> None:
+    """This window is watched by somebody who is not doing the work, and often by somebody who
+    does not read code. Four paragraphs of technical prose is a second thing to read, not an
+    answer."""
+    prompt = session.build_prompt("anything", board=[], history=[])
+
+    assert "Two or three sentences" in prompt
+    assert "does not read code" in prompt
+    assert "name the session" in prompt

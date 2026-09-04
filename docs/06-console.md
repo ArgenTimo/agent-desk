@@ -21,11 +21,45 @@ One window, two regions: a board of sessions, and a column of blocks under an in
 └────────────────────────────────────────────────────────────────┘
 ```
 
+## The two halves
+
+The window is split: what you ask on the left, what is running on the right. The left half is for
+somebody watching work they are not doing — often somebody who does not read code — so an answer
+there is two or three sentences of ordinary words with the answer in the first one, and never a
+wall of technical prose. That instruction is in the prompt, not in a hope
+([04-threads-and-blocks.md](04-threads-and-blocks.md)).
+
+A question can be pointed at one of three things, and the third is the default: a project, one
+session, or nothing in particular — in which case the run is given the whole board and works out
+from it what the question is about. Dragging a card into the question field points it there, which
+is the same act as choosing from the two lists beside it.
+
 ## The board
 
-One row per live session, from the registry ([03-session-observation.md](03-session-observation.md)).
-Each row: project, branch, status, the session's own generated title, and how long since anything
-changed.
+Sessions are not a flat list, because nobody has a flat list in their head. Four levels, and every
+one of them is derived rather than declared — a level somebody had to maintain by hand would be
+wrong the first time they forgot ([03-session-observation.md](03-session-observation.md)):
+
+| Level | What it is | How it is known |
+|---|---|---|
+| an agent | a subagent a session started | an `Agent` tool call in the transcript, and the result that ended it |
+| a session | one console | one registry entry |
+| an instance | one checkout on this machine | the session's working directory |
+| a project | one or more repositories | a worktree's pointer and the `origin` in a git config — or a human saying so |
+
+The default grouping needs no button: every checkout of one origin is one project. The button is
+for the case the default cannot know — an API and an app in two repositories that are obviously one
+product — and it produces an empty card to drag other cards into. Ungrouping returns every
+repository in it to being its own project; nothing is lost by it.
+
+**There is no progress bar, and there will not be one.** Nothing on disk says how far along a
+session or a subagent is. A bar that moved without knowing would be the guessed status this whole
+board refuses to render ([03-session-observation.md](03-session-observation.md), "What cannot be
+known"). What a card shows instead is what is true: the status the session wrote, what it last did
+and when, and which subagents are still out.
+
+Each row: status, the session's own generated title, how long since anything changed, its branch
+and name, and what it has farmed out.
 
 **Sorted by what needs a human, not by recency.** Sessions inferred to be waiting first, then
 `busy`, then `idle`. Sorting by `updatedAt` puts a session that flickered twice above a long
