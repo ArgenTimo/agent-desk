@@ -41,6 +41,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 from agent_desk.ideas import inbox
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Store, Viewer
+from agent_desk.web.origin import SameOriginOnly
 
 TEMPLATES = Path(__file__).parent / "templates" / "shared"
 
@@ -57,6 +58,9 @@ env = Environment(
 log = structlog.get_logger("agent_desk.shared")
 
 app = FastAPI(title="agent-desk · ideas", openapi_url=None)
+# The same guard as the console's. A viewer's token is not a secret a foreign page has, but
+# a page that obtained one must not be able to post through the viewer's browser either.
+app.add_middleware(SameOriginOnly)
 
 
 def _store(request: Request) -> Store | None:

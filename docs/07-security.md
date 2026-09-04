@@ -63,6 +63,15 @@ would be transcript text. So the application answers only to a `Host` header nam
 refuses anything else before a route sees it — which is what makes the bind mean, for the one
 client that is not a process on this machine, what the paragraph above says it means.
 
+**A page you are merely visiting must not be able to act on the console.** Loopback and the `Host`
+check both let one through: a form on any website can post to `http://127.0.0.1:8787/blocks`
+without asking CORS for permission, and the request carries the right `Host` because it really is
+going there. Nothing secret is attached and nothing secret is needed — submitting a question,
+discarding an idea and pressing send on the one write path are all just posts. So a state-changing
+request whose `Sec-Fetch-Site` says it came from another page is refused. A request with no fetch
+metadata is not a browser: it is a script run by the same operating-system user, who can already
+read `~/.claude/` and needs no form.
+
 No outbound network calls. The `claude` CLI makes its own; this tool makes none.
 
 ## Phase 4, where the model changed
@@ -122,6 +131,8 @@ adding a login form.
 
 - Never widen `sessions/*.json`.
 - Never widen the allowed `Host` list beyond loopback while there is no authentication.
+- Never let a state-changing route answer a request a foreign page caused, and never move one to a
+  `GET` where the guard does not apply.
 - Never write a path under `~/.claude/` or under an observed repository.
 - Never put transcript text into a log line, an error message, or a subprocess argument.
 - Never pass a session's socket key to anything, including the peer-messaging client — that client

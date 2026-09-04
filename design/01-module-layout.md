@@ -19,6 +19,7 @@ agent_desk/
     app.py  routes.py  sse.py  templates/  static/
     blocks.py      the input field: one task group for every run in flight
     shared.py      a SECOND application: the ideas list, on its own bind, for a named viewer
+    origin.py      refuses a state-changing request that a foreign page caused
   __main__.py    serves the console, and the shared view beside it when one is asked for
   peer.py        the ONE write path: a message to a named session
   config.py      paths and settings, resolved once
