@@ -216,3 +216,20 @@ def test_only_the_last_word_from_the_session_offers_choices() -> None:
         ],
     )
     assert answered.choices == []
+
+
+@pytest.mark.unit
+def test_a_session_that_stopped_signing_has_lost_the_brief_with_it() -> None:
+    """The canary works because the instruction to sign is in the *first* message: a window that
+    has rolled far enough to lose the signature has lost the rest of the brief too."""
+    from agent_desk.observe.model import lost_the_canary, signed_by
+
+    # Generous about how it signs — what is being detected is that it stopped.
+    for said in ("biba: done", "**biba**: done", "[biba] done", "biba — done", "  Biba: done"):
+        assert signed_by(said, "biba"), said
+        assert not lost_the_canary(said, "biba")
+
+    assert lost_the_canary("I have finished the parser.", "biba")
+    # Nobody else's session was told to sign anything, so an unsigned reply there means nothing.
+    assert not lost_the_canary("I have finished the parser.", "")
+    assert not lost_the_canary("   ", "biba")

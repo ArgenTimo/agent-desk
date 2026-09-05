@@ -38,6 +38,7 @@ from agent_desk.observe.model import (
     Session,
     TranscriptTail,
     attention_hint,
+    lost_the_canary,
     now_ms,
     since,
     triage_rank,
@@ -89,6 +90,19 @@ def _ago(then_ms: int, now: int | None = None) -> str:
 def _clock(entry_at: object) -> str:
     """A wall-clock time for a transcript entry, or nothing when it carried none."""
     return entry_at.strftime("%H:%M") if hasattr(entry_at, "strftime") else ""
+
+
+def signed(row: object, name: str) -> bool:
+    """Has this session stopped signing its replies with the name it was given?
+
+    A reading, and only ever of a session this console started and told to sign — an unsigned
+    reply from anybody else's session means nothing at all (023-canary.sql).
+    """
+    tail = getattr(row, "tail", None)
+    last = getattr(tail, "last_entry", None) if tail else None
+    if last is None or last.role != "assistant" or not last.text:
+        return True
+    return not lost_the_canary(last.text, name)
 
 
 def _at(when_ms: object) -> str:
@@ -325,6 +339,11 @@ async def board_work() -> dict[str, dict[str, int]]:
     return counted
 
 
+async def board_canaries() -> dict[str, str]:
+    """The signature each session this console started was told to keep (023-canary.sql)."""
+    return await store.canaries()
+
+
 async def board_kicks() -> dict[str, Kicking]:
     """Which sessions are switched on to keep going, by short id (docs/adr/0009).
 
@@ -347,6 +366,7 @@ def render_board(
     links: dict[str, list[ProjectLink]] | None = None,
     work: dict[str, dict[str, int]] | None = None,
     kicks: dict[str, Kicking] | None = None,
+    canaries: dict[str, str] | None = None,
 ) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
@@ -365,6 +385,11 @@ def render_board(
         # Which sessions are switched on not to idle, so the button on each card shows its own
         # state rather than the same state on all of them (docs/adr/0009).
         kicks=kicks or {},
+        # The signature each session this console started was told to keep, so the card can say
+        # when one stops (023-canary.sql).
+        canaries=canaries or {},
+        # A reading of the text, in one place rather than in the template.
+        signed=signed,
         flagged=sum(1 for row in rows if row.hint.waiting),
     )
 
@@ -674,6 +699,7 @@ async def render_page(message: str = "") -> str:
             links=await board_links(),
             work=await board_work(),
             kicks=await board_kicks(),
+            canaries=await board_canaries(),
             flagged=sum(1 for row in rows if row.hint.waiting),
         ),
         projects=projects,
@@ -834,6 +860,10 @@ async def new_instance(request: Request) -> Response:
         cwd=cwd,
         name=who,
     )
+    if result.started:
+        # It was told to sign its replies with this name, so the board can notice when it stops
+        # (023-canary.sql). Only sessions this console started have one.
+        await store.keep_canary(result.agent_id, who)
     panel = env.get_template("_instance.html").render(
         stage="started" if result.started else "failed",
         detail=result.detail,
@@ -943,6 +973,7 @@ async def create_project(request: Request) -> Response:
                     await board_links(),
                     await board_work(),
                     await board_kicks(),
+                    await board_canaries(),
                 )
             )
     return RedirectResponse("/", status_code=303)

@@ -1125,3 +1125,39 @@ async def test_a_terminal_session_is_told_the_rule_rather_than_the_symptom(
 
     assert status == 200
     assert "only a background session" in panel
+
+
+@pytest.mark.unit
+async def test_a_session_that_stopped_signing_is_flagged_and_never_closed_for_it(
+    home: Home, desk: Store
+) -> None:
+    """Closing a session throws away whatever it has not committed, and that is not a call a
+    background loop gets to make (docs/adr/0002) — so the board says so and offers a click."""
+    import os
+    import time
+
+    session_id = "0b0b0b0b-0000-4000-8000-000000000008"
+    home.session(
+        os.getpid(),
+        session_id,
+        cwd=str(home.root.parent),
+        kind="bg",
+        updatedAt=int(time.time() * 1000),
+    )
+    home.transcript(session_id, _entry("assistant", "biba: still reading the parser"))
+    await desk.keep_canary("0b0b0b0b", "biba")
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, {}, await routes.board_canaries()
+    )
+    assert "lost the thread" not in board
+
+    home.transcript(session_id, _entry("assistant", "I have finished the parser."))
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, {}, await routes.board_canaries()
+    )
+
+    assert "lost the thread" in board
+    assert "has stopped signing" in board
+    # A session nobody told to sign is never flagged for not signing.
+    assert routes.signed(object(), "") is True

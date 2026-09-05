@@ -211,6 +211,29 @@ def choices_in(text: str) -> list[str]:
     return found if len(found) >= 2 else []
 
 
+def signed_by(text: str, name: str) -> bool:
+    """Does this reply begin with the name the session was told to sign with?
+
+    Generous about how: `biba:`, `**biba**:`, `[biba]`, `biba —`. What is being detected is a
+    session that has *stopped* signing, and a strict match would report that every time a model
+    put its name in bold.
+    """
+    if not name:
+        return False
+    head = text.lstrip().lstrip("*_`[(#> ").lower()
+    return head.startswith(name.lower())
+
+
+def lost_the_canary(text: str, name: str) -> bool:
+    """Was this reply expected to carry a signature and did not (023-canary.sql)?
+
+    Only ever asked about a session this console started and told to sign — an unsigned reply from
+    anybody else's session means nothing at all, which is why the name has to be looked up before
+    this is called rather than guessed from the text.
+    """
+    return bool(name) and bool(text.strip()) and not signed_by(text, name)
+
+
 class AttentionHint(BaseModel):
     """An inference, carrying the observation it was made from.
 

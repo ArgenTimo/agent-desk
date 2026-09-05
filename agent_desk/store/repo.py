@@ -1495,6 +1495,24 @@ class Store:
                 {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
             )
 
+    # --- the signature an instance was told to keep (023-canary.sql) --------------------------
+    async def keep_canary(self, short_id: str, name: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO canary (short_id, name, started_at) "
+                    "VALUES (:short_id, :name, :t) "
+                    "ON CONFLICT (short_id) DO UPDATE SET name = :name, started_at = :t"
+                ),
+                {"short_id": short_id, "name": name, "t": _now_ms()},
+            )
+
+    async def canaries(self) -> dict[str, str]:
+        """Every session this console told to sign its replies, by short id."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT short_id, name FROM canary"))
+            return {str(row[0]): str(row[1]) for row in rows}
+
     # --- the names somebody uses for things (021-glossary.sql) --------------------------------
     async def add_term(self, *, repo_key: str, term: str, means: str) -> Term | None:
         """A word and what it means. Nothing without both halves — a term with no meaning in a

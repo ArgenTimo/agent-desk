@@ -219,6 +219,15 @@ def introduce(who: str, *, project: str, doing: str = "", env_names: Sequence[st
         "a question would normally be asked, make the reasonable choice, write down what you "
         "chose, and carry on. When you have read enough to be useful, say in a few lines what you "
         "found and what you would do first.",
+        "",
+        # The canary (023-canary.sql). It works because this instruction is in the *first* message
+        # of the conversation: a window that has rolled far enough to lose the signature has lost
+        # the rest of this brief with it, and the signature is the cheapest visible symptom of a
+        # thing that is otherwise invisible until the work comes back wrong.
+        f"One habit, and keep it for the whole session: **begin every reply with `{who}:`**. It is "
+        "how the console tells that you still have this message in view. If you ever notice you "
+        "have stopped, say so — it means your context has rolled and you should finish what is in "
+        "front of you rather than starting anything new.",
     ]
     return "\n".join(lines)
 

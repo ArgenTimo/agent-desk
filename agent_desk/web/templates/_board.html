@@ -101,6 +101,16 @@
               {% if row.hint.waiting %}
               <span class="pill attention" title="{{ row.hint.observation }} — a guess, not a signal">⚑ may want you</span>
               {% endif %}
+              {# The canary (023-canary.sql). This session was told to begin every reply with its
+                 own name, in the first message of the conversation — so a reply that has stopped
+                 carrying it is a window that has rolled far enough to lose the brief with it.
+                 Amber: the work in front of it is still worth finishing, and red means stopped. #}
+              {% set canary = canaries.get(row.session.session_id.split("-")[0]) %}
+              {% if canary and not signed(row, canary) %}
+              <span class="pill attention"
+                    title="it was told to begin every reply with “{{ canary }}” and has stopped — its context has rolled far enough to lose the first message">
+                🐤 lost the thread</span>
+              {% endif %}
               {% if not row.tail %}<span class="pill quiet" title="no transcript was read">registry only</span>{% endif %}
             </div>
 
@@ -139,6 +149,15 @@
                      placeholder="answer it, or tell it what to do next…">
               <button type="submit" title="send this to the session and let it carry on">↵</button>
             </form>
+            {% endif %}
+
+            {% if canary and not signed(row, canary) %}
+            {# What to do about it, and it is a click rather than something this console does on
+               its own: closing a session throws away whatever it has not committed, and that is
+               not a call a background loop gets to make (docs/adr/0002). #}
+            <p class="small attention-line">🐤 It has stopped signing as <strong>{{ canary }}</strong>.
+              Its context has rolled past the brief — let it finish what it is on, then start a
+              fresh one from the project's <span class="hint-key">⋯</span> menu.</p>
             {% endif %}
 
             {# The switch that will not let this session sit idle (docs/adr/0009). It is the
