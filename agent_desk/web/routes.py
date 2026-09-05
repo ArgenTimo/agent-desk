@@ -38,7 +38,7 @@ from agent_desk.observe.model import (
     triage_rank,
 )
 from agent_desk.observe.shape import repository_of
-from agent_desk.store.repo import DRAFT_KINDS, Group, Store, Thread
+from agent_desk.store.repo import DRAFT_KINDS, Group, Idea, Store, Thread
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -322,7 +322,12 @@ async def render_blocks() -> str:
         for thread in await store.threads_of({row.thread_id for row in rows} - known)
         if thread.id not in known
     ]
-    ideas = {idea.block_id: idea for idea in await store.ideas() if idea.block_id}
+    # One message can hold several thoughts, so a block's card is a list rather than a card
+    # (docs/05-ideas.md).
+    ideas: dict[str, list[Idea]] = {}
+    for idea in reversed(await store.ideas()):
+        if idea.block_id:
+            ideas.setdefault(idea.block_id, []).append(idea)
     directives = {d.block_id: d for d in await store.directives()}
     return env.get_template("_blocks.html").render(
         blocks=rows,
@@ -351,6 +356,16 @@ def render_message(
         detail=detail,
         directive_id=directive_id,
     )
+
+
+async def render_ideas() -> str:
+    """The bottom half of the right column: what has been written down.
+
+    Dropped ideas are not shown here. The inbox keeps them — an idea's history is part of what the
+    notebook is for — but a column somebody glances at is about what is still live.
+    """
+    ideas = [idea for idea in await store.ideas() if idea.state != "dropped"]
+    return env.get_template("_ideas.html").render(ideas=ideas[:40])
 
 
 async def render_inbox() -> str:
@@ -411,6 +426,7 @@ async def render_page(message: str = "") -> str:
     projects = shape(rows, groups)
     return env.get_template("board.html").render(
         threads=await open_chats(),
+        ideas=await render_ideas(),
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,
@@ -460,11 +476,68 @@ async def close_thread(thread_id: str, request: Request) -> Response:
 
 @router.get("/cards/{kind}", response_class=HTMLResponse)
 async def card(kind: str, id: str = "") -> HTMLResponse:
-    """What one card contains. The id is a query parameter because two of the four kinds are
-    identified by a filesystem path, and a path does not fit in a path segment."""
+    """What one card contains. The id is a query parameter because two of the kinds are identified
+    by a filesystem path, and a path does not fit in a path segment."""
+    if kind == "idea":
+        # An idea is not a session and has no board row: what it contains is what was written.
+        idea = await store.idea(id)
+        return HTMLResponse(
+            env.get_template("_card_idea.html").render(idea=idea),
+            status_code=200 if idea else 404,
+        )
     groups = await store.groups()
     markup = await asyncio.to_thread(render_card, kind, id, groups)
     return HTMLResponse(markup, status_code=200 if markup else 404)
+
+
+async def render_project(key: str) -> str:
+    """The settings panel for one project, rendered where the write path's panel goes."""
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    named = next((project for project in projects if project.key == key), None)
+    return env.get_template("_project.html").render(
+        key=key,
+        name=named.name if named else key,
+        links=await store.links(key),
+    )
+
+
+@router.get("/project-settings", response_class=HTMLResponse)
+async def project_settings(request: Request, key: str = "") -> Response:
+    """The `⋯` on a project card. A repository key holds slashes and colons, so it travels as a
+    query parameter rather than as a path segment."""
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/project-links", response_class=HTMLResponse)
+async def add_project_link(request: Request) -> Response:
+    """Somewhere this project also lives. The token field names a variable, never a value."""
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    name = form.get("name", "").strip()[:40]
+    url = form.get("url", "").strip()
+    if key and name and url.startswith(("http://", "https://")):
+        await store.set_link(
+            repo_key=key, name=name, url=url, token_env=form.get("token_env", "").strip()[:64]
+        )
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/project-links/remove", response_class=HTMLResponse)
+async def remove_project_link(request: Request) -> Response:
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    await store.remove_link(key, form.get("name", "").strip())
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/projects", response_class=HTMLResponse)
@@ -732,10 +805,14 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
 
     # A form field, not a header: the card must behave the same with htmx and without it, and
     # `hx-headers` only travels when htmx is the one sending.
-    from_the_card = form.get("from") == "card"
+    where = form.get("from")
     if _wants_fragment(request):
-        return HTMLResponse(await render_blocks() if from_the_card else await render_inbox())
-    return RedirectResponse("/" if from_the_card else "/ideas", status_code=303)
+        if where == "card":
+            return HTMLResponse(await render_blocks())
+        if where == "column":
+            return HTMLResponse(await render_ideas())
+        return HTMLResponse(await render_inbox())
+    return RedirectResponse("/" if where in ("card", "column") else "/ideas", status_code=303)
 
 
 @router.get("/ideas", response_class=HTMLResponse)

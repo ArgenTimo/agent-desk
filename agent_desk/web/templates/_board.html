@@ -30,6 +30,9 @@
     <span class="card-name">{{ project.name }}</span>
     <span class="pill">{{ project.sessions }}</span>
     {% if project.flagged %}<span class="pill flag" title="{{ project.flagged }} may want you">{{ project.flagged }} ⚑</span>{% endif %}
+    <a class="more" href="/project-settings?key={{ project.key | urlencode }}"
+       hx-get="/project-settings?key={{ project.key | urlencode }}" hx-target="#message"
+       title="links and settings for this project" aria-label="settings">⋯</a>
   </summary>
 
   <div class="card-body">

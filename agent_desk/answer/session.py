@@ -268,6 +268,7 @@ def build_prompt(
     history: Iterable[tuple[str, str]],
     about: str = "",
     transcripts: Iterable[str] = (),
+    notes: Iterable[str] = (),
 ) -> str:
     """What a block is answered *from* (docs/04-threads-and-blocks.md).
 
@@ -308,6 +309,12 @@ def build_prompt(
         lines += ["", "## Earlier in this thread"]
         for asked, answered in previous:
             lines += [f"Q: {asked}", f"A: {answered}", ""]
+
+    written = list(notes)
+    if written:
+        # Ideas somebody dropped into the question. They are not evidence of anything an agent
+        # did — they are what a person thought at some point — and the prompt says so.
+        lines += ["", "## Ideas the person carried into this question", *written]
 
     read = list(transcripts)
     if read:

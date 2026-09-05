@@ -66,6 +66,26 @@ CREATE TABLE directive (
 ```
 
 ```sql
+-- Where a project lives besides on this disk: a tracker, a repository page, a dashboard. Nothing
+-- on disk derives these — an `origin` gives a repository, never a board — so a human types them
+-- once and they are one click away afterwards.
+--
+-- What is deliberately not here is a credential. This is a plain SQLite file that a second
+-- application already serves a redacted view out of (../docs/07-security.md), with no encryption
+-- and no audit of who read it. `token_env` records the *name* of an environment variable and
+-- never a value, so the secret stays where the operating system already keeps secrets and the
+-- console can still say what it would use.
+CREATE TABLE project_link (
+    repo_key    TEXT NOT NULL,
+    name        TEXT NOT NULL,          -- jira | github | anything a human types
+    url         TEXT NOT NULL,
+    token_env   TEXT,                   -- the variable, never the token
+    added_at    INTEGER NOT NULL,
+    PRIMARY KEY (repo_key, name)
+);
+```
+
+```sql
 -- Phase 4. One row per person who may open the shared ideas list.
 CREATE TABLE viewer (
     id          TEXT PRIMARY KEY,
@@ -113,6 +133,12 @@ about.
 ([`../docs/08-non-goals.md`](../docs/08-non-goals.md) §4).
 
 **No token or cost accounting.** The `claude` CLI reports it and nothing here is decided by it.
+
+**No credentials of any kind.** Not the CLI's, which this program never opens
+([`../docs/07-security.md`](../docs/07-security.md)), and not a tracker's, which a human might
+reasonably want it to hold. `project_link.token_env` names the environment variable instead. A
+token in this file would be a token in a database with no encryption, no rotation and no record of
+who read it, in a process that also serves a page to other people.
 
 ## Two fields that exist for a reason
 

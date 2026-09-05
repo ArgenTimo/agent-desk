@@ -109,12 +109,15 @@ async def test_a_generated_line_replaces_the_fallback_and_the_thought_is_untouch
 async def test_the_card_asks_once_and_offers_two_answers(
     desk: Store, fake_claude: pathlib.Path
 ) -> None:
-    """docs/05: keep or discard, one click. Anything more and the tool is competing with the run."""
+    """docs/05: keep or discard, one click. Anything more and the tool is competing with the run.
+
+    One line per thought, saying that it was written down, with the two answers beside it. A
+    message that held three thoughts says it three times.
+    """
     await blocks.submit(desk, "/idea a thought", [])
     card = await routes.render_blocks()
 
-    assert "Idea recorded" in card
-    assert "Keep it?" in card
+    assert "recorded as an idea" in card
     assert "Keep" in card and "Discard" in card
     assert "a thought" in card
 
@@ -317,7 +320,7 @@ async def test_the_card_works_the_same_with_htmx_and_without(
 
     status, html = await _card_post(f"/ideas/{second.id}/keep", {"from": "card"}, htmx=True)
     assert status == 200
-    assert "Idea recorded" in html  # the block column, not the inbox
+    assert "recorded as an idea" in html  # the block column, not the inbox
 
 
 @pytest.mark.unit
@@ -393,3 +396,146 @@ async def test_an_idea_cannot_walk_backwards_through_its_states(
     status, _ = await _card_post(f"/ideas/{fresh.id}/proposal", {})
     assert status == 409, "a draft is for an idea somebody kept"
     assert await desk.drafts_for(fresh.id) == []
+
+
+# --- one message, several thoughts ---------------------------------------------------------------
+SPLITTER = """#!/bin/sh
+prompt=$(cat)
+case "$prompt" in
+  *"Split it into the separate ideas"*)
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"cache the probe results\\\\nthe ports are still hardcoded"}]}}\\n' ;;
+  *) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n' ;;
+esac
+"""
+
+
+@pytest.fixture
+def splitter(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    binary = tmp_path / "split" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(SPLITTER)
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+    return binary
+
+
+@pytest.mark.unit
+async def test_one_message_can_hold_several_thoughts(desk: Store, splitter: pathlib.Path) -> None:
+    """ "Add A, and B is broken" is one message and two ideas, and both are written down.
+
+    The whole message is recorded first, before any model is asked anything — that is the
+    guarantee — and the split replaces it only once it has something to replace it with.
+    """
+    block = await blocks.submit(
+        desk, "/idea cache the probe results, and the ports are still hardcoded", []
+    )
+
+    # Immediately: one idea, the whole message, with no run having happened yet.
+    (whole,) = await desk.ideas()
+    assert whole.text == "cache the probe results, and the ports are still hardcoded"
+
+    async def split() -> bool:
+        return len(await desk.ideas()) == 2
+
+    await _settle(split)
+    second, first = await desk.ideas()
+    assert first.text == "cache the probe results"
+    assert second.text == "the ports are still hardcoded"
+    # Both belong to the message that captured them, and the placeholder is gone.
+    assert {idea.block_id for idea in (first, second)} == {block.id}
+    assert whole.id not in {idea.id for idea in (first, second)}
+
+    card = await routes.render_blocks()
+    assert card.count("recorded as an idea") == 2
+
+
+@pytest.mark.unit
+async def test_a_card_a_human_has_touched_is_not_split_underneath_them(
+    desk: Store, splitter: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rule the generated summary follows: they have said what they want it to be."""
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
+    await blocks.submit(desk, "/idea cache the probes, and the ports are hardcoded", [])
+    (whole,) = await desk.ideas()
+    await desk.set_idea_state(whole.id, "kept")
+
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(splitter), answer_timeout_seconds=10.0)
+    )
+    await blocks._write_ideas(desk, await desk.block(whole.block_id), whole, [])  # type: ignore[arg-type]
+
+    assert [idea.id for idea in await desk.ideas()] == [whole.id]
+
+
+@pytest.mark.unit
+async def test_an_idea_dropped_into_a_question_travels_as_what_was_written(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An idea has no session and no transcript: what it contributes is the thought itself."""
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
+    await blocks.submit(desk, "/idea cache the probe results", [])
+    (idea,) = await desk.ideas()
+
+    assert await blocks.notes(desk, [f"idea:{idea.id}"]) == [
+        "- cache the probe results: cache the probe results"
+    ]
+    assert await blocks.notes(desk, ["idea:no-such-idea"]) == []
+    # And it is named in what the block says it carried.
+    assert await blocks._context_lines(desk, [], [f"idea:{idea.id}"], []) == [
+        "idea · cache the probe results"
+    ]
+
+
+# --- where a project also lives ------------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_project_keeps_its_links_and_never_a_token(desk: Store) -> None:
+    """docs/07-security.md: this file has no encryption and a second application reads out of it.
+
+    So a link is stored and a token is not. What is recorded is the *name* of the environment
+    variable the token would come from, which lets the console say what it would use without ever
+    holding it.
+    """
+    await desk.set_link(
+        repo_key="origin:acme/api",
+        url="https://acme.atlassian.net/browse/API",
+        name="jira",
+        token_env="ACME_JIRA_TOKEN",
+    )
+    (link,) = await desk.links("origin:acme/api")
+
+    assert link.url == "https://acme.atlassian.net/browse/API"
+    assert link.token_env == "ACME_JIRA_TOKEN"
+    assert link.token_present is False
+
+    # Setting the variable changes what the console says, and nothing about what it stores.
+    import os
+
+    os.environ["ACME_JIRA_TOKEN"] = "not-a-real-token"
+    try:
+        (again,) = await desk.links("origin:acme/api")
+        assert again.token_present is True
+        assert again.token_env == "ACME_JIRA_TOKEN"
+    finally:
+        del os.environ["ACME_JIRA_TOKEN"]
+
+    # One name per project: a second "jira" is a typo, not a second board.
+    await desk.set_link(repo_key="origin:acme/api", url="https://elsewhere", name="jira")
+    (only,) = await desk.links("origin:acme/api")
+    assert only.url == "https://elsewhere"
+    assert only.token_env is None
+
+    await desk.remove_link("origin:acme/api", "jira")
+    assert await desk.links("origin:acme/api") == []
+
+
+@pytest.mark.unit
+async def test_the_settings_panel_has_nowhere_to_type_a_token(desk: Store) -> None:
+    """The rule, made visible: the field asks for a variable name and says so."""
+    await desk.set_link(repo_key="k", name="jira", url="https://example.invalid", token_env="T")
+    panel = await routes.render_project("k")
+
+    assert 'type="password"' not in panel
+    assert "never typed here and never stored" in panel
+    assert "https://example.invalid" in panel

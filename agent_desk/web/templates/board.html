@@ -70,7 +70,7 @@
   <div class="gutter" data-gutter="right" role="separator" aria-orientation="vertical"
        tabindex="0" title="drag to resize · double-click to reset"></div>
 
-  <aside class="col-right" aria-label="what is in the way">
+  <aside class="col-right" aria-label="what is in the way, and what was written down">
     <header class="col-head"><span class="col-title">blockers</span></header>
     {# Stubs, and labelled as stubs. Nothing on disk says what is blocking a session; inventing a
        blocker would be the guessed status this board refuses to render. #}
@@ -106,6 +106,12 @@
         of them is computed, and a blocker this program cannot observe is one it will not
         invent.</p>
     </div>
+
+    {# The other half: what has been written down. Same cards, same dragging — an idea dropped
+       into the middle is a question about that idea (docs/05-ideas.md). #}
+    <header class="col-head second"><span class="col-title">ideas</span>
+      <span class="spacer"></span><a class="tiny" href="/ideas">the inbox</a></header>
+    <div id="idea-list" class="ideas-list">{{ ideas|safe }}</div>
   </aside>
 </div>
 

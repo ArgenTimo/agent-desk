@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import time
 from pathlib import Path
@@ -87,6 +88,27 @@ class Directive(BaseModel):
     text: str
     created_at: int
     sent_at: int | None = None
+
+
+class ProjectLink(BaseModel):
+    """Somewhere a project also lives: a board, a repository page, a dashboard.
+
+    `token_env` names an environment variable and never holds a token. See 006-project-links.sql
+    for why, and docs/07-security.md for the rule it follows.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    name: str
+    url: str
+    token_env: str | None = None
+    added_at: int
+
+    @property
+    def token_present(self) -> bool:
+        """Whether the variable this link names is set — never what it is set to."""
+        return bool(self.token_env) and bool(os.environ.get(self.token_env or ""))
 
 
 class Idea(BaseModel):
@@ -563,6 +585,49 @@ class Store:
         fields["context"] = scrub_optional(fields["context"])
         return Block(**fields)
 
+    # --- where a project also lives ----------------------------------------------------------
+    async def set_link(
+        self, *, repo_key: str, name: str, url: str, token_env: str | None = None
+    ) -> None:
+        """Add or replace one link. One name per project, because a second "jira" is a typo."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO project_link (repo_key, name, url, token_env, added_at) "
+                    "VALUES (:repo_key, :name, :url, :token_env, :added_at) "
+                    "ON CONFLICT (repo_key, name) DO UPDATE SET url = :url, token_env = :token_env"
+                ),
+                {
+                    "repo_key": repo_key,
+                    "name": name,
+                    "url": url,
+                    "token_env": token_env or None,
+                    "added_at": _now_ms(),
+                },
+            )
+
+    async def links(self, repo_key: str | None = None) -> list[ProjectLink]:
+        """Every link, or one project's. Two statements rather than one with a hole in it: a
+        query built by concatenation is a query somebody eventually concatenates a value into."""
+        one = (
+            "SELECT repo_key, name, url, token_env, added_at FROM project_link "
+            "WHERE repo_key = :repo_key ORDER BY name"
+        )
+        every = "SELECT repo_key, name, url, token_env, added_at FROM project_link ORDER BY repo_key, name"
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(one if repo_key else every),
+                {"repo_key": repo_key} if repo_key else {},
+            )
+            return [ProjectLink(**row._mapping) for row in rows]
+
+    async def remove_link(self, repo_key: str, name: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM project_link WHERE repo_key = :repo_key AND name = :name"),
+                {"repo_key": repo_key, "name": name},
+            )
+
     # --- directives -------------------------------------------------------------------------
     async def record_directive(
         self, *, block_id: str, session_id: str, session_name: str, text_: str
@@ -637,6 +702,23 @@ class Store:
                 {**idea.model_dump(exclude={"context"}), "context": json.dumps(idea.context)},
             )
         return idea
+
+    async def delete_idea(self, idea_id: str) -> None:
+        """Remove an idea that turned out to be several, and only that.
+
+        The one caller is the splitter, undoing its own placeholder within seconds of writing it
+        and only while nothing has happened to it. Anything a human has touched — a state, a
+        summary, a draft — is not deleted by this program; `dropped` is the state for that
+        (docs/05-ideas.md).
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "DELETE FROM idea WHERE id = :id AND state = 'new' "
+                    "AND NOT EXISTS (SELECT 1 FROM draft WHERE draft.idea_id = idea.id)"
+                ),
+                {"id": idea_id},
+            )
 
     async def set_idea_state(self, idea_id: str, state: IdeaState) -> None:
         async with self.engine.begin() as conn:

@@ -70,6 +70,47 @@ def summary_prompt(text: str) -> str:
     )
 
 
+# One message can hold several thoughts — "add A, and B is broken, and we should probably C" — and
+# a person typing at speed does not stop to send three messages. More than this in one message is
+# a review queue rather than a capture, and that shape is docs/10-meeting-intake.md's question,
+# not this one's.
+MOST_IDEAS = 8
+
+
+def split_prompt(text: str) -> str:
+    """Cut one message into the thoughts it actually contains, and no more than it contains.
+
+    The instruction against inventing is the whole of this prompt. A splitter that turns one
+    thought into three has not helped anybody remember anything: it has put two things in the
+    notebook that nobody said, and a week later they read exactly like the one that was said.
+    """
+    return (
+        "A developer typed one message into a notebook. Split it into the separate ideas it "
+        "contains — one per line, in their words, each a line that stands on its own.\n\n"
+        "Rules, and the first two matter more than the split:\n"
+        "- Never invent an idea that is not in the text. One thought is one line; reply with one "
+        "line.\n"
+        "- Never drop anything. Every part of what they wrote belongs to one of the lines.\n"
+        f"- At most {MOST_IDEAS} lines. No numbering, no bullets, no preamble, no blank lines.\n\n"
+        f"{text}"
+    )
+
+
+def read_split(reply: str, text: str) -> list[str]:
+    """The lines the reply names, or the whole message when it named nothing usable.
+
+    Anything unparsed is one idea, because one idea is what was typed and losing the thought is
+    the only failure this module has (docs/05-ideas.md).
+    """
+    lines = [
+        stripped.lstrip("-*•0123456789.) ").strip()
+        for line in reply.splitlines()
+        if (stripped := line.strip())
+    ]
+    lines = [line for line in lines if line][:MOST_IDEAS]
+    return lines if len(lines) > 1 else [text.strip()]
+
+
 def _context_lines(idea: Idea) -> list[str]:
     """Where it came from, which is most of an idea's meaning a week later (docs/05)."""
     lines = [f"- captured: {idea.source_kind}"]

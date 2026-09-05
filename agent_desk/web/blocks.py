@@ -212,9 +212,10 @@ def _capture_context(rows: Sequence[BoardRow]) -> tuple[str, str | None, dict[st
 async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Block:
     """`/idea`: recorded in one step, with a card and no second question (docs/05-ideas.md).
 
-    The block is `answered` the moment it exists, because it is: the card is the whole content of
-    an idea block, and nothing about the thought is pending. What runs afterwards only improves
-    the summary line, and the idea is complete without it.
+    The block is `answered` the moment it exists, because it is. The idea is written before any
+    model is asked anything, which is the property this module is for: the run is the part that
+    can fail. What runs afterwards improves the summary, or — when the message held several
+    thoughts — takes it apart into one idea each.
     """
     source_kind, source_ref, context = _capture_context(rows)
     thread = await store.create_thread(inbox.fallback_summary(text) or "an idea")
@@ -233,8 +234,51 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
     # An idea block asks nothing further, so its subject is not a candidate for a later question
     # to be attached to — and an idea's summary makes a confusing thread title anyway.
     await store.close_thread(thread.id)
-    runs.start(f"summary:{idea.id}", lambda: _summarise(store, idea))
+    runs.start(f"capture:{block.id}", lambda: _write_ideas(store, block, idea, rows))
     return block
+
+
+async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[BoardRow]) -> None:
+    """Take the message apart, if it was several thoughts, and write each of them down.
+
+    "Add A, B is broken, and we should probably C" is one message and three ideas, and a person
+    typing at speed does not stop to send three messages. This runs *after* the thought is safe:
+    the whole message is already an idea in the store, and what happens here either improves its
+    summary or replaces it with the ideas it turned out to contain. Failing changes nothing, which
+    is why it is allowed to be a model call at all (docs/05-ideas.md).
+    """
+    try:
+        reply = "".join(
+            [chunk async for chunk in session.stream_answer(inbox.split_prompt(whole.text))]
+        )
+        parts = inbox.read_split(reply, whole.text)
+    except (session.AnswerFailed, OSError):
+        parts = [whole.text]
+
+    if len(parts) < 2:
+        # One thought, which is the ordinary case: it gets the generated summary line it has
+        # always got, and the text it was typed as.
+        await _summarise(store, whole)
+        return
+
+    # A human who has already touched this card has said what they want it to be, and a splitter
+    # arriving afterwards does not get to disagree — the same rule the summary follows.
+    current = await store.idea(whole.id)
+    if current is None or current.state != "new" or current.summary != whole.summary:
+        return
+
+    source_kind, source_ref, context = _capture_context(rows)
+    for part in parts:
+        await inbox.capture(
+            store,
+            part,
+            source_kind=source_kind,  # type: ignore[arg-type]
+            source_ref=source_ref,
+            context=context,
+            block_id=block.id,
+        )
+    # Last, so that there is never a moment when the message has no idea against it at all.
+    await store.delete_idea(whole.id)
 
 
 async def _summarise(store: Store, idea: Idea) -> None:
@@ -428,14 +472,40 @@ async def submit(
         await store.set_block_context(block.id, "\n".join(carried))
     aimed, about = aim(rows, project, session, targets)
     deep = transcripts(rows, targets)
+    written = await notes(store, targets)
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
         lambda: _work(
-            store, block, aimed, classify=classify, about=about, deep=deep, history=list(history)
+            store,
+            block,
+            aimed,
+            classify=classify,
+            about=about,
+            deep=deep,
+            history=list(history),
+            written=written,
         ),
     )
     return block
+
+
+async def notes(store: Store, dropped: Sequence[str]) -> list[str]:
+    """The ideas carried into a question, as text rather than as sessions.
+
+    An idea has no board row and no transcript: what it contributes is what somebody wrote down
+    and why it was written down then. Dropping one into the output is how "does this still make
+    sense given what these two sessions did" gets asked.
+    """
+    lines: list[str] = []
+    for target in dropped:
+        kind, ident, _ = _card(target)
+        if kind != "idea":
+            continue
+        idea = await store.idea(ident)
+        if idea is not None:
+            lines.append(f"- {idea.summary}: {idea.text}")
+    return lines
 
 
 async def _context_lines(
@@ -453,6 +523,10 @@ async def _context_lines(
     lines: list[str] = []
     for target in targets:
         kind, ident, deep = _card(target)
+        if kind == "idea":
+            idea = await store.idea(ident)
+            lines.append(f"idea · {idea.summary}" if idea else "idea · no longer in the inbox")
+            continue
         found, label = _rows_named(rows, kind, ident)
         if not found:
             lines.append(f"{kind} · no longer on the board")
@@ -491,6 +565,7 @@ async def _work(
     about: str = "",
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
+    written: Sequence[str] = (),
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
 
@@ -507,7 +582,14 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         await _classify_and_answer(
-            store, block, rows, classify=classify, about=about, deep=deep, history=history
+            store,
+            block,
+            rows,
+            classify=classify,
+            about=about,
+            deep=deep,
+            history=history,
+            written=written,
         )
     except asyncio.CancelledError:
         # Cancellation before `answer_block` is entered used to leave the block `queued` with no
@@ -521,8 +603,9 @@ async def _work(
 async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
-    docs/05-ideas.md is explicit that capture ends here. The block is answered the moment the row
-    exists, because it is — what runs afterwards only improves the summary line.
+    docs/05-ideas.md is explicit that capture ends here. This run has already read the message
+    once to decide it was an idea, so it takes it apart itself rather than handing that to another
+    task — but the idea is written down first, before anything else can fail.
     """
     source_kind, source_ref, context = _capture_context(rows)
     await store.set_block_kind(block.id, "idea")
@@ -535,7 +618,7 @@ async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> 
         block_id=block.id,
     )
     await store.finish_block(block.id, "")
-    runs.start(f"summary:{idea.id}", lambda: _summarise(store, idea))
+    await _write_ideas(store, block, idea, rows)
 
 
 def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
@@ -626,6 +709,7 @@ async def _classify_and_answer(
     about: str = "",
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
+    written: Sequence[str] = (),
 ) -> None:
     thread_id = block.thread_id
     if classify:
@@ -661,6 +745,7 @@ async def _classify_and_answer(
         history=earlier,
         about=about,
         transcripts=deep,
+        notes=written,
     )
     await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
 

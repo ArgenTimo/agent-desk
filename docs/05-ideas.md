@@ -7,16 +7,17 @@ Keeping it in your head costs the idea.
 
 ## The capture
 
-An input classified as an idea produces, in seconds, a card:
+An input classified as an idea produces, in seconds, a line per thought:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ Idea recorded                                              │
+│ Cache the probe results — recorded as an idea              │
+│                            [ Keep ] [ Discard ] [ Ticket ] │
+│ cache the probe results per project so onboarding does     │
+│ not re-run four API calls on every retry                   │
 │                                                            │
-│ Cache the tracker probe results per project so onboarding  │
-│ does not re-run four API calls on every retry.             │
-│                                                            │
-│ [ Keep ]  [ Edit ]  [ Discard ]        thread: onboarding  │
+│ Ports are still hardcoded — recorded as an idea            │
+│                            [ Keep ] [ Discard ] [ Ticket ] │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -27,9 +28,16 @@ thought would be the tool losing the thing it was built to keep.
 **Capture never asks a second question.** Keep or discard, one click. Anything more and the tool is
 competing with the run it was supposed to stay out of.
 
-That holds for one idea at a time, which is how they arrive when a human types them. A source that
-proposes twelve at once — a meeting transcript — is a review queue rather than a card, and the
-shape of that queue is an open question recorded in
+**One message can hold several thoughts.** "Add A, B is broken, and we should probably C" is one
+message and three ideas, and a person typing at speed does not stop to send three messages. So the
+message is written down *first*, whole, as one idea and before any model is asked anything — that
+is the guarantee, and the run is the part that can fail. A splitting run then either improves the
+summary of the one thought it found, or replaces it with the several it did. It never invents one
+that is not in the text, it never drops a part of what was written, and a card a human has already
+touched is left exactly as they left it.
+
+A source that proposes twelve at once — a meeting transcript — is still a review queue rather than
+a card, and the shape of that queue is an open question recorded in
 [`10-meeting-intake.md`](10-meeting-intake.md) rather than guessed at here.
 
 ## The inbox

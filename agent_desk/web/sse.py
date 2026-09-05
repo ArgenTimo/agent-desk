@@ -18,7 +18,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from agent_desk.config import settings
-from agent_desk.web.routes import render_blocks, render_board
+from agent_desk.web import routes
 
 router = APIRouter()
 
@@ -53,9 +53,14 @@ async def board_events() -> AsyncIterator[str]:
     previous: dict[str, str] = {}
     while True:
         pushed = False
+        # The groups are read every pass rather than once: a project somebody declares while the
+        # page is open must survive the next push. Without them the stream rendered an ungrouped
+        # board two seconds after the grouping appeared, and the grouping looked broken.
+        groups = await routes.store.groups()
         for name, html in (
-            ("board", await asyncio.to_thread(render_board)),
-            ("blocks", await render_blocks()),
+            ("board", await asyncio.to_thread(routes.render_board, groups)),
+            ("blocks", await routes.render_blocks()),
+            ("ideas", await routes.render_ideas()),
         ):
             if previous.get(name) != html:
                 previous[name] = html

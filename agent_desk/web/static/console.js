@@ -138,6 +138,47 @@ for (const handle of document.querySelectorAll('.gutter')) {
   });
 }
 
+/* --- what is folded shut ----------------------------------------------------------------------- */
+// The board is re-rendered from the server whenever it changes, and the server has no idea which
+// cards somebody folded shut — so without this, closing one and waiting two seconds opened it
+// again. Which cards are folded is a preference about this window, so it lives in this browser
+// beside the column widths and the order of the chats.
+const FOLDED = 'agent-desk:folded';
+let folded = new Set();
+
+try {
+  folded = new Set(JSON.parse(localStorage.getItem(FOLDED) || '[]'));
+} catch {
+  // A browser with storage switched off gets every card open, which is the default anyway.
+}
+
+function cardKey(card) {
+  return `${card.dataset.kind}:${card.dataset.id}`;
+}
+
+function applyFolded() {
+  for (const card of document.querySelectorAll('#board details[data-kind]')) {
+    card.open = !folded.has(cardKey(card));
+  }
+}
+
+// `toggle` does not bubble, so it is caught on the way down.
+document.addEventListener(
+  'toggle',
+  (event) => {
+    const card = event.target;
+    if (!card.dataset?.kind || !card.closest('#board')) return;
+    if (card.open) folded.delete(cardKey(card));
+    else folded.add(cardKey(card));
+    try {
+      localStorage.setItem(FOLDED, JSON.stringify([...folded]));
+    } catch {
+      // It still holds for this window.
+    }
+  },
+  true
+);
+
 /* --- the stream ------------------------------------------------------------------------------ */
 function checked() {
   lastChecked = Date.now();
@@ -169,6 +210,7 @@ stream.addEventListener('board', (event) => {
   if (event.data === lastBoard || document.body.classList.contains('dragging-card')) return;
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
+  applyFolded();
   const waiting = document.querySelectorAll('.node.session.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 });
@@ -184,6 +226,12 @@ stream.addEventListener('blocks', (event) => {
   // Only if they were already there. Yanking somebody back to the newest answer while they are
   // reading an older one is the same mistake as replacing the text under their cursor.
   if (wasAtBottom) out.scrollTop = out.scrollHeight;
+  checked();
+});
+stream.addEventListener('ideas', (event) => {
+  if (document.activeElement.closest('#idea-list')) return;
+  document.getElementById('idea-list').innerHTML = event.data;
+  if (window.htmx) htmx.process(document.getElementById('idea-list'));
   checked();
 });
 stream.addEventListener('heartbeat', checked);
@@ -514,6 +562,7 @@ document.getElementById('ask').addEventListener('submit', () => {
   setTimeout(clearPins, 0);
 });
 
+applyFolded();
 applyTabOrder();
 showActiveThread();
 out.scrollTop = out.scrollHeight;

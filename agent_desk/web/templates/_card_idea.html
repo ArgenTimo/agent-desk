@@ -1,0 +1,18 @@
+{# An idea, carried into the middle to ask about. What it contains is what was written and where
+   it came from — an idea's context is most of its meaning a week later (docs/05-ideas.md). #}
+{% if not idea %}
+<p class="empty small">that idea is not in the inbox any more</p>
+{% else %}
+<div class="card-detail">
+  <div class="card-line">
+    <span class="card-title">{{ idea.summary }}</span>
+    <span class="tiny">{{ idea.state }}</span>
+  </div>
+  <dl class="card-facts">
+    <dt>thought</dt>
+    <dd>{{ idea.text }}</dd>
+    <dt>from</dt>
+    <dd>{{ idea.source_kind }}{% for key, value in idea.context.items() %} · {{ key }}: {{ value }}{% endfor %}</dd>
+  </dl>
+</div>
+{% endif %}

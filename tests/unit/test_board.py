@@ -273,9 +273,10 @@ async def test_the_stream_pushes_the_board_and_then_stays_quiet(home: Home, wire
     assert all(line.startswith("data: ") for line in first.strip().splitlines()[1:])
     assert "example" in first
 
-    # The blocks channel is pushed once too, and then nothing changes — but the page is still told
-    # that somebody looked, because "quiet" and "gone" must not look alike.
+    # The other two channels are pushed once too, and then nothing changes — but the page is
+    # still told that somebody looked, because "quiet" and "gone" must not look alike.
     assert (await anext(events)).startswith("event: blocks")
+    assert (await anext(events)).startswith("event: ideas")
     second = await anext(events)
     assert second.startswith("event: heartbeat")
     assert "<article" not in second

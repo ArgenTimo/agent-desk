@@ -25,10 +25,44 @@
   {% endif %}
 
   {% if block.kind == "idea" and block.id in ideas %}
-  {# The card of docs/05-ideas.md. Keep or discard, one click, and never a second question. #}
-  {% set idea = ideas[block.id] %}
+  {# The cards of docs/05-ideas.md — one per thought, because one message can hold several. Keep
+     or discard, one click each, and never a second question. #}
   <div class="card">
-    <p class="recorded">Idea recorded. Keep it?</p>
+    {% for idea in ideas[block.id] %}
+    <div class="idea-line{% if idea.state != 'new' %} settled{% endif %}"
+         data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}" draggable="true">
+      <span class="idea-summary">{{ idea.summary }}</span>
+      <span class="idea-said">— recorded as an idea</span>
+      <span class="idea-buttons">
+        {% if idea.state == "new" %}
+        {# `from` travels as a form field rather than as a header, so the card works the same way
+           with htmx and without it — a header only htmx sends made Keep navigate to the inbox. #}
+        <form method="post" action="/ideas/{{ idea.id }}/keep"
+              hx-post="/ideas/{{ idea.id }}/keep" hx-target="#blocks">
+          <input type="hidden" name="from" value="card">
+          <button type="submit">Keep</button>
+        </form>
+        <form method="post" action="/ideas/{{ idea.id }}/drop"
+              hx-post="/ideas/{{ idea.id }}/drop" hx-target="#blocks">
+          <input type="hidden" name="from" value="card">
+          <button type="submit">Discard</button>
+        </form>
+        {% else %}
+        <span class="state">{{ idea.state }}</span>
+        {% endif %}
+        {# The ticket is written here, in this program's store, and a human carries it wherever it
+           goes. Nothing in the ideas module writes outside ~/.local/share/agent-desk/. It is
+           offered only once the idea has been kept: the step between a thought and a written
+           ticket is somebody deciding it is worth doing (docs/05-ideas.md). #}
+        {% if idea.state in ("kept", "promoted") %}
+        <form method="post" action="/ideas/{{ idea.id }}/ticket"
+              hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#blocks">
+          <input type="hidden" name="from" value="card">
+          <button type="submit" title="write it up as a ticket, in this tool">draft a ticket</button>
+        </form>
+        {% endif %}
+      </span>
+    </div>
     {# The summary is editable here, not only in the inbox: docs/04's action table gives an idea
        block `keep · discard · edit summary`, and docs/05 draws the card with all three. #}
     <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
@@ -36,7 +70,10 @@
       <input type="hidden" name="from" value="card">
       <input name="summary" value="{{ idea.summary }}" aria-label="the one-line summary">
     </form>
+    {% if idea.text != idea.summary %}
     <p class="verbatim">{{ idea.text }}</p>
+    {% endif %}
+    {% endfor %}
   </div>
   {% elif block.state in ("queued", "running") %}
   <div class="answer streaming">{{ partial.get(block.id, "") }}<span class="caret" aria-hidden="true">▍</span></div>
@@ -72,29 +109,12 @@
     <button type="button" class="attach" data-block="{{ block.id }}"
             title="carry this question and its answer into the next message">use as context</button>
     {% endif %}
-    {% if block.kind == "idea" and block.id in ideas %}
-    {% set idea = ideas[block.id] %}
-    {% if idea.state == "new" %}
-    {# `from` travels as a form field rather than as a header, so the card works the same way
-       with htmx and without it — a header only htmx sends made Keep navigate to the inbox. #}
-    <form method="post" action="/ideas/{{ idea.id }}/keep"
-          hx-post="/ideas/{{ idea.id }}/keep" hx-target="#blocks">
-      <input type="hidden" name="from" value="card">
-      <button type="submit">Keep</button>
-    </form>
-    <form method="post" action="/ideas/{{ idea.id }}/drop"
-          hx-post="/ideas/{{ idea.id }}/drop" hx-target="#blocks">
-      <input type="hidden" name="from" value="card">
-      <button type="submit">Discard</button>
-    </form>
-    {% else %}
-    <span class="state">{{ idea.state }}</span>
-    {% endif %}
+    {% if block.kind == "idea" %}
     <a class="as-button" href="/ideas">the inbox</a>
     <form method="post" action="/blocks/{{ block.id }}/delete"
           hx-post="/blocks/{{ block.id }}/delete" hx-target="#blocks">
-      {# The idea itself stays in the inbox; what goes is the message that captured it. #}
-      <button type="submit" class="danger" title="remove this message — the idea stays in the inbox">delete</button>
+      {# The ideas themselves stay in the inbox; what goes is the message that captured them. #}
+      <button type="submit" class="danger" title="remove this message — the ideas stay in the inbox">delete</button>
     </form>
     {% else %}
 

@@ -409,6 +409,9 @@ button[disabled] { opacity: 0.5; cursor: default; }
   padding: 10px 12px;
   margin: 10px 0;
 }
+/* The panel is the write path's, and it is red because that is what it is. The settings that
+   share the slot are not a message to anybody, and must not look like one. */
+#message:has(.settings) { border-color: var(--line-strong); }
 #message header { margin-bottom: 6px; color: var(--fg-soft); }
 #message .target { color: var(--fg); font-weight: 600; }
 #message textarea {
@@ -651,6 +654,29 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .drop-hint.standing { border-color: var(--focus); color: var(--fg-soft); }
 .drop-target { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: var(--radius); }
 
+.more {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  color: var(--fg-dim);
+  text-decoration: none;
+  line-height: 1;
+}
+.more:hover { color: var(--fg); background: var(--raised); }
+
+.settings header { margin-bottom: 8px; }
+.settings .links { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.settings .links li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.settings .links .dim { color: var(--fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.settings .links form { margin-left: auto; }
+.add-link { display: flex; gap: 6px; flex-wrap: wrap; }
+.add-link input {
+  flex: 1; min-width: 12ch; padding: 4px 8px; font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+.settings .dim { color: var(--fg-dim); }
+.settings footer { margin-top: 8px; }
+
 .new-project { display: flex; gap: 6px; padding: 8px 2px 0; }
 .new-project input {
   width: 100%; min-width: 0; padding: 4px 9px; font: inherit; font-size: 12px; color: var(--fg);
@@ -756,6 +782,47 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .hint { display: flex; gap: 6px; align-items: baseline; margin: 6px 0 0; font-size: 11px; color: var(--flag); }
 .hint .evidence { color: var(--fg-dim); }
 .message-link { display: inline-block; margin-top: 6px; font-size: 11px; }
+
+/* --- ideas, in the middle and on the right ------------------------------------------------------ */
+/* One line a thought, saying it was written down, with the two answers beside it. A message that
+   held three thoughts says it three times (docs/05-ideas.md). */
+.idea-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: grab;
+}
+.idea-summary { font-weight: 600; }
+.idea-said { color: var(--idle); font-size: 12px; }
+.idea-line.settled .idea-said { color: var(--fg-dim); }
+.idea-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.idea-buttons form { display: contents; }
+.idea-buttons button { min-height: 22px; padding: 1px 8px; font-size: 11px; }
+
+.col-head.second { margin-top: 10px; }
+.ideas-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 2px 4px;
+}
+.idea-card { cursor: grab; }
+.idea-card .card-head { cursor: grab; }
+.idea-card.kept { border-left: 3px solid var(--idle); }
+.idea-card.promoted { border-left: 3px solid var(--busy); }
+.idea-card.new { border-left: 3px solid var(--line-strong); }
+.idea-card .card-body { padding-bottom: 7px; }
+
+/* The blockers keep the top half and the ideas take the rest: two lists that both scroll, in one
+   column, neither of them able to push the other off the screen. */
+.blockers { flex: 0 1 auto; max-height: 40%; }
 
 /* --- the right column --------------------------------------------------------------------------- */
 /* Stubs, drawn as stubs. Nothing on disk says what is blocking a session, and a blocker this

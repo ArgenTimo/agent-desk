@@ -1,0 +1,48 @@
+{# The saved ideas, mirroring the cards on the other side of the window. Drag one into the middle
+   to ask about it; the buttons are the same three the inbox offers, because an idea is the same
+   idea wherever it is looked at (docs/05-ideas.md). #}
+{% if not ideas %}
+<p class="empty small">Nothing recorded yet. Type a thought into the field — or start it with
+  <span class="hint-key">/idea</span> — and it lands here.</p>
+{% endif %}
+
+{% for idea in ideas %}
+<div class="card idea-card {{ idea.state }}" data-kind="idea" data-id="{{ idea.id }}"
+     data-label="{{ idea.summary }}" draggable="true">
+  <div class="card-head">
+    <span class="dot {{ 'idle' if idea.state == 'kept' else 'busy' if idea.state == 'promoted' else '' }}"
+          aria-hidden="true"></span>
+    <span class="card-name" title="{{ idea.text }}">{{ idea.summary }}</span>
+    <span class="pill">{{ idea.state }}</span>
+  </div>
+  <div class="card-body">
+    <p class="last-line">{{ idea.context.get("project") or idea.context.get("projects") or "typed" }}</p>
+    <div class="idea-buttons">
+      {% if idea.state == "new" %}
+      <form method="post" action="/ideas/{{ idea.id }}/keep"
+            hx-post="/ideas/{{ idea.id }}/keep" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit">Keep</button>
+      </form>
+      {% endif %}
+      {% if idea.state != "dropped" %}
+      <form method="post" action="/ideas/{{ idea.id }}/drop"
+            hx-post="/ideas/{{ idea.id }}/drop" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit">Discard</button>
+      </form>
+      {% endif %}
+      {# Written here, in this program's store, and carried wherever it goes by a human. Nothing
+         in the ideas module writes outside ~/.local/share/agent-desk/. Offered once the idea has
+         been kept: that click is somebody deciding it is worth doing (docs/05-ideas.md). #}
+      {% if idea.state in ("kept", "promoted") %}
+      <form method="post" action="/ideas/{{ idea.id }}/ticket"
+            hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit" title="write it up as a ticket, in this tool">draft a ticket</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
