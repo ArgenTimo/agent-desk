@@ -1,22 +1,25 @@
-{# The saved ideas, mirroring the cards on the other side of the window. Drag one into the middle
-   to ask about it; the buttons are the same three the inbox offers, because an idea is the same
-   idea wherever it is looked at (docs/05-ideas.md). #}
-{% if not ideas %}
-<p class="empty small">Nothing recorded yet. Type a thought into the field — or start it with
-  <span class="hint-key">/idea</span> — and it lands here.</p>
-{% endif %}
+{# The saved ideas, mirroring the cards on the other side of the window: a group holds the
+   thoughts under it, the way a project holds checkouts.
 
-{% for idea in ideas %}
-<div class="card idea-card {{ idea.state }}" data-kind="idea" data-id="{{ idea.id }}"
-     data-label="{{ idea.summary }}" draggable="true">
-  <div class="card-head">
-    <span class="dot {{ 'idle' if idea.state == 'kept' else 'busy' if idea.state == 'promoted' else '' }}"
-          aria-hidden="true"></span>
+   Two things make a group. A message that held several thoughts keeps the message as the card and
+   hangs the thoughts under it, and a human who sees that four ideas are really one piece of work
+   says so by dragging one onto another. Drag one out onto the header to ungroup it.
+
+   Every card drags into the middle, where it becomes what the next question is about
+   (docs/05-ideas.md). #}
+{% macro card(idea, children) %}
+<details class="node card idea-card {{ idea.state }}" open
+         data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}"
+         data-drop="idea" draggable="true">
+  <summary class="card-head">
+    <span class="twist{% if not children[idea.id] %} leaf{% endif %}" aria-hidden="true"></span>
     <span class="card-name" title="{{ idea.text }}">{{ idea.summary }}</span>
-    <span class="pill">{{ idea.state }}</span>
-  </div>
+    {% if children[idea.id] %}<span class="pill">{{ children[idea.id] | length }}</span>{% endif %}
+    <span class="pill {{ idea.state }}">{{ idea.state }}</span>
+  </summary>
+
   <div class="card-body">
-    <p class="last-line">{{ idea.context.get("project") or idea.context.get("projects") or "typed" }}</p>
+    {% if idea.text != idea.summary %}<p class="last-line">{{ idea.text }}</p>{% endif %}
     <div class="idea-buttons">
       {% if idea.state == "new" %}
       <form method="post" action="/ideas/{{ idea.id }}/keep"
@@ -32,27 +35,48 @@
         <button type="submit">Discard</button>
       </form>
       {% endif %}
-      {# Written here, in this program's store, and carried wherever it goes by a human. Nothing
-         in the ideas module writes outside ~/.local/share/agent-desk/. Offered once the idea has
-         been kept: that click is somebody deciding it is worth doing (docs/05-ideas.md). #}
+      {# Written here, in this program's store, and carried wherever it goes by a human. Offered
+         once the idea has been kept: that click is somebody deciding it is worth doing
+         (docs/05-ideas.md). #}
       {% if idea.state in ("kept", "promoted") %}
       <form method="post" action="/ideas/{{ idea.id }}/ticket"
             hx-post="/ideas/{{ idea.id }}/ticket" hx-target="#idea-list">
         <input type="hidden" name="from" value="column">
         <button type="submit" title="write it up as a ticket, in this tool">draft a ticket</button>
       </form>
-    {% endif %}
-    {% if idea.id in filings %}
-    <a class="as-button" href="{{ filings[idea.id].url }}" target="_blank" rel="noreferrer noopener"
-       title="this idea is already an issue">{{ filings[idea.id].issue_key }}</a>
-    {% elif idea.id in drafted and idea.state in ("kept", "promoted") %}
-    {# The third of the three human acts docs/adr/0005 puts between a thought and an issue. It
-       opens the ticket in full beside where it would land; the button that sends it is there. #}
-    <a class="as-button" href="/ideas/{{ idea.id }}/file"
-       hx-get="/ideas/{{ idea.id }}/file" hx-target="#message"
-       title="read it once more, then file it">file it…</a>
-    {% endif %}
+      {% endif %}
+      {% if idea.id in filings %}
+      <a class="as-button" href="{{ filings[idea.id].url }}" target="_blank" rel="noreferrer noopener"
+         title="this idea is already an issue">{{ filings[idea.id].issue_key }}</a>
+      {% elif idea.id in drafted and idea.state in ("kept", "promoted") %}
+      <a class="as-button" href="/ideas/{{ idea.id }}/file"
+         hx-get="/ideas/{{ idea.id }}/file" hx-target="#message"
+         title="read it once more, then file it">file it…</a>
+      {% endif %}
     </div>
+
+    {% for child in children[idea.id] %}
+    {{ card(child, children) }}
+    {% endfor %}
+    <p class="drop-hint">drop an idea here to put it under this one</p>
   </div>
+</details>
+{% endmacro %}
+
+<div class="ideas-head">
+  <span class="tree-count">{{ counted }} idea{{ "" if counted == 1 else "s" }}</span>
+  {% if counted > (roots | length) %}
+  <span class="tree-count">{{ roots | length }} group{{ "" if roots | length == 1 else "s" }}</span>
+  {% endif %}
+  <span class="spacer"></span>
+  <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>
 </div>
+
+{% if not roots %}
+<p class="empty small">Nothing recorded yet. Type a thought into the field — or start it with
+  <span class="hint-key">/idea</span> — and it lands here.</p>
+{% endif %}
+
+{% for idea in roots %}
+{{ card(idea, children) }}
 {% endfor %}

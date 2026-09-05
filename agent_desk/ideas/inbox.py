@@ -44,6 +44,7 @@ async def capture(
     source_ref: str | None = None,
     context: dict[str, Any] | None = None,
     block_id: str | None = None,
+    parent_id: str | None = None,
 ) -> Idea:
     """Record the thought. No model call, no second question, no way to fail on a busy machine."""
     return await store.create_idea(
@@ -53,6 +54,7 @@ async def capture(
         source_ref=source_ref,
         context=context,
         block_id=block_id,
+        parent_id=parent_id,
     )
 
 

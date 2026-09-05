@@ -816,12 +816,33 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   gap: 6px;
   padding: 0 2px 4px;
 }
+.ideas-head {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 0 2px 6px;
+  font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+}
+.ideas-head .spacer { margin-left: auto; }
+/* Drag an idea onto this to take it out of whatever it was under. A target rather than a button,
+   because ungrouping is the same gesture as grouping, pointed somewhere else. */
+.ungroup {
+  padding: 2px 7px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  color: var(--fg-dim);
+}
+body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft); }
+
 .idea-card { cursor: grab; }
-.idea-card .card-head { cursor: grab; }
+.idea-card > .card-head { cursor: grab; }
 .idea-card.kept { border-left: 3px solid var(--idle); }
 .idea-card.promoted { border-left: 3px solid var(--busy); }
 .idea-card.new { border-left: 3px solid var(--line-strong); }
 .idea-card .card-body { padding-bottom: 7px; }
+/* A group holds its thoughts the way a project holds checkouts, and one indent says so. */
+.idea-card .idea-card { margin-left: 8px; background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
+.pill.kept { color: var(--idle); }
+.pill.promoted { color: var(--busy); }
+.idea-card .drop-hint { margin: 2px 0 0; }
 
 /* The blockers keep the top half and the ideas take the rest: two lists that both scroll, in one
    column, neither of them able to push the other off the screen. */

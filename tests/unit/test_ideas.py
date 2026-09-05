@@ -423,10 +423,11 @@ def splitter(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib
 
 @pytest.mark.unit
 async def test_one_message_can_hold_several_thoughts(desk: Store, splitter: pathlib.Path) -> None:
-    """ "Add A, and B is broken" is one message and two ideas, and both are written down.
+    """ "Add A, and B is broken" is one message and two ideas, and all three are written down.
 
     The whole message is recorded first, before any model is asked anything — that is the
-    guarantee — and the split replaces it only once it has something to replace it with.
+    guarantee — and it stays as the thing the two thoughts hang under, because it is one thing
+    somebody typed and several things they meant (docs/05-ideas.md).
     """
     block = await blocks.submit(
         desk, "/idea cache the probe results, and the ports are still hardcoded", []
@@ -437,18 +438,25 @@ async def test_one_message_can_hold_several_thoughts(desk: Store, splitter: path
     assert whole.text == "cache the probe results, and the ports are still hardcoded"
 
     async def split() -> bool:
-        return len(await desk.ideas()) == 2
+        return len(await desk.ideas()) == 3
 
     await _settle(split)
-    second, first = await desk.ideas()
+    second, first, message = await desk.ideas()
     assert first.text == "cache the probe results"
     assert second.text == "the ports are still hardcoded"
-    # Both belong to the message that captured them, and the placeholder is gone.
+    # The two hang under the message, and the message is the one that was typed.
+    assert message.id == whole.id
+    assert message.parent_id is None
+    assert {idea.parent_id for idea in (first, second)} == {whole.id}
     assert {idea.block_id for idea in (first, second)} == {block.id}
-    assert whole.id not in {idea.id for idea in (first, second)}
 
     card = await routes.render_blocks()
-    assert card.count("recorded as an idea") == 2
+    assert card.count("recorded as an idea") == 3
+
+    # And the column shows one group with two under it, rather than three cards in a row.
+    column = await routes.render_ideas()
+    assert column.count('data-kind="idea"') == 3
+    assert "3 ideas" in column and "1 group" in column
 
 
 @pytest.mark.unit
@@ -539,3 +547,41 @@ async def test_the_settings_panel_has_nowhere_to_type_a_token(desk: Store) -> No
     assert 'type="password"' not in panel
     assert "never typed here and never stored" in panel
     assert "https://example.invalid" in panel
+
+
+@pytest.mark.unit
+async def test_ideas_can_be_grouped_by_hand_and_never_into_a_loop(desk: Store) -> None:
+    """A human who sees that two ideas are one piece of work says so by dragging one onto the
+    other. What the store refuses is the shape that would render forever."""
+    one = await desk.create_idea(text_="the api half", summary="the api half", source_kind="typed")
+    two = await desk.create_idea(text_="the app half", summary="the app half", source_kind="typed")
+    three = await desk.create_idea(text_="a third", summary="a third", source_kind="typed")
+
+    assert await desk.set_idea_parent(two.id, one.id) is True
+    assert await desk.set_idea_parent(three.id, two.id) is True
+
+    # Its own parent, its child's parent, its grandchild's parent — each would be a cycle.
+    assert await desk.set_idea_parent(one.id, one.id) is False
+    assert await desk.set_idea_parent(one.id, two.id) is False
+    assert await desk.set_idea_parent(one.id, three.id) is False
+
+    # And out of the group again.
+    assert await desk.set_idea_parent(two.id, None) is True
+    fresh = {idea.id: idea for idea in await desk.ideas()}
+    assert fresh[two.id].parent_id is None
+    assert fresh[three.id].parent_id == two.id
+
+
+@pytest.mark.unit
+async def test_a_child_whose_group_was_discarded_is_shown_rather_than_hidden(desk: Store) -> None:
+    """An idea that vanished from the inbox is the one failure this module has."""
+    parent = await desk.create_idea(text_="the message", summary="the message", source_kind="typed")
+    child = await desk.create_idea(
+        text_="a thought", summary="a thought", source_kind="typed", parent_id=parent.id
+    )
+    await desk.set_idea_state(parent.id, "dropped")
+
+    column = await routes.render_ideas()
+
+    assert child.id in column
+    assert parent.id not in column

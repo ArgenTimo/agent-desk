@@ -139,6 +139,9 @@ class Idea(BaseModel):
     source_ref: str | None
     context: dict[str, Any]
     created_at: int
+    # The idea this one is part of, when a message held several thoughts or a human said two
+    # ideas are one piece of work (docs/05-ideas.md).
+    parent_id: str | None = None
 
 
 class Viewer(BaseModel):
@@ -769,10 +772,12 @@ class Store:
         source_ref: str | None = None,
         context: dict[str, Any] | None = None,
         block_id: str | None = None,
+        parent_id: str | None = None,
     ) -> Idea:
         idea = Idea(
             id=_new_id(),
             block_id=block_id,
+            parent_id=parent_id,
             text=text_,
             summary=summary,
             state="new",
@@ -785,8 +790,9 @@ class Store:
             await conn.execute(
                 text(
                     "INSERT INTO idea (id, block_id, text, summary, state, source_kind, "
-                    "source_ref, context, created_at) VALUES (:id, :block_id, :text, :summary, "
-                    ":state, :source_kind, :source_ref, :context, :created_at)"
+                    "source_ref, context, created_at, parent_id) VALUES (:id, :block_id, :text, "
+                    ":summary, :state, :source_kind, :source_ref, :context, :created_at, "
+                    ":parent_id)"
                 ),
                 {**idea.model_dump(exclude={"context"}), "context": json.dumps(idea.context)},
             )
@@ -845,19 +851,44 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at FROM idea "
+                    "context, created_at, parent_id FROM idea "
                     "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
                 ),
                 {"state": state, "limit": limit},
             )
             return [self._idea(row._mapping) for row in rows]
 
+    async def set_idea_parent(self, idea_id: str, parent_id: str | None) -> bool:
+        """Put one idea under another, or take it back out. `False` when it would make a loop.
+
+        A parent that is its own descendant renders forever, so the walk happens here rather than
+        in the template that would hang on it.
+        """
+        if parent_id == idea_id:
+            return False
+        if parent_id is not None:
+            seen = {idea_id}
+            walking: str | None = parent_id
+            while walking is not None:
+                if walking in seen:
+                    return False
+                seen.add(walking)
+                above = await self.idea(walking)
+                walking = above.parent_id if above else None
+
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET parent_id = :parent_id WHERE id = :id"),
+                {"parent_id": parent_id, "id": idea_id},
+            )
+        return True
+
     async def idea(self, idea_id: str) -> Idea | None:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at FROM idea WHERE id = :id"
+                    "context, created_at, parent_id FROM idea WHERE id = :id"
                 ),
                 {"id": idea_id},
             )

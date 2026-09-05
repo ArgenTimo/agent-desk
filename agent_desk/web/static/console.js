@@ -500,7 +500,9 @@ document.addEventListener('dragend', (event) => {
 function zoneOf(event) {
   // The output and the staging area under it are one target: dropping a card anywhere in the
   // middle means "this is what the next message is about".
-  return event.target.closest('#out, #pins, [data-drop="project"]');
+  return event.target.closest(
+    '#out, #pins, [data-drop="project"], [data-drop="idea"], [data-drop="ungroup"]'
+  );
 }
 
 document.addEventListener('dragover', (event) => {
@@ -524,6 +526,23 @@ document.addEventListener('drop', (event) => {
     document.getElementById('ask-text').focus();
     return;
   }
+
+  // One idea onto another: they are one piece of work, and somebody just said so. Onto the header
+  // instead: take it back out of whatever it was under.
+  const grouping = zone.dataset.drop === 'idea' || zone.dataset.drop === 'ungroup';
+  if (grouping && dragged.kind === 'idea') {
+    const parent = zone.dataset.drop === 'idea' ? zone.dataset.id : '';
+    if (parent === dragged.id) return;
+    fetch(`/ideas/${encodeURIComponent(dragged.id)}/parent`, {
+      method: 'POST',
+      headers: { 'HX-Request': 'true' },
+      body: new URLSearchParams({ parent }),
+    })
+      .then((response) => (response.ok ? response.text() : null))
+      .then((html) => { if (html) document.getElementById('idea-list').innerHTML = html; });
+    return;
+  }
+  if (grouping) return;
 
   // Onto a project card: what travels is the repository the dragged card belongs to.
   const into = zone.dataset.project;

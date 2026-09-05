@@ -267,6 +267,9 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
     if current is None or current.state != "new" or current.summary != whole.summary:
         return
 
+    # The message stays, and the thoughts hang under it. It is one thing somebody typed and
+    # several things they meant, and a week later "what was I saying" reads as the first rather
+    # than as three fragments in a row (docs/05-ideas.md).
     source_kind, source_ref, context = _capture_context(rows)
     for part in parts:
         await inbox.capture(
@@ -276,9 +279,8 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
             source_ref=source_ref,
             context=context,
             block_id=block.id,
+            parent_id=whole.id,
         )
-    # Last, so that there is never a moment when the message has no idea against it at all.
-    await store.delete_idea(whole.id)
 
 
 async def _summarise(store: Store, idea: Idea) -> None:

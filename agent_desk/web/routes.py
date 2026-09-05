@@ -367,8 +367,20 @@ async def render_ideas() -> str:
     notebook is for — but a column somebody glances at is about what is still live.
     """
     ideas = [idea for idea in await store.ideas() if idea.state != "dropped"]
+    known = {idea.id for idea in ideas}
+    children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
+    roots: list[Idea] = []
+    for idea in reversed(ideas):  # oldest first inside a group, which is the order they arrived
+        # A child whose parent was discarded is shown at the top rather than hidden under a card
+        # nobody can see: an idea that vanished from the inbox is the one failure here.
+        if idea.parent_id in known:
+            children[idea.parent_id].append(idea)
+        else:
+            roots.append(idea)
     return env.get_template("_ideas.html").render(
-        ideas=ideas[:40],
+        roots=list(reversed(roots)),
+        children=children,
+        counted=len(ideas),
         drafted=await store.drafted("ticket"),
         filings={filing.idea_id: filing for filing in await store.filings()},
     )
@@ -737,6 +749,20 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.post("/ideas/{idea_id}/parent", response_class=HTMLResponse)
+async def group_idea(idea_id: str, request: Request) -> Response:
+    """Put one idea under another, or take it out of its group.
+
+    Reached by dragging one card onto another, which is the same gesture that carries a card into
+    the middle — the difference is where it lands. An empty `parent` ungroups.
+    """
+    parent = (await _form(request)).get("parent", "").strip()
+    await store.set_idea_parent(idea_id, parent or None)
+    if _wants_fragment(request):
+        return HTMLResponse(await render_ideas())
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/directives/{directive_id}/dispatch", response_class=HTMLResponse)
