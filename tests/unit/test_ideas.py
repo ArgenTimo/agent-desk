@@ -777,3 +777,38 @@ async def test_discarding_an_idea_writes_nothing(desk: Store, fake_claude: pathl
     await _settle(nothing_running)
 
     assert await desk.drafts_for(idea.id) == []
+
+
+@pytest.mark.unit
+async def test_one_idea_can_be_said_to_need_another(desk: Store, fake_claude: pathlib.Path) -> None:
+    """Grouping says "this is part of that". These two say what it cannot: a dependency between
+    whole ideas, and a pair whose combination is worth more than either (024-idea-links.sql)."""
+    first = await desk.create_idea(text_="the parser", summary="the parser", source_kind="typed")
+    second = await desk.create_idea(text_="the cache", summary="the cache", source_kind="typed")
+
+    await _card_post("/ideas/link", {"from_id": second.id, "to_id": first.id, "kind": "needs"})
+
+    (link,) = await desk.idea_links()
+    assert (link.from_id, link.to_id, link.kind) == (second.id, first.id, "needs")
+
+    column = await routes.render_ideas()
+    assert "needs" in column and "the parser" in column
+
+    await _card_post("/ideas/link", {"drop": link.id})
+    assert await desk.idea_links() == []
+
+
+@pytest.mark.unit
+async def test_an_idea_cannot_need_itself_and_a_link_is_stored_once(desk: Store) -> None:
+    """Both are a misclick rather than something to store."""
+    idea = await desk.create_idea(text_="one", summary="one", source_kind="typed")
+    other = await desk.create_idea(text_="two", summary="two", source_kind="typed")
+
+    assert await desk.link_ideas(from_id=idea.id, to_id=idea.id, kind="needs") is None
+    await desk.link_ideas(from_id=idea.id, to_id=other.id, kind="needs")
+    await desk.link_ideas(from_id=idea.id, to_id=other.id, kind="needs")
+
+    assert len(await desk.idea_links()) == 1
+    # The same pair related a different way is a different statement, and both are kept.
+    await desk.link_ideas(from_id=idea.id, to_id=other.id, kind="touches")
+    assert len(await desk.idea_links()) == 2

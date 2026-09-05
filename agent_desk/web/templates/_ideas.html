@@ -81,6 +81,51 @@
       {% endif %}
     </div>
 
+    {# What it needs, and what needs it. Not the same thing as a sub-idea: both of these are
+       whole ideas, and either could be built by somebody who never heard of the other
+       (024-idea-links.sql). #}
+    {% set needs = links | selectattr("from_id", "equalto", idea.id) | list %}
+    {% set needed_by = links | selectattr("to_id", "equalto", idea.id) | list %}
+    {% if needs or needed_by %}
+    <ul class="idea-links">
+      {% for link in needs %}
+      <li>
+        <span class="link-kind {{ link.kind }}">{{ "needs" if link.kind == "needs" else "with" }}</span>
+        {{ named.get(link.to_id, "an idea that has gone") }}
+        <form method="post" action="/ideas/link" hx-post="/ideas/link" hx-target="#idea-list">
+          <input type="hidden" name="drop" value="{{ link.id }}">
+          <button type="submit" title="forget this link">×</button>
+        </form>
+      </li>
+      {% endfor %}
+      {% for link in needed_by %}
+      <li class="dim">
+        <span class="link-kind {{ link.kind }}">{{ "needed by" if link.kind == "needs" else "with" }}</span>
+        {{ named.get(link.from_id, "an idea that has gone") }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <details class="more link-form">
+      <summary>say what this one depends on</summary>
+      <form method="post" action="/ideas/link" hx-post="/ideas/link" hx-target="#idea-list">
+        <input type="hidden" name="from_id" value="{{ idea.id }}">
+        <label class="visually-hidden" for="kind-{{ idea.id }}">how they relate</label>
+        <select id="kind-{{ idea.id }}" name="kind">
+          <option value="needs">this one needs…</option>
+          <option value="touches">together with… they make a third thing</option>
+        </select>
+        <label class="visually-hidden" for="to-{{ idea.id }}">which idea</label>
+        <select id="to-{{ idea.id }}" name="to_id">
+          {% for other in roots %}{% if other.id != idea.id %}
+          <option value="{{ other.id }}">{{ other.summary[:60] }}</option>
+          {% endif %}{% endfor %}
+        </select>
+        <button type="submit">link them</button>
+      </form>
+    </details>
+
     {% for child in children[idea.id] %}
     {{ card(child, children) }}
     {% endfor %}
@@ -108,6 +153,7 @@
     </select>
     <button type="submit" class="visually-hidden">order them</button>
   </form>
+  <a class="map-link" href="/ideas/map" title="the whole pool at once, with what depends on what">the map</a>
   <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>
 </div>
 

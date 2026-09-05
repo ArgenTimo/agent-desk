@@ -136,3 +136,34 @@ able to tell a standing preference from the task it was given, and a heading is 
 
 Splitting it into fields was rejected. It is prose nobody has written yet, and a schema invented
 ahead of the prose is a schema the prose then has to fit.
+
+## How one idea relates to another
+
+Grouping — dragging one card onto another — says *this is part of that*, and the pool has had it
+since the beginning. Two things it cannot say, and both are worth recording:
+
+**`needs`** — a dependency between two whole ideas. Either could be built by somebody who never
+heard of the other; doing them in the wrong order is wasted work. That is not a sub-idea, and
+filing it as one loses the fact that they are two.
+
+**`touches`** — a pair that each work exactly as described on their own, and together produce
+something neither of them describes. That third thing is the reason the link is worth having: it
+is invisible in a flat list, and it is usually the most valuable thing in the pool.
+
+Both are directed, because both are asymmetric — A needs B is not B needs A — and a pair is stored
+once and read from both ends.
+
+### The map
+
+[`/ideas/map`](../agent_desk/ideas/chart.py) draws the whole pool at once: an arrow from an idea to
+the one it needs, a dashed line for a pair that makes a third thing, and every node one column to
+the right of everything it depends on, so dependencies read right to left.
+
+**What is built stays on it, dimmed and ticked.** A map of only the outstanding work is a map of
+half the shape, and the half it drops is the half that explains the rest.
+
+It is laid out in Python and rendered as inline SVG. There is no JavaScript build step here
+([`adr/0003`](adr/0003-sqlite-and-one-process.md)) and a graph library is exactly the kind of thing
+that arrives with one. The layout is not general — it is right for a few dozen thoughts with a
+handful of dependencies each, and it degrades into one tall column rather than into nonsense when
+there are no links at all.

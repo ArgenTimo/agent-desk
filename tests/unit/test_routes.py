@@ -1161,3 +1161,29 @@ async def test_a_session_that_stopped_signing_is_flagged_and_never_closed_for_it
     assert "has stopped signing" in board
     # A session nobody told to sign is never flagged for not signing.
     assert routes.signed(object(), "") is True
+
+
+@pytest.mark.unit
+async def test_the_map_draws_the_whole_pool_including_what_is_built(
+    home: Home, desk: Store
+) -> None:
+    """A list cannot show the thing that makes the links worth recording, and half the shape of a
+    pool is what is already there."""
+    first = await desk.create_idea(text_="the parser", summary="the parser", source_kind="typed")
+    second = await desk.create_idea(text_="the cache", summary="the cache", source_kind="typed")
+    built = await desk.create_idea(text_="hotkeys", summary="hotkeys", source_kind="typed")
+    await desk.set_idea_state(built.id, "done")
+    gone = await desk.create_idea(text_="never mind", summary="never mind", source_kind="typed")
+    await desk.set_idea_state(gone.id, "dropped")
+    await desk.link_ideas(from_id=second.id, to_id=first.id, kind="needs")
+
+    status, page = await _get("/ideas/map")
+
+    assert status == 200
+    assert "<svg" in page
+    assert "the parser" in page and "the cache" in page
+    # What is built is drawn, and drawn differently.
+    assert "hotkeys" in page
+    assert "node done built" in page
+    # What was discarded is not: the map is the pool, and a discarded thought left it.
+    assert "never mind" not in page

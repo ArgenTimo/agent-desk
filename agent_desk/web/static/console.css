@@ -1195,3 +1195,41 @@ body.stale .col-left { opacity: 0.55; }
   text-align: left;
 }
 .chip.choice:hover { background: color-mix(in srgb, var(--focus) 18%, transparent); }
+
+/* --- what depends on what ---------------------------------------------------------------- */
+.idea-links { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.idea-links li { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-soft); }
+.idea-links li form { margin-left: auto; }
+.link-kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-dim);
+}
+/* A dependency is a hard edge; a pair that makes a third thing is a soft one. The same two
+   weights the map draws them with, so the column and the picture agree. */
+.link-kind.needs { border-color: var(--focus); color: var(--focus); }
+.link-kind.touches { border-style: dashed; }
+.link-form > summary { cursor: pointer; font-size: 11px; color: var(--fg-dim); margin-top: 4px; }
+.link-form form { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.link-form select { font: inherit; font-size: 11px; max-width: 100%; }
+.map-link { font-size: 11px; }
+
+/* --- the pool as a picture (agent_desk/ideas/chart.py) ------------------------------------ */
+.map-scroll { overflow: auto; padding: 12px; }
+svg.map { display: block; color: var(--fg-dim); }
+svg.map .edge { stroke: var(--focus); stroke-width: 1.5; opacity: 0.75; color: var(--focus); }
+svg.map .edge.touches { stroke-dasharray: 4 4; stroke: var(--fg-dim); color: var(--fg-dim); opacity: 0.6; }
+svg.map .node rect { fill: var(--surface); stroke: var(--line-strong); }
+svg.map .node text { fill: var(--fg); font-size: 11px; }
+svg.map .node text.second { fill: var(--fg-dim); font-size: 10px; }
+/* What is built stays on the map and says so: half the shape of a pool is what is already
+   there, and a map that dropped it would be a map of the work that is left. */
+svg.map .node.built rect { fill: color-mix(in srgb, var(--busy) 10%, var(--surface)); stroke: var(--busy); stroke-dasharray: 3 3; }
+svg.map .node.built text { fill: var(--fg-dim); }
+svg.map .node.built text.tick { fill: var(--busy); font-size: 13px; }
+svg.map a:hover .node rect { stroke: var(--focus); }
+.page-head { padding: 16px 16px 8px; }
+.page-head h1 { margin: 0 0 4px; font-size: 18px; }

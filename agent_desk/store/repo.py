@@ -299,6 +299,21 @@ class Idea(BaseModel):
     appraised_at: int | None = None
 
 
+LinkKind = Literal["needs", "touches"]
+
+
+class IdeaLink(BaseModel):
+    """One idea's relation to another, when it is not a sub-idea of it (024-idea-links.sql)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    from_id: str
+    to_id: str
+    kind: LinkKind
+    created_at: int
+
+
 class Viewer(BaseModel):
     """A person who may open the shared ideas list, and nothing else (docs/07-security.md)."""
 
@@ -1494,6 +1509,37 @@ class Store:
                 ),
                 {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
             )
+
+    # --- how ideas relate to each other (024-idea-links.sql) ----------------------------------
+    async def link_ideas(self, *, from_id: str, to_id: str, kind: LinkKind) -> IdeaLink | None:
+        """Record that one idea needs, or touches, another.
+
+        Refuses a link from an idea to itself, and refuses one that is already there — both are a
+        misclick rather than something to store twice.
+        """
+        if from_id == to_id or not from_id or not to_id:
+            return None
+        row = IdeaLink(id=_new_id(), from_id=from_id, to_id=to_id, kind=kind, created_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO idea_link (id, from_id, to_id, kind, created_at) "
+                    "VALUES (:id, :from_id, :to_id, :kind, :created_at)"
+                ),
+                row.model_dump(),
+            )
+        return row
+
+    async def idea_links(self) -> list[IdeaLink]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, from_id, to_id, kind, created_at FROM idea_link ORDER BY id")
+            )
+            return [IdeaLink(**row._mapping) for row in rows]
+
+    async def unlink_ideas(self, link_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM idea_link WHERE id = :id"), {"id": link_id})
 
     # --- the signature an instance was told to keep (023-canary.sql) --------------------------
     async def keep_canary(self, short_id: str, name: str) -> None:

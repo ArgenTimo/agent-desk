@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>the map · agent-desk</title>
+  <link rel="stylesheet" href="/static/console.css">
+</head>
+<body class="page">
+<header class="page-head">
+  <h1>the map</h1>
+  <p class="dim">What depends on what. An arrow points from an idea to the one it needs, so
+    dependencies read right to left; a dashed line is a pair that works separately and produces
+    something else together. What is built stays on the map, dimmed — half the shape of a pool is
+    what is already there.</p>
+  <nav><a href="/">the board</a> · <a href="/ideas">the inbox</a></nav>
+</header>
+
+{% if chart.empty %}
+<p class="empty">Nothing to draw yet. Ideas appear here as they are written down, and the lines
+  appear when you say one needs another.</p>
+{% else %}
+<div class="map-scroll">
+  <svg class="map" width="{{ chart.width }}" height="{{ chart.height }}"
+       viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img"
+       aria-label="the ideas and how they depend on each other">
+    <defs>
+      <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+
+    {# Lines first, so a box always sits on top of the line that reaches it. #}
+    {% for edge in chart.edges %}
+    <path class="edge {{ edge.kind }}"
+          d="M {{ edge.x1 }} {{ edge.y1 }} C {{ edge.x1 - 40 }} {{ edge.y1 }}, {{ edge.x2 + 40 }} {{ edge.y2 }}, {{ edge.x2 }} {{ edge.y2 }}"
+          marker-end="url(#arrow)" fill="none"></path>
+    {% endfor %}
+
+    {% for node in chart.nodes %}
+    <a href="/cards/idea?id={{ node.idea.id }}">
+      <g class="node {{ node.idea.state }}{{ ' built' if node.done else '' }}">
+        <rect x="{{ node.x }}" y="{{ node.y }}" width="{{ width }}" height="{{ height }}"
+              rx="5"></rect>
+        <text x="{{ node.x + 9 }}" y="{{ node.y + 18 }}">{{ node.idea.summary[:26] }}</text>
+        <text class="second" x="{{ node.x + 9 }}" y="{{ node.y + 32 }}">
+          {{ node.idea.summary[26:52] or node.idea.state }}</text>
+        {% if node.done %}<text class="tick" x="{{ node.x + width - 16 }}" y="{{ node.y + 18 }}">✓</text>{% endif %}
+      </g>
+    </a>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
+</body>
+</html>

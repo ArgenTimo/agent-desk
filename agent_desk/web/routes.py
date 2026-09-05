@@ -31,7 +31,7 @@ from markupsafe import Markup, escape
 from agent_desk import dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
-from agent_desk.ideas import appraise
+from agent_desk.ideas import appraise, chart
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -565,6 +565,11 @@ async def render_ideas() -> str:
         sorted_by=how,
         # The words the pass's two answers are shown as, in one place rather than in the template.
         says=appraise.SAYS,
+        # What depends on what (024-idea-links.sql). Read with the column: it is a handful of
+        # rows, and a card that fetched its own links would be a card that flickers.
+        links=await store.idea_links(),
+        # Their summaries, so a link can name the idea at the other end of it.
+        named={idea.id: idea.summary for idea in ideas},
         counted=len(ideas),
         # A root with nothing under it is an idea, not a group of one.
         grouped=len([idea for idea in ideas if children.get(idea.id)]),
@@ -1164,6 +1169,49 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.get("/ideas/map", response_class=HTMLResponse)
+async def idea_map() -> HTMLResponse:
+    """The pool as a picture (agent_desk/ideas/chart.py).
+
+    A page of its own rather than a column: it is the whole pool at once, which is the opposite of
+    what the column is for. Everything that is not discarded is on it, including what is built —
+    half the shape of a pool is what is already there.
+    """
+    ideas = [idea for idea in await store.ideas(limit=400) if idea.state != "dropped"]
+    return HTMLResponse(
+        env.get_template("map.html").render(
+            chart=chart.lay_out(ideas, await store.idea_links()),
+            width=chart.BOX_WIDTH,
+            height=chart.BOX_HEIGHT,
+        )
+    )
+
+
+@router.post("/ideas/link", response_class=HTMLResponse)
+async def link_ideas(request: Request) -> Response:
+    """Say that one idea needs another, or that the two of them together make a third thing.
+
+    Grouping already says "this is part of that" (`parent_id`). These two say what it cannot: a
+    dependency between whole ideas, and a pair whose combination is worth more than either
+    (024-idea-links.sql).
+    """
+    form = await _form(request)
+    drop = form.get("drop", "").strip()
+    if drop:
+        await store.unlink_ideas(drop)
+    else:
+        kind = form.get("kind", "needs").strip()
+        await store.link_ideas(
+            from_id=form.get("from_id", "").strip(),
+            to_id=form.get("to_id", "").strip(),
+            kind="touches" if kind == "touches" else "needs",
+        )
+    panel = await render_ideas()
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
 
 
 @router.post("/ideas/sort", response_class=HTMLResponse)
