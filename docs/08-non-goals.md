@@ -98,3 +98,24 @@ A row expands to a tail. That is the drill-down.
 **Assumption to test:** how often expanding the tail is followed by switching to the terminal
 anyway. If it is rare, the tail is enough; if it is always, the board is missing the thing that
 would have answered the question.
+
+
+## Routing around a refusal
+
+One idea in the pool asks for local models to be integrated so that a request can be **re-sent to a
+local model when Claude declines to answer on ethical grounds**.
+
+The first half is ordinary and may well get built one day: running a cheap local model for the
+small classifications this console makes all the time — what kind of line was typed, which ideas a
+request touches — would cost nothing per call and would keep working when the network does not.
+Routing on *availability* is the same kind of decision as any other fallback.
+
+The second half is not, and it is not a matter of degree. A refusal is an answer. Machinery whose
+purpose is to take a request that was declined and put it somewhere that will not decline it is
+machinery for getting around the judgement rather than for getting an answer — and it does not
+become something else because it is built into a tool that mostly does other things. It is not
+built here and it will not be.
+
+Nothing about that limits the useful half. Availability routing — a rate limit, an outage, a model
+that is simply slower than the job needs — is a different trigger with a different reason, and it
+is welcome whenever somebody wants it enough to run a local model to test it against.

@@ -91,3 +91,10 @@ is a tool with a rotation policy and an audit trail, and that is a different pro
 The import-graph test, extended: `agent_desk/tracker/` joins `agent_desk/peer.py` as a module only
 `web/` may import. Both are doors out of this program, both are opened by a click, and the test is
 what keeps that true after the first hurried afternoon.
+
+
+## Amended by 0010
+
+The refusal to read a tracker *back* was written here as a corollary rather than argued, because
+nobody had asked for it. [0010](0010-reading-a-tracker-back.md) argues it, and narrows it: this
+document's reasoning is about *writing*, and none of it reaches reading. The door out is unchanged.
