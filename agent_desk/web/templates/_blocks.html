@@ -199,6 +199,14 @@
     </form>
     {% else %}
 
+    {# The run that decides what a message is can be wrong, and the cost of it being wrong is a
+       worktree. So the correction is one click on the block that got it, and it does not ask
+       anybody to retype what they said (docs/04-threads-and-blocks.md). #}
+    <form method="post" action="/blocks/{{ block.id }}/as-idea"
+          hx-post="/blocks/{{ block.id }}/as-idea" hx-target="#blocks">
+      <button type="submit" title="this was a thought, not an instruction">record as an idea</button>
+    </form>
+
     <form method="post" action="/blocks/{{ block.id }}/delete"
           hx-post="/blocks/{{ block.id }}/delete" hx-target="#blocks">
       <button type="submit" class="danger" title="throw this message away">delete</button>

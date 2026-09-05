@@ -1156,3 +1156,34 @@ async def test_a_second_instruction_waits_for_the_seat_rather_than_taking_anothe
     assert [task.title for task in waiting] == ["and then check the ports"]
     column = await routes.render_blocks()
     assert "Start it now" in column
+
+
+@pytest.mark.unit
+async def test_a_message_read_as_the_wrong_kind_is_corrected_in_one_click(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run that reads what was typed can be wrong, and what it costs is a worktree.
+
+    So the correction is a button on the block itself: the thought is recorded, and whatever was
+    started keeps its own separate button to stop it.
+    """
+    from agent_desk import dispatch
+
+    monkeypatch.setattr(
+        dispatch, "start", lambda instruction, *, cwd, name: dispatch.Started(True, agent_id="a1")
+    )
+    monkeypatch.setenv("KIND", "do")
+    block = await blocks.submit(
+        desk, "сделать так, чтобы сервис подключался к любому проекту", [make_row("alpha", "main")]
+    )
+    assert await _settled(desk, block.id) == "answered"
+    assert await desk.ideas() == []
+
+    status, column, _ = await _post(f"/blocks/{block.id}/as-idea", {}, htmx=True)
+
+    assert status == 200
+    after = await desk.block(block.id)
+    assert after is not None and after.kind == "idea"
+    (idea,) = await desk.ideas()
+    assert idea.text == "сделать так, чтобы сервис подключался к любому проекту"
+    assert "recorded as an idea" in column

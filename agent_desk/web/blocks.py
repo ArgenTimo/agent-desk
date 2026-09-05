@@ -582,7 +582,7 @@ async def _work(
     try:
         kind = await classifier.kind(block.input)
         if kind == "idea":
-            await _record_idea(store, block, rows)
+            await record_idea(store, block, rows)
             return
         if kind == "instruction":
             await _prepare_directive(store, block, rows)
@@ -606,7 +606,7 @@ async def _work(
         raise
 
 
-async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+async def record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
     docs/05-ideas.md is explicit that capture ends here. This run has already read the message

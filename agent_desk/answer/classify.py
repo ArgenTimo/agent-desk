@@ -107,16 +107,43 @@ _KIND_OF = {"question": "question", "idea": "idea", "do": "instruction"}
 
 
 def kind_prompt(text: str) -> str:
+    """What was typed, and the one boundary that is hard to draw.
+
+    `idea` against `do` is the whole difficulty, and it is not a matter of grammar: in Russian and
+    in English alike, a wish about the product is usually phrased as a command. "Make the service
+    easy to attach to any project" is a thought about what should exist; "tell Biba to run the
+    tests" is somebody being asked to act now. The rule below is the only one that separates them
+    reliably — a `do` has an addressee, or it says outright to start.
+
+    The asymmetry matters because the costs are not equal. A thought recorded as an instruction
+    starts an agent in a worktree and takes somebody's attention; an instruction recorded as a
+    thought sits in the pool until it is clicked. So the doubtful case is an idea.
+    """
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
             "Say which of three things it is. One token, nothing else:",
             "",
-            '  question — they want to know something. "what did the migration do"',
-            '  idea     — a thought to keep, not a request. "idea: cache the probe results"',
-            '  do       — they are telling an agent to do something. "tell Biba to test it again"',
+            "  question — they want to know something.",
+            '             "what did the migration end up doing", "какие сессии сейчас заняты"',
+            "  idea     — they are describing something that should exist, or work differently.",
+            "             Any wish, proposal, complaint or requirement about the product —",
+            "             *even when it is phrased as a command*.",
+            '             "cache the probe results", "сделать так, чтобы сервис подключался',
+            '             к любому проекту", "добавить экспорт в CSV", "при внесении идей',
+            '             сперва проверять, не под-идея ли это"',
+            "  do       — they are telling a named agent, session or project to act, now.",
+            '             "tell Biba to run the tests again", "бери в работу", "запусти',
+            '             проверку в agent-desk", "сделай это сейчас"',
             "",
-            "When it is not clearly one of idea or do, answer question.",
+            "The line between `idea` and `do` is the only hard one, and it is this: **`do` needs an",
+            "addressee, or an explicit instruction to start now.** A session's name, \"this",
+            'project", "take it on", "бери в работу", "запусти", "сделай сейчас". A wish with',
+            "nobody named is an idea, however imperative it sounds.",
+            "",
+            "When you are unsure between idea and do, answer idea. A thought recorded as an",
+            "instruction starts an agent nobody asked for; an instruction recorded as a thought",
+            "waits one click.",
             "",
             "## The line",
             text,

@@ -1199,6 +1199,29 @@ async def dispatch_directive(directive_id: str, request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+@router.post("/blocks/{block_id}/as-idea", response_class=HTMLResponse)
+async def make_it_an_idea(block_id: str, request: Request) -> Response:
+    """ "That was a thought, not an instruction" — one click, on the block that got it wrong.
+
+    The run that reads what was typed is a run, and it is wrong sometimes; the console's answer to
+    that is the same as everywhere else in this program — the correction is visible, it is one
+    click, and it does not need anybody to retype what they said (docs/04-threads-and-blocks.md).
+
+    What it does not do is stop an agent that was already started. That has its own button, right
+    beside it, because "record this as an idea" and "stop what is running" are two decisions and
+    somebody may well want only the first.
+    """
+    block = await store.block(block_id)
+    if block is None:
+        return HTMLResponse(await render_blocks(), status_code=404)
+    if block.kind != "idea":
+        rows, _ = await asyncio.to_thread(board)
+        await block_runs.record_idea(store, block, rows)
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
+
+
 @router.post("/blocks/{block_id}/delete", response_class=HTMLResponse)
 async def delete_block(block_id: str, request: Request) -> Response:
     """Throw one message away, at a human's asking.
