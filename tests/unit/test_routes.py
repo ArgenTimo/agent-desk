@@ -835,3 +835,32 @@ async def test_switching_one_off_works_for_a_session_that_has_since_gone(desk: S
 
     assert status == 200
     assert not (await desk.kicking("cccccccc")).armed
+
+
+@pytest.mark.unit
+async def test_a_whole_project_can_be_told_not_to_idle_one_session_at_a_time(
+    home: Home, desk: Store
+) -> None:
+    """docs/adr/0009: "all of them" is a click repeated, not a wider switch — so this writes the
+    same per-session rows the card's own button writes."""
+    import os
+    import time
+
+    now = int(time.time() * 1000)
+    background = "dddddddd-0000-4000-8000-000000000004"
+    # A different pid: the registry is one file per pid, and the fixture's own session takes
+    # os.getpid().
+    home.session(os.getppid(), background, cwd=str(home.root.parent), kind="bg", updatedAt=now)
+    terminal = _a_session(home)
+    key = await _the_project(home)
+
+    status, _ = await _post("/projects/kicking", {"key": key, "kicking": "yes"})
+
+    assert status == 200
+    assert (await desk.kicking("dddddddd")).armed
+    # And the one in a terminal is left out: there is no door into it (docs/adr/0009).
+    assert not (await desk.kicking(terminal.split("-")[0])).armed
+
+    status, _ = await _post("/projects/kicking", {"key": key, "kicking": "no"})
+    assert status == 200
+    assert not (await desk.kicking("dddddddd")).armed

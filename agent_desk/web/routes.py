@@ -1299,6 +1299,37 @@ async def set_exploring(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+@router.post("/projects/kicking", response_class=HTMLResponse)
+async def set_kicking_here(request: Request) -> Response:
+    """Switch every background session in one project into not being allowed to idle.
+
+    docs/adr/0009 says "all of them" is a click repeated, not a wider switch — so this is exactly
+    that: the same per-session rows the card's own button writes, written for the sessions that
+    are in this project right now. A session started afterwards is a new decision and gets its own
+    click, which is the property that keeps the switch a permission rather than a policy.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    on = form.get("kicking") == "yes"
+    if key:
+        rows, _ = await asyncio.to_thread(board)
+        projects = shape(rows, await store.groups())
+        named = next((project for project in projects if project.key == key), None)
+        for row in [r for i in (named.instances if named else []) for r in i.rows]:
+            if row.session.kind != "bg":
+                continue
+            await store.kick_session(
+                row.session.session_id.split("-")[0],
+                on=on,
+                session_id=row.session.session_id,
+                cwd=row.session.cwd,
+            )
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
 @router.post("/sessions/{session_id}/kicking", response_class=HTMLResponse)
 async def set_kicking(session_id: str, request: Request) -> Response:
     """Switch one session into not being allowed to idle, or back out of it (docs/adr/0009).

@@ -779,6 +779,16 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   color: var(--fg);
   text-decoration: none;
 }
+/* A menu row that posts rather than navigates is a button, and it has to look like every other
+   row in the menu rather than like a form control dropped into one. */
+button.menu-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .menu-item:hover { background: color-mix(in srgb, var(--focus) 10%, transparent); }
 .menu-what { display: block; font-size: 12px; }
 .menu-why { display: block; font-size: 10px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

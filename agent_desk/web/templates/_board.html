@@ -177,6 +177,27 @@
       <span class="menu-what">Project settings</span>
       <span class="menu-why">services, environment, the queue</span>
     </a>
+    {# "All of them" is a click repeated rather than a wider switch (docs/adr/0009): this writes
+       the same per-session rows the card's own button writes, for the sessions in this project
+       now. One started afterwards is a new decision and gets its own click. #}
+    <form method="post" action="/projects/kicking"
+          hx-post="/projects/kicking" hx-target="#message">
+      <input type="hidden" name="key" value="{{ project.key }}">
+      <input type="hidden" name="kicking" value="yes">
+      <button type="submit" class="menu-item">
+        <span class="menu-what">👟 Don't let any of them idle</span>
+        <span class="menu-why">continue every background session here whenever it goes quiet</span>
+      </button>
+    </form>
+    <form method="post" action="/projects/kicking"
+          hx-post="/projects/kicking" hx-target="#message">
+      <input type="hidden" name="key" value="{{ project.key }}">
+      <input type="hidden" name="kicking" value="no">
+      <button type="submit" class="menu-item">
+        <span class="menu-what">Let them idle again</span>
+        <span class="menu-why">stop continuing them</span>
+      </button>
+    </form>
     {% for link in links.get(project.key, []) %}
     <a class="menu-item" href="{{ link.url }}" target="_blank" rel="noreferrer noopener">
       <span class="menu-what">Open {{ link.name }}</span>
