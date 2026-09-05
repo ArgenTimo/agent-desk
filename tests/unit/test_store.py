@@ -453,8 +453,10 @@ async def test_the_token_field_cannot_be_given_a_token(store: Store) -> None:
     assert kept.token_env == "JIRA_TOKEN"
 
     for pasted in (
-        "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        "ATATTyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy==",
+        # Shaped like the real things and belonging to nobody: a test fixture that is somebody's
+        # actual credential is a credential in the history of this repository forever.
+        "ghp_" + "x" * 36,
+        "ATATT" + "y" * 40 + "==",
         "me@example.com:secret",
         "not a name",
         "x" * 200,
