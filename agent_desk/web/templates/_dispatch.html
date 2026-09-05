@@ -1,0 +1,16 @@
+{# What happened when somebody pressed "have an agent do it" (docs/adr/0006). #}
+{% if started %}
+<div class="delivered">
+  <header>an agent is on it <span class="dim">· {{ project }} · {{ agent_id }}</span></header>
+  <p class="detail">It is working in a git worktree of its own, so nothing in the checkout you are
+    sitting in moves. It will appear on the board while it runs. Nothing can be said to it once it
+    has started — read what it did, and start another if it needs one.</p>
+  <footer><a class="as-button" href="/">Close</a></footer>
+</div>
+{% else %}
+<div class="refused">
+  <header>no agent was started</header>
+  <p class="detail">{{ detail }}</p>
+  <footer><a class="as-button" href="/">Close</a></footer>
+</div>
+{% endif %}

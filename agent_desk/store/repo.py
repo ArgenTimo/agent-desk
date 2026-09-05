@@ -88,6 +88,9 @@ class Directive(BaseModel):
     text: str
     created_at: int
     sent_at: int | None = None
+    # The other ending: a background agent started on this instruction (docs/adr/0006).
+    agent_id: str | None = None
+    dispatched_at: int | None = None
 
 
 class Filing(BaseModel):
@@ -714,12 +717,40 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, block_id, session_id, session_name, text, created_at, sent_at "
-                    "FROM directive ORDER BY created_at DESC LIMIT :limit"
+                    "SELECT id, block_id, session_id, session_name, text, created_at, sent_at, "
+                    "agent_id, dispatched_at FROM directive ORDER BY created_at DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
             return [Directive(**row._mapping) for row in rows]
+
+    async def directive(self, directive_id: str) -> Directive | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, session_id, session_name, text, created_at, sent_at, "
+                    "agent_id, dispatched_at FROM directive WHERE id = :id"
+                ),
+                {"id": directive_id},
+            )
+            row = rows.first()
+            return None if row is None else Directive(**row._mapping)
+
+    async def mark_directive_dispatched(self, directive_id: str, agent_id: str) -> None:
+        """Written after the agent exists, so a row here means a session there (docs/adr/0006).
+
+        Only once: a second click on an instruction that already started one does nothing, the way
+        a second click on a filed idea does nothing. Starting the same work twice is two agents in
+        two worktrees editing the same repository.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE directive SET agent_id = :agent_id, dispatched_at = :t "
+                    "WHERE id = :id AND agent_id IS NULL"
+                ),
+                {"agent_id": agent_id, "t": _now_ms(), "id": directive_id},
+            )
 
     async def mark_directive_sent(self, directive_id: str) -> None:
         async with self.engine.begin() as conn:

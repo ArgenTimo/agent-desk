@@ -136,8 +136,16 @@ It is a local page over plain HTTP on `127.0.0.1`, and it opens in a normal brow
 
 ## What the console must never grow
 
-No button that starts, stops, or steers an interactive session. No button that edits a file in an
-observed repository. No approval, no merge, no "mark as done".
+No button that **steers** an interactive session — no follow-up into a running context, no
+keystrokes, no `tmux send-keys`. No button that edits a file in an observed repository. No
+approval, no merge, no "mark as done".
+
+One thing on that list moved, deliberately and with an argument:
+[adr/0006](adr/0006-the-desk-may-start-work.md) allows a written instruction to **start** a new
+background agent, in a git worktree of its own, when a human clicks. Starting is not interrupting:
+a session that does not exist yet has no context to displace. It can be stopped from here and it
+cannot be steered from here, and nothing dispatches without a click — not on a timer, not when a
+session goes idle, not when a tracker has an unassigned ticket.
 
 This tool watches work it does not own, and the moment it can change that work it needs to be
 trusted the way the thing doing the work is trusted — an audit trail, a permission model, an

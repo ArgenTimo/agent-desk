@@ -594,6 +594,9 @@ button[disabled] { opacity: 0.5; cursor: default; }
 }
 .pill.flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
 .pill.quiet { background: none; border: 1px dashed var(--line-strong); color: var(--fg-dim); }
+.pill.agent-started { background: color-mix(in srgb, var(--focus) 18%, transparent); color: var(--focus); }
+.directive-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.directive-buttons form { display: contents; }
 .pill.state.busy { background: color-mix(in srgb, var(--busy) 18%, transparent); color: var(--busy); }
 .pill.state.idle { background: color-mix(in srgb, var(--idle) 18%, transparent); color: var(--idle); }
 .pill.state.shell { background: color-mix(in srgb, var(--shell) 18%, transparent); color: var(--shell); }

@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import peer, tracker
+from agent_desk import dispatch, peer, tracker
 from agent_desk.config import settings
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
@@ -737,6 +737,48 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.post("/directives/{directive_id}/dispatch", response_class=HTMLResponse)
+async def dispatch_directive(directive_id: str, request: Request) -> Response:
+    """The click that makes an instruction happen (docs/adr/0006).
+
+    It starts a *new* agent in the project the instruction named, in a worktree of its own, with
+    the written instruction as its prompt. It does not reach into the session that is already
+    running there — there is still no client for that, and this is the half of the problem the
+    CLI's background sessions do solve.
+    """
+    directive = await store.directive(directive_id)
+    if directive is None:
+        return HTMLResponse(await render_blocks(), status_code=404)
+    if directive.agent_id:
+        # Twice is two agents in two worktrees editing one repository.
+        return HTMLResponse(await render_blocks())
+
+    rows, _ = await asyncio.to_thread(board)
+    row = next((r for r in rows if r.session.session_id == directive.session_id), None)
+    if row is None:
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail="that session is not on the board any more, so its checkout is not known",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    result = await asyncio.to_thread(
+        dispatch.start, directive.text, cwd=row.session.cwd, name=directive.text[:40]
+    )
+    if result.started:
+        await store.mark_directive_dispatched(directive_id, result.agent_id)
+
+    panel = env.get_template("_dispatch.html").render(
+        started=result.started,
+        detail=result.detail,
+        agent_id=result.agent_id,
+        project=row.session.project,
+    )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/blocks/{block_id}/delete", response_class=HTMLResponse)

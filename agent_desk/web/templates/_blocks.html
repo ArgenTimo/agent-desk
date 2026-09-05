@@ -100,13 +100,27 @@
       {% if directive.sent_at %}<span class="state">sent</span>{% endif %}
     </div>
     <pre class="full">{{ directive.text }}</pre>
-    {% if not directive.sent_at %}
-    <form method="post" action="/sessions/{{ directive.session_id }}/message/review"
-          hx-post="/sessions/{{ directive.session_id }}/message/review" hx-target="#message">
-      <input type="hidden" name="text" value="{{ directive.text }}">
-      <input type="hidden" name="directive" value="{{ directive.id }}">
-      <button type="submit">Read it and send…</button>
-    </form>
+    {% if directive.agent_id %}
+    <p class="detail small">An agent is on it — <span class="mono">{{ directive.agent_id }}</span>.
+      It works in a worktree of its own and shows up on the board while it runs.</p>
+    {% elif not directive.sent_at %}
+    <div class="directive-buttons">
+      {# The one that works. It starts a new agent on this instruction rather than reaching into
+         the session that is already running there (docs/adr/0006). #}
+      <form method="post" action="/directives/{{ directive.id }}/dispatch"
+            hx-post="/directives/{{ directive.id }}/dispatch" hx-target="#message">
+        <button type="submit" class="send" title="start an agent in its own worktree on this">Have an agent do it</button>
+      </form>
+      {# The one that is honest about not working. The CLI publishes no client for writing into a
+         session that is already running (docs/09-roadmap.md, Phase 3), so this offers the text
+         back to be pasted at a moment you choose. #}
+      <form method="post" action="/sessions/{{ directive.session_id }}/message/review"
+            hx-post="/sessions/{{ directive.session_id }}/message/review" hx-target="#message">
+        <input type="hidden" name="text" value="{{ directive.text }}">
+        <input type="hidden" name="directive" value="{{ directive.id }}">
+        <button type="submit" title="into the session already running there — which cannot be delivered yet">Send it to that session…</button>
+      </form>
+    </div>
     {% endif %}
   </div>
   {% endif %}

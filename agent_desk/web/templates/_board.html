@@ -65,6 +65,11 @@
                different claim about it (docs/03-session-observation.md). #}
             <div class="state-line">
               <span class="pill state {{ row.session.status }}" title="the registry says: {{ row.session.status }}">{{ row.session.status | plainly }}</span>
+              {% if row.session.kind == "bg" %}
+              {# Started from here, in a worktree of its own, rather than by a human in a terminal.
+                 A thing this console caused is a thing it has to show (docs/adr/0006). #}
+              <span class="pill agent-started" title="a background agent, working in its own worktree">agent</span>
+              {% endif %}
               {% if row.hint.waiting %}
               <span class="pill flag" title="{{ row.hint.observation }} — a guess, not a signal">⚑ may want you</span>
               {% endif %}
