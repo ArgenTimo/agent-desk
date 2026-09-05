@@ -20,3 +20,6 @@ build/
 # Never, under any circumstances.
 .env
 .env.*
+
+# Somebody's own notes, kept beside the project and not part of it.
+идеи.md

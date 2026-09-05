@@ -764,8 +764,18 @@ async def dispatch_directive(directive_id: str, request: Request) -> Response:
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
+    # What the agent is told, rather than the bare line somebody typed. It starts cold in a
+    # repository it has never seen, and this text is most of the difference between a useful
+    # session and a wasted one (docs/adr/0006).
+    block = await store.block(directive.block_id)
+    task = dispatch.build_task(
+        directive.text,
+        project=row.session.project,
+        branch=(row.tail.git_branch if row.tail else "") or "",
+        notes=[block.context] if block is not None and block.context else [],
+    )
     result = await asyncio.to_thread(
-        dispatch.start, directive.text, cwd=row.session.cwd, name=directive.text[:40]
+        dispatch.start, task, cwd=row.session.cwd, name=directive.text[:40]
     )
     if result.started:
         await store.mark_directive_dispatched(directive_id, result.agent_id)

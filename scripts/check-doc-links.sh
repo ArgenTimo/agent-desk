@@ -28,7 +28,10 @@ while IFS= read -r src; do
     fi
   done
   checked=$((checked + 1))
-done < <(find . -name '*.md' -not -path './.git/*' -not -path './.claude/*' | sort)
+  # A file git ignores is somebody's own notebook, not part of the specification. Checking it
+  # fails the gate over a link in a document nobody but its author will ever open.
+done < <(find . -name '*.md' -not -path './.git/*' -not -path './.claude/*' \
+  -exec sh -c 'git check-ignore -q "$1" || echo "$1"' _ {} \; | sort)
 
 if [ -f /tmp/.adlinks.$$ ]; then
   fail="$(wc -l < /tmp/.adlinks.$$ | tr -d ' ')"

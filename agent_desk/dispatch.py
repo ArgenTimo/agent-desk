@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,6 +58,42 @@ def argv(instruction: str, *, worktree: str) -> list[str]:
         worktree,
         instruction,
     ]
+
+
+def build_task(
+    instruction: str,
+    *,
+    project: str = "",
+    branch: str = "",
+    notes: Sequence[str] = (),
+) -> str:
+    """What the agent is actually told.
+
+    A dispatched session starts cold in a repository it has never seen, and the difference between
+    a useful one and a wasted one is almost entirely this text. Three things go in: what was asked,
+    what it is about, and the one fact it cannot find out for itself — that nobody is at the other
+    end of it.
+
+    What deliberately does not go in is this program. The agent is working in a repository, under
+    that repository's conventions; agent-desk is the thing that typed the message, and knowing
+    about it would only invite the agent to report back to something that cannot listen.
+    """
+    lines = [instruction.strip(), ""]
+    where = " · ".join(part for part in (project, branch) if part)
+    if where:
+        lines += [f"This is in {where}."]
+    written = [note for note in notes if note.strip()]
+    if written:
+        lines += ["", "Context that came with the request:", *written]
+    lines += [
+        "",
+        "Two things about how this arrived. It was dispatched from a console, so you are running "
+        "in a git worktree of your own and **cannot be asked anything once you start** — where a "
+        "question would normally be asked, make the reasonable choice, write down what you chose, "
+        "and carry on. And read the repository's own CLAUDE.md and docs before changing anything: "
+        "its conventions are the ones that apply here, not any you were told elsewhere.",
+    ]
+    return "\n".join(lines)
 
 
 def _worktree_name(name: str) -> str:
