@@ -1072,3 +1072,42 @@ body.stale .col-left { opacity: 0.55; }
   color: var(--busy);
   background: color-mix(in srgb, var(--busy) 12%, transparent);
 }
+
+/* The blockers are a column of their own and a long one scrolls rather than pushing the idea pool
+   off the bottom of the window. The same `scrollbar-gutter` as every other scroller here, so the
+   cards do not shift sideways when one appears. */
+.blockers {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.blockers > .card { flex: 0 0 auto; }
+
+/* Copying the line that opens a session in a terminal. It is a chip like the others on the card,
+   and it says what happened for a moment after it is pressed. */
+.chip.goto {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  margin-top: 0.35rem;
+}
+.chip.goto:hover { color: var(--fg); border-color: var(--line-strong); }
+
+/* What the keyboard does, opened with `?`. A definition list because that is what it is. */
+.keys dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.keys dt { font-family: ui-monospace, monospace; color: var(--fg); white-space: nowrap; }
+.keys dd { margin: 0; color: var(--fg-soft); }
+
+/* A break is a wait, not a failure: amber like every other "look at this eventually", never red.
+   Red is stopped, and a session on a break comes back on its own (docs/adr/0009). */
+.pill.state.break { color: var(--attention); border-color: color-mix(in srgb, var(--attention) 45%, transparent); }

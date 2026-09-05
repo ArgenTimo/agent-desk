@@ -75,7 +75,14 @@
                one line of what it is doing. Everything a card said beyond that was noise on a
                surface somebody glances at (docs/06-console.md). #}
             <div class="state-line">
-              {% if row.session.status == "idle" %}
+              {% set kick = kicks.get(row.session.session_id.split("-")[0]) %}
+              {% if row.session.status == "idle" and kick and kick.resume_at %}
+              {# An idle row that knows *why* it is idle. Not an inference: this console tried to
+                 continue this session and the account said there was nothing left to spend, so
+                 the time is the one it was given rather than one it worked out. #}
+              <span class="pill state break" title="the registry says: idle — and a kick was refused for want of budget">
+                🍽 on a break until {{ kick.resume_at | at }}</span>
+              {% elif row.session.status == "idle" %}
               {# A picture and plain words, because "idle" says nothing to somebody who does not
                  use a terminal. The registry's own word stays on the tooltip: this renders a
                  fact, it does not replace one (docs/03-session-observation.md). #}
@@ -110,7 +117,6 @@
                explicit click docs/adr/0002 requires, so it says what it will do before it is
                pressed — and where it cannot be offered it says why instead of showing a button
                that would lie. #}
-            {% set kick = kicks.get(row.session.session_id.split("-")[0]) %}
             {% if row.session.kind == "bg" %}
             <form class="kick" method="post"
                   action="/sessions/{{ row.session.session_id }}/kicking"
@@ -127,10 +133,13 @@
                 👟 don't let it idle</button>
               {% endif %}
             </form>
-            {% if kick and kick.resume_at %}
-            <p class="small quiet one" title="the account had nothing left to spend; the switch stayed on">
-              🍽 on a break until {{ kick.resume_at | at }}</p>
-            {% endif %}
+            {# "Go to it" — as far as a browser can take you, which is the command and not the
+               terminal. A page cannot open a terminal on somebody's desktop and a button that
+               claimed to would be a button that lies; this is the exact line to paste, copied by
+               one click, which is the half that is real. #}
+            <button type="button" class="chip goto" data-copy="claude attach {{ row.session.session_id.split('-')[0] }}"
+                    title="copy the command that opens this session in a terminal">
+              ↗ go to it</button>
             {% if kick and kick.disarmed_why %}
             <p class="small quiet one">it stopped being kept going: {{ kick.disarmed_why }}</p>
             {% endif %}

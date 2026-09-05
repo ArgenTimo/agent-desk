@@ -709,6 +709,27 @@ document.addEventListener(
   true
 );
 
+/* --- go to it ---------------------------------------------------------------------------------- */
+// A page cannot open a terminal on somebody's desktop, and a button that claimed to would be one
+// more thing on this board that says something it does not know. What it can do is hand over the
+// exact line, so that going there is a paste rather than a hunt for the id.
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-copy]');
+  if (!button) return;
+  event.preventDefault();
+  const said = button.textContent;
+  try {
+    await navigator.clipboard.writeText(button.dataset.copy);
+    button.textContent = '✓ copied — paste it in a terminal';
+  } catch {
+    // No clipboard (an insecure context, a browser that refuses): show the line instead of
+    // pretending it was copied.
+    button.textContent = button.dataset.copy;
+    return;
+  }
+  setTimeout(() => { button.textContent = said; }, 2000);
+});
+
 /* --- the keyboard ----------------------------------------------------------------------------- */
 // This window hovers over a terminal, and reaching for the mouse is what it exists to save.
 document.addEventListener('keydown', (event) => {
@@ -733,7 +754,66 @@ document.addEventListener('keydown', (event) => {
     else if (pins.children.length) clearPins();
     else document.activeElement.blur();
   }
+
+  // The rest of them, and every one is a thing this window makes somebody reach for the mouse to
+  // do. Nothing here fires while somebody is typing, and nothing here is destructive: the two
+  // rules that keep a keyboard shortcut from being a trap.
+  if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+
+  // `i` puts the cursor in the field with /idea already typed, which is the second most common
+  // thing anybody does here after asking a question.
+  if (event.key === 'i') {
+    event.preventDefault();
+    const field = document.getElementById('ask-text');
+    if (!field.value.trim()) field.value = '/idea ';
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    return;
+  }
+
+  // The three columns, by number: hide one, show it again. The same buttons the rails press.
+  const column = { 1: 'overview', 2: 'blockers', 3: 'right' }[event.key];
+  if (column) {
+    event.preventDefault();
+    const button = document.querySelector(`[data-hide="${column}"]`)
+      || document.querySelector(`[data-show="${column}"]`);
+    if (button) button.click();
+    return;
+  }
+
+  // `n` opens a new chat and `w` closes the one that is open — a browser's own two, because this
+  // page is a set of tabs and somebody who uses tabs already knows these.
+  if (event.key === 'n') {
+    const plus = document.querySelector('.tab-new button');
+    if (plus) { event.preventDefault(); plus.click(); }
+    return;
+  }
+  if (event.key === 'w') {
+    const close = document.querySelector('.tab.on .tab-off');
+    if (close) { event.preventDefault(); close.click(); }
+    return;
+  }
+
+  // `?` says what all of this is, because a shortcut nobody can discover is a shortcut nobody
+  // uses. It is the same panel every other card opens into.
+  if (event.key === '?') {
+    event.preventDefault();
+    document.getElementById('message').innerHTML = KEYS;
+  }
 });
+
+// Written here rather than in a template: it is a list of what this file does, and a copy in a
+// template is a copy that stops being true.
+const KEYS = `<div class="keys card"><div class="card-head"><span class="card-name">the keyboard</span></div>
+<div class="card-body"><dl>
+<dt>/</dt><dd>ask something</dd>
+<dt>i</dt><dd>write an idea down</dd>
+<dt>Ctrl+L</dt><dd>fold the conversation away, and back</dd>
+<dt>1 · 2 · 3</dt><dd>hide the overview, the blockers, the right column — press again to bring it back</dd>
+<dt>n · w</dt><dd>a new chat, and close this one</dd>
+<dt>Esc</dt><dd>close this panel, then clear the workbench, then let go of the field</dd>
+<dt>?</dt><dd>this</dd>
+</dl></div></div>`;
 
 // A question carries its pins with it, and once it has been asked they are spent: the next message
 // is about whatever is dropped in after this answer, which is what "the last blocks" means.

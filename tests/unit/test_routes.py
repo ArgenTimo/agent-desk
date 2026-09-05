@@ -895,3 +895,33 @@ async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
     # A sort nobody offers changes nothing rather than raising.
     await _post("/ideas/sort", {"how": "by vibes"})
     assert await desk.setting(routes.IDEA_SORT_KEY) == "project"
+
+
+@pytest.mark.unit
+async def test_an_idle_row_says_why_it_is_idle_when_the_console_knows(
+    home: Home, desk: Store
+) -> None:
+    """Not an inference: this console tried to continue the session and the account said there
+    was nothing left to spend, so the time on the card is the one it was given."""
+    import os
+    import time
+
+    now = int(time.time() * 1000)
+    session_id = "eeeeeeee-0000-4000-8000-000000000005"
+    home.session(os.getpid(), session_id, cwd=str(home.root.parent), kind="bg", updatedAt=now)
+    await desk.kick_session("eeeeeeee", on=True, session_id=session_id, cwd="/somewhere")
+
+    # Before: it is just idle, and the board says only what the registry says.
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
+    )
+    assert "having a smoke" in board
+    assert "on a break" not in board
+
+    await desk.kick_waits_until("eeeeeeee", now + 30 * 60 * 1000)
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
+    )
+    assert "on a break until" in board
+    assert "having a smoke" not in board
