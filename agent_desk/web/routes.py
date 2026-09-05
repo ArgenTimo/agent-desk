@@ -792,6 +792,9 @@ async def new_instance_form(request: Request, key: str = "") -> Response:
         stage="ask",
         key=key,
         name=named.name if named else key,
+        # Filled in rather than empty: naming a thing is a decision, and a decision on a form is
+        # a pause. Anybody may type over it (dispatch.a_name).
+        suggested=dispatch.a_name(),
         cwd=named.instances[0].path if named and named.instances else "",
         env_names=await store.env(key),
     )
@@ -811,7 +814,7 @@ async def new_instance(request: Request) -> Response:
     """
     form = await _form(request)
     key = form.get("key", "").strip()
-    who = form.get("name", "").strip()[:40] or "agent"
+    who = form.get("name", "").strip()[:40] or dispatch.a_name()
     doing = form.get("doing", "").strip()[:200]
 
     rows, _ = await asyncio.to_thread(board)

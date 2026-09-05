@@ -24,16 +24,18 @@
     <span class="dim">· {{ cwd }}</span></header>
   <p class="small dim">A git worktree beside that checkout, with one agent in it. It starts by
     reading the repository — its CLAUDE.md, its docs, enough of the code to be useful — and says
-    what it found. It is not given a task here; give it one from the board.</p>
+    what it found. It is not given a task here; give it one from the board. The two are linked
+    only through the repository itself, which is what makes a second one safe.</p>
 
   <form class="add-link" method="post" action="/projects/instance"
         hx-post="/projects/instance" hx-target="#message">
     <input type="hidden" name="key" value="{{ key }}">
     <label class="visually-hidden" for="instance-name">what to call it</label>
-    <input id="instance-name" name="name" placeholder="a name — biba, api-work, anything"
-           autocomplete="off">
-    <label class="visually-hidden" for="instance-doing">what it is for</label>
-    <input id="instance-doing" name="doing" placeholder="what it is for (optional)"
+    <input id="instance-name" name="name" value="{{ suggested }}"
+           placeholder="a name — biba, api-work, anything" autocomplete="off">
+    <label class="visually-hidden" for="instance-doing">what it specialises in</label>
+    <input id="instance-doing" name="doing"
+           placeholder="what it specialises in — the parser, the console, tests (optional)"
            autocomplete="off">
     <button type="submit" class="send">Create it</button>
   </form>

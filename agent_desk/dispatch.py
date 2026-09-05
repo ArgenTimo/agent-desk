@@ -14,6 +14,7 @@ agent it starts.
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -153,6 +154,39 @@ def build_task(
         "its conventions are the ones that apply here, not any you were told elsewhere.",
     ]
     return "\n".join(lines)
+
+
+# Names for a new instance, so the field arrives filled in rather than empty. A name matters more
+# than it sounds: "biba said the parser is fine" is a sentence somebody can hold in their head, and
+# "agent" three times over is three rows nobody can tell apart. Short, sayable, and nothing that
+# reads like a status word.
+NAMES: tuple[str, ...] = (
+    "biba",
+    "boba",
+    "koda",
+    "mira",
+    "nix",
+    "odo",
+    "pim",
+    "quill",
+    "rue",
+    "sable",
+    "tolo",
+    "umber",
+    "vane",
+    "wren",
+    "yuki",
+    "zeph",
+    "arlo",
+    "bex",
+    "cyd",
+    "dot",
+)
+
+
+def a_name() -> str:
+    """One of them, at random. The field is pre-filled with it and anybody may type over it."""
+    return secrets.choice(NAMES)
 
 
 def introduce(who: str, *, project: str, doing: str = "", env_names: Sequence[str] = ()) -> str:

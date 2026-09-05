@@ -164,6 +164,52 @@ class TranscriptTail(BaseModel):
     def last_entry(self) -> TailEntry | None:
         return self.entries[-1] if self.entries else None
 
+    @property
+    def choices(self) -> list[str]:
+        """The options its last words offered, if they were a question with a list under them.
+
+        A reading of the text and nothing more: the console renders these as buttons beside a
+        field that can say anything, so a wrong reading costs a button nobody presses rather than
+        a claim about what the session wants (`choices_in`).
+        """
+        last = self.last_entry
+        if last is None or last.role != "assistant" or not last.text:
+            return []
+        return choices_in(last.text)
+
+
+def choices_in(text: str) -> list[str]:
+    """The options a session offered, when its last words were a question with a list under them.
+
+    Asked for as "когда в сессии предлагается пройти опросник или выбрать решение — это
+    отображается в качестве кнопок здесь". A session that stops on "1. keep it 2. rewrite it"
+    is a session waiting on one word, and a person should not have to open a terminal to say it.
+
+    Narrow on purpose, because the failure mode is a button that sends the wrong thing. Only a
+    *numbered* list, only when the text before it asks something, only short lines, and never more
+    than a handful — a prose paragraph with "1990" in it must not become a button. Everything it
+    is unsure about it leaves alone, and the reply field beside the buttons is always there.
+    """
+    if "?" not in text:
+        return []
+    found: list[str] = []
+    expect = 1
+    for line in text.splitlines():
+        stripped = line.strip()
+        head = f"{expect}."
+        if not stripped.startswith((head, f"{expect})")):
+            continue
+        option = stripped[len(head) :].strip(" )*-—:")
+        # A whole paragraph is not a choice, and neither is an empty one.
+        if not option or len(option) > 80:
+            return []
+        found.append(option)
+        expect += 1
+        if expect > 6:
+            break
+    # One option is not a choice; a list that never started at 1 is not one either.
+    return found if len(found) >= 2 else []
+
 
 class AttentionHint(BaseModel):
     """An inference, carrying the observation it was made from.

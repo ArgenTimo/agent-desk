@@ -1179,3 +1179,19 @@ body.stale .col-left { opacity: 0.55; }
 }
 .chip.detail-toggle:hover { color: var(--fg); border-color: var(--line-strong); }
 .chip.detail-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--focus); }
+
+/* The options a session offered, as buttons. They wrap, because a choice is a sentence and a
+   sentence does not fit on a card in one line. */
+.card .choices { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.35rem; }
+.chip.choice {
+  border: 1px solid var(--focus);
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-align: left;
+}
+.chip.choice:hover { background: color-mix(in srgb, var(--focus) 18%, transparent); }

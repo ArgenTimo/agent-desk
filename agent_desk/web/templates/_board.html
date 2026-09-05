@@ -117,6 +117,21 @@
                somebody's, the click is theirs, and it goes nowhere else. A session that is busy
                gets no field — a message into work in progress is the half of 0002 that stands. #}
             {% if row.session.kind == "bg" and row.session.status == "idle" %}
+            {# It stopped on a question with a list under it, so the list is buttons. A reading of
+               the text, which is why the field below is always there too: a wrong reading costs a
+               button nobody presses, never a claim about what the session wants. #}
+            {% if row.tail and row.tail.choices %}
+            <div class="choices">
+              {% for choice in row.tail.choices %}
+              <form method="post" action="/sessions/{{ row.session.session_id }}/say"
+                    hx-post="/sessions/{{ row.session.session_id }}/say" hx-target="#message">
+                <input type="hidden" name="text" value="{{ choice }}">
+                <button type="submit" class="chip choice" title="send “{{ choice }}” to this session">
+                  {{ loop.index }}. {{ choice }}</button>
+              </form>
+              {% endfor %}
+            </div>
+            {% endif %}
             <form class="say" method="post" action="/sessions/{{ row.session.session_id }}/say"
                   hx-post="/sessions/{{ row.session.session_id }}/say" hx-target="#message">
               <label class="visually-hidden" for="say-{{ row.session.session_id }}">say something to this session</label>

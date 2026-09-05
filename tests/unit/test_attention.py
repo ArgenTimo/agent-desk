@@ -163,3 +163,56 @@ def test_a_long_silence_is_read_in_hours_rather_than_minutes() -> None:
         after_seconds=FIVE_MINUTES,
     )
     assert hint.observation == "idle 3h · last entry: assistant"
+
+
+@pytest.mark.unit
+def test_a_question_with_a_list_under_it_becomes_buttons() -> None:
+    """ "Когда в сессии предлагается выбрать решение — это отображается кнопками." A session that
+    stopped on "1. keep it 2. rewrite it" is waiting on one word."""
+    from agent_desk.observe.model import choices_in
+
+    assert choices_in("Which one?\n1. keep it\n2. rewrite it\n3. leave it alone") == [
+        "keep it",
+        "rewrite it",
+        "leave it alone",
+    ]
+    assert choices_in("What next?\n1) start over\n2) carry on") == ["start over", "carry on"]
+
+
+@pytest.mark.unit
+def test_everything_it_is_unsure_about_it_leaves_alone() -> None:
+    """The failure mode is a button that sends the wrong thing, so it is narrow on purpose and the
+    field beside the buttons is always there."""
+    from agent_desk.observe.model import choices_in
+
+    # No question: a numbered list in prose is not a choice.
+    assert choices_in("I did three things.\n1. read it\n2. fixed it\n3. tested it") == []
+    # One option is not a choice.
+    assert choices_in("Shall I?\n1. yes") == []
+    # A list that does not start at 1, or skips, is not read.
+    assert choices_in("Which?\n2. this one\n3. that one") == []
+    # A paragraph is not an option.
+    assert choices_in("Which?\n1. " + "a very long line " * 8 + "\n2. no") == []
+    # A year in prose is not a list.
+    assert choices_in("Was it right?\nIn 1990. the parser changed") == []
+
+
+@pytest.mark.unit
+def test_only_the_last_word_from_the_session_offers_choices() -> None:
+    """A question somebody already answered is not still open."""
+    from agent_desk.observe.model import TailEntry, TranscriptTail
+
+    asked = TranscriptTail(
+        session_id="s",
+        entries=[TailEntry(role="assistant", text="Which?\n1. keep it\n2. drop it")],
+    )
+    assert asked.choices == ["keep it", "drop it"]
+
+    answered = TranscriptTail(
+        session_id="s",
+        entries=[
+            TailEntry(role="assistant", text="Which?\n1. keep it\n2. drop it"),
+            TailEntry(role="user", text="keep it"),
+        ],
+    )
+    assert answered.choices == []
