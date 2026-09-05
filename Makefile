@@ -48,10 +48,16 @@ coverage: ## pytest with a coverage floor
 
 gate: lint typecheck test ## What stop-verify.sh runs at every turn end
 
-verify: gate check-links coverage ## Everything green before a human sees it
+verify: gate check-links check-patterns coverage ## Everything green before a human sees it
 
 check-links: ## Prove every relative link in docs/ and design/ resolves
 	@scripts/check-doc-links.sh
+
+.PHONY: check-patterns
+check-patterns: ## The packaged secret shapes must match the ones the commit hook reads
+	@cmp -s .claude/security-patterns.yaml agent_desk/security-patterns.yaml \
+		|| { echo "agent_desk/security-patterns.yaml has drifted from .claude/ — copy it over"; exit 1; }
+	@echo "the packaged secret shapes match the ones the commit hook reads"
 
 # --timeout-graceful-shutdown is not a tuning knob, it is a bug fix. Uvicorn's graceful stop waits
 # for open responses to finish, and the board's server-sent-events response never finishes by

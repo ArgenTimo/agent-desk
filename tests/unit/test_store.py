@@ -471,3 +471,40 @@ async def test_the_token_field_cannot_be_given_a_token(store: Store) -> None:
     assert await store.set_env(repo_key="k", name="DATABASE_URL") is True
     assert await store.set_env(repo_key="k", name="postgres://user:pw@host/db") is False
     assert [one.name for one in await store.env("k")] == ["DATABASE_URL"]
+
+
+@pytest.mark.unit
+def test_the_secret_shapes_are_found_from_an_installed_copy_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """This program is meant to run from a checkout *and* from an installed copy that has no
+    `.claude/` above it, and redaction must work in both."""
+    from agent_desk.config import Settings
+
+    where = Settings().security_patterns
+    assert where.exists(), "the shapes must be findable as this repository is laid out"
+    assert where.name == "security-patterns.yaml"
+
+    # The checkout's copy wins, so the file the commit hook reads is the file the store uses.
+    assert where.parent.name == ".claude"
+
+
+@pytest.mark.unit
+def test_missing_secret_shapes_stop_the_program_rather_than_render_unredacted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Redaction that silently matched nothing would put every transcript excerpt on the shared
+    page in the clear, which is the one failure docs/07-security.md exists to prevent."""
+    from agent_desk.store import redact
+
+    redact.patterns.cache_clear()
+    monkeypatch.setattr(
+        type(redact.settings),
+        "security_patterns",
+        property(lambda self: tmp_path / "nothing-here.yaml"),
+    )
+    try:
+        with pytest.raises(FileNotFoundError, match="refusing to render"):
+            redact.scrub("ghp_" + "x" * 36)
+    finally:
+        redact.patterns.cache_clear()

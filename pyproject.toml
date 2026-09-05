@@ -5,6 +5,10 @@ description = "A read-first console over the Claude Code sessions running on thi
 authors = ["agent-desk"]
 readme = "README.md"
 packages = [{ include = "agent_desk" }]
+# The secret shapes the store redacts with, so an installed copy has them too. The checkout's
+# `.claude/security-patterns.yaml` still wins when there is one — this is the fallback that makes
+# `pip install agent-desk` work at all, and `make check-patterns` fails when the two drift.
+include = [{ path = "agent_desk/security-patterns.yaml", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
 python = "^3.12"

@@ -37,7 +37,17 @@ _POSIX_CLASS = "[[:"
 @lru_cache(maxsize=1)
 def patterns() -> tuple[re.Pattern[str], ...]:
     """Every secret shape in `.claude/security-patterns.yaml`, compiled once."""
-    document = yaml.safe_load(settings.security_patterns.read_text())
+    where = settings.security_patterns
+    if not where.exists():
+        # Loud, and named. Redaction that silently matched nothing would render every transcript
+        # excerpt on the shared page unredacted, which is the one failure docs/07-security.md
+        # exists to prevent — so this stops the program instead (the same argument as
+        # docs/adr/0004, one layer down).
+        raise FileNotFoundError(
+            f"the secret shapes to redact with are not at {where}: refusing to render anything "
+            "rather than render it unredacted (docs/07-security.md)"
+        )
+    document = yaml.safe_load(where.read_text())
     raw = document["categories"][_CATEGORY]["patterns"]
     return tuple(re.compile(p) for p in raw if _POSIX_CLASS not in p)
 

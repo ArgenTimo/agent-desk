@@ -1,0 +1,124 @@
+# Default security scan patterns for a project served by ai-worker.
+#
+# Heuristics, not verdicts: a match is a prompt to look, not proof of a vulnerability. Consumed by
+# `static-analysis-security-triage`, the secret sweep in `pre-pr-checklist`, `diff-security-scan`,
+# and the `secret-scan.sh` commit hook (which prefers `gitleaks` when installed).
+#
+# Stack-agnostic by design: the secret shapes cover the systems ai-worker itself connects to plus
+# the common cloud providers, and the code patterns cover the languages the toolchain matrix
+# supports. `project-bootstrap` MAY append a project-specific block; it must not remove one.
+# Record confirmed false positives in `.claude/security-guidance.md`.
+
+version: 1
+
+categories:
+
+  hardcoded_secrets:
+    description: >-
+      Credentials committed to source. The highest-value category in any project, and the one
+      most often introduced by a fixture written "temporarily".
+    patterns:
+      # --- systems ai-worker integrates with ---
+      - 'ATATT[A-Za-z0-9_\-]{20,}'                 # Atlassian / Jira Cloud API token
+      - 'ghp_[A-Za-z0-9]{36}'                      # GitHub PAT (classic)
+      - 'github_pat_[A-Za-z0-9_]{22,}'             # GitHub fine-grained PAT
+      - 'gho_[A-Za-z0-9]{36}'                      # GitHub OAuth token
+      - 'glpat-[A-Za-z0-9_-]{20,}'                 # GitLab PAT
+      - 'gldt-[A-Za-z0-9_-]{20,}'                  # GitLab deploy token
+      - 'xox[baprs]-[A-Za-z0-9-]{10,}'             # Slack token
+      - 'figd_[A-Za-z0-9_\-]{20,}'                 # Figma PAT
+      - 'ntn_[A-Za-z0-9]{20,}'                     # Notion integration token
+      - 'sk-ant-[A-Za-z0-9\-_]{20,}'               # Anthropic API key
+      # --- common third parties ---
+      - 'AKIA[0-9A-Z]{16}'                         # AWS access key id
+      - 'ASIA[0-9A-Z]{16}'                         # AWS temporary access key id
+      - 'AIza[0-9A-Za-z_\-]{35}'                   # Google API key
+      - 'ya29\.[0-9A-Za-z_\-]{20,}'                # Google OAuth access token
+      - 'sk-[A-Za-z0-9]{32,}'                      # OpenAI-style key
+      - 'sk-or-v1-[A-Za-z0-9]{32,}'                # OpenRouter key
+      - 'sk_live_[0-9a-zA-Z]{20,}'                 # Stripe live key
+      - 'SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}'   # SendGrid
+      - 'npm_[A-Za-z0-9]{36}'                      # npm token
+      - 'dckr_pat_[A-Za-z0-9_\-]{20,}'             # Docker Hub PAT
+      - 'eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}'  # JWT
+      # --- generic shapes ---
+      - '-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----'
+      - 'Bearer\s+[A-Za-z0-9\-._~+/]{16,}'
+      - '(postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://[^:\s]+:[^@\s]+@'   # DSN with a password
+      - '(?i)(password|passwd|secret|api[_-]?key|access[_-]?key|token|private[_-]?key)\s*[:=]\s*["''][^"''\s]{8,}["'']'
+
+      # --- POSIX-safe duplicates of the (?i) patterns above -------------------------------
+      # `secret-scan.sh` uses gitleaks when it is installed and falls back to `grep -E` when it
+      # is not. `grep -E` is POSIX ERE: it does not understand the `(?i)` inline flag, warns
+      # "? at start of expression", and returns no match — and the hook sends that warning to
+      # /dev/null. So on a machine without gitleaks every `(?i)` pattern in this file is silently
+      # inert, which is precisely the failure mode a secret scanner must not have.
+      #
+      # Verified on this machine: the line `AWS_SECRET_ACCESS_KEY = "wJalr…"` passed the hook
+      # until the pattern below was added. Case-insensitivity is written as character classes,
+      # which both backends understand.
+      - '([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy])[[:space:]]*[:=][[:space:]]*["''][^"''[:space:]]{8,}["'']'
+
+  credential_leak_paths:
+    description: >-
+      Ways a credential reaches somewhere it must never be — a log, a ticket comment, a report,
+      an argv element, a transcript. The commit that introduces one is usually "let me add a
+      debug log".
+    patterns:
+      - '(?i)log\w*\.(debug|info|warn|warning|error)\([^)]*\b(token|secret|password|credential|api[_-]?key)\b'
+      - '(?i)(console\.(log|error|warn)|print|println|System\.out\.print\w*)\([^)]*\b(token|secret|password|credential|api[_-]?key)\b'
+      - '(?i)(subprocess|exec|spawn|Runtime\.getRuntime)\.[A-Za-z_]*\([^)]*\b(token|secret|password)\b'
+      - '(?i)(os\.environ|process\.env|System\.getenv)\b[^\n]*\b(dump|items\(\)|copy\(\)|JSON\.stringify)'
+      - '(?i)(comment|report|body|message)\s*=[^\n]*\b(token|secret|api[_-]?key)\b'
+
+      # POSIX-safe duplicate, for the same reason as in `hardcoded_secrets` above: without
+      # gitleaks the five `(?i)` patterns in this block match nothing at all. This one covers the
+      # commit that actually happens — "let me add a debug log".
+      - '([Ll][Oo][Gg][A-Za-z_]*\.(debug|info|warn|warning|error|DEBUG|INFO|WARN|ERROR)|[Pp][Rr][Ii][Nn][Tt]|console\.(log|error|warn))\([^)]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy])'
+
+  dynamic_execution:
+    description: Dynamic code or command execution — dangerous with untrusted input.
+    patterns:
+      - '\beval\s*\('
+      - '\bexec\s*\('
+      - 'new\s+Function\s*\('
+      - 'os\.system\s*\('
+      - 'os\.popen\s*\('
+      - '(?i)subprocess\.[A-Za-z_]+\([^)]*shell\s*=\s*True'
+      - 'child_process\.(exec|execSync)\s*\('
+      - 'pickle\.loads?\s*\('
+      - 'yaml\.load\s*\((?![^)]*Safe)'
+      - 'ObjectInputStream\s*\('
+      - '__import__\s*\('
+
+  injection_sinks:
+    description: >-
+      Injection-prone sinks. Treat ticket text, comment bodies, branch names, issue keys and any
+      external API response as attacker-controlled — see security-guidance.md.
+    patterns:
+      - 'execute\s*\(\s*f["'']'                    # f-string into a query
+      - 'text\s*\(\s*f["'']'                       # SQLAlchemy text() with an f-string
+      - 'execute\s*\(\s*["''][^"'']*["'']\s*%'
+      - '\.query\s*\(\s*`[^`]*\$\{'                # JS template literal in a query
+      - 'createQueryBuilder\([^)]*\)\.where\(\s*`'
+      - 'dangerouslySetInnerHTML'
+      - 'v-html\s*='
+      - '\.innerHTML\s*='
+      - '(?i)(path|filepath|filename)\s*=\s*[^\n]*\+\s*(request|params|body|input|user)'
+
+  insecure_transport:
+    description: TLS verification disabled, or plaintext transport to a non-local host.
+    patterns:
+      - '(?i)verify\s*=\s*False'
+      - 'rejectUnauthorized\s*:\s*false'
+      - 'ssl\._create_unverified_context'
+      - 'InsecureSkipVerify\s*:\s*true'
+      - '(?i)http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)'
+
+  weak_crypto:
+    description: Algorithms and constructions that should not appear in new code.
+    patterns:
+      - '(?i)\b(md5|sha1)\s*\('
+      - '(?i)DES|RC4|ECB'
+      - '(?i)random\.(random|randint|choice)\s*\([^)]*\)\s*#?\s*(token|password|salt|nonce)'
+      - '(?i)(iv|salt)\s*=\s*["''][^"'']{4,}["'']'   # hardcoded IV or salt

@@ -83,8 +83,18 @@ class Settings(BaseSettings):
 
         One source of them, and it is the file the skillset already ships and the commit hook
         already reads — not a second list that drifts from it (docs/07-security.md).
+
+        Two places are looked in, in this order, because this program is meant to run from
+        somebody's checkout *and* from an installed copy that has no `.claude/` above it. The
+        checkout wins when there is one, so the file the commit hook reads is the file the store
+        redacts with; the packaged copy is what makes an install work at all. Neither existing is
+        a loud failure rather than a quiet one — see `store/redact.py`, because redaction that
+        silently matched nothing is the worst outcome available here.
         """
-        return Path(__file__).resolve().parents[1] / ".claude" / "security-patterns.yaml"
+        beside = Path(__file__).resolve().parents[1] / ".claude" / "security-patterns.yaml"
+        if beside.exists():
+            return beside
+        return Path(__file__).resolve().parent / "security-patterns.yaml"
 
 
 settings = Settings()

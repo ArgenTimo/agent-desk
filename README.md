@@ -67,6 +67,41 @@ make overlay          # the same page in its own always-on-top window
 Nothing here needs a server, a database daemon, a container or a network. One process, one SQLite
 file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
+## Using it with your projects
+
+**There is nothing to connect.** This is the part that is easy to miss, so it is worth stating
+plainly: agent-desk is not installed *into* a project and is not configured *per* project. It reads
+`~/.claude/`, which is where the CLI already records every session on this machine — so every
+repository you run `claude` in appears on the board by itself, the first time it appears there.
+
+That means the whole of "adding a project" is:
+
+```bash
+cd ~/wherever/the-project && claude      # you were going to do this anyway
+```
+
+and it is on the board. Nothing is written into that repository, ever — not a config file, not a
+`.gitignore` line, not a directory (CLAUDE.md, rule two). A project you have not run anything in
+yet can still be *declared* from the board (`+ new project`) so that ideas and links can hang off
+it before there is a session.
+
+What is optional, per project, and set from the board rather than from a file:
+
+| On the project's page | What it does |
+|---|---|
+| **What should anybody working here know?** | prose handed verbatim to every agent this console starts here |
+| **Words used here** | your names for things, so an agent is told what they mean |
+| **Links** | Jira, GitHub, a dashboard — opened from the card's `⋯` menu |
+| **Environment** | the *names* of variables the work needs; never a value ([`docs/07-security.md`](docs/07-security.md)) |
+| **Start what I queue** / **find something to fix** | the two switches of [`adr/0007`](docs/adr/0007-a-loop-that-decides-when-not-what.md) and [`adr/0008`](docs/adr/0008-an-agent-that-finds-its-own-work.md) |
+
+### On another machine
+
+Same three lines. The database is per machine and holds this machine's ideas and settings; nothing
+in it is shared, and nothing needs to be. The one file that has to travel with an installed copy —
+the secret shapes the store redacts with — ships inside the package, and `make check-patterns`
+fails if it drifts from the one the commit hook reads.
+
 ## Status
 
 **Phases 1 and 2 are built. Neither is done. Phase 3 is built up to a wall. Phase 4 is built and
