@@ -97,4 +97,5 @@ what keeps that true after the first hurried afternoon.
 
 The refusal to read a tracker *back* was written here as a corollary rather than argued, because
 nobody had asked for it. [0010](0010-reading-a-tracker-back.md) argues it, and narrows it: this
-document's reasoning is about *writing*, and none of it reaches reading. The door out is unchanged.
+document's reasoning is about *writing*, and none of it reaches reading. The door out is unchanged
+— reading queues *tasks*, never ideas, and writes nothing back at all.

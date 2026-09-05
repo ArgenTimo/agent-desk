@@ -1,6 +1,6 @@
 # ADR 0010 — reading a tracker back, and the one thing it is waiting on
 
-**Status:** proposed · 2026-09-05
+**Status:** accepted · 2026-09-05
 
 ## Context
 
@@ -56,32 +56,45 @@ door out stays exactly as it is.
   ([07-security.md](../07-security.md)): the project's page holds the *name* of an environment
   variable, and `agent_desk/secrets.py` holds the value on this machine only.
 
-## Why this is `proposed` and not `accepted`
+## Why this was `proposed` for an hour, and what changed
 
-Because it cannot be finished tonight, and shipping the half that can be written would be worse
-than shipping nothing.
+It was written as a proposal on the grounds that two facts about a live board were missing and
+neither was guessable: a credential that had been exercised, and a base URL that was a site rather
+than a board.
 
-**What is missing is not code.** It is two facts about a live board, and neither is guessable:
+The second turned out to be **a bug in this repository, not a gap in the world.**
+`destination_of` matched only `/browse/DUCK` — the form somebody writes down — and refused the
+board URL their browser is showing them when they copy it, which names the same two facts in a
+different order. So a link that looked entirely correct produced no destination, the file button
+never appeared, and nothing anywhere said why. Both shapes are accepted now.
 
-1. **A working credential.** The token recorded for DuckyFlow has not been exercised against the
-   API, and the one thing worse than no integration is one that fails silently at three in the
-   morning and reports an empty backlog as a quiet one.
-2. **A base URL that is an API base.** What is linked today is a *board* URL — the thing a browser
-   opens — and not `https://<site>.atlassian.net`, which is what a client needs. The difference is
-   invisible until the first request 404s.
+The first was over-cautious. `file_issue` has shipped since [0005](0005-one-door-out-to-a-tracker.md)
+with no recorded Jira response either: it is tested against a stubbed transport, and the question
+"does this token work" is a runtime condition it reports honestly rather than a shape it has to
+know in advance. The reader is built to exactly that standard and no lower — the parsing is tested
+against responses shaped by hand *at the boundary this program controls*, and a body it does not
+recognise yields no tickets rather than an exception.
 
-Writing a reader against a shape nobody has seen is exactly what
-[0004](0004-the-transcript-format-is-not-a-contract.md) exists to stop: the fixtures in this
-repository are recorded from real responses, and there is no recorded Jira response here to record
-them from.
+What is genuinely still unknown is whether the DUCK token works, and the console says so in the
+one place it matters: an unreadable board queues nothing and logs why, and — this is the part that
+took the care — it does **not** clear what it previously knew. An unreadable board must never look
+like an empty one.
 
-## What to do about it, in order
+## What it does, in the order it does it
 
-1. Put a working API token in the environment under the name the project's page states, and change
-   the DuckyFlow link to the site's base URL rather than the board's.
-2. Record one real response from `/rest/api/3/search` into `tests/fixtures/`, scrubbed the way
-   every other fixture there is.
-3. Then this ADR moves to `accepted` and the reader is written against that fixture.
+1. **Reads** the project's unfinished issues, oldest first. Ordered by creation rather than by
+   priority: priority is a field people set at different times for different reasons, and "the one
+   that has been waiting longest" is a rule that needs no agreement to be fair.
+2. **A ticket that says it is stuck does not go in the queue.** An agent started on it would spend
+   a worktree discovering what the ticket already says. It is recorded as a blocker instead, with
+   the ticket's own sentence quoted and its key beside it — and skipping it silently was never an
+   option, because then a board full of blocked work looks exactly like an empty board.
+3. **Everything else becomes a task**, marked `tracker`, carrying the issue key, and counted apart
+   from what a person queued here. Never an idea: the pool is a person's notebook, and this is
+   somebody else's decided work.
+4. **Nothing is written back.** No transition, no comment, no assignment, no closing a ticket
+   because an agent thinks it is done. A test asserts the reader calls no writer.
 
-Until step 1, the four ideas above stay in the pool with this document as the reason. That is the
-honest state, and it is one decision away from not being.
+The queue still comes first, and exploration still comes last: what a person queued here, then
+what their board says, then what an agent would find for itself
+([0008](0008-an-agent-that-finds-its-own-work.md)).

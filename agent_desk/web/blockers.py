@@ -121,6 +121,20 @@ async def blockers(store: Store) -> list[Blocker]:
                 )
             )
 
+    # And what somebody else's board says is stuck. A quotation with a key, never a judgement:
+    # this program does not decide that a ticket is blocked, it repeats that the ticket says so
+    # (docs/adr/0010, CLAUDE.md rule five).
+    for ticket in await store.tracker_blockers():
+        found.append(
+            Blocker(
+                kind="ticket",
+                ref=ticket.key,
+                what=f"{ticket.key} · {ticket.summary}",
+                why=f"the ticket says: {ticket.said}",
+                when=ticket.seen_at,
+            )
+        )
+
     found.sort(key=lambda one: one.when, reverse=True)
     return found[:MOST_SHOWN]
 

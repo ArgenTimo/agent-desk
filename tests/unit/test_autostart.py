@@ -688,3 +688,124 @@ async def test_an_agent_this_module_cannot_name_keeps_its_seat(
     assert autostart.still_going(None, set()) == (True, None)
     assert await autostart.settle(desk, set()) == []
     assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_a_board_fills_the_queue_and_marks_where_it_came_from(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docs/adr/0010: a ticket is a decision somebody already made in a system built for making
+    it, so it becomes a *task* — never an idea, and counted apart from what a person queued."""
+    from agent_desk.tracker import jira
+
+    await desk.arm(KEY, per_hour=5)
+    await desk.set_link(
+        repo_key=KEY,
+        name="jira",
+        url="https://x.atlassian.net/browse/DUCK",
+        token_env="DUCK_TOKEN",
+    )
+    monkeypatch.setattr(
+        jira,
+        "read_board",
+        lambda where: jira.Read(
+            True,
+            tickets=(
+                jira.Ticket(key="DUCK-1", summary="the export is wrong", status="To Do"),
+                jira.Ticket(
+                    key="DUCK-2",
+                    summary="the import",
+                    status="To Do",
+                    blocked_by="Blocked on the vendor key.",
+                ),
+            ),
+        ),
+    )
+    arming = await desk.autostart(KEY)
+
+    assert await autostart.pull_tickets(desk, arming) == 1
+
+    (task,) = await desk.tasks(repo_key=KEY)
+    assert task.source_kind == "tracker"
+    assert task.source_ref == "DUCK-1"
+    assert "DUCK-1" in task.title
+    # Nothing reached the pool: it is a person's notebook (docs/05-ideas.md).
+    assert await desk.ideas() == []
+
+    # The blocked one is not queued and not silently dropped — a board full of blocked work must
+    # not look like an empty board.
+    (stuck,) = await desk.tracker_blockers()
+    assert stuck.key == "DUCK-2"
+    assert "vendor key" in stuck.said
+
+    # And running again queues nothing twice.
+    assert await autostart.pull_tickets(desk, arming) == 0
+
+
+@pytest.mark.unit
+async def test_a_ticket_that_was_unblocked_stops_being_a_blocker(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replaced rather than merged, which is the only way this stays true without anybody telling
+    the console anything."""
+    from agent_desk.tracker import jira
+
+    await desk.set_link(
+        repo_key=KEY,
+        name="jira",
+        url="https://x.atlassian.net/browse/DUCK",
+        token_env="DUCK_TOKEN",
+    )
+    arming = await desk.autostart(KEY)
+
+    monkeypatch.setattr(
+        jira,
+        "read_board",
+        lambda where: jira.Read(
+            True,
+            tickets=(jira.Ticket(key="DUCK-2", summary="the import", blocked_by="Blocked."),),
+        ),
+    )
+    await autostart.pull_tickets(desk, arming)
+    assert len(await desk.tracker_blockers()) == 1
+
+    monkeypatch.setattr(
+        jira,
+        "read_board",
+        lambda where: jira.Read(True, tickets=(jira.Ticket(key="DUCK-2", summary="the import"),)),
+    )
+    await autostart.pull_tickets(desk, arming)
+
+    assert await desk.tracker_blockers() == []
+
+
+@pytest.mark.unit
+async def test_a_project_with_no_tracker_reads_nothing_and_is_not_an_error(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """Which is every project by default."""
+    assert await autostart.pull_tickets(desk, await desk.autostart(KEY)) == 0
+
+
+@pytest.mark.unit
+async def test_a_tracker_that_cannot_be_read_queues_nothing_and_says_nothing_false(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable board must not look like an empty one to anything downstream."""
+    from agent_desk.tracker import jira
+
+    await desk.set_link(
+        repo_key=KEY,
+        name="jira",
+        url="https://x.atlassian.net/browse/DUCK",
+        token_env="DUCK_TOKEN",
+    )
+    monkeypatch.setattr(
+        jira, "read_board", lambda where: jira.Read(False, detail="DUCK_TOKEN is not set")
+    )
+
+    assert await autostart.pull_tickets(desk, await desk.autostart(KEY)) == 0
+    assert await desk.tasks(repo_key=KEY) == []
+    # And nothing was recorded as unblocked either, which a naive "replace with what we found"
+    # would have done.
+    assert await desk.tracker_blockers() == []

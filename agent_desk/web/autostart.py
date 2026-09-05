@@ -22,6 +22,7 @@ from agent_desk import dispatch, land
 from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd
 from agent_desk.store.repo import Autostart, Store, Task
+from agent_desk.tracker import jira
 
 log = structlog.get_logger()
 
@@ -226,6 +227,75 @@ async def settle(store: Store, live: set[str]) -> list[str]:
     return settled
 
 
+async def _destination(store: Store, repo_key: str) -> jira.Destination | None:
+    """Where this project's tracker is, if it has one somebody named a credential for.
+
+    A project with a link and no variable has a link, not a destination — `tracker/jira.py` makes
+    that judgement and this only asks it (docs/adr/0005).
+    """
+    for link in await store.links(repo_key):
+        found = jira.destination_of(link.url, link.token_env)
+        if found is not None:
+            return found
+    return None
+
+
+async def pull_tickets(store: Store, arming: Autostart) -> int:
+    """Put this project's unfinished tickets in the queue (docs/adr/0010). Returns how many.
+
+    Three things keep this from being the backlog-that-fills-itself docs/adr/0005 refuses.
+
+    It reads a queue **somebody else already decided**: a ticket in a tracker is a decision made
+    in a system built for making it, which is exactly what an idea in the pool is not. It never
+    touches the pool — what it writes is a *task*, marked `tracker` and counted apart from what a
+    person queued here, so nobody a month later has to work out which was which. And it writes
+    nothing back: no transition, no comment, no assignment.
+
+    A ticket already in the queue is skipped by its key, so this is safe to run on every tick.
+    """
+    where = await _destination(store, arming.repo_key)
+    if where is None:
+        return 0
+    read = await asyncio.to_thread(jira.read_board, where)
+    if not read.ok:
+        log.info("autostart.tracker_unread", repo=arming.repo_key, detail=read.detail)
+        return 0
+
+    # A ticket that says it is stuck does not go in the queue: an agent started on it would spend
+    # a worktree discovering what the ticket already says. It is recorded as a blocker instead,
+    # and skipping it silently would make a board full of blocked work look like an empty one
+    # (026-tracker-blockers.sql).
+    await store.replace_tracker_blockers(
+        arming.repo_key,
+        [(one.key, one.summary, one.blocked_by) for one in read.tickets if one.blocked],
+    )
+
+    already = {
+        task.source_ref for task in await store.tasks(repo_key=arming.repo_key) if task.source_ref
+    }
+    queued = 0
+    for ticket in read.tickets:
+        if ticket.key in already or ticket.blocked:
+            continue
+        await store.queue_task(
+            repo_key=arming.repo_key,
+            cwd=arming.cwd or "",
+            title=f"{ticket.key} · {ticket.summary}",
+            instruction=(
+                f"{ticket.summary}\n\nThis is {ticket.key} on the project's own board, and it was "
+                "read from there rather than written here. Do what it asks. If the ticket turns "
+                "out to be wrong, or to need somebody to decide something, say so and stop — "
+                "nothing here transitions it, comments on it, or closes it."
+            ),
+            source_kind="tracker",
+            source_ref=ticket.key,
+        )
+        queued += 1
+    if queued:
+        log.info("autostart.tracker_queued", repo=arming.repo_key, queued=queued)
+    return queued
+
+
 async def _may_explore(store: Store, arming: Autostart, live: set[str]) -> str:
     """Why this project may not go looking right now, or an empty string (docs/adr/0008).
 
@@ -325,6 +395,13 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
                 # One start per tick, across every project. Nothing here is urgent, and a burst is
                 # the thing this file exists to not do.
                 return task
+
+        # Nothing queued here, but there may be something on the project's own board. A ticket
+        # somebody wrote comes before anything an agent would find for itself (docs/adr/0010),
+        # which is why this sits above the exploration and below the queue.
+        if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
+            if await pull_tickets(store, arming):
+                return None
 
         # Nothing queued, and this project was told it may find something (docs/adr/0008).
         if not await _may_explore(store, arming, live):

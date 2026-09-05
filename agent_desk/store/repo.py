@@ -314,6 +314,18 @@ class IdeaLink(BaseModel):
     created_at: int
 
 
+class TrackerBlocker(BaseModel):
+    """A ticket on somebody's board that says it is stuck (026-tracker-blockers.sql)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str
+    repo_key: str
+    summary: str
+    said: str
+    seen_at: int
+
+
 class Subscription(BaseModel):
     """A plan a session's tokens are spent against (025-subscriptions.sql).
 
@@ -1526,6 +1538,45 @@ class Store:
                 ),
                 {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
             )
+
+    # --- tickets that say they are stuck (026-tracker-blockers.sql) ---------------------------
+    async def replace_tracker_blockers(
+        self, repo_key: str, found: Sequence[tuple[str, str, str]]
+    ) -> None:
+        """What this project's board says is blocked, as of now.
+
+        Replaced rather than merged: a ticket somebody unblocked stops being a blocker without
+        anybody having to tell this console, which is the only way this stays true.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM tracker_blocker WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
+            for key, summary, said in found:
+                await conn.execute(
+                    text(
+                        "INSERT INTO tracker_blocker (key, repo_key, summary, said, seen_at) "
+                        "VALUES (:key, :repo_key, :summary, :said, :t)"
+                    ),
+                    {
+                        "key": key,
+                        "repo_key": repo_key,
+                        "summary": summary[:200],
+                        "said": said[:300],
+                        "t": _now_ms(),
+                    },
+                )
+
+    async def tracker_blockers(self) -> list[TrackerBlocker]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT key, repo_key, summary, said, seen_at FROM tracker_blocker "
+                    "ORDER BY seen_at DESC"
+                )
+            )
+            return [TrackerBlocker(**row._mapping) for row in rows]
 
     # --- the plan a session's tokens are spent against (025-subscriptions.sql) ----------------
     async def add_subscription(

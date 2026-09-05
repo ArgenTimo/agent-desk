@@ -35,6 +35,9 @@
         row, rather than firing into a broken condition all night (docs/adr/0007).
       {% elif one.kind == "session" %}This session stopped being kept going after two attempts in
         a row failed (docs/adr/0009).
+      {% elif one.kind == "ticket" %}A ticket on this project's own board that says it is stuck.
+        It is not in the queue and no agent was started on it: what it is waiting for is a person
+        (docs/adr/0010). The words above are the ticket's own.
       {% else %}A question this console asked, and the run came back an error.
       {% endif %}
     </p>

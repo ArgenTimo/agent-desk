@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import urllib.error
 from collections.abc import AsyncIterator
 
 import pytest
@@ -278,3 +279,207 @@ async def test_a_filed_idea_leaves_the_column_and_keeps_its_key(
     assert "cache the probe results" not in await routes.render_ideas()
     # And the inbox keeps it, with where it went.
     assert "API-3" in await routes.render_inbox()
+
+
+# --- reading a tracker back (docs/adr/0010) -----------------------------------------------------
+BOARD_URL = (
+    "https://batmslec.atlassian.net/jira/software/projects/DUCK/boards/236"
+    "?filter=&groupBy=none&visitedUserSeg=true"
+)
+
+
+@pytest.mark.unit
+def test_the_url_somebody_actually_has_in_their_clipboard_is_a_destination() -> None:
+    """`/browse/DUCK` is what somebody writes down; a board URL is what their browser is showing
+    them when they copy it. Only the first was matched, so a link that looked entirely correct
+    produced no destination and the button never appeared, with nothing saying why."""
+    from_board = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+
+    assert from_board is not None
+    assert from_board.site == "https://batmslec.atlassian.net"
+    assert from_board.project_key == "DUCK"
+    # And it names the same place as the written-down form.
+    written = jira.destination_of("https://batmslec.atlassian.net/browse/DUCK", "DUCK_TOKEN")
+    assert written is not None
+    assert (written.site, written.project_key) == (from_board.site, from_board.project_key)
+
+
+@pytest.mark.unit
+def test_a_board_url_is_still_not_a_destination_without_a_variable() -> None:
+    """A credential nobody named is a credential nobody decided to use here."""
+    assert jira.destination_of(BOARD_URL, None) is None
+    assert jira.destination_of(BOARD_URL, "") is None
+
+
+@pytest.mark.unit
+def test_the_query_asks_for_unfinished_work_oldest_first() -> None:
+    """ "The one that has been waiting longest" is a rule that needs no agreement to be fair."""
+    destination = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+    assert destination is not None
+
+    jql = jira.search_jql(destination)
+
+    assert 'project = "DUCK"' in jql
+    assert '"To Do"' in jql
+    assert "ORDER BY created ASC" in jql
+    # Never anything already finished or already being worked on by a person.
+    assert "Done" not in jql and "In Progress" not in jql
+
+
+@pytest.mark.unit
+def test_reading_a_board_never_writes_to_it() -> None:
+    """No transition, no comment, no assignment. The one write is `file_issue`, unchanged."""
+    # Against the code rather than the prose: the docstring says "no transition", which a naive
+    # search for the word would trip over.
+    import ast
+
+    tree = ast.parse(pathlib.Path(jira.__file__).read_text())
+    reader = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "read_board"
+    )
+    called = {
+        node.func.id
+        for node in ast.walk(reader)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert "_get" in called
+    assert "_post" not in called
+    assert "file_issue" not in called
+
+
+@pytest.mark.unit
+def test_an_unset_variable_is_a_refusal_here_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCK_TOKEN", raising=False)
+    destination = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+    assert destination is not None
+
+    read = jira.read_board(destination)
+
+    assert not read.ok
+    assert "DUCK_TOKEN is not set" in read.detail
+    assert read.tickets == ()
+
+
+@pytest.mark.unit
+def test_the_read_asks_for_the_three_fields_it_uses_and_carries_the_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: dict[str, str] = {}
+
+    def fake_get(url: str, authorization: str) -> tuple[int, bytes]:
+        asked["url"] = url
+        asked["authorization"] = authorization
+        return 200, json.dumps(
+            {
+                "issues": [
+                    {
+                        "key": "DUCK-12",
+                        "fields": {
+                            "summary": "the export is wrong",
+                            "status": {"name": "To Do"},
+                            "description": None,
+                        },
+                    }
+                ]
+            }
+        ).encode()
+
+    monkeypatch.setattr(jira, "_get", fake_get)
+    monkeypatch.setenv("DUCK_TOKEN", "someone@example.com:a-token")
+    destination = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+    assert destination is not None
+
+    read = jira.read_board(destination)
+
+    assert read.ok
+    assert [one.key for one in read.tickets] == ["DUCK-12"]
+    assert read.tickets[0].summary == "the export is wrong"
+    assert "rest/api/3/search" in asked["url"]
+    assert "summary" in asked["url"] and "description" in asked["url"]
+    assert asked["authorization"].startswith("Basic ")
+
+
+@pytest.mark.unit
+def test_a_ticket_that_says_it_is_blocked_is_quoted_rather_than_judged() -> None:
+    """ "The ticket says it is blocked" is a fact with a source; "this ticket is blocked" is a
+    claim this program is not entitled to make (CLAUDE.md, rule five)."""
+    raw = json.dumps(
+        {
+            "issues": [
+                {
+                    "key": "DUCK-1",
+                    "fields": {
+                        "summary": "the import",
+                        "status": {"name": "To Do"},
+                        "description": {
+                            "type": "doc",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [
+                                        {"type": "text", "text": "Started on this. "},
+                                        {"type": "text", "text": "Blocked on the vendor key."},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                },
+                {
+                    "key": "DUCK-2",
+                    "fields": {"summary": "the export", "status": {"name": "To Do"}},
+                },
+            ]
+        }
+    ).encode()
+
+    first, second = jira.read_tickets(raw)
+
+    assert first.blocked
+    assert "Blocked on the vendor key" in first.blocked_by
+    # It never concludes anything from silence.
+    assert not second.blocked
+    assert second.blocked_by == ""
+
+
+@pytest.mark.unit
+def test_a_shape_this_does_not_recognise_yields_no_tickets_rather_than_raising() -> None:
+    """A tracker that answered something unexpected is one this console reports as unreadable,
+    not one that stops the console."""
+    for raw in (b"", b"not json", b"{}", b'{"issues": "lots"}', b'{"issues": [null, 3]}'):
+        assert jira.read_tickets(raw) == (), raw
+
+    # A ticket with no key or no summary is not half a ticket, it is not one.
+    assert jira.read_tickets(json.dumps({"issues": [{"fields": {"summary": "x"}}]}).encode()) == ()
+
+
+@pytest.mark.unit
+def test_a_board_of_four_hundred_is_not_paged_through() -> None:
+    many = {"issues": [{"key": f"DUCK-{n}", "fields": {"summary": f"one {n}"}} for n in range(400)]}
+
+    assert len(jira.read_tickets(json.dumps(many).encode())) == jira.MOST_TICKETS
+
+
+@pytest.mark.unit
+def test_a_network_failure_reading_never_quotes_the_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The request carries an Authorization header."""
+
+    def refuse(url: str, authorization: str) -> tuple[int, bytes]:
+        raise urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(jira, "_get", refuse)
+    monkeypatch.setenv("DUCK_TOKEN", "a-token")
+    destination = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+    assert destination is not None
+
+    read = jira.read_board(destination)
+
+    assert not read.ok
+    assert "URLError" in read.detail
+    assert "a-token" not in read.detail
+    assert "Authorization" not in read.detail

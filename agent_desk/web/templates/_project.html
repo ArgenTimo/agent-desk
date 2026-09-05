@@ -106,6 +106,12 @@
     {% for task in tasks %}
     <li class="task {{ 'failed' if task.failed_at else 'running' if task.started_at else 'waiting' }}">
       <span class="task-title" title="{{ task.instruction }}">{{ task.title }}</span>
+      {% if task.source_kind == "tracker" %}
+      {# Read from the project's own board rather than written here. Marked for the same reason
+         `found` is: a queue with two kinds of row in it is only honest if they look different
+         (docs/adr/0008, docs/adr/0010). #}
+      <span class="pill quiet" title="read from this project's board — nobody queued it here">{{ task.source_ref }} · from the board</span>
+      {% endif %}
       {% if task.source_kind == "found" %}
       {# Marked, because a queue that mixes what somebody asked for with what a machine proposed
          is a queue that has stopped meaning anything (docs/adr/0008). #}
