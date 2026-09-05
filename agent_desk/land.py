@@ -31,6 +31,9 @@ from pathlib import Path
 # The whole of a landing is bounded: a gate that hangs must not hold a queue open all night.
 GATE_TIMEOUT_SECONDS = 900.0
 GIT_TIMEOUT_SECONDS = 120.0
+# A fresh worktree usually has no dependencies installed in it, and installing them is slower than
+# running them.
+INSTALL_TIMEOUT_SECONDS = 900.0
 
 # What a repository's own gate is called, in the order they are looked for. `make verify` is this
 # project's, and a repository with neither is not landed automatically — there is nothing to check
@@ -98,10 +101,38 @@ def _theirs(status: str) -> bool:
     return any(".claude/worktrees/" not in line for line in lines)
 
 
+def _make(where: Path, target: str, timeout: float) -> tuple[int, str]:
+    try:
+        done = subprocess.run(  # noqa: S603 — a list, no shell, and the binary is resolved above
+            [MAKE, target],
+            cwd=str(where),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "it did not finish in time"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, type(exc).__name__
+    return done.returncode, (done.stdout + done.stderr).strip()
+
+
 def _gate(where: Path) -> tuple[bool, str]:
-    """Run the repository's own gate in the worktree. Its command, its exit code, no judgement."""
+    """Run the repository's own gate in the worktree. Its command, its exit code, no judgement.
+
+    A worktree is a fresh directory, so the dependencies are usually not installed in it yet: a
+    Python project keyed by path has no environment there, and its gate fails on a missing runner
+    rather than on the work. So `make install` runs first where the repository has one — its own
+    command again, and a repository that does not have one simply does not get it.
+    """
     if not (where / "Makefile").exists():
         return False, "no Makefile, so there is no gate to check this against"
+
+    code, said = _make(where, "install", INSTALL_TIMEOUT_SECONDS)
+    if code != 0 and "No rule to make target" not in said and "no rule to make target" not in said:
+        return False, f"`make install` failed: {said.splitlines()[-1][:200] if said else ''}"
+
     for command in GATES:
         code, said = _git(where, "rev-parse", "--git-dir")  # cheap check that it is a checkout
         if code != 0:

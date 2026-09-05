@@ -229,3 +229,37 @@ def test_a_merge_that_cannot_be_pushed_is_still_a_merge(
     assert result.landed
     assert "not pushed" in result.detail
     assert (root / "fixed.md").exists()
+
+
+@pytest.mark.unit
+def test_the_dependencies_are_installed_before_the_gate_is_believed(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A worktree is a fresh directory: a project keyed by path has no environment in it yet, and
+    its gate would fail on a missing runner rather than on the work."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    where = land.worktree_for(str(root), "found-project")
+    # `verify` only passes once `install` has been run: the file it looks for is made by it.
+    (where / "Makefile").write_text(
+        "install:\n\t@touch .installed\nverify:\n\t@test -f .installed\n"
+    )
+
+    result = land.land(str(root), "found-project", push=False)
+
+    assert result.landed, result.detail
+    assert "`make verify` passed" in result.detail
+
+
+@pytest.mark.unit
+def test_an_install_that_fails_stops_before_the_gate(tmp_path: pathlib.Path) -> None:
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    (land.worktree_for(str(root), "found-project") / "Makefile").write_text(
+        "install:\n\t@echo 'no network' && false\nverify:\n\t@true\n"
+    )
+
+    result = land.land(str(root), "found-project", push=False)
+
+    assert not result.landed
+    assert "`make install` failed" in result.detail
