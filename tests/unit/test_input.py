@@ -825,38 +825,44 @@ async def test_a_thought_typed_without_a_prefix_is_still_recorded_as_one(
 
 
 @pytest.mark.unit
-async def test_an_instruction_is_written_out_and_then_waits_for_a_human(
+async def test_an_instruction_is_written_out_and_started(
     desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ "Tell Biba to test it again" prepares a message and stops.
+    """ "Tell it to test everything again" is written out *and* started (docs/adr/0006).
 
-    This is docs/adr/0002 with the one door it leaves open: the message exists, addressed, in
-    full, and the only thing that can send it is somebody pressing the button. Nothing here
-    decides that a moment is a good one to interrupt an agent (docs/08-non-goals.md §2).
+    The message is still recorded — it is what was asked for, in the words it would be said in —
+    but a console whose answer to "do this" is "copy this" has not done the thing it was asked.
     """
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="agent3")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
     monkeypatch.setenv("KIND", "do")
-    rows = [make_row("alpha", "main")]
-    block = await blocks.submit(desk, "tell alpha-d0 to test everything again", rows)
+    block = await blocks.submit(
+        desk, "tell alpha-d0 to test everything again", [make_row("alpha", "main")]
+    )
     assert await _settled(desk, block.id) == "answered"
 
     after = await desk.block(block.id)
     assert after is not None
     assert after.kind == "instruction"
-    assert after.answer and "waiting" in after.answer
+    assert after.answer and "an agent is working on it" in after.answer
+    assert "agent3" in after.answer
 
-    directives = await desk.directives()
-    assert len(directives) == 1
-    assert directives[0].session_id == "session-alpha"
-    assert directives[0].text == "run the tests again, all of them"
-    # Nothing was sent. `sent_at` is written by the route behind the button, and only when the
-    # delivery actually happened.
-    assert directives[0].sent_at is None
+    # What it was told is the message that was written, not the line typed at the field.
+    assert told and "run the tests again, all of them" in told[0]
 
-    # And the console offers it as the write path offers everything else: as a form to a route
-    # that shows it in full first.
-    column = await routes.render_blocks()
-    assert "run the tests again, all of them" in column
-    assert 'action="/sessions/session-alpha/message/review"' in column
+    # The message is on the record, against the session it was for and the agent that took it.
+    (directive,) = await desk.directives()
+    assert directive.session_id == "session-alpha"
+    assert directive.text == "run the tests again, all of them"
+    assert directive.agent_id == "agent3"
+    assert directive.sent_at is None  # nothing was written into that running session
 
 
 @pytest.mark.unit
@@ -882,7 +888,7 @@ async def test_an_instruction_that_names_no_session_prepares_nothing(
     assert await _settled(desk, block.id) == "answered"
     assert await desk.directives() == []
     after = await desk.block(block.id)
-    assert after is not None and "could not tell which session" in (after.answer or "")
+    assert after is not None and "could not tell which project" in (after.answer or "")
 
 
 # --- what one call to the model is built from ---------------------------------------------------
@@ -1090,22 +1096,63 @@ async def test_an_idea_dropped_in_with_take_it_on_starts_an_agent(
 
 
 @pytest.mark.unit
-async def test_an_instruction_with_nothing_dropped_in_still_only_prepares(
+async def test_a_question_never_starts_anything(
     desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Without the cards, this program does not guess what to start: it writes the message and
-    waits for the button (docs/adr/0002)."""
+    """The kind is what decides, and a question is answered rather than acted on.
+
+    This is the one that has to hold: an instruction now starts an agent on a sentence, and the
+    sentence is read by a run that can be wrong. A question misread would be a worktree nobody
+    asked for.
+    """
     from agent_desk import dispatch
 
-    monkeypatch.setattr(
-        dispatch,
-        "start",
-        lambda instruction, *, cwd, name: pytest.fail("it started an agent nobody pointed at"),
-    )
-    monkeypatch.setenv("KIND", "do")
+    def never(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+        pytest.fail("a question started an agent")
 
-    block = await blocks.submit(desk, "tell alpha-d0 to test it again", [make_row("alpha", "main")])
+    monkeypatch.setattr(dispatch, "start", never)
+    monkeypatch.setenv("KIND", "question")
+
+    block = await blocks.submit(desk, "what did it end up doing", [make_row("alpha", "main")])
     assert await _settled(desk, block.id) == "answered"
 
     assert await desk.tasks() == []
-    assert len(await desk.directives()) == 1
+    assert await desk.directives() == []
+
+
+@pytest.mark.unit
+async def test_a_second_instruction_waits_for_the_seat_rather_than_taking_another(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two agents in two worktrees of one project, started a minute apart, is the mess
+    docs/adr/0007 is careful about. The second one is written down and says it is waiting — a
+    request is not done until it is done."""
+    from agent_desk import dispatch
+
+    starts: list[str] = []
+
+    def once(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+        starts.append(name)
+        return dispatch.Started(True, agent_id=f"agent{len(starts)}")
+
+    monkeypatch.setattr(dispatch, "start", once)
+    monkeypatch.setenv("KIND", "do")
+    rows = [make_row("alpha", "main")]
+
+    first = await blocks.submit(desk, "tell it to run the tests", rows)
+    assert await _settled(desk, first.id) == "answered"
+    assert len(starts) == 1
+
+    second = await blocks.submit(desk, "and then check the ports", rows)
+    assert await _settled(desk, second.id) == "answered"
+
+    # Nothing else was started, and the block says why rather than claiming it is done.
+    assert len(starts) == 1
+    after = await desk.block(second.id)
+    assert after is not None and "waiting" in (after.answer or "")
+
+    # It is a real line in the queue, and the console offers the one thing that changes it.
+    waiting = [task for task in await desk.tasks() if task.waiting]
+    assert [task.title for task in waiting] == ["and then check the ports"]
+    column = await routes.render_blocks()
+    assert "Start it now" in column

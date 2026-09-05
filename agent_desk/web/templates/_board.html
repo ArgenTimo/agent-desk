@@ -21,6 +21,7 @@
 {% endif %}
 
 {% for project in projects %}
+<div class="project-slot">
 <details class="node card project{% if project.flagged %} flagged{% endif %}" open
          data-drop="project" data-project="{{ project.key }}"
          data-kind="project" data-id="{{ project.key }}" data-label="{{ project.name }}"
@@ -34,32 +35,6 @@
        data-menu="menu-{{ loop.index }}" title="what can be done with this project"
        aria-label="project menu">⋯</a>
   </summary>
-
-  {# The menu itself, rendered here rather than fetched: it is four links and a form, and a click
-     that has to wait for a round trip is a click that feels broken. #}
-  <div class="menu" id="menu-{{ loop.index }}" hidden>
-    <a class="menu-item" href="/projects/instance?key={{ project.key | urlencode }}"
-       hx-get="/projects/instance?key={{ project.key | urlencode }}" hx-target="#message">
-      <span class="menu-what">New instance…</span>
-      <span class="menu-why">a copy of the checkout with an agent working in it</span>
-    </a>
-    <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
-      <span class="menu-what">Project settings</span>
-      <span class="menu-why">services, environment, the queue</span>
-    </a>
-    {% for link in links.get(project.key, []) %}
-    <a class="menu-item" href="{{ link.url }}" target="_blank" rel="noreferrer noopener">
-      <span class="menu-what">Open {{ link.name }}</span>
-      <span class="menu-why">{{ link.url }}</span>
-    </a>
-    {% endfor %}
-    {% if not links.get(project.key) %}
-    <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
-      <span class="menu-what">Connect a service…</span>
-      <span class="menu-why">Jira, GitHub, a dashboard — nothing is linked yet</span>
-    </a>
-    {% endif %}
-  </div>
 
   <div class="card-body">
     {% for instance in project.instances %}
@@ -137,6 +112,34 @@
     <p class="drop-hint{% if not project.instances %} standing{% endif %}">drop a card here to add it to this project</p>
   </div>
 </details>
+
+{# The menu sits beside the card, not inside it: a folded card has no body, and a link inside a
+   `<summary>` is swallowed by the disclosure rather than followed — so the `⋯` did nothing at all
+   on a project somebody had folded shut. #}
+<div class="menu" id="menu-{{ loop.index }}" hidden>
+<a class="menu-item" href="/projects/instance?key={{ project.key | urlencode }}"
+       hx-get="/projects/instance?key={{ project.key | urlencode }}" hx-target="#message">
+      <span class="menu-what">New instance…</span>
+      <span class="menu-why">a copy of the checkout with an agent working in it</span>
+    </a>
+    <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
+      <span class="menu-what">Project settings</span>
+      <span class="menu-why">services, environment, the queue</span>
+    </a>
+    {% for link in links.get(project.key, []) %}
+    <a class="menu-item" href="{{ link.url }}" target="_blank" rel="noreferrer noopener">
+      <span class="menu-what">Open {{ link.name }}</span>
+      <span class="menu-why">{{ link.url }}</span>
+    </a>
+    {% endfor %}
+    {% if not links.get(project.key) %}
+    <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
+      <span class="menu-what">Connect a service…</span>
+      <span class="menu-why">Jira, GitHub, a dashboard — nothing is linked yet</span>
+    </a>
+    {% endif %}
+</div>
+</div>
 {% endfor %}
 
 <form method="post" action="/projects" class="new-project">

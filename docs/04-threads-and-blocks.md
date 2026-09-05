@@ -22,7 +22,7 @@ the kind changes what it looks like and what it can do:
 |---|---|---|
 | `question` | the question, then the answer as it streams | retry · follow up · discard |
 | `idea` | "Idea recorded. \<one-line summary\>. Keep it?" | keep · discard · edit summary ([05-ideas.md](05-ideas.md)) |
-| `instruction` | "Understood — a message to \<session\> is written and waiting below." | read it and send ([adr/0002](adr/0002-read-first-never-interrupt.md)) |
+| `instruction` | "On it — an agent is working on it in \<project\>", or that it is **waiting** for the seat | stop it · start it now · drop it ([adr/0006](adr/0006-the-desk-may-start-work.md)) |
 | `observation` | a rendered fact from the board, no model call | pin |
 
 **The kind is decided by a run, not by the person typing.** Three things arrive through one field
@@ -32,13 +32,22 @@ asking which of the three it was would be the second question capture is not all
 and `question` is what an unreadable answer produces: a thought answered as a question loses
 nothing, because the text is in the block verbatim and recording it is one click away.
 
-**An instruction is prepared and then stops.** The run writes the message and names the session it
-is for, by number, from the board it was given; anything else in the reply names no session, and
-no message is prepared rather than a guess at which console to interrupt. What is written is a row
-in `directive` and a button — nothing dispatches it, and nothing here decides that a moment is a
-good one to interrupt an agent ([08-non-goals.md](08-non-goals.md) §2). The button leads to the
-same three-step panel every other message goes through
-([adr/0002](adr/0002-read-first-never-interrupt.md)).
+**An instruction is carried out.** The run writes the message and names the project it is for,
+from the board it was given, and then an agent starts on it in a worktree of its own
+([adr/0006](adr/0006-the-desk-may-start-work.md)). A reply that names no project prepares the
+message and asks which one it meant: picking a repository to start work in would be a guess with a
+worktree at the end of it.
+
+**And a request is not done until it is done.** Where something this program started is already
+running in that project, the work is written into the queue and the block says **waiting** — it
+starts when the seat is free, by itself where the project is armed
+([adr/0007](adr/0007-a-loop-that-decides-when-not-what.md)) and by a click otherwise. What it does
+not do is claim to be finished, or start a second agent in the same repository a minute after the
+first.
+
+The message itself is still written down against the session it names, and can still be sent by
+hand into a session that is already running — that path has no client and says so, and it is a
+second button rather than the answer.
 
 States: `queued → running → answered`, or `failed`, or `cancelled`. A block that fails says why and
 offers retry; it does not disappear, because a question that vanished is a question you ask again.

@@ -627,6 +627,18 @@ async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> 
     await _write_ideas(store, block, idea, rows)
 
 
+async def _seat_taken(store: Store, repo_key: str) -> bool:
+    """Is an agent this program started already working in that project?
+
+    Read from the queue, which is where every start is recorded. A task whose agent has finished
+    is settled by the loop in `autostart`, so a stale one costs a wait rather than a second agent.
+    """
+    return any(
+        task.started_at is not None and task.failed_at is None and task.finished_at is None
+        for task in await store.tasks(repo_key=repo_key)
+    )
+
+
 async def _pinned_ideas(store: Store, block: Block) -> list[Idea]:
     """The ideas already linked to this message because a human dropped their cards in.
 
@@ -663,26 +675,33 @@ def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
 
 
 async def _take_it_on(
-    store: Store, block: Block, rows: Sequence[BoardRow], ideas: Sequence[Idea]
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow],
+    ideas: Sequence[Idea] = (),
+    *,
+    row: BoardRow | None = None,
+    message: str = "",
 ) -> bool:
-    """Drop an idea into the output, say "take it on", and it is taken on (docs/adr/0006).
+    """Say what should happen, and it happens (docs/adr/0006).
 
-    The trigger is a sentence a person typed with cards they dropped there themselves — not a
-    schedule, not an idle agent, not a ticket appearing. Both halves have to be present: the run
-    read this as an instruction *and* the human pointed at the thoughts it is about. One without
-    the other prepares a message and waits, which is what it did before.
+    An instruction starts an agent. It does not produce a message somebody has to carry by hand:
+    that path ended at a wall — the CLI publishes no way into a session that is already running —
+    and a console whose answer to "do this" is "copy this" has not done the thing it was asked.
 
-    What the agent is told is the request and the ideas as they were written, verbatim. The
-    summaries are for scanning; what somebody actually wrote is what the work is built from.
+    The trigger is a sentence a person typed. Not a schedule, not an idle agent, not a ticket
+    appearing; those are docs/adr/0007's subject and have their own limits. What the agent is told
+    is the request, the ideas it was pointed at as they were written, and where it is — verbatim,
+    because the summaries are for scanning and the work is built from what was actually said.
     """
-    if not ideas or not rows:
+    row = row or (rows[0] if rows else None)
+    if row is None:
         return False
-
-    row = rows[0]
-    instruction = "\n\n".join(
-        [block.input, "The ideas this is about, as they were written down:"]
-        + [f"- {idea.text}" for idea in ideas]
-    )
+    parts = [message.strip() or block.input]
+    if ideas:
+        parts += ["The ideas this is about, as they were written down:"]
+        parts += [f"- {idea.text}" for idea in ideas]
+    instruction = "\n\n".join(parts)
     project = row.project_name or row.session.project
     task = await store.queue_task(
         repo_key=row.project_key or row.session.cwd,
@@ -693,7 +712,27 @@ async def _take_it_on(
         # What gets marked built when this agent is gone from the registry.
         source_ref=",".join(idea.id for idea in ideas),
     )
+    # Somebody else is already in that repository on this program's behalf. Two agents in two
+    # worktrees of one project, started a minute apart, is the mess docs/adr/0007 is careful
+    # about — so this one waits for the seat rather than taking a second one. It is a real,
+    # written-down piece of work in the queue, and the console says it is waiting rather than
+    # pretending it was done.
+    if await _seat_taken(store, row.project_key or row.session.cwd):
+        armed = (await store.autostart(row.project_key or row.session.cwd)).armed
+        await store.finish_block(
+            block.id,
+            f"Understood, and it is waiting: something is already running in {project}. "
+            + (
+                "It starts by itself when that finishes."
+                if armed
+                else "Start it from the project's page when you want it, or let the project start "
+                "its own queue."
+            ),
+        )
+        return True
+
     await store.take_next_task(row.project_key or row.session.cwd)
+    log.info("dispatching an instruction", block=block.id, project=project)
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(
@@ -706,16 +745,18 @@ async def _take_it_on(
         await store.task_failed(task.id, result.detail)
         await store.finish_block(
             block.id,
-            f"I could not start an agent on it: {result.detail}. The ideas are untouched.",
+            f"I could not start an agent on it: {result.detail}. Nothing has changed, and the "
+            "message is below to send by hand if you want it now.",
         )
         return True
 
     await store.task_started(task.id, result.agent_id)
+    about = f"{len(ideas)} idea{'' if len(ideas) == 1 else 's'}" if ideas else "it"
     await store.finish_block(
         block.id,
-        f"On it — an agent is working on {len(ideas)} idea"
-        f"{'' if len(ideas) == 1 else 's'} in {project}, in a worktree of its own "
-        f"({result.agent_id}). They leave the list when it finishes.",
+        f"On it — an agent is working on {about} in {project}, in a worktree of its own "
+        f"({result.agent_id}). It is on the board while it runs"
+        + (". They leave the list when it finishes." if ideas else "."),
     )
     return True
 
@@ -747,20 +788,37 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
 
     index, message = session.read_directive(reply, len(rows))
     if index is None or not message.strip():
+        # No session named and nothing dropped in: the console does not pick a repository to start
+        # work in on its own. That would be a guess with a worktree at the end of it.
         await store.finish_block(
             block.id,
-            "Understood, but I could not tell which session this is for. Drop its card into this "
-            "field, or name it, and I will write the message.",
+            "Understood, but I could not tell which project this is for. Drop a card into the "
+            "workbench, or name it, and I will get it started.",
         )
         return
 
     row = rows[index - 1]
+    # The message is written down whichever way this goes: it is what was asked for, in the words
+    # it would have been said in, and a dispatch that fails leaves it there to send by hand.
     await store.record_directive(
         block_id=block.id,
         session_id=row.session.session_id,
         session_name=f"{row.session.project} · {row.session.name}",
         text_=message.strip(),
     )
+    directive = next((one for one in await store.directives() if one.block_id == block.id), None)
+
+    # And then it happens. An instruction that ends in a message somebody has to carry by hand is
+    # a console that did not do the thing it was asked (docs/adr/0006).
+    if await _take_it_on(store, block, rows, row=row, message=message.strip()):
+        if directive is not None:
+            started = next(
+                (task for task in await store.tasks() if task.title == block.input[:60]), None
+            )
+            if started is not None and started.agent_id:
+                await store.mark_directive_dispatched(directive.id, started.agent_id)
+        return
+
     await store.finish_block(
         block.id,
         f"Understood — a message to {row.session.project} · {row.session.name} is written and "

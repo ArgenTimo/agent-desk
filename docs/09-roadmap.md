@@ -69,9 +69,16 @@ delivery, and it is missing for a reason no amount of work here removes:
   peer credentials, "never from the payload". The rule against opening those files
   ([07-security.md](07-security.md)) costs this phase nothing.
 
-So `peer.send()` returns `needs_toolchain` and the panel says so, offering the text back to be
-pasted by a human at a moment they choose — which is [08-non-goals.md](08-non-goals.md) §2 and §3
-arriving at the same answer from the other direction.
+So `peer.send()` returns `needs_toolchain`. For three phases the console's answer to "tell it to
+do this" was that refusal and the text back to paste by hand — honest, and useless.
+
+**That is no longer what happens.** An instruction starts an agent on the work, in a worktree of
+its own, in the project it names ([adr/0006](adr/0006-the-desk-may-start-work.md)): the CLI grew
+`--bg` and `--worktree`, which is the supported surface the entry condition below was waiting for
+— for *starting* a session, which turns out to be the half of the problem worth having. Writing
+into a session that is already running is still refused and still has no client, and the manual
+path is still there for the case where somebody wants those words in that session: it is a
+secondary button now rather than the only answer.
 
 **Entry condition for finishing it:** a supported client — a CLI subcommand, an SDK call, or a
 published protocol. Not a reverse-engineered frame: that would be a write into another agent's

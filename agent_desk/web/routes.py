@@ -372,6 +372,9 @@ async def render_blocks() -> str:
         # Which of them an agent has in its hands right now, so the console can say so wherever an
         # idea appears rather than only where the work was started.
         working=await store.ideas_in_flight(),
+        # Work that was written down and is waiting for a seat: a request is not done until it is
+        # done, and a console that said nothing about it would be pretending otherwise.
+        waiting={task.title: task for task in await store.tasks() if task.waiting},
         directives=directives,
         partial=block_runs.PARTIAL,
     )
@@ -944,10 +947,25 @@ async def queue_task(request: Request) -> Response:
 
 @router.post("/tasks/{task_id}/{action}", response_class=HTMLResponse)
 async def task_action(task_id: str, action: str, request: Request) -> Response:
-    """Take one out of the queue, or put a failed one back. Retry is a click (docs/adr/0007)."""
+    """Start one now, take one out of the queue, or put a failed one back (docs/adr/0007)."""
     form = await _form(request)
     key = form.get("key", "").strip()
-    if action == "drop":
+    if action == "start":
+        waiting = next((t for t in await store.tasks() if t.id == task_id and t.waiting), None)
+        if waiting is not None:
+            claimed = await store.take_next_task(waiting.repo_key)
+            if claimed is not None and claimed.id == task_id:
+                result = await asyncio.to_thread(
+                    dispatch.start,
+                    dispatch.build_task(claimed.instruction, project=claimed.title),
+                    cwd=claimed.cwd,
+                    name=claimed.title,
+                )
+                if result.started:
+                    await store.task_started(claimed.id, result.agent_id)
+                else:
+                    await store.task_failed(claimed.id, result.detail)
+    elif action == "drop":
         await store.drop_task(task_id)
     elif action == "retry":
         task = next((t for t in await store.tasks() if t.id == task_id), None)
@@ -986,6 +1004,31 @@ async def set_autostart(request: Request) -> Response:
     elif key:
         await store.disarm(key, why="switched off here")
     panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/agents/{agent_id}/stop", response_class=HTMLResponse)
+async def stop_agent(agent_id: str, request: Request) -> Response:
+    """Stop an agent this console started (docs/adr/0006).
+
+    The one control that matters once something is running. Its conversation is kept — `claude
+    attach` opens it again — and the task it was on is marked finished, which frees the seat.
+    """
+    result = await asyncio.to_thread(dispatch.stop, agent_id)
+    for task in await store.tasks():
+        if task.agent_id == agent_id and task.finished_at is None:
+            await store.finish_task(task.id)
+    panel = env.get_template("_dispatch.html").render(
+        started=False,
+        detail=(
+            f"{agent_id} was stopped. Its conversation is kept — `claude attach {agent_id}` "
+            "opens it again."
+            if result.started
+            else f"{agent_id} would not stop: {result.detail}"
+        ),
+    )
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))

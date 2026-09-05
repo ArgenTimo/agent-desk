@@ -582,6 +582,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
   gap: 8px;
   padding: 0 2px 4px;
 }
+.tree > .project-slot { flex: 0 0 auto; }
 .tree-head { display: flex; gap: 8px; align-items: baseline; padding: 0 2px; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
 .flagged-count { color: var(--attention); }
 
@@ -675,6 +676,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
   background: color-mix(in srgb, var(--busy) 12%, transparent);
 }
 .about.taken { border-left-color: var(--busy); }
+.about.waiting { border-left-color: var(--attention); border-left-style: dashed; }
 .idea-card.working { border-left-color: var(--busy); background: color-mix(in srgb, var(--busy) 7%, var(--surface)); }
 
 .dot {
@@ -743,7 +745,7 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .more:hover { color: var(--fg); background: var(--raised); }
 
 /* The options on a project. Rendered with the card and hidden, so opening it costs nothing. */
-.card.project { position: relative; }
+.project-slot { position: relative; }
 .menu {
   position: absolute;
   right: 6px;

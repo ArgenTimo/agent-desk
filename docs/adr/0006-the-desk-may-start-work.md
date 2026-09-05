@@ -34,12 +34,21 @@ ability to *start a new one*.
 **A written instruction, on a human click, may start a new background agent** in the project it
 names, in a git worktree of its own, with that instruction as its prompt.
 
-- **The click may be the send button.** An instruction typed with the cards it is about dropped
-  into the output — "take this on", with two ideas sitting there — is a person naming the work and
-  saying to do it, and it starts an agent. Both halves are required: the run read it as an
-  instruction *and* a human put those cards there. Neither on its own does anything but prepare a
-  message, and no machine signal is ever the trigger (that is [0007](0007-a-loop-that-decides-when-not-what.md)'s
-  subject, with its own limits).
+- **The click is the send button.** An instruction is a person saying what should happen, so it
+  starts an agent — that is the whole trigger, and it was narrowed twice before it was widened to
+  this. A console whose answer to "do this" is "here are the words, carry them over yourself" has
+  not done the thing it was asked; that was the honest answer while nothing could be started, and
+  it stopped being the honest answer the day something could.
+
+  Two things bound it and both are load-bearing. **What is read as an instruction is a run's
+  judgement, and it can be wrong** — so a question is answered and never acted on, a misfire lands
+  in a worktree nobody has to keep, and every dispatch is announced with the id and a button that
+  stops it. And **no machine signal is ever the trigger**: a schedule, an idle agent, a ticket
+  appearing are [0007](0007-a-loop-that-decides-when-not-what.md)'s subject, with its own limits.
+
+  What is *not* started is the case where nothing says where: an instruction naming no session and
+  with no card dropped in produces the message and asks which project it meant. Picking a
+  repository to start work in would be a guess with a worktree at the end of it.
 - **Starting is not interrupting.** What [0002](0002-read-first-never-interrupt.md) protects is a
   *running* agent's context window; a session that does not exist yet has none to displace. The
   property that made this tool safe to point at a working session — reading is invisible to the
