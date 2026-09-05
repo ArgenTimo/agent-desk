@@ -1268,3 +1268,25 @@ svg.map a:hover .node rect { stroke: var(--focus); }
   color: var(--fg);
 }
 .meeting-form button { align-self: flex-start; }
+
+/* The workbench drawn rather than stacked (agent_desk/ideas/bench.py). */
+.bench-head { display: flex; justify-content: flex-end; padding: 2px 0; }
+.chip.bench-toggle {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.chip.bench-toggle:hover { color: var(--fg); border-color: var(--line-strong); }
+.chip.bench-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--focus); }
+.bench { overflow: auto; min-height: 0; }
+svg.map.bench .tie path { stroke: var(--line-strong); stroke-width: 1.4; color: var(--line-strong); }
+svg.map.bench .tie text { fill: var(--fg-dim); font-size: 9px; }
+svg.map.bench .tie.needs path { stroke: var(--focus); color: var(--focus); }
+svg.map.bench .node.project rect { fill: color-mix(in srgb, var(--focus) 6%, var(--surface)); }
+svg.map.bench .node.idea rect { fill: color-mix(in srgb, var(--attention) 6%, var(--surface)); }
+svg.map.bench .node.done rect { stroke-dasharray: 3 3; }

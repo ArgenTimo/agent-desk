@@ -1,0 +1,38 @@
+{# The workbench as a diagram. A stack of cards says what each card is; it cannot say that this
+   session is in that project or that this idea needs that one — and when somebody has dragged
+   four things here to ask one question about them, the relation between them is usually the
+   question (agent_desk/ideas/bench.py). #}
+{% if drawn.empty %}
+<p class="empty small">Drop a card or two on the workbench and the relations between them are
+  drawn here.</p>
+{% else %}
+<div class="map-scroll">
+  <svg class="map bench" width="{{ drawn.width }}" height="{{ drawn.height }}"
+       viewBox="0 0 {{ drawn.width }} {{ drawn.height }}" role="img"
+       aria-label="what is on the workbench and how it is related">
+    <defs>
+      <marker id="tie" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7"
+              orient="auto-start-reverse">
+        <path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path>
+      </marker>
+    </defs>
+
+    {% for tie in drawn.ties %}
+    <g class="tie {{ tie.says | replace(' ', '-') }}">
+      <path d="M {{ tie.x1 }} {{ tie.y1 }} C {{ tie.x1 + 40 }} {{ tie.y1 }}, {{ tie.x2 - 40 }} {{ tie.y2 }}, {{ tie.x2 }} {{ tie.y2 }}"
+            marker-end="url(#tie)" fill="none"></path>
+      <text x="{{ (tie.x1 + tie.x2) // 2 }}" y="{{ (tie.y1 + tie.y2) // 2 - 4 }}"
+            text-anchor="middle">{{ tie.says }}</text>
+    </g>
+    {% endfor %}
+
+    {% for piece in drawn.pieces %}
+    <g class="node {{ piece.kind }} {{ piece.state }}">
+      <rect x="{{ piece.x }}" y="{{ piece.y }}" width="{{ width }}" height="{{ height }}" rx="5"></rect>
+      <text class="second" x="{{ piece.x + 9 }}" y="{{ piece.y + 15 }}">{{ piece.kind }}</text>
+      <text x="{{ piece.x + 9 }}" y="{{ piece.y + 31 }}">{{ piece.label[:26] }}</text>
+    </g>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}

@@ -58,7 +58,15 @@
     {# What the next message will carry, said out loud. Every call to the model is built from
        exactly this and nothing else — the question, the cards in the output, and whichever
        earlier exchanges were attached. #}
+    {# Two ways to look at the same bench: the cards themselves, and the relations between them.
+       A stack says what each one is; the diagram says how they stand to each other, which is
+       usually the question when four things were dragged here at once. #}
+    <div class="bench-head" hidden>
+      <button type="button" class="chip bench-toggle" data-bench-toggle aria-pressed="false"
+              title="draw what is on the workbench and how it is related">as a diagram</button>
+    </div>
     <div id="pins" class="pins" aria-label="what the next message is about"></div>
+    <div id="bench" class="bench" hidden></div>
 
     <div class="context-strip">
       <span id="context-count"></span>

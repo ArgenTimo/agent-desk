@@ -464,6 +464,10 @@ document.addEventListener('dragend', () => {
 // Dropping a card here does two things at once, because they are the same thought: it shows what
 // the card actually contains, and it says that what you type next is about that. Dragging it back
 // out undoes both.
+function showBenchToggle() {
+  if (benchHead) benchHead.hidden = pins.children.length === 0;
+}
+
 function pinnedTargets() {
   return [...pins.querySelectorAll('[data-kind]')]
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
@@ -480,6 +484,8 @@ function attachedBlocks() {
 }
 
 function syncTargets() {
+  showBenchToggle();
+  drawBench();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
@@ -708,6 +714,41 @@ document.addEventListener(
   },
   true
 );
+
+/* --- the workbench as a diagram --------------------------------------------------------------- */
+// A stack of cards says what each one is. It cannot say that this session is in that project, or
+// that this idea needs that one — and when four things were dragged here to ask one question, the
+// relation between them is usually the question (agent_desk/ideas/bench.py).
+const benchHead = document.querySelector('.bench-head');
+const benchView = document.getElementById('bench');
+
+function benchShowing() {
+  return benchView && !benchView.hidden;
+}
+
+async function drawBench() {
+  if (!benchShowing()) return;
+  const cards = pinnedTargets();
+  try {
+    const response = await fetch(`/workbench?cards=${encodeURIComponent(cards)}`);
+    benchView.innerHTML = response.ok
+      ? await response.text()
+      : '<p class="empty small">could not draw this</p>';
+  } catch {
+    benchView.innerHTML = '<p class="empty small">could not draw this</p>';
+  }
+}
+
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-bench-toggle]');
+  if (!button) return;
+  const showing = benchView.hidden;
+  benchView.hidden = !showing;
+  pins.hidden = showing;
+  button.setAttribute('aria-pressed', String(showing));
+  button.textContent = showing ? 'as cards' : 'as a diagram';
+  await drawBench();
+});
 
 /* --- plain words, and the technical half behind a toggle ---------------------------------------- */
 // A card dropped on the workbench opens in plain words: a card that leads with paths and pids is a

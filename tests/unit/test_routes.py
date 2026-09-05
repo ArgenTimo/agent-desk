@@ -1227,3 +1227,23 @@ async def test_the_plans_page_declares_one_and_moves_a_session_onto_it(
     status, _ = await _post("/plans", {"drop": plan.id})
     assert status == 200
     assert [one.name for one in await desk.subscriptions()] == ["Team"]
+
+
+@pytest.mark.unit
+async def test_the_workbench_draws_what_is_on_it(home: Home, desk: Store) -> None:
+    """A stack of cards says what each one is; it cannot say how they stand to each other, which
+    is usually the question when four things were dragged there at once."""
+    session_id = _a_session(home)
+    rows, _ = routes.board()
+    key = (routes.shape(rows, []))[0].key
+
+    status, page = await _get(f"/workbench?cards=project:{key},session:{session_id}")
+
+    assert status == 200
+    assert "<svg" in page
+    assert "runs in" in page
+
+    # Nothing on it draws nothing, and says so rather than showing an empty frame.
+    status, page = await _get("/workbench?cards=")
+    assert status == 200
+    assert "Drop a card or two" in page

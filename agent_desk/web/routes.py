@@ -31,7 +31,7 @@ from markupsafe import Markup, escape
 from agent_desk import dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, chart, meeting
+from agent_desk.ideas import appraise, bench, chart, meeting
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -1195,6 +1195,38 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.get("/workbench", response_class=HTMLResponse)
+async def workbench_diagram(cards: str = "") -> HTMLResponse:
+    """The cards on the workbench as a diagram, with the relations between them drawn.
+
+    "Отображение на верстаке не как просто блоки, а как диаграммы со всеми взаимосвязями." A stack
+    of cards says what each one is; it cannot say that this session is in that project, or that
+    this idea needs that one. The relation is the thing a diagram has room for and a stack does
+    not.
+
+    Only relations this console already knows are drawn, and only between cards that are actually
+    on the bench: a line to something you cannot see is a line that explains nothing.
+    """
+    picked = [one for one in cards.split(",") if one]
+    rows, _ = await asyncio.to_thread(board)
+    # The *shaped* rows: `project_key` is stamped by `shape`, and without it a session and the
+    # project it runs in are two boxes with nothing between them.
+    projects = shape(rows, await store.groups())
+    stamped = [row for project in projects for one in project.instances for row in one.rows]
+    return HTMLResponse(
+        env.get_template("_workbench.html").render(
+            drawn=bench.lay_out(
+                picked,
+                stamped,
+                await store.ideas(limit=400),
+                await store.idea_links(),
+            ),
+            width=chart.BOX_WIDTH,
+            height=chart.BOX_HEIGHT,
+        )
+    )
 
 
 @router.post("/ideas/meeting", response_class=HTMLResponse)
