@@ -31,7 +31,16 @@
     {% for idea in ideas[block.id] %}
     <div class="idea-line{% if idea.state != 'new' %} settled{% endif %}"
          data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}" draggable="true">
-      <span class="idea-summary">{{ idea.summary }}</span>
+      {# The line *is* the edit control, rather than sitting above a second copy of itself:
+         docs/04's action table gives an idea block `keep · discard · edit summary`, and three
+         renderings of one sentence is what that looked like when they were separate. #}
+      <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
+            hx-post="/ideas/{{ idea.id }}/summary" hx-target="#blocks">
+        <input type="hidden" name="from" value="card">
+        <label class="visually-hidden" for="summary-{{ idea.id }}">the one-line summary</label>
+        <input class="idea-summary" id="summary-{{ idea.id }}" name="summary"
+               value="{{ idea.summary }}">
+      </form>
       <span class="idea-said">— recorded as an idea</span>
       <span class="idea-buttons">
         {% if idea.state == "new" %}
@@ -73,13 +82,9 @@
       {% endif %}
       </span>
     </div>
-    {# The summary is editable here, not only in the inbox: docs/04's action table gives an idea
-       block `keep · discard · edit summary`, and docs/05 draws the card with all three. #}
-    <form class="rename" method="post" action="/ideas/{{ idea.id }}/summary"
-          hx-post="/ideas/{{ idea.id }}/summary" hx-target="#blocks">
-      <input type="hidden" name="from" value="card">
-      <input name="summary" value="{{ idea.summary }}" aria-label="the one-line summary">
-    </form>
+    {# The thought itself, under the line that says it was written down — and only when the line
+       is not already the whole of it. The summary is edited in the inbox and in the column; a
+       third editable copy of it here made one message read as the same sentence three times. #}
     {% if idea.text != idea.summary %}
     <p class="verbatim">{{ idea.text }}</p>
     {% endif %}

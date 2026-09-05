@@ -797,7 +797,19 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   padding: 3px 0;
   cursor: grab;
 }
-.idea-summary { font-weight: 600; }
+.idea-line .rename { flex: 1; min-width: 12ch; display: flex; }
+.idea-summary {
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted transparent;
+  padding: 1px 0;
+}
+.idea-summary:hover { border-bottom-color: var(--line-strong); }
+.idea-summary:focus { outline: none; border-bottom-color: var(--focus); }
 .idea-said { color: var(--idle); font-size: 12px; }
 .idea-line.settled .idea-said { color: var(--fg-dim); }
 .idea-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
@@ -831,6 +843,11 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   color: var(--fg-dim);
 }
 body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft); }
+
+/* A card keeps its own height. Flex children shrink by default, and thirty-one of them in a
+   column that fits eight squeezed every one of them into a sliver with a dot in it — the list has
+   to scroll instead, which is the whole reason it has an overflow. */
+.ideas-list > .card, .pins > .pin, .tree > .card { flex: 0 0 auto; }
 
 .idea-card { cursor: grab; }
 .idea-card > .card-head { cursor: grab; }
