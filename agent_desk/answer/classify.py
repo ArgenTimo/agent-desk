@@ -101,9 +101,14 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk)\Z", re.IGNORECASE)
 
-_KIND_OF = {"question": "question", "idea": "idea", "do": "instruction"}
+_KIND_OF = {
+    "question": "question",
+    "idea": "idea",
+    "do": "instruction",
+    "desk": "master",
+}
 
 
 def kind_prompt(text: str) -> str:
@@ -135,6 +140,13 @@ def kind_prompt(text: str) -> str:
             "  do       — they are telling a named agent, session or project to act, now.",
             '             "tell Biba to run the tests again", "бери в работу", "запусти',
             '             проверку в agent-desk", "сделай это сейчас"',
+            "  desk     — they are telling *this console* to act, now: on its own screen, its own",
+            "             ideas, its own data, its own behaviour.",
+            '             "разгреби текущие идеи", "tidy up the pool", "убери эту колонку"',
+            "",
+            "`desk` is `do` pointed at this program rather than at a project it watches, and it is",
+            "the address that decides it. A wish about how this console *should* be one day is",
+            'still an idea; "do this to my desk, now" is `desk`.',
             "",
             "The line between `idea` and `do` is the only hard one, and it is this: **`do` needs an",
             "addressee, or an explicit instruction to start now.** A session's name, \"this",

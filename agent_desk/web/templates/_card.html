@@ -44,6 +44,17 @@
   <p class="hint small"><span aria-hidden="true">⚑</span> may be waiting for you
     <span class="evidence">— {{ row.hint.observation }}; a guess, not a signal</span></p>
   {% endif %}
+  {# Three views of one card (docs/06-console.md): the **hint** is what the overview shows, the
+     **metadata** is this — what goes into a question and what opens on the workbench — and the
+     **whole thing** is below, folded, because it is a console's worth of text and nobody wants it
+     by default. #}
+  <details class="whole">
+    <summary>everything this session has said</summary>
+    <div class="whole-body" data-tail="{{ row.session.session_id }}">
+      <a href="/sessions/{{ row.session.session_id }}/tail">read it</a>
+    </div>
+  </details>
+
   <a class="message-button message-link" href="/sessions/{{ row.session.session_id }}/message"
      hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message">message this session…</a>
 </div>

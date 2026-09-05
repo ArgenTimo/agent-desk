@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -558,8 +559,21 @@ async def _thread_for(store: Store, thread_id: str, text: str) -> Thread:
     if thread_id:
         for thread in await store.open_threads():
             if thread.id == thread_id:
+                # A chat that has not been about anything yet takes the name of the first thing
+                # said in it. "chat 4" tells nobody which tab held the migration conversation, and
+                # a person with seven tabs open is reading the names rather than counting.
+                if _is_unnamed(thread.subject):
+                    await store.rename_thread(thread.id, inbox.fallback_summary(text) or "a chat")
                 return thread
     return await store.create_thread(text[:60] or "untitled")
+
+
+# A chat named by the `+` button rather than by anything said in it.
+_UNNAMED = re.compile(r"\Achat( [0-9]+)?\Z", re.IGNORECASE)
+
+
+def _is_unnamed(subject: str) -> bool:
+    return bool(_UNNAMED.match(subject.strip()))
 
 
 async def _work(
@@ -583,6 +597,9 @@ async def _work(
         kind = await classifier.kind(block.input)
         if kind == "idea":
             await record_idea(store, block, rows)
+            return
+        if kind == "master":
+            await _master_request(store, block, rows)
             return
         if kind == "instruction":
             await _prepare_directive(store, block, rows)
@@ -697,15 +714,43 @@ async def _take_it_on(
     row = row or (rows[0] if rows else None)
     if row is None:
         return False
+    return await _start_work(
+        store,
+        block,
+        ideas,
+        message=message,
+        repo_key=row.project_key or row.session.cwd,
+        cwd=row.session.cwd,
+        project=row.project_name or row.session.project,
+        branch=(row.tail.git_branch if row.tail else "") or "",
+    )
+
+
+async def _start_work(
+    store: Store,
+    block: Block,
+    ideas: Sequence[Idea] = (),
+    *,
+    message: str = "",
+    repo_key: str,
+    cwd: str,
+    project: str,
+    branch: str = "",
+) -> bool:
+    """Queue the work and start it, or say why it is waiting. One place, two callers.
+
+    The second caller is a request about this console itself, whose checkout is not a row on the
+    board: the desk watches other people's repositories, and its own is simply where it is
+    installed (docs/04-threads-and-blocks.md).
+    """
     parts = [message.strip() or block.input]
     if ideas:
         parts += ["The ideas this is about, as they were written down:"]
         parts += [f"- {idea.text}" for idea in ideas]
     instruction = "\n\n".join(parts)
-    project = row.project_name or row.session.project
     task = await store.queue_task(
-        repo_key=row.project_key or row.session.cwd,
-        cwd=row.session.cwd,
+        repo_key=repo_key,
+        cwd=cwd,
         title=block.input[:60],
         instruction=instruction,
         source_kind="idea" if ideas else "instruction",
@@ -718,8 +763,8 @@ async def _take_it_on(
     # about — so this one waits for the seat rather than taking a second one. It is a real,
     # written-down piece of work in the queue, and the console says it is waiting rather than
     # pretending it was done.
-    if await _seat_taken(store, row.project_key or row.session.cwd):
-        armed = (await store.autostart(row.project_key or row.session.cwd)).armed
+    if await _seat_taken(store, repo_key):
+        armed = (await store.autostart(repo_key)).armed
         await store.finish_block(
             block.id,
             f"Understood, and it is waiting: something is already running in {project}. "
@@ -732,14 +777,12 @@ async def _take_it_on(
         )
         return True
 
-    await store.take_next_task(row.project_key or row.session.cwd)
+    await store.take_next_task(repo_key)
     log.info("dispatching an instruction", block=block.id, project=project)
     result = await asyncio.to_thread(
         dispatch.start,
-        dispatch.build_task(
-            instruction, project=project, branch=(row.tail.git_branch if row.tail else "") or ""
-        ),
-        cwd=row.session.cwd,
+        dispatch.build_task(instruction, project=project, branch=branch),
+        cwd=cwd,
         name=block.input[:40],
     )
     if not result.started:
@@ -760,6 +803,48 @@ async def _take_it_on(
         + (". They leave the list when it finishes." if ideas else "."),
     )
     return True
+
+
+def own_checkout() -> Path:
+    """Where this console's own code is, which is where a request about it has to be done.
+
+    Not a row on the board: the desk watches other people's repositories and does not watch
+    itself. This is the package's own directory, which is the checkout when it was started from
+    one and an installed copy otherwise — and the difference decides what a `desk` request can do.
+    """
+    return Path(__file__).resolve().parents[2]
+
+
+async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+    """A request about this console: "tidy up the ideas", "put a button here".
+
+    Where the console is running from its own checkout, an agent is started there and does it —
+    the same dispatch as any other instruction, addressed at the one repository this program is
+    allowed to change. Where it is not — an installed copy with no source beside it — there is
+    nothing to start, so the request is written down as a thought about the service and says so.
+    That is not a fob-off: it is the only honest answer when the code is somewhere else
+    (docs/04-threads-and-blocks.md).
+    """
+    await store.set_block_kind(block.id, "master")
+    await store.set_block_running(block.id)
+
+    here = own_checkout()
+    if (here / ".git").exists():
+        if await _start_work(
+            store,
+            block,
+            repo_key=f"desk:{here}",
+            cwd=str(here),
+            project=here.name,
+        ):
+            return
+
+    await record_idea(store, block, rows)
+    await store.finish_block(
+        block.id,
+        "This is about the console itself, and its code is not on this machine to change — "
+        "written down as a thought about the service instead. We will try to take it into account.",
+    )
 
 
 async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:

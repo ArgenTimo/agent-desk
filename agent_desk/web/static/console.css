@@ -927,6 +927,11 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .hint { display: flex; gap: 6px; align-items: baseline; margin: 6px 0 0; font-size: 11px; color: var(--attention); }
 .hint .evidence { color: var(--fg-dim); }
 .message-link { display: inline-block; margin-top: 6px; font-size: 11px; }
+/* The third view: everything, folded, and scrolling inside itself so that opening it does not
+   push the rest of the workbench off the screen. */
+.whole { margin-top: 8px; font-size: 11px; }
+.whole > summary { cursor: pointer; color: var(--fg-dim); font-family: var(--mono); }
+.whole-body { margin-top: 6px; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; }
 
 /* --- ideas, in the middle and on the right ------------------------------------------------------ */
 /* One line a thought, saying it was written down, with the two answers beside it. A message that

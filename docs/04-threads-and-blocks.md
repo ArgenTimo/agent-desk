@@ -23,7 +23,15 @@ the kind changes what it looks like and what it can do:
 | `question` | the question, then the answer as it streams | retry · follow up · discard |
 | `idea` | "Idea recorded. \<one-line summary\>. Keep it?" | keep · discard · edit summary ([05-ideas.md](05-ideas.md)) |
 | `instruction` | "On it — an agent is working on it in \<project\>", or that it is **waiting** for the seat | stop it · start it now · drop it ([adr/0006](adr/0006-the-desk-may-start-work.md)) |
+| `master` | "an agent is working on it in agent-desk", or that the code is not on this machine | stop it · record as an idea |
 | `observation` | a rendered fact from the board, no model call | pin |
+
+**A request about this console goes to this console.** "Tidy up the ideas", "put a button here"
+— `do` pointed at the desk rather than at a project it watches, and the address is the whole
+difference. It starts an agent in the console's own checkout, which is the one repository this
+program is allowed to change. Where that checkout is not on the machine — an installed copy with
+no source beside it — there is nothing to start, so the request is written down as a thought about
+the service and says so; that is the only honest answer available, not a fob-off.
 
 **The kind is decided by a run, not by the person typing.** Three things arrive through one field
 — "what did the migration do", "cache the probe results", "tell Biba to test it again" — and

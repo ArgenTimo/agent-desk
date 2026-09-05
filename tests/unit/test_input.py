@@ -1187,3 +1187,75 @@ async def test_a_message_read_as_the_wrong_kind_is_corrected_in_one_click(
     (idea,) = await desk.ideas()
     assert idea.text == "сделать так, чтобы сервис подключался к любому проекту"
     assert "recorded as an idea" in column
+
+
+@pytest.mark.unit
+async def test_a_request_about_the_console_is_done_in_the_console(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Tidy up the ideas" is `do` pointed at this program, and it goes to this program's own
+    checkout rather than to a project it watches (docs/04-threads-and-blocks.md)."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+        told.append(cwd)
+        return dispatch.Started(True, agent_id="desk1")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "desk")
+
+    block = await blocks.submit(desk, "разгреби текущие идеи", [make_row("alpha", "main")])
+    assert await _settled(desk, block.id) == "answered"
+
+    after = await desk.block(block.id)
+    assert after is not None and after.kind == "master"
+    # Its own checkout, not the session that happened to be on the board.
+    assert told == [str(blocks.own_checkout())]
+    assert "/projects/alpha" not in told[0]
+
+    (task,) = await desk.tasks()
+    assert task.repo_key.startswith("desk:")
+
+
+@pytest.mark.unit
+async def test_a_request_about_a_console_whose_code_is_elsewhere_is_written_down(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An installed copy with no source beside it has nothing to start, and saying so is the only
+    honest answer available."""
+    from agent_desk import dispatch
+
+    monkeypatch.setattr(
+        dispatch, "start", lambda instruction, *, cwd, name: pytest.fail("there was nothing to run")
+    )
+    monkeypatch.setattr(blocks, "own_checkout", lambda: pathlib.Path("/not/a/checkout"))
+    monkeypatch.setenv("KIND", "desk")
+
+    block = await blocks.submit(desk, "убери эту колонку", [])
+    assert await _settled(desk, block.id) == "answered"
+
+    after = await desk.block(block.id)
+    assert after is not None
+    assert "not on this machine" in (after.answer or "")
+    # And the thought is kept rather than lost.
+    assert [idea.text for idea in await desk.ideas()] == ["убери эту колонку"]
+
+
+@pytest.mark.unit
+async def test_a_chat_takes_the_name_of_the_first_thing_said_in_it(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """ "chat 4" tells nobody which tab held the migration conversation."""
+    chat = await desk.create_thread("chat 3")
+
+    await blocks.submit(desk, "what did the migration end up doing", [], thread_id=chat.id)
+
+    renamed = next(one for one in await desk.open_threads() if one.id == chat.id)
+    assert renamed.subject == "what did the migration end up doing"
+
+    # And a chat that already has a name keeps it.
+    await blocks.submit(desk, "and what about the ports", [], thread_id=chat.id)
+    again = next(one for one in await desk.open_threads() if one.id == chat.id)
+    assert again.subject == "what did the migration end up doing"

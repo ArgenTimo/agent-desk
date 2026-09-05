@@ -59,6 +59,11 @@
 
     <div class="context-strip">
       <span id="context-count"></span>
+      {# Appears the moment an idea lands on the workbench, because at that point there is exactly
+         one thing anybody wants to do with it. It types the words and sends them, so what happens
+         is the same thing that happens when they are typed by hand — no second path to keep in
+         step (docs/adr/0006). #}
+      <button type="button" id="get-started" class="send" hidden>Get started on it</button>
       <button type="button" id="clear-context">carry nothing</button>
     </div>
 

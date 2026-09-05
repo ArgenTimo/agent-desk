@@ -29,7 +29,10 @@ from ulid import ULID
 
 from agent_desk.store.redact import scrub, scrub_optional
 
-BlockKind = Literal["question", "idea", "observation", "instruction"]
+# The fifth is a request about *this console* — "tidy up the ideas", "put a button here" — as
+# opposed to one about a project it watches. It is an instruction with a different address, and
+# the address is the difference that matters (docs/04-threads-and-blocks.md).
+BlockKind = Literal["question", "idea", "observation", "instruction", "master"]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
 # and "it is in the product" are different answers to "what happened to my idea"

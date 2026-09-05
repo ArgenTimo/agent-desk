@@ -483,6 +483,12 @@ function syncTargets() {
       `${attached ? ` and ${attached} earlier answer${attached === 1 ? '' : 's'}` : ''}`
     : '';
   document.querySelector('.context-strip').classList.toggle('on', carried > 0);
+  // One idea on the workbench means one obvious next move, so the console offers it rather than
+  // waiting to be told in words it already knows.
+  const ideas = pins.querySelectorAll('[data-kind="idea"]').length;
+  const go = document.getElementById('get-started');
+  go.hidden = ideas === 0;
+  go.textContent = ideas > 1 ? `Get started on these ${ideas}` : 'Get started on it';
   showActiveThread();
 }
 
@@ -496,6 +502,14 @@ function clearPins() {
 }
 
 document.getElementById('clear-context').addEventListener('click', clearPins);
+
+// It types the words and sends them. The message then reads as what it is — somebody saying to
+// take it on — and there is one path through the console rather than two.
+document.getElementById('get-started').addEventListener('click', () => {
+  const field = document.getElementById('ask-text');
+  field.value = field.value.trim() || 'take these on';
+  document.getElementById('ask').requestSubmit();
+});
 
 async function pin(card) {
   if (pins.querySelector(`[data-id="${CSS.escape(card.id)}"][data-kind="${card.kind}"]`)) return;
@@ -664,6 +678,28 @@ document.addEventListener('drop', (event) => {
     .then((response) => (response.ok ? response.text() : null))
     .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
 });
+
+/* --- the third view of a card ------------------------------------------------------------------- */
+// A card has three: the hint in the overview, the metadata that opens on the workbench, and this —
+// everything the session has said. It is fetched when it is asked for and not before, because it
+// is a console's worth of text and most cards are never opened this far.
+document.addEventListener(
+  'toggle',
+  async (event) => {
+    const whole = event.target;
+    if (!whole.classList?.contains('whole') || !whole.open) return;
+    const body = whole.querySelector('.whole-body');
+    if (!body || body.dataset.read) return;
+    body.dataset.read = 'yes';
+    try {
+      const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
+      if (response.ok) body.innerHTML = await response.text();
+    } catch {
+      body.textContent = 'could not read it';
+    }
+  },
+  true
+);
 
 /* --- the keyboard ----------------------------------------------------------------------------- */
 // This window hovers over a terminal, and reaching for the mouse is what it exists to save.
