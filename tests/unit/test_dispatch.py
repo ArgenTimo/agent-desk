@@ -233,3 +233,60 @@ def test_an_introduction_says_what_it_is_for_and_what_it_cannot_ask(tmp_path: pa
     full = dispatch.introduce("biba", project="alpha", doing="the api half", env_names=["A", "B"])
     assert "What you are here for: the api half" in full
     assert "A, B" in full
+
+
+@pytest.mark.unit
+def test_continuing_a_session_uses_the_cli_s_own_door() -> None:
+    """`--bg --resume <id>` "continues that session in the background under the same ID". The full
+    id, not the short one: `--resume` takes the first and `stop` takes the second."""
+    command = dispatch.resume_argv("abc12345-1111-4222-8333-444444444444", "carry on")
+
+    assert "--bg" in command
+    assert command[command.index("--resume") + 1] == "abc12345-1111-4222-8333-444444444444"
+    assert command[-1] == "carry on"
+    assert not [flag for flag in command if flag in dispatch.NEVER]
+
+
+@pytest.mark.unit
+def test_a_kick_stops_the_session_first_because_resume_needs_it_stopped(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI: "`claude --resume` works once it is stopped". A `--bg` session that has finished a
+    turn is still running — it idles at its prompt with its process alive."""
+    calls: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+        stdout = "backgrounded · abc12345\n"
+        stderr = ""
+
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(
+        dispatch.subprocess, "run", lambda command, **kw: (calls.append(command), Done())[1]
+    )
+
+    result = dispatch.kick(
+        "abc12345-1111-4222-8333-444444444444", "carry on", cwd=str(tmp_path), agent_id="abc12345"
+    )
+
+    assert result.started
+    assert calls[0][1:] == ["stop", "abc12345"]
+    assert "--resume" in calls[1]
+
+
+@pytest.mark.unit
+def test_a_kick_with_nothing_to_say_or_nowhere_to_go_is_refused(tmp_path: pathlib.Path) -> None:
+    assert not dispatch.kick("an-id", "   ", cwd=str(tmp_path)).started
+    assert not dispatch.kick("", "carry on", cwd=str(tmp_path)).started
+    assert not dispatch.kick("an-id", "carry on", cwd=str(tmp_path / "gone")).started
+
+
+@pytest.mark.unit
+def test_a_limit_is_told_apart_from_something_being_broken() -> None:
+    """It decides whether a refusal becomes a wait or counts towards two failures. Loose on
+    purpose: this is the one shape here not recorded from a real occurrence."""
+    assert dispatch.looks_like_a_limit("usage limit reached · resets at 14:00")
+    assert dispatch.looks_like_a_limit("You have hit your rate limit")
+    assert dispatch.looks_like_a_limit("out of quota for now")
+    assert not dispatch.looks_like_a_limit("Error creating worktree: Invalid worktree name")
+    assert not dispatch.looks_like_a_limit("")

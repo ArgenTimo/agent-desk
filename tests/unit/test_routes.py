@@ -765,3 +765,73 @@ async def test_the_switch_records_where_the_project_is(home: Home, desk: Store) 
     arming = await desk.autostart(key)
     assert arming.cwd == str(home.root.parent)
     assert await autostart.why_not_explore(desk, key, live=set()) == ""
+
+
+@pytest.mark.unit
+async def test_the_switch_that_will_not_let_a_session_idle_says_what_it_does(
+    home: Home, desk: Store
+) -> None:
+    """docs/adr/0009: this is the explicit click docs/adr/0002 requires, and what it buys is a
+    standing permission — so the button says so before it is pressed."""
+    import os
+    import time
+
+    session_id = "bbbbbbbb-0000-4000-8000-000000000002"
+    home.session(
+        os.getpid(),
+        session_id,
+        cwd=str(home.root.parent),
+        kind="bg",
+        status="idle",
+        updatedAt=int(time.time() * 1000),
+    )
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
+    )
+    assert "don&#39;t let it idle" in board or "don't let it idle" in board
+
+    status, _ = await _post(f"/sessions/{session_id}/kicking", {"kicking": "yes"})
+    assert status == 200
+    arming = await desk.kicking("bbbbbbbb")
+    assert arming.armed
+    # Recorded when the button is pressed, because a kick stops the session first and a stopped
+    # session has no registry entry to read them back from.
+    assert arming.session_id == session_id
+    assert arming.cwd == str(home.root.parent)
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
+    )
+    assert "keeping it going" in board
+
+    status, _ = await _post(f"/sessions/{session_id}/kicking", {"kicking": "no"})
+    assert status == 200
+    assert not (await desk.kicking("bbbbbbbb")).armed
+
+
+@pytest.mark.unit
+async def test_a_terminal_session_is_offered_no_button_and_told_why(
+    home: Home, desk: Store
+) -> None:
+    """A button that would lie is worse than a sentence that explains (docs/adr/0009)."""
+    _a_session(home)  # the fixture's session is interactive
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
+    )
+
+    assert "cannot be continued from here" in board
+    assert "let it idle" not in board
+
+
+@pytest.mark.unit
+async def test_switching_one_off_works_for_a_session_that_has_since_gone(desk: Store) -> None:
+    """Otherwise the row stays armed forever and the loop keeps saying it is not running."""
+    gone = "cccccccc-0000-4000-8000-000000000003"
+    await desk.kick_session("cccccccc", on=True, session_id=gone, cwd="/somewhere")
+
+    status, _ = await _post(f"/sessions/{gone}/kicking", {"kicking": "no"})
+
+    assert status == 200
+    assert not (await desk.kicking("cccccccc")).armed

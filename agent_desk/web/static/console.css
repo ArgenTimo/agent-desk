@@ -1040,3 +1040,25 @@ body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft);
 .tiny { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); }
 #stream-state.lost { color: var(--flag); }
 body.stale .col-left { opacity: 0.55; }
+
+/* The switch that will not let a session sit idle (docs/adr/0009).
+   Off it reads as one more chip on the card; on it is the colour of a thing that is working,
+   because that is exactly what it is doing — and the card it sits on is the one place somebody
+   looks to find out why a session that was idle a minute ago is not idle now. */
+.card .kick { margin: 0.35rem 0 0; }
+.chip.kicking {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.chip.kicking:hover { color: var(--ink); border-color: var(--fg-dim); }
+.chip.kicking.on {
+  border-color: var(--busy);
+  color: var(--busy);
+  background: color-mix(in srgb, var(--busy) 12%, transparent);
+}

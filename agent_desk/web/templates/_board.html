@@ -106,6 +106,40 @@
             <a class="node-open" href="/sessions/{{ row.session.session_id }}/tail"
                data-card="session:{{ row.session.session_id }}">what it is doing…</a>
 
+            {# The switch that will not let this session sit idle (docs/adr/0009). It is the
+               explicit click docs/adr/0002 requires, so it says what it will do before it is
+               pressed — and where it cannot be offered it says why instead of showing a button
+               that would lie. #}
+            {% set kick = kicks.get(row.session.session_id.split("-")[0]) %}
+            {% if row.session.kind == "bg" %}
+            <form class="kick" method="post"
+                  action="/sessions/{{ row.session.session_id }}/kicking"
+                  hx-post="/sessions/{{ row.session.session_id }}/kicking"
+                  hx-target="#message">
+              <input type="hidden" name="kicking" value="{{ "no" if kick and kick.armed else "yes" }}">
+              {% if kick and kick.armed %}
+              <button type="submit" class="chip kicking on"
+                      title="it is continued whenever it goes idle — {{ kick.kicks }} turn{{ "" if kick.kicks == 1 else "s" }} so far. Press to stop.">
+                👟 keeping it going</button>
+              {% else %}
+              <button type="submit" class="chip kicking"
+                      title="while this console runs, continue this session whenever it goes idle: its own unfinished work first, and something worth fixing when there is none">
+                👟 don't let it idle</button>
+              {% endif %}
+            </form>
+            {% if kick and kick.resume_at %}
+            <p class="small quiet one" title="the account had nothing left to spend; the switch stayed on">
+              🍽 on a break until {{ kick.resume_at | at }}</p>
+            {% endif %}
+            {% if kick and kick.disarmed_why %}
+            <p class="small quiet one">it stopped being kept going: {{ kick.disarmed_why }}</p>
+            {% endif %}
+            {% else %}
+            <p class="small quiet one"
+               title="`stop` and `--resume` are the CLI's door into a background session; a terminal has none this console is allowed to open (docs/adr/0009)">
+              a session in a terminal cannot be continued from here</p>
+            {% endif %}
+
             {% if row.tail and row.tail.agents %}
             <div class="chips">
               {% for agent in row.tail.agents[:5] %}

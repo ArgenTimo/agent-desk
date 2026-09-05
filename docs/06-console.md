@@ -192,3 +192,28 @@ rendered in full beside the name and status of the session that would receive it
 happened. **Today the last step always reports a refusal**, because the installed CLI publishes no
 client for its cross-session socket; the panel then offers the text back to be pasted by hand
 ([09-roadmap.md](09-roadmap.md), Phase 3).
+
+## The switch on a session card
+
+A session card carries one control, and it is the only place in this console where a click buys a
+*standing* permission rather than a single act: **don't let it idle**. While it is on and the
+console is running, that session is continued whenever it goes quiet — its own unfinished work
+first, and the fenced "find one thing worth fixing" instruction when there is none.
+
+It appears only on a background session. `stop` followed by `--bg --resume` is the CLI's own door
+into one of those, and a session running in somebody's terminal has no door this program is
+allowed to open — the one that exists is authenticated by a key CLAUDE.md forbids reading. So the
+card says that in a sentence instead of showing a button that would not work
+([`adr/0009`](adr/0009-a-session-that-is-not-allowed-to-idle.md)).
+
+Three things it will show you afterwards, in the place the button was:
+
+- **how many turns it has kept alive**, on the button's own tooltip — the number that says whether
+  switching it on was worth it;
+- **🍽 on a break until 14:20** when the account ran out of budget. The switch stays on: a limit is
+  a wait, not a failure, and a console that switched itself off at lunchtime would need somebody
+  to notice and switch it back;
+- **why it stopped**, when two attempts in a row failed and it turned itself off.
+
+A session that is *working* is never continued, ever. That is the half of
+[`adr/0002`](adr/0002-read-first-never-interrupt.md) this console still keeps whole.

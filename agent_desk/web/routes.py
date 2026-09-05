@@ -18,6 +18,7 @@ import csv
 import io
 import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -46,6 +47,7 @@ from agent_desk.store.repo import (
     Group,
     Idea,
     IdeaState,
+    Kicking,
     ProjectLink,
     Store,
     Thread,
@@ -85,6 +87,17 @@ def _ago(then_ms: int, now: int | None = None) -> str:
 def _clock(entry_at: object) -> str:
     """A wall-clock time for a transcript entry, or nothing when it carried none."""
     return entry_at.strftime("%H:%M") if hasattr(entry_at, "strftime") else ""
+
+
+def _at(when_ms: object) -> str:
+    """A wall-clock time from unix milliseconds — when a wait is over, in local time.
+
+    Local rather than UTC because the only reader is sitting at this machine, and "back at 14:20"
+    is a sentence somebody can act on where an offset is one more thing to work out.
+    """
+    if not isinstance(when_ms, int) or when_ms <= 0:
+        return ""
+    return datetime.fromtimestamp(when_ms / 1000).strftime("%H:%M")
 
 
 env = Environment(
@@ -141,6 +154,7 @@ env.filters["plainly"] = _plainly
 env.filters["prose"] = _prose
 env.filters["ago"] = _ago
 env.filters["clock"] = _clock
+env.filters["at"] = _at
 
 
 @dataclass(frozen=True)
@@ -309,6 +323,15 @@ async def board_work() -> dict[str, dict[str, int]]:
     return counted
 
 
+async def board_kicks() -> dict[str, Kicking]:
+    """Which sessions are switched on to keep going, by short id (docs/adr/0009).
+
+    Read with the board for the same reason the links are: it is a handful of rows, and a button
+    whose state arrives one round trip after the card is a button that looks broken.
+    """
+    return {arming.short_id: arming for arming in await store.kicked_sessions()}
+
+
 async def board_links() -> dict[str, list[ProjectLink]]:
     """Every project's links, keyed by repository, for the menu on its card."""
     grouped: dict[str, list[ProjectLink]] = {}
@@ -321,6 +344,7 @@ def render_board(
     groups: list[Group] | None = None,
     links: dict[str, list[ProjectLink]] | None = None,
     work: dict[str, dict[str, int]] | None = None,
+    kicks: dict[str, Kicking] | None = None,
 ) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
@@ -336,6 +360,9 @@ def render_board(
         # What it has going on and what it has got through — from this program's own queue, which
         # is the only work it can honestly count (docs/adr/0007).
         work=work or {},
+        # Which sessions are switched on not to idle, so the button on each card shows its own
+        # state rather than the same state on all of them (docs/adr/0009).
+        kicks=kicks or {},
         flagged=sum(1 for row in rows if row.hint.waiting),
     )
 
@@ -593,6 +620,7 @@ async def render_page(message: str = "") -> str:
             notices=notices,
             links=await board_links(),
             work=await board_work(),
+            kicks=await board_kicks(),
             flagged=sum(1 for row in rows if row.hint.waiting),
         ),
         projects=projects,
@@ -841,7 +869,11 @@ async def create_project(request: Request) -> Response:
         if _wants_fragment(request):
             return HTMLResponse(
                 await asyncio.to_thread(
-                    render_board, await store.groups(), await board_links(), await board_work()
+                    render_board,
+                    await store.groups(),
+                    await board_links(),
+                    await board_work(),
+                    await board_kicks(),
                 )
             )
     return RedirectResponse("/", status_code=303)
@@ -856,7 +888,11 @@ async def add_to_project(group_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(
             await asyncio.to_thread(
-                render_board, await store.groups(), await board_links(), await board_work()
+                render_board,
+                await store.groups(),
+                await board_links(),
+                await board_work(),
+                await board_kicks(),
             )
         )
     return RedirectResponse("/", status_code=303)
@@ -869,7 +905,11 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(
             await asyncio.to_thread(
-                render_board, await store.groups(), await board_links(), await board_work()
+                render_board,
+                await store.groups(),
+                await board_links(),
+                await board_work(),
+                await board_kicks(),
             )
         )
     return RedirectResponse("/", status_code=303)
@@ -1254,6 +1294,39 @@ async def set_exploring(request: Request) -> Response:
         where = named.instances[0].path if named and named.instances else ""
         await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes", cwd=where)
     panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/sessions/{session_id}/kicking", response_class=HTMLResponse)
+async def set_kicking(session_id: str, request: Request) -> Response:
+    """Switch one session into not being allowed to idle, or back out of it (docs/adr/0009).
+
+    This is the explicit human click docs/adr/0002 requires, and what it buys is a standing
+    permission rather than one message — which is the whole of what 0009 changes about that rule.
+    Nothing here writes into a session that is working: the loop checks the registry every time,
+    and `busy` is never continued.
+
+    The full id and the checkout are recorded now, by the card that has them, because the first
+    thing a kick does is stop the session — and a stopped session has no registry entry to read
+    them back from.
+    """
+    form = await _form(request)
+    on = form.get("kicking") == "yes"
+    rows, _ = await asyncio.to_thread(board)
+    row = next((r for r in rows if r.session.session_id == session_id), None)
+    short = session_id.split("-")[0]
+    if row is not None:
+        await store.kick_session(
+            short, on=on, session_id=row.session.session_id, cwd=row.session.cwd
+        )
+    elif not on:
+        # Switching one off must work even for a session that has since gone: otherwise the row
+        # stays armed forever and the loop keeps saying it is not running any more.
+        await store.kick_session(short, on=False)
+
+    panel = render_card("session", session_id, await store.groups())
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))

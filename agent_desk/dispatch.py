@@ -61,6 +61,35 @@ def argv(instruction: str, *, worktree: str) -> list[str]:
     ]
 
 
+def resume_argv(session_id: str, instruction: str) -> list[str]:
+    """The command that continues one background session (docs/adr/0009).
+
+    `--bg --resume <session-id>` is the CLI's own door: "continues that session in the background
+    under the same ID". The id is the full one from the registry rather than the short one, which
+    is what `--resume` takes.
+    """
+    return [
+        settings.claude_bin,
+        "--bg",
+        "--resume",
+        session_id,
+        instruction,
+    ]
+
+
+# What the CLI says when the account has nothing left to spend. Matched loosely and on purpose:
+# this is the one shape here that was not recorded from a real occurrence, so it is a hint that
+# turns a failure into a wait, never a parser anything depends on (docs/adr/0004). When none of
+# these appear the failure is an ordinary failure and is counted as one.
+LIMIT_SAID = ("rate limit", "rate-limit", "usage limit", "resets at", "try again at", "quota")
+
+
+def looks_like_a_limit(said: str) -> bool:
+    """Is this failure the account being out of budget rather than something being broken?"""
+    lowered = said.lower()
+    return any(phrase in lowered for phrase in LIMIT_SAID)
+
+
 def build_task(
     instruction: str,
     *,
@@ -298,6 +327,57 @@ def start(
         said = (done.stderr or done.stdout).strip().splitlines()
         return Started(False, detail=said[-1][:300] if said else f"exit {done.returncode}")
     return Started(True, agent_id=agent_id)
+
+
+def kick(session_id: str, instruction: str, *, cwd: str, agent_id: str = "") -> Started:
+    """Continue one idle background session with one more turn (docs/adr/0009).
+
+    Two calls, because the CLI needs both: `--resume` "works once it is stopped", and a `--bg`
+    session that has finished a turn is still running — it idles at its prompt with its process
+    alive. So the session is stopped first, which keeps the conversation, and then continued under
+    the same id.
+
+    A stop that fails is not fatal and is not reported: the session may have exited between the
+    registry being read and this running, and the resume is what actually has to work.
+
+    Never raises, for the same reason `start` does not.
+    """
+    if not instruction.strip():
+        return Started(False, detail="there is nothing written to send")
+    if not session_id:
+        return Started(False, detail="that session has no id to resume")
+    directory = Path(cwd)
+    if not directory.is_dir():
+        return Started(False, detail=f"{cwd} is not a directory on this machine any more")
+    if shutil.which(settings.claude_bin) is None and not Path(settings.claude_bin).exists():
+        return Started(False, detail=f"{settings.claude_bin} is not installed here")
+
+    if agent_id:
+        stop(agent_id)
+
+    command = resume_argv(session_id, instruction)
+    forbidden = [flag for flag in command if flag in NEVER]
+    if forbidden:  # pragma: no cover — the argv builder cannot produce one; the check is the rule
+        return Started(False, detail=f"refusing to continue a session with {forbidden[0]}")
+
+    try:
+        done = subprocess.run(  # noqa: S603 — a list, no shell, and the binary is from settings
+            command,
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            timeout=START_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return Started(False, detail=f"could not continue it: {type(exc).__name__}")
+
+    said = (done.stderr or done.stdout).strip()
+    short = _read_id(done.stdout) or session_id.split("-")[0]
+    if done.returncode != 0:
+        lines = said.splitlines()
+        return Started(False, detail=lines[-1][:300] if lines else f"exit {done.returncode}")
+    return Started(True, agent_id=short)
 
 
 def stop(agent_id: str) -> Started:

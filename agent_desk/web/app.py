@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_desk.web import autostart, blocks, routes, sse
+from agent_desk.web import autostart, blocks, kicking, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -46,10 +46,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # (docs/adr/0007). On a console where nothing is armed it wakes, finds no armed
             # project, and sleeps again.
             watching = group.create_task(autostart.run(routes.store))
+            # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
+            # Same lifetime, same kill switch: it runs while the console does.
+            nudging = group.create_task(kicking.run(routes.store))
             try:
                 yield
             finally:
                 watching.cancel()
+                nudging.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

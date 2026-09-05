@@ -171,6 +171,37 @@ class Autostart(BaseModel):
         return self.exploring_at is not None
 
 
+class Kicking(BaseModel):
+    """One session that is not allowed to idle, and what it has spent not idling (docs/adr/0009).
+
+    Keyed by the short id, because that is the name the CLI's own `stop` and `logs` take and the
+    prefix of the id `--resume` takes. Per session rather than per project: this is a permission
+    about one conversation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    short_id: str
+    session_id: str = ""
+    cwd: str = ""
+    armed_at: int | None = None
+    kicks: int = 0
+    kicked_at: int | None = None
+    # When the account was out of budget, this is when to look again. A limit is a wait, not a
+    # failure, and this field is the difference between the two.
+    resume_at: int | None = None
+    failures: int = 0
+    disarmed_why: str | None = None
+    per_hour: int = 4
+
+    @property
+    def armed(self) -> bool:
+        return self.armed_at is not None
+
+    def waiting(self, now_ms: int) -> bool:
+        return self.resume_at is not None and self.resume_at > now_ms
+
+
 class Filing(BaseModel):
     """Where an idea went, once a human sent it there (docs/adr/0005)."""
 
@@ -913,6 +944,97 @@ class Store:
                 )
             )
             return [Autostart(**row._mapping) for row in rows]
+
+    # --- a session that is not allowed to idle (docs/adr/0009) --------------------------------
+    async def kicking(self, short_id: str) -> Kicking:
+        """Absent is off, which is what every session is until somebody presses the button."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
+                    "failures, disarmed_why, per_hour FROM kicking WHERE short_id = :short_id"
+                ),
+                {"short_id": short_id},
+            )
+            row = rows.first()
+            return Kicking(short_id=short_id) if row is None else Kicking(**row._mapping)
+
+    async def kicked_sessions(self) -> list[Kicking]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
+                    "failures, disarmed_why, per_hour FROM kicking WHERE armed_at IS NOT NULL"
+                )
+            )
+            return [Kicking(**row._mapping) for row in rows]
+
+    async def kick_session(
+        self, short_id: str, *, on: bool, session_id: str = "", cwd: str = "", per_hour: int = 4
+    ) -> None:
+        """Switch kicking on or off for one session.
+
+        The full id and the directory are recorded when the button is pressed, by the card that
+        already knows them: the loop must be able to continue a session whose registry entry has
+        gone, and a registry entry goes the moment the session is stopped — which is the first
+        thing a kick does.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO kicking (short_id, session_id, cwd, armed_at, per_hour) "
+                    "VALUES (:short_id, :session_id, :cwd, :armed_at, :per_hour) "
+                    "ON CONFLICT (short_id) DO UPDATE SET armed_at = :armed_at, "
+                    "session_id = CASE WHEN :session_id = '' THEN kicking.session_id "
+                    "ELSE :session_id END, "
+                    "cwd = CASE WHEN :cwd = '' THEN kicking.cwd ELSE :cwd END, "
+                    "per_hour = :per_hour, failures = 0, disarmed_why = NULL, resume_at = NULL"
+                ),
+                {
+                    "short_id": short_id,
+                    "session_id": session_id,
+                    "cwd": cwd,
+                    "armed_at": _now_ms() if on else None,
+                    "per_hour": per_hour,
+                },
+            )
+
+    async def note_kick(self, short_id: str) -> None:
+        """One more turn kept alive. The count is what says whether this was worth switching on."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE kicking SET kicks = kicks + 1, kicked_at = :t, failures = 0, "
+                    "resume_at = NULL WHERE short_id = :short_id"
+                ),
+                {"t": _now_ms(), "short_id": short_id},
+            )
+
+    async def kick_waits_until(self, short_id: str, when_ms: int) -> None:
+        """The account is out of budget. Not a failure: the switch stays on and this is when."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE kicking SET resume_at = :t WHERE short_id = :short_id"),
+                {"t": when_ms, "short_id": short_id},
+            )
+
+    async def note_kick_failure(self, short_id: str) -> int:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE kicking SET failures = failures + 1 WHERE short_id = :short_id"),
+                {"short_id": short_id},
+            )
+        return (await self.kicking(short_id)).failures
+
+    async def stop_kicking(self, short_id: str, *, why: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE kicking SET armed_at = NULL, disarmed_why = :why "
+                    "WHERE short_id = :short_id"
+                ),
+                {"why": why[:300], "short_id": short_id},
+            )
 
     async def explore(self, repo_key: str, *, per_day: int, on: bool, cwd: str = "") -> None:
         """Switch exploring on or off for one project (docs/adr/0008).
