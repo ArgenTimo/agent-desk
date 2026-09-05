@@ -12,7 +12,6 @@ what the loop starts is what a human queued.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from pathlib import Path
 
@@ -265,13 +264,16 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
 async def run(store: Store) -> None:
     """The loop, held open for the life of the process by the same TaskGroup the blocks use.
 
-    It never raises out: a bad tick logs and waits for the next one. A loop that took the console
-    down with it would be a worse failure than anything it was started to do.
+    A bad tick logs and waits for the next one: a loop that took the console down with it would be
+    a worse failure than anything it was started to do. Cancellation is the one thing it lets
+    through, and it has to be — `app.lifespan` cancels this task on the way out and the group then
+    *waits* for it, so a swallowed cancel is a console that will not close. And the cancel lands
+    inside a tick rather than in the sleep more often than it looks: a tick sits in a thread for
+    as long as `land.land` takes, which is `make install` and the repository's own gate.
     """
     while True:
-        with contextlib.suppress(asyncio.CancelledError):
-            try:
-                await tick(store)
-            except Exception:
-                log.exception("autostart.tick_failed")
+        try:
+            await tick(store)
+        except Exception:
+            log.exception("autostart.tick_failed")
         await asyncio.sleep(TICK_SECONDS)

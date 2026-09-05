@@ -510,3 +510,36 @@ async def test_the_loop_survives_a_tick_that_raises(
         await running
 
     assert len(calls) > 1, "it stopped after the first failure"
+
+
+@pytest.mark.unit
+async def test_the_loop_stops_when_the_cancel_lands_inside_a_tick(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`app.lifespan` cancels this task and then waits for it, so it has to end.
+
+    The cancel arriving while the loop is parked between passes was always fine. The one that
+    matters is the other one: a tick sits in a thread for as long as `land.land` takes — `make
+    install` and then the repository's own gate — and a cancellation swallowed there leaves the
+    loop running and the TaskGroup holding it waiting for a task that never finishes.
+    """
+    in_a_tick = asyncio.Event()
+
+    async def slow(store: Store, live: set[str] | None = None) -> None:
+        in_a_tick.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(autostart, "tick", slow)
+
+    running = asyncio.create_task(autostart.run(desk))
+    await in_a_tick.wait()
+    running.cancel()
+    _, pending = await asyncio.wait({running}, timeout=1)
+
+    for task in pending:
+        # It went round again and is now in the sleep, where a cancel does land. Ending it here
+        # rather than leaving it for the loop to be torn down with.
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert not pending, "the loop swallowed the cancellation and went on running"
