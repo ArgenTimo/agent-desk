@@ -969,6 +969,21 @@ class Store:
             )
             return [Kicking(**row._mapping) for row in rows]
 
+    async def switched_off_sessions(self) -> list[Kicking]:
+        """Sessions that stopped being kept going, and said why (docs/adr/0009).
+
+        The same shape as `switched_off_projects`, and for the same reason: turning itself off is
+        what takes a row out of `kicked_sessions`, and that is the moment it is worth showing.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
+                    "failures, disarmed_why, per_hour FROM kicking WHERE disarmed_why IS NOT NULL"
+                )
+            )
+            return [Kicking(**row._mapping) for row in rows]
+
     async def kick_session(
         self, short_id: str, *, on: bool, session_id: str = "", cwd: str = "", per_hour: int = 4
     ) -> None:
@@ -1035,6 +1050,22 @@ class Store:
                 ),
                 {"why": why[:300], "short_id": short_id},
             )
+
+    async def switched_off_projects(self) -> list[Autostart]:
+        """Projects that turned themselves off, and said why (docs/adr/0007).
+
+        Separate from `armed_projects` on purpose: disarming clears `armed_at`, so the moment a
+        project stops starting work it leaves that list — which is exactly when somebody needs to
+        see it (agent_desk/web/blockers.py).
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
+                    "exploring_at, per_day, cwd FROM autostart WHERE disarmed_why IS NOT NULL"
+                )
+            )
+            return [Autostart(**row._mapping) for row in rows]
 
     async def explore(self, repo_key: str, *, per_day: int, on: bool, cwd: str = "") -> None:
         """Switch exploring on or off for one project (docs/adr/0008).

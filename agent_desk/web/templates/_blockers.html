@@ -1,0 +1,31 @@
+{# What has actually stopped. Every card here is a fact this console wrote down itself — a task it
+   started that failed, a branch its own gate refused, a switch that turned itself off — and never
+   an inference about somebody else's session. "Waiting for a person" is not on disk; it stays on
+   the session card, in amber, next to the observation it was made from (CLAUDE.md, rule five).
+
+   Red is the colour of stopped, and everything in this column is stopped. #}
+{% if not found %}
+<p class="empty small">Nothing is stuck. A task that fails, a branch a gate refuses, or a switch
+  that turns itself off lands here — with the reason it gave and the one thing that would clear
+  it.</p>
+{% endif %}
+
+{% for one in found %}
+<div class="card blocker{% if one.card %} node{% endif %}"
+     {% if one.card %}data-kind="{{ one.card.split(":")[0] }}" data-id="{{ one.card.split(":", 1)[1] }}"
+     data-label="{{ one.what }}" draggable="true"{% endif %}>
+  <div class="card-head">
+    <span class="dot flag" aria-hidden="true"></span>
+    <span class="card-name" title="{{ one.why }}">{{ one.what }}</span>
+    <span class="pill quiet">{{ one.when | ago }}</span>
+  </div>
+  <div class="card-body">
+    <p class="small">{{ one.why }}</p>
+    {% if one.action %}
+    <form method="post" action="{{ one.action }}" hx-post="{{ one.action }}" hx-target="#message">
+      <button type="submit">{{ one.action_says }}</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}

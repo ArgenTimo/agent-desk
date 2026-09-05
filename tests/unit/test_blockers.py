@@ -1,0 +1,146 @@
+"""What is actually stopped, and the two things this column still refuses to claim.
+
+The three placeholders that stood here for a year were the right refusal to the wrong question:
+a guessed blocker is CLAUDE.md's fifth rule broken, but every card here is a fact this console
+wrote down about its *own* work. So most of these assert what is on a card, and the last one
+asserts what is still not.
+"""
+
+from __future__ import annotations
+
+import pathlib
+from collections.abc import AsyncIterator
+
+import pytest
+from agent_desk.store.repo import Store
+from agent_desk.web import blockers
+
+KEY = "origin:acme/api"
+
+
+@pytest.fixture
+async def desk(tmp_path: pathlib.Path) -> AsyncIterator[Store]:
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    yield store
+    await store.close()
+
+
+@pytest.mark.unit
+async def test_a_console_where_nothing_is_stuck_shows_nothing(desk: Store) -> None:
+    assert await blockers.blockers(desk) == []
+
+
+@pytest.mark.unit
+async def test_a_task_that_failed_is_a_blocker_with_the_reason_and_a_retry(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build the thing",
+        instruction="build it",
+        source_kind="instruction",
+    )
+    await desk.task_failed(task.id, "the worktree name was not one the CLI would take")
+
+    found = await blockers.blockers(desk)
+
+    assert len(found) == 1
+    assert found[0].kind == "task"
+    assert found[0].what == "build the thing"
+    assert "worktree name" in found[0].why
+    # A blocker whose fix is one click and does not offer it is not much of a card.
+    assert found[0].action == f"/tasks/{task.id}/retry"
+
+
+@pytest.mark.unit
+async def test_a_branch_a_gate_refused_is_work_nobody_has_read(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """docs/adr/0008: it merges when the project's own gate passes. When it does not, the branch
+    sits in a worktree, and that is exactly a thing that has stopped."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="looking for something to fix",
+        instruction="find one",
+        source_kind="found",
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent1")
+    await desk.finish_task(task.id)
+    await desk.task_landed(task.id, "not merged: `make verify` failed: 1 test")
+
+    found = await blockers.blockers(desk)
+
+    assert [one.kind for one in found] == ["branch"]
+    assert "make verify" in found[0].why
+
+
+@pytest.mark.unit
+async def test_a_switch_that_turned_itself_off_says_so_here(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """Both of them: a project that stopped starting work (docs/adr/0007) and a session that
+    stopped being kept going (docs/adr/0009)."""
+    await desk.arm(KEY, per_hour=2)
+    await desk.disarm(KEY, why="two starts in a row failed: no such directory")
+    await desk.kick_session("abc12345", on=True, session_id="abc12345-x", cwd=str(tmp_path))
+    await desk.stop_kicking("abc12345", why="two in a row failed: it would not resume")
+
+    found = {one.kind: one for one in await blockers.blockers(desk)}
+
+    assert "no such directory" in found["project"].why
+    assert "would not resume" in found["session"].why
+    # The project card is draggable into the middle, because there is one to drag.
+    assert found["project"].card == f"project:{KEY}"
+
+
+@pytest.mark.unit
+async def test_the_newest_thing_that_stopped_is_at_the_top(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A column somebody glances at is read from the top."""
+    for title in ("the older one", "the newer one"):
+        task = await desk.queue_task(
+            repo_key=KEY,
+            cwd=str(tmp_path),
+            title=title,
+            instruction="build it",
+            source_kind="instruction",
+        )
+        await desk.task_failed(task.id, "it fell over")
+
+    found = await blockers.blockers(desk)
+
+    assert [one.what for one in found] == ["the newer one", "the older one"]
+
+
+@pytest.mark.unit
+async def test_a_column_of_forty_is_a_column_nobody_reads(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    for number in range(blockers.MOST_SHOWN + 5):
+        task = await desk.queue_task(
+            repo_key=KEY,
+            cwd=str(tmp_path),
+            title=f"task {number}",
+            instruction="build it",
+            source_kind="instruction",
+        )
+        await desk.task_failed(task.id, "it fell over")
+
+    assert len(await blockers.blockers(desk)) == blockers.MOST_SHOWN
+
+
+@pytest.mark.unit
+def test_the_two_things_this_column_still_will_not_claim() -> None:
+    """ "Waiting on a person" and "waiting on a run" are not on disk. The first is rendered as an
+    inference on the session card, in amber; neither is ever a red card here (CLAUDE.md, rule
+    five)."""
+    source = pathlib.Path(blockers.__file__).read_text()
+    assert "waiting on a person" in source, "the refusal is written down where it applies"
+    for line in source.splitlines():
+        if line.strip().startswith("kind="):
+            assert "waiting" not in line

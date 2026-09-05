@@ -71,6 +71,9 @@ async def board_events() -> AsyncIterator[str]:
             ),
             ("blocks", await routes.render_blocks()),
             ("ideas", await routes.render_ideas()),
+            # What has stopped. Pushed with the rest: a blocker somebody has just cleared should
+            # leave the column without a reload (agent_desk/web/blockers.py).
+            ("blockers", await routes.render_blockers()),
         ):
             if previous.get(name) != html:
                 previous[name] = html

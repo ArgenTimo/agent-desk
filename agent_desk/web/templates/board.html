@@ -100,40 +100,11 @@
       <button type="button" class="pane-hide" data-hide="right" title="put this column away"
               aria-label="hide this column">×</button>
     </header>
-    {# Stubs, and labelled as stubs. Nothing on disk says what is blocking a session; inventing a
-       blocker would be the guessed status this board refuses to render. #}
-    <div class="blockers">
-      <div class="card blocker stub">
-        <div class="card-head">
-          <span class="dot idle" aria-hidden="true"></span>
-          <span class="card-name">waiting on a person</span>
-          <span class="pill quiet">soon</span>
-        </div>
-        <div class="card-body"><p class="small">A session that has asked something and had no
-          answer. Nothing on disk says this yet.</p></div>
-      </div>
-      <div class="card blocker stub">
-        <div class="card-head">
-          <span class="dot busy" aria-hidden="true"></span>
-          <span class="card-name">waiting on a run</span>
-          <span class="pill quiet">soon</span>
-        </div>
-        <div class="card-body"><p class="small">Tests, a build, something long. Visible from a
-          transcript, not yet read out of one.</p></div>
-      </div>
-      <div class="card blocker stub">
-        <div class="card-head">
-          <span class="dot flag" aria-hidden="true"></span>
-          <span class="card-name">failed and unattended</span>
-          <span class="pill quiet">soon</span>
-        </div>
-        <div class="card-body"><p class="small">Something went wrong and nobody has looked at it
-          since.</p></div>
-      </div>
-      <p class="empty small">These three are placeholders, drawn so the column has a shape. None
-        of them is computed, and a blocker this program cannot observe is one it will not
-        invent.</p>
-    </div>
+    {# Computed, at last, and only from facts this console wrote down itself
+       (agent_desk/web/blockers.py). The three placeholders that stood here promised two things
+       that are not on disk — "waiting on a person" and "waiting on a run" — and those stay where
+       they belong: on the session card, as an inference, in amber. #}
+    <div class="blockers" id="blocker-list">{{ blockers | safe }}</div>
 
     {# The other half: what has been written down. Same cards, same dragging — an idea dropped
        into the middle is a question about that idea (docs/05-ideas.md). #}

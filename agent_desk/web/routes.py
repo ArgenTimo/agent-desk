@@ -52,7 +52,7 @@ from agent_desk.store.repo import (
     Store,
     Thread,
 )
-from agent_desk.web import autostart
+from agent_desk.web import autostart, blockers
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -500,6 +500,11 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
     return roots
 
 
+async def render_blockers() -> str:
+    """The top of the right column: what has stopped (agent_desk/web/blockers.py)."""
+    return env.get_template("_blockers.html").render(found=await blockers.blockers(store))
+
+
 async def render_ideas() -> str:
     """The bottom half of the right column: what has been written down.
 
@@ -650,6 +655,7 @@ async def render_page(message: str = "") -> str:
     return env.get_template("board.html").render(
         threads=await open_chats(),
         ideas=await render_ideas(),
+        blockers=await render_blockers(),
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,

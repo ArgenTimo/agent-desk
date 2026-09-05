@@ -331,6 +331,14 @@ stream.addEventListener('ideas', (event) => {
   if (window.htmx) htmx.process(document.getElementById('idea-list'));
   checked();
 });
+stream.addEventListener('blockers', (event) => {
+  // Same rule as the ideas: never replace what somebody is in the middle of pressing.
+  const list = document.getElementById('blocker-list');
+  if (!list || document.activeElement.closest('#blocker-list')) return;
+  list.innerHTML = event.data;
+  if (window.htmx) htmx.process(list);
+  checked();
+});
 stream.addEventListener('heartbeat', checked);
 stream.onerror = () => lost('stream lost — reconnecting');
 setInterval(() => {
