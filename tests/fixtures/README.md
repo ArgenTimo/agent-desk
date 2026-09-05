@@ -13,6 +13,8 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 | `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` | `2.1.258` |
 | `registry_entry_headless.json` | `~/.claude/sessions/<pid>.json` of a `claude -p` run | `2.1.259` |
 | `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `2.1.259` |
+| `job_state_failed.json` | `~/.claude/jobs/<short>/state.json` of a `--bg` job that died | `2.1.261` |
+| `job_state_done.json` | `~/.claude/jobs/<short>/state.json` of a `--bg` job that worked | `2.1.261` |
 
 ## What was scrubbed, and what was not
 
@@ -84,3 +86,21 @@ These fixtures were captured at `2.1.251` and re-recorded at `2.1.258` within th
 because the CLI updated itself in between. A new key (`bridgeSessionId`) had appeared. Nothing
 broke, and nothing announced it either — which is the argument for this directory, made by the
 subject of it, before a line of the parser existed.
+
+## The two files that say how a dispatched agent ended
+
+`job_state_failed.json` and `job_state_done.json` are the same shape twice, and the pair is the
+point: the registry says only whether a session is alive, so the *difference* between an agent
+that worked all night and one that exited in a second is here or nowhere.
+
+They were recorded the hard way too. Six agents dispatched from the console died on
+`Error creating worktree: Invalid worktree name "берём-в-работу"` — the CLI accepts only ASCII
+letters, digits, dots, underscores and dashes, and `str.isalnum` is true for every alphabet. The
+console reported all six as finished work and marked the ideas they carried as built, because
+"gone from the registry" was the only fact it was reading. `agent_desk/observe/jobs.py` reads the
+other one.
+
+The failed file carries no `worktreeBranch`, `tokens` or `name` at all — it never got far enough
+to have them — which is why those are optional in the model rather than merely unread. The done
+one carries `worktreeBranch`, and it is preferred over re-deriving the slug: the branch the CLI
+actually made is a fact, and a second derivation is a second copy of its rules to keep in step.

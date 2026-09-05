@@ -19,7 +19,8 @@ from pathlib import Path
 import structlog
 
 from agent_desk import dispatch, land
-from agent_desk.observe import registry
+from agent_desk.observe import jobs, registry
+from agent_desk.observe.model import JobEnd
 from agent_desk.store.repo import Autostart, Store, Task
 
 log = structlog.get_logger()
@@ -114,8 +115,15 @@ async def _start(store: Store, task: Task) -> None:
         await store.disarm(task.repo_key, why=f"two starts in a row failed: {result.detail}"[:300])
 
 
-def _worktree_of(task: Task) -> str:
-    """The name this task's worktree was made under, which is how its branch is found."""
+def _worktree_of(task: Task, ended: JobEnd | None = None) -> str:
+    """The name this task's worktree was made under, which is how its branch is found.
+
+    Preferring what the CLI recorded over what this program would derive: the branch it actually
+    made is a fact in its job file, and re-deriving it is a second copy of its slug rules to keep
+    in step. The derivation stays as the fallback for a job whose file has been tidied away.
+    """
+    if ended is not None and ended.worktree_branch.startswith("worktree-"):
+        return ended.worktree_branch[len("worktree-") :]
     return dispatch._worktree_name(task.title)
 
 
@@ -128,7 +136,17 @@ async def settle(store: Store, live: set[str]) -> list[str]:
     Keep (docs/05-ideas.md).
 
     It says nothing about whether the work was any good. "An agent was dispatched for this and it
-    finished" is the whole of the claim, and it is the only one available.
+    finished" is the whole of the claim about *quality*, and it is the only one available.
+
+    It does say whether the agent ran at all, and that is a different claim with a different source
+    (`observe/jobs.py`). An agent that exits before its first turn — a worktree name the CLI will
+    not take, a directory that is not a checkout — is gone from the registry in under a second and
+    looks from here exactly like one that worked all night. Six of them once did, and every idea
+    they were dispatched for was marked built. So: the job file is asked, and a job the CLI calls
+    `failed` fails the task, keeps the ideas in the list, and counts towards the two failures that
+    disarm a project. Where the CLI has nothing to say — an old job tidied away by `claude rm` —
+    the claim stays the weak one, because a guess in either direction is worse than the truth about
+    what is known (CLAUDE.md, rule five).
     """
     settled: list[str] = []
     for task in await store.tasks():
@@ -136,12 +154,23 @@ async def settle(store: Store, live: set[str]) -> list[str]:
             continue
         if task.agent_id is None or task.agent_id in live:
             continue
+
+        ended = await asyncio.to_thread(jobs.read_job, task.agent_id)
+        if ended is not None and ended.failed:
+            detail = ended.detail or "its agent exited without saying why"
+            await store.task_failed(task.id, detail)
+            failures = await store.note_failure(task.repo_key)
+            log.warning("autostart.died", repo=task.repo_key, agent=task.agent_id, detail=detail)
+            if failures >= FAILURES_BEFORE_DISARM:
+                await store.disarm(task.repo_key, why=f"two in a row died: {detail}"[:300])
+            continue
+
         await store.finish_task(task.id)
 
         # What it found, merged if the project's own gate passes on it (docs/adr/0008, as the
         # owner amended it). A failing gate leaves the branch exactly where it is and says why.
         if task.source_kind == "found":
-            result = await asyncio.to_thread(land.land, task.cwd, _worktree_of(task))
+            result = await asyncio.to_thread(land.land, task.cwd, _worktree_of(task, ended))
             await store.task_landed(task.id, result.detail)
             log.info("autostart.landed", repo=task.repo_key, landed=result.landed)
 

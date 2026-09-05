@@ -68,6 +68,21 @@ def test_a_name_becomes_a_directory_so_it_is_shaped_like_one() -> None:
 
 
 @pytest.mark.unit
+def test_a_russian_name_survives_as_something_the_cli_will_accept() -> None:
+    """The CLI exits 1 before the model starts on a worktree name outside `[A-Za-z0-9._-]`, and
+    `str.isalnum` is true for every alphabet — which is how six dispatched agents died at once."""
+    assert dispatch._worktree_name("берём в работу") == "berem-v-rabotu"
+    assert dispatch._worktree_name("проанализируй jira") == "proanaliziruy-jira"
+    # Anything with no letter to transliterate to still yields a name, never an empty one.
+    assert dispatch._worktree_name("刷新 ✨") == "desk-task"
+    for typed in ("берём в работу", "Сейчас доска заточена под нетехнического заказчика", "汉字"):
+        name = dispatch._worktree_name(typed)
+        assert name and name.isascii()
+        assert all(character.isalnum() or character in "._-" for character in name)
+        assert not name.startswith("-") and not name.endswith("-")
+
+
+@pytest.mark.unit
 def test_the_id_is_read_from_the_line_that_names_one() -> None:
     """The CLI prints a help block after it, and a format that grows a line must not break this."""
     assert dispatch._read_id("backgrounded · 79586f63\n  claude agents  list\n") == "79586f63"

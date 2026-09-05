@@ -60,6 +60,31 @@ class Session(BaseModel):
         return Path(self.cwd).name or self.cwd
 
 
+class JobEnd(BaseModel):
+    """How one `claude --bg` job ended, from `~/.claude/jobs/<short>/state.json`.
+
+    Four fields out of twenty-odd, and the omissions are the point (this module's docstring): what
+    is not named here is not depended on. `state` is the CLI's word — `done`, `failed`, or
+    whatever it grows next — and it is passed through rather than mapped, because a value this
+    program has not seen before must not silently become one it has.
+
+    `worktree_branch` is read rather than reconstructed from the task's name: the branch the CLI
+    actually made is a fact in this file, and deriving it a second time is a second thing to keep
+    in step with the CLI's slug rules.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="ignore")
+
+    state: str
+    detail: str = ""
+    tokens: int | None = None
+    worktree_branch: str = Field(default="", alias="worktreeBranch")
+
+    @property
+    def failed(self) -> bool:
+        return self.state == "failed"
+
+
 class RegistryRead(BaseModel):
     """What one pass over the registry found, including what it could not read.
 

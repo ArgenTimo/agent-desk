@@ -173,13 +173,71 @@ def go_looking(project: str) -> str:
     )
 
 
+# Cyrillic to latin, because the person using this console writes in Russian and the CLI does not
+# accept a worktree name outside `[A-Za-z0-9._-]` — it exits 1 before the model ever starts, which
+# is how six dispatched agents died without spending a token. Transliterating rather than dropping:
+# the name becomes a branch and a directory somebody has to recognise later.
+CYRILLIC: Mapping[str, str] = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    "і": "i",
+    "ї": "yi",
+    "є": "ye",
+    "ґ": "g",
+}
+
+
 def _worktree_name(name: str) -> str:
-    """A branch-shaped name from whatever a human typed. Bounded, because it becomes a directory."""
-    kept = [character if character.isalnum() else "-" for character in name.lower()]
+    """A branch-shaped name from whatever a human typed. Bounded, because it becomes a directory.
+
+    ASCII by construction, not by hope: `str.isalnum` is true for every letter in every alphabet,
+    and the CLI's `--worktree` accepts only letters, digits, dots, underscores and dashes in the
+    ASCII sense. Anything it would reject is transliterated where there is a sensible letter for
+    it and dropped where there is not.
+    """
+    kept: list[str] = []
+    for character in name.lower():
+        if character in CYRILLIC:
+            kept.append(CYRILLIC[character])
+        elif character.isascii() and character.isalnum():
+            kept.append(character)
+        else:
+            kept.append("-")
     slug = "".join(kept).strip("-")
     while "--" in slug:
         slug = slug.replace("--", "-")
-    return (slug or "desk-task")[:40]
+    return (slug or "desk-task")[:40].strip("-") or "desk-task"
 
 
 def _read_id(output: str) -> str:

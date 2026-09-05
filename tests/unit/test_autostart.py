@@ -15,7 +15,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 from agent_desk import dispatch
-from agent_desk.store.repo import Store
+from agent_desk.observe.model import JobEnd
+from agent_desk.store.repo import Store, Task
 from agent_desk.web import autostart
 
 KEY = "origin:acme/api"
@@ -498,3 +499,105 @@ async def test_the_loop_survives_a_tick_that_raises(
         await running
 
     assert len(calls) > 1, "it stopped after the first failure"
+
+
+@pytest.mark.unit
+async def test_an_agent_that_died_before_it_ran_does_not_mark_its_ideas_built(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure this reader was written for: six agents exited in under a second on a worktree
+    name the CLI would not accept, and every idea they carried was marked built."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="берём в работу",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "deadone")
+    monkeypatch.setattr(
+        autostart.jobs,
+        "read_job",
+        lambda short: JobEnd(state="failed", detail="exit 1 before init — Invalid worktree name"),
+    )
+
+    assert await autostart.settle(desk, set()) == []
+
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+    died = next(one for one in await desk.tasks() if one.id == task.id)
+    assert died.failed_at is not None and died.finished_at is None
+    assert died.detail is not None and "Invalid worktree name" in died.detail
+
+
+@pytest.mark.unit
+async def test_two_agents_that_die_in_a_row_disarm_the_project(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rule firing into a broken condition stops rather than retrying harder — and a start that
+    dies a second later is the same broken condition as one that never started."""
+    await desk.arm(KEY, per_hour=5)
+    monkeypatch.setattr(
+        autostart.jobs, "read_job", lambda short: JobEnd(state="failed", detail="it fell over")
+    )
+    for number in range(2):
+        task = await desk.queue_task(
+            repo_key=KEY,
+            cwd=str(tmp_path),
+            title=f"try {number}",
+            instruction="build it",
+            source_kind="instruction",
+        )
+        await desk.take_next_task(KEY)
+        await desk.task_started(task.id, f"dead{number}")
+        await autostart.settle(desk, set())
+
+    arming = await desk.autostart(KEY)
+    assert not arming.armed
+    assert arming.disarmed_why is not None and "it fell over" in arming.disarmed_why
+
+
+@pytest.mark.unit
+async def test_a_job_the_cli_has_forgotten_keeps_the_weaker_claim(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`claude rm` removes the job directory. Absence is not evidence of failure, and guessing
+    either way is worse than saying what is known (CLAUDE.md, rule five)."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "tidiedaway")
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: None)
+
+    assert await autostart.settle(desk, set()) == [idea.id]
+    settled = next(one for one in await desk.tasks() if one.id == task.id)
+    assert settled.finished_at is not None and settled.failed_at is None
+
+
+@pytest.mark.unit
+def test_the_branch_the_cli_actually_made_is_preferred_over_a_second_guess() -> None:
+    """Deriving the slug twice is two copies of the CLI's rules to keep in step."""
+    task = Task(
+        id="t",
+        repo_key=KEY,
+        cwd="/tmp",
+        title="looking for something to fix in agent-desk, and then some",
+        instruction="",
+        source_kind="found",
+        queued_at=0,
+    )
+    assert autostart._worktree_of(task, JobEnd(state="done", worktreeBranch="worktree-a-name")) == (
+        "a-name"
+    )
+    # No job file, or one from a CLI that stopped recording it: the derivation is the fallback.
+    assert autostart._worktree_of(task, None) == dispatch._worktree_name(task.title)
+    assert autostart._worktree_of(task, JobEnd(state="done")) == dispatch._worktree_name(task.title)

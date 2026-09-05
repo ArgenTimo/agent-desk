@@ -1,0 +1,21 @@
+{
+  "state": "failed",
+  "detail": "exit 1 before init — Error creating worktree: Invalid worktree name \"a-name\": each \"/\"-separated segment must be non-empty and contain only letters, digits, dots, underscores, and dashes",
+  "tempo": "idle",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "bg",
+  "respawnFlags": [],
+  "providerEnv": {},
+  "intent": "what somebody asked for",
+  "sessionId": "11111111-2222-4333-8444-555555555555",
+  "resumeSessionId": "11111111-2222-4333-8444-555555555555",
+  "daemonShort": "11111111",
+  "cwd": "/home/someone/a-project",
+  "createdAt": "2026-09-05T02:34:08.575Z",
+  "updatedAt": "2026-09-05T02:34:09.167Z",
+  "firstTerminalAt": "2026-09-05T02:34:09.167Z",
+  "backend": "daemon",
+  "lastTerminalAt": "2026-09-05T02:34:09.167Z"
+}

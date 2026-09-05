@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         return self.claude_home / "projects"
 
     @property
+    def jobs_root(self) -> Path:
+        """Where `claude --bg` keeps what became of each background job. See `observe/jobs.py`."""
+        return self.claude_home / "jobs"
+
+    @property
     def db_path(self) -> Path:
         return self.data_dir / "agent-desk.db"
 
