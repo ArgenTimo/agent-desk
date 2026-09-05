@@ -144,3 +144,46 @@ def test_the_two_things_this_column_still_will_not_claim() -> None:
     for line in source.splitlines():
         if line.strip().startswith("kind="):
             assert "waiting" not in line
+
+
+@pytest.mark.unit
+async def test_a_blocker_has_a_name_of_its_own_so_it_can_be_dragged_and_opened(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A card somebody can only look at from the corner of their eye is one they cannot act on."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build the thing",
+        instruction="build it",
+        source_kind="instruction",
+    )
+    await desk.task_failed(task.id, "it fell over")
+
+    found = await blockers.blockers(desk)
+    assert found[0].id == f"task:{task.id}"
+
+    opened = await blockers.one(desk, found[0].id)
+    assert opened is not None and opened.what == "build the thing"
+
+
+@pytest.mark.unit
+async def test_a_blocker_that_cleared_is_gone_rather_than_an_error(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A blocker is a view of facts that live elsewhere. Gone is the ordinary outcome — it means
+    the thing got unstuck."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build the thing",
+        instruction="build it",
+        source_kind="instruction",
+    )
+    await desk.task_failed(task.id, "it fell over")
+    stuck = (await blockers.blockers(desk))[0].id
+
+    # What "retry" does: the failed row goes and a fresh one takes its place.
+    await desk.drop_task(task.id)
+
+    assert await blockers.one(desk, stuck) is None

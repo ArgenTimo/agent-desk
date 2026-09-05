@@ -1,0 +1,57 @@
+{# One blocker, opened or dragged onto the workbench. Everything the column has room for and
+   everything it does not: what stopped, the reason it gave in its own words, when, and the one
+   thing that would clear it.
+
+   A blocker is a view of facts that live elsewhere, so this can be empty — and empty means the
+   thing got unstuck, which is worth saying rather than 404-ing into a blank panel. #}
+{% if not one %}
+<div class="card blocker">
+  <div class="card-head">
+    <span class="dot done" aria-hidden="true"></span>
+    <span class="card-name">not stuck any more</span>
+  </div>
+  <div class="card-body"><p class="small">Whatever this was, it has cleared — the card was built
+    from facts that have since changed.</p></div>
+</div>
+{% else %}
+<div class="card blocker open">
+  <div class="card-head">
+    <span class="dot flag" aria-hidden="true"></span>
+    <span class="card-name">{{ one.what }}</span>
+    <span class="pill quiet">{{ one.kind }}</span>
+    <span class="pill quiet">{{ one.when | ago }}</span>
+  </div>
+  <div class="card-body">
+    <h4>Why it is stuck</h4>
+    <p class="last-line">{{ one.why }}</p>
+
+    <h4>What it is</h4>
+    <p class="small">
+      {% if one.kind == "task" %}A task this console started, which failed. Nobody has retried it.
+      {% elif one.kind == "branch" %}An agent finished and committed, and this project's own gate
+        would not take the branch — so the work is sitting in a worktree nobody has read
+        (docs/adr/0008).
+      {% elif one.kind == "project" %}This project switched itself off after two failures in a
+        row, rather than firing into a broken condition all night (docs/adr/0007).
+      {% elif one.kind == "session" %}This session stopped being kept going after two attempts in
+        a row failed (docs/adr/0009).
+      {% else %}A question this console asked, and the run came back an error.
+      {% endif %}
+    </p>
+
+    {% if one.card %}
+    <p class="small"><a href="/cards/{{ one.card.split(':')[0] }}?id={{ one.card.split(':', 1)[1] | urlencode }}"
+       data-card="{{ one.card }}">open what this is about…</a></p>
+    {% endif %}
+
+    {% if one.action %}
+    <form method="post" action="{{ one.action }}" hx-post="{{ one.action }}" hx-target="#message">
+      <button type="submit">{{ one.action_says }}</button>
+    </form>
+    {% else %}
+    <p class="dim small">There is nothing here to press: this one is cleared by fixing what it
+      names, not by retrying it.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

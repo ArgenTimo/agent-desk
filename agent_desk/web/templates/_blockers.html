@@ -11,9 +11,10 @@
 {% endif %}
 
 {% for one in found %}
-<div class="card blocker{% if one.card %} node{% endif %}"
-     {% if one.card %}data-kind="{{ one.card.split(":")[0] }}" data-id="{{ one.card.split(":", 1)[1] }}"
-     data-label="{{ one.what }}" draggable="true"{% endif %}>
+{# Every blocker drags onto the workbench and opens like any other card: a card somebody can
+   only look at from the corner of their eye is a card they cannot act on. #}
+<div class="card blocker node" data-kind="blocker" data-id="{{ one.id }}"
+     data-label="{{ one.what }}" draggable="true">
   <div class="card-head">
     <span class="dot flag" aria-hidden="true"></span>
     <span class="card-name" title="{{ one.why }}">{{ one.what }}</span>
@@ -21,6 +22,8 @@
   </div>
   <div class="card-body">
     <p class="small">{{ one.why }}</p>
+    <a class="node-open" href="/cards/blocker?id={{ one.id | urlencode }}"
+       data-card="blocker:{{ one.id }}">everything about it…</a>
     {% if one.action %}
     <form method="post" action="{{ one.action }}" hx-post="{{ one.action }}" hx-target="#message">
       <button type="submit">{{ one.action_says }}</button>

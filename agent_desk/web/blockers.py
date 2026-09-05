@@ -40,12 +40,19 @@ class Blocker:
     what: str
     why: str
     when: int
-    # Where to go: the card this is about, in the same `kind:id` shape the board's cards drag as.
+    # A name of its own, so this card can be dragged onto the workbench and opened like any other
+    # — `kind:ref`, stable for as long as the thing is stuck, which is as long as the card exists.
+    ref: str = ""
+    # Where the thing it is about lives, in the same `kind:id` shape the board's cards drag as.
     card: str = ""
     # The form that would deal with it, where there is one. A blocker with nothing to press is
     # still worth showing; a blocker whose fix is one click and does not offer it is not.
     action: str = ""
     action_says: str = ""
+
+    @property
+    def id(self) -> str:
+        return f"{self.kind}:{self.ref}"
 
 
 async def blockers(store: Store) -> list[Blocker]:
@@ -57,6 +64,7 @@ async def blockers(store: Store) -> list[Blocker]:
             found.append(
                 Blocker(
                     kind="task",
+                    ref=task.id,
                     what=task.title,
                     why=task.detail or "it failed and said nothing",
                     when=task.failed_at,
@@ -69,6 +77,7 @@ async def blockers(store: Store) -> list[Blocker]:
             found.append(
                 Blocker(
                     kind="branch",
+                    ref=task.id,
                     what=task.title,
                     why=task.detail,
                     when=task.finished_at,
@@ -80,6 +89,7 @@ async def blockers(store: Store) -> list[Blocker]:
             found.append(
                 Blocker(
                     kind="project",
+                    ref=arming.repo_key,
                     what=arming.repo_key.split(":")[-1],
                     why=f"it stopped starting work: {arming.disarmed_why}",
                     when=arming.armed_at or 0,
@@ -92,6 +102,7 @@ async def blockers(store: Store) -> list[Blocker]:
             found.append(
                 Blocker(
                     kind="session",
+                    ref=kicked.short_id,
                     what=kicked.short_id,
                     why=f"it stopped being kept going: {kicked.disarmed_why}",
                     when=kicked.kicked_at or 0,
@@ -103,6 +114,7 @@ async def blockers(store: Store) -> list[Blocker]:
             found.append(
                 Blocker(
                     kind="answer",
+                    ref=block.id,
                     what=block.input.splitlines()[0][:60] if block.input else "a question",
                     why=block.error or "the run failed and said nothing",
                     when=block.finished_at,
@@ -111,3 +123,13 @@ async def blockers(store: Store) -> list[Blocker]:
 
     found.sort(key=lambda one: one.when, reverse=True)
     return found[:MOST_SHOWN]
+
+
+async def one(store: Store, blocker_id: str) -> Blocker | None:
+    """The blocker with this id, or `None` when it has been cleared.
+
+    Recomputed rather than stored: a blocker is a *view* of facts that live elsewhere, and a copy
+    of one would go stale the moment somebody retried the task it is about. Gone is the ordinary
+    outcome here and it is not an error — it means the thing got unstuck.
+    """
+    return next((one for one in await blockers(store) if one.id == blocker_id), None)

@@ -717,6 +717,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_idea.html").render(idea=idea),
             status_code=200 if idea else 404,
         )
+    if kind == "blocker":
+        # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
+        # "it is gone" is the ordinary outcome — it means the thing got unstuck.
+        stuck = await blockers.one(store, id)
+        return HTMLResponse(
+            env.get_template("_card_blocker.html").render(one=stuck, card_id=id),
+            status_code=200 if stuck else 404,
+        )
     groups = await store.groups()
     markup = await asyncio.to_thread(render_card, kind, id, groups)
     return HTMLResponse(markup, status_code=200 if markup else 404)
@@ -1188,7 +1196,11 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
             if claimed is not None and claimed.id == task_id:
                 result = await asyncio.to_thread(
                     dispatch.start,
-                    dispatch.build_task(claimed.instruction, project=claimed.title),
+                    dispatch.build_task(
+                        claimed.instruction,
+                        project=claimed.title,
+                        **await autostart.about(store, claimed.repo_key),  # type: ignore[arg-type]
+                    ),
                     cwd=claimed.cwd,
                     name=claimed.title,
                 )
@@ -1316,7 +1328,11 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
     )
     result = await asyncio.to_thread(
         dispatch.start,
-        dispatch.build_task(instruction, project=named.name),
+        dispatch.build_task(
+            instruction,
+            project=named.name,
+            **await autostart.about(store, named.key),  # type: ignore[arg-type]
+        ),
         cwd=named.instances[0].path,
         name=block.input[:40],
     )
