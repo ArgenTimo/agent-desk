@@ -32,7 +32,9 @@ def started(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """A dispatch that always works, and a list of what it was asked to start."""
     asked: list[str] = []
 
-    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
         asked.append(instruction)
         return dispatch.Started(True, agent_id=f"agent{len(asked)}")
 
@@ -120,7 +122,7 @@ async def test_two_failures_in_a_row_switch_it_off(
     monkeypatch.setattr(
         dispatch,
         "start",
-        lambda instruction, *, cwd, name: dispatch.Started(False, detail="no disk space"),
+        lambda instruction, *, cwd, name, env=None: dispatch.Started(False, detail="no disk space"),
     )
     await desk.arm(KEY, per_hour=9)
     await _queue(desk, tmp_path, "the first")

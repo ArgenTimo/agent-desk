@@ -90,14 +90,25 @@ limit: one host, named in a link a human typed on a project card; one request, m
 somebody clicks the second of two buttons; one payload, the ticket draft that person had already
 read. No polling, no retry, no read back, and no other destination.
 
-**The field that asks for a variable name refuses a token.** It was given one within a day of
-existing — of course it was; a field that accepts a secret is a field that will be given one. The
-rule is upper snake case and short, which is what every environment variable looks like and what
-no token this program has seen looks like: the obvious rule, "letters, digits and underscores",
-accepts a GitHub token verbatim. A refused value is not stored and the panel says so, because a
-refused token that looks saved is worse than no field at all.
+**A token can be typed into the console, and it stays on the machine it was typed on.** The first
+answer to this was to refuse the field, and that was the wrong shape of no: somebody with a
+console open wants to paste a token into it, and telling them to export a shell variable instead
+is telling them to do the same thing in a less convenient place. What was actually wrong was
+*where it went* — into the SQLite file a second application serves a view out of, and back onto a
+page.
 
-The credential for it is **not in this program**. `project_link.token_env` records the *name* of
+So there are two fields and the difference between them is the whole of it. **The name** is stored
+with the project, in the database, and looks like `JIRA_TOKEN`: upper snake and short, which is
+what every environment variable looks like and what no token does — the obvious rule, "letters,
+digits and underscores", accepts a GitHub token verbatim. **The token** goes to
+`~/.local/share/agent-desk/secrets.json`, mode 0600 in a 0700 directory, written by this program
+and opened by nothing that answers a network request. It never comes back to a screen: the panel
+can say *set here* or *not set*, which is what somebody needs to know, and there is no route that
+returns a value and no template that could render one. A variable of the same name exported in the
+shell wins over the file, so an operator with a secret manager is not quietly shadowed.
+
+The credential is **not in the database** and not in this program's memory beyond the request that
+uses it. `project_link.token_env` records the *name* of
 an environment variable, the value is read from the environment at the moment of the request and
 passed straight into it, and nothing logs it: a network failure reports the exception type and the
 host, never the call. There is no field anywhere in this console to type a token into, because a

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import secrets
 import time
@@ -189,8 +188,14 @@ class ProjectLink(BaseModel):
 
     @property
     def token_present(self) -> bool:
-        """Whether the variable this link names is set — never what it is set to."""
-        return bool(self.token_env) and bool(os.environ.get(self.token_env or ""))
+        """Whether there is a secret under this name — never what it is.
+
+        Two places count: the shell that started the console, and this machine's own secret file
+        (agent_desk/secrets.py). Neither is ever rendered.
+        """
+        from agent_desk import secrets as kept
+
+        return kept.has(self.token_env or "")
 
 
 class ProjectEnv(BaseModel):
@@ -205,8 +210,10 @@ class ProjectEnv(BaseModel):
 
     @property
     def present(self) -> bool:
-        """Whether the shell this console was started from has it — not what it holds."""
-        return bool(os.environ.get(self.name))
+        """Whether there is a value for it here — not what it holds."""
+        from agent_desk import secrets as kept
+
+        return kept.has(self.name)
 
 
 class Idea(BaseModel):
@@ -224,6 +231,9 @@ class Idea(BaseModel):
     # The idea this one is part of, when a message held several thoughts or a human said two
     # ideas are one piece of work (docs/05-ideas.md).
     parent_id: str | None = None
+    # Which project it is about, as a repository key. Editable, and defaulted rather than guessed:
+    # a thought typed with nothing on the workbench is about the thing in front of you.
+    project_key: str | None = None
 
 
 class Viewer(BaseModel):
@@ -1141,11 +1151,13 @@ class Store:
         context: dict[str, Any] | None = None,
         block_id: str | None = None,
         parent_id: str | None = None,
+        project_key: str | None = None,
     ) -> Idea:
         idea = Idea(
             id=_new_id(),
             block_id=block_id,
             parent_id=parent_id,
+            project_key=project_key,
             text=text_,
             summary=summary,
             state="new",
@@ -1158,9 +1170,9 @@ class Store:
             await conn.execute(
                 text(
                     "INSERT INTO idea (id, block_id, text, summary, state, source_kind, "
-                    "source_ref, context, created_at, parent_id) VALUES (:id, :block_id, :text, "
-                    ":summary, :state, :source_kind, :source_ref, :context, :created_at, "
-                    ":parent_id)"
+                    "source_ref, context, created_at, parent_id, project_key) VALUES (:id, "
+                    ":block_id, :text, :summary, :state, :source_kind, :source_ref, :context, "
+                    ":created_at, :parent_id, :project_key)"
                 ),
                 {**idea.model_dump(exclude={"context"}), "context": json.dumps(idea.context)},
             )
@@ -1219,12 +1231,20 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id FROM idea "
+                    "context, created_at, parent_id, project_key FROM idea "
                     "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
                 ),
                 {"state": state, "limit": limit},
             )
             return [self._idea(row._mapping) for row in rows]
+
+    async def set_idea_project(self, idea_id: str, project_key: str | None) -> None:
+        """Point an idea at a project, or at nothing in particular."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET project_key = :project_key WHERE id = :id"),
+                {"project_key": project_key or None, "id": idea_id},
+            )
 
     async def set_idea_parent(self, idea_id: str, parent_id: str | None) -> bool:
         """Put one idea under another, or take it back out. `False` when it would make a loop.
@@ -1256,7 +1276,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id FROM idea WHERE id = :id"
+                    "context, created_at, parent_id, project_key FROM idea WHERE id = :id"
                 ),
                 {"id": idea_id},
             )

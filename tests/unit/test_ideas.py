@@ -539,13 +539,30 @@ async def test_a_project_keeps_its_links_and_never_a_token(desk: Store) -> None:
 
 
 @pytest.mark.unit
-async def test_the_settings_panel_has_nowhere_to_type_a_token(desk: Store) -> None:
-    """The rule, made visible: the field asks for a variable name and says so."""
-    await desk.set_link(repo_key="k", name="jira", url="https://example.invalid", token_env="T")
-    panel = await routes.render_project("k")
+async def test_the_settings_panel_takes_a_token_and_never_gives_one_back(desk: Store) -> None:
+    """A field that asks for a secret is fine; a field that shows one back is not.
 
-    assert 'type="password"' not in panel
-    assert "never typed here and never stored" in panel
+    The token is written to this machine's own file and the panel can say only whether there is
+    one — which is what somebody needs to know (agent_desk/secrets.py, docs/07-security.md).
+    """
+    from agent_desk import secrets as kept
+
+    await desk.set_link(
+        repo_key="k", name="jira", url="https://example.invalid", token_env="DESK_TEST_TOKEN"
+    )
+    kept.keep("DESK_TEST_TOKEN", "a-real-looking-secret")
+    try:
+        panel = await routes.render_project("k")
+    finally:
+        kept.forget("DESK_TEST_TOKEN")
+
+    # It says there is one, and never what it is.
+    assert "DESK_TEST_TOKEN" in panel
+    assert "set here" in panel
+    assert "a-real-looking-secret" not in panel
+    # The field that takes it is a password field, and the page says where it goes.
+    assert 'type="password"' in panel
+    assert "stays on this machine" in panel
     assert "https://example.invalid" in panel
 
 

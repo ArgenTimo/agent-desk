@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 from markupsafe import Markup, escape
 
 from agent_desk import dispatch, peer, tracker
+from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
@@ -699,19 +700,27 @@ async def add_project_link(request: Request) -> Response:
     key = form.get("key", "").strip()
     name = form.get("name", "").strip()[:40]
     url = form.get("url", "").strip()
-    typed = form.get("token_env", "").strip()[:64]
+    variable = form.get("token_env", "").strip()[:64]
     if key and name and url.startswith(("http://", "https://")):
-        await store.set_link(repo_key=key, name=name, url=url, token_env=typed)
-    if typed and not await _kept_the_variable(key, name, typed):
-        # It was a value, not a name. Say so where it was typed: a refused token that looks saved
-        # is worse than no field at all (docs/07-security.md).
-        return HTMLResponse(
-            await render_project(
-                key,
-                refused="that is not the name of an environment variable — "
-                "nothing was stored. Export the token in your shell and name the variable here.",
-            )
+        await store.set_link(repo_key=key, name=name, url=url, token_env=variable)
+
+    # The token itself, if one was typed. It goes to this machine's own secret file under the name
+    # on the link — never to the store, which a second application serves a view out of, and never
+    # back to a screen: the panel can only ever say whether there is one (agent_desk/secrets.py).
+    secret = form.get("token", "")
+    said = ""
+    if secret and not variable:
+        said = "name the token first — a secret needs somewhere to be looked up from."
+    elif secret:
+        kept.keep(variable, secret.strip())
+        said = f"{variable} is set on this machine. It is not stored with the project."
+    elif variable and not await _kept_the_variable(key, name, variable):
+        said = (
+            "that is not a name — nothing was stored. A name looks like JIRA_TOKEN; the token "
+            "itself goes in the field beside it."
         )
+    if said:
+        return HTMLResponse(await render_project(key, refused=said))
     panel = await render_project(key)
     if _wants_fragment(request):
         return HTMLResponse(panel)

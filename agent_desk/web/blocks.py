@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import re
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -231,6 +232,7 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
         source_ref=source_ref,
         context=context,
         block_id=block.id,
+        project_key=project_of(rows),
     )
     await store.finish_block(block.id, "")
     # An idea block asks nothing further, so its subject is not a candidate for a later question
@@ -281,6 +283,7 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
             source_ref=source_ref,
             context=context,
             block_id=block.id,
+            project_key=project_of(rows),
             parent_id=whole.id,
         )
 
@@ -623,6 +626,24 @@ async def _work(
         raise
 
 
+def project_of(rows: Sequence[BoardRow]) -> str:
+    """Which project a thought or a request is about, when nothing says otherwise.
+
+    The cards that were on the workbench, if there were any; otherwise this console's own project.
+    A thought typed with nothing in front of it is a thought about the thing in front of you, and
+    the thing in front of you is the desk (docs/05-ideas.md).
+    """
+    for row in rows:
+        if row.project_key:
+            return row.project_key
+    return desk_key()
+
+
+def desk_key() -> str:
+    """This console's own project, as a repository key."""
+    return f"desk:{own_checkout()}"
+
+
 async def record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
@@ -639,6 +660,7 @@ async def record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> N
         source_ref=source_ref,
         context=context,
         block_id=block.id,
+        project_key=project_of(rows),
     )
     await store.finish_block(block.id, "")
     await _write_ideas(store, block, idea, rows)
@@ -736,6 +758,9 @@ async def _start_work(
     cwd: str,
     project: str,
     branch: str = "",
+    extra: Sequence[str] = (),
+    env: Mapping[str, str] | None = None,
+    given: Sequence[str] = (),
 ) -> bool:
     """Queue the work and start it, or say why it is waiting. One place, two callers.
 
@@ -747,6 +772,8 @@ async def _start_work(
     if ideas:
         parts += ["The ideas this is about, as they were written down:"]
         parts += [f"- {idea.text}" for idea in ideas]
+    if extra:
+        parts += ["\n".join(extra)]
     instruction = "\n\n".join(parts)
     task = await store.queue_task(
         repo_key=repo_key,
@@ -780,10 +807,13 @@ async def _start_work(
     await store.take_next_task(repo_key)
     log.info("dispatching an instruction", block=block.id, project=project)
     result = await asyncio.to_thread(
-        dispatch.start,
-        dispatch.build_task(instruction, project=project, branch=branch),
-        cwd=cwd,
-        name=block.input[:40],
+        functools.partial(
+            dispatch.start,
+            dispatch.build_task(instruction, project=project, branch=branch, secrets=sorted(given)),
+            cwd=cwd,
+            name=block.input[:40],
+            env=env,
+        )
     )
     if not result.started:
         await store.task_failed(task.id, result.detail)
@@ -796,11 +826,13 @@ async def _start_work(
 
     await store.task_started(task.id, result.agent_id)
     about = f"{len(ideas)} idea{'' if len(ideas) == 1 else 's'}" if ideas else "it"
+    handed = f" It was given {', '.join(given)}." if given else ""
     await store.finish_block(
         block.id,
         f"On it — an agent is working on {about} in {project}, in a worktree of its own "
         f"({result.agent_id}). It is on the board while it runs"
-        + (". They leave the list when it finishes." if ideas else "."),
+        + (". They leave the list when it finishes." if ideas else ".")
+        + handed,
     )
     return True
 
@@ -813,6 +845,51 @@ def own_checkout() -> Path:
     one and an installed copy otherwise — and the difference decides what a `desk` request can do.
     """
     return Path(__file__).resolve().parents[2]
+
+
+async def briefing(store: Store) -> list[str]:
+    """What this console knows, for an agent asked to work on the console's own things.
+
+    "Write documentation for all the ideas" cannot be done by an agent that has to guess what the
+    ideas are, and handing it the database would be handing it a file it has no business opening.
+    So the facts travel in the prompt: the thoughts, which project each is about, and what is in
+    the queue. It is what the console would say out loud if asked.
+    """
+    ideas = [idea for idea in await store.ideas() if idea.state not in ("dropped", "done")]
+    if not ideas:
+        return []
+
+    by_project: dict[str, list[str]] = {}
+    for idea in reversed(ideas):
+        line = f"- {idea.text}" + (" (part of a group)" if idea.parent_id else "")
+        by_project.setdefault(idea.project_key or "no project named", []).append(line)
+
+    lines = ["", "## What is written down, by project"]
+    for project, thoughts in by_project.items():
+        lines += ["", f"### {project}", *thoughts]
+
+    waiting = [task for task in await store.tasks() if task.waiting]
+    if waiting:
+        lines += ["", "## Work already queued", *[f"- {task.title}" for task in waiting]]
+    return lines
+
+
+async def _secrets_for(store: Store, repo_keys: Sequence[str]) -> dict[str, str]:
+    """The tokens these projects named, for the child process that needs them.
+
+    Named, set, and belonging to the work: a project's link says which variable its token is
+    under, and this reads the value from where it is kept. Nothing else is passed, and the console
+    says which ones were (agent_desk/secrets.py).
+    """
+    from agent_desk import secrets as kept
+
+    found: dict[str, str] = {}
+    for link in await store.links():
+        if repo_keys and link.repo_key not in repo_keys:
+            continue
+        if link.token_env and kept.has(link.token_env):
+            found[link.token_env] = kept.get(link.token_env)
+    return found
 
 
 async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
@@ -830,12 +907,19 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
 
     here = own_checkout()
     if (here / ".git").exists():
+        # A request about the desk is a request about the desk's own things, so it goes with the
+        # facts — every thought and which project it belongs to — and with the tokens the projects
+        # named, because "collect the blockers from Jira" cannot be done without one.
+        given = await _secrets_for(store, [])
         if await _start_work(
             store,
             block,
-            repo_key=f"desk:{here}",
+            repo_key=desk_key(),
             cwd=str(here),
             project=here.name,
+            extra=await briefing(store),
+            env=given,
+            given=sorted(given),
         ):
             return
 

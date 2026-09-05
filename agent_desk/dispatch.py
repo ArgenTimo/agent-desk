@@ -13,9 +13,10 @@ agent it starts.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +67,7 @@ def build_task(
     project: str = "",
     branch: str = "",
     notes: Sequence[str] = (),
+    secrets: Sequence[str] = (),
 ) -> str:
     """What the agent is actually told.
 
@@ -85,6 +87,13 @@ def build_task(
     written = [note for note in notes if note.strip()]
     if written:
         lines += ["", "Context that came with the request:", *written]
+    if secrets:
+        lines += [
+            "",
+            "Credentials you were given, in the environment: " + ", ".join(secrets) + ". Use them "
+            "for what was asked and nothing else, and never write one into a file, a commit, a "
+            "log line or a message.",
+        ]
     lines += [
         "",
         "Two things about how this arrived. It was dispatched from a console, so you are running "
@@ -152,7 +161,9 @@ def _read_id(output: str) -> str:
     return ""
 
 
-def start(instruction: str, *, cwd: str, name: str) -> Started:
+def start(
+    instruction: str, *, cwd: str, name: str, env: Mapping[str, str] | None = None
+) -> Started:
     """Start one agent on one instruction. Blocking: the caller runs it in a thread.
 
     Never raises. Every ending is a `Started`, because this is reached from a route that has to
@@ -171,10 +182,16 @@ def start(instruction: str, *, cwd: str, name: str) -> Started:
     if forbidden:  # pragma: no cover — the argv builder cannot produce one; the check is the rule
         return Started(False, detail=f"refusing to start an agent with {forbidden[0]}")
 
+    # Secrets the work needs, handed to the child the way secrets are handed to processes: in its
+    # environment, for the life of that process, and never written anywhere by this program
+    # (agent_desk/secrets.py). What is passed is decided by the caller and named in the console.
+    environment = {**os.environ, **(env or {})}
+
     try:
         done = subprocess.run(  # noqa: S603 — a list, no shell, and the binary is from settings
             command,
             cwd=directory,
+            env=environment,
             capture_output=True,
             text=True,
             timeout=START_TIMEOUT_SECONDS,

@@ -25,10 +25,17 @@ PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 #                       design/01-module-layout.md names as this module's job.
 #   tracker/jira.py     the answer to a request this program made a second earlier, which is the
 #                       only thing that module does at all (docs/adr/0005).
+#   secrets.py          this program's own file of secrets, on this machine, which it writes
+#                       itself and never renders (docs/07-security.md).
 #
 # All three are paths, not categories. A fourth module that starts parsing JSON still fails this
 # test, which is the point of it.
-_NOT_AN_ON_DISK_FORMAT = {"store/repo.py", "answer/session.py", "tracker/jira.py"}
+_NOT_AN_ON_DISK_FORMAT = {
+    "store/repo.py",
+    "answer/session.py",
+    "tracker/jira.py",
+    "secrets.py",
+}
 
 
 def _modules() -> list[Path]:

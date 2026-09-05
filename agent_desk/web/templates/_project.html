@@ -18,7 +18,7 @@
       <span class="dim">{{ link.url }}</span>
       {% if link.token_env %}
       <span class="pill{{ ' flag' if not link.token_present }}"
-            title="the variable this link would read a token from">{{ link.token_env }}{{ " · set" if link.token_present else " · not set" }}</span>
+            title="whether there is a token under this name — never what it is">{{ link.token_env }}{{ " · set here" if link.token_present else " · not set" }}</span>
       {% endif %}
       <form method="post" action="/project-links/remove"
             hx-post="/project-links/remove" hx-target="#message">
@@ -41,18 +41,23 @@
     <input id="link-name" name="name" placeholder="jira" autocomplete="off" required>
     <label class="visually-hidden" for="link-url">the address</label>
     <input id="link-url" name="url" type="url" placeholder="https://…" autocomplete="off" required>
-    <label class="visually-hidden" for="link-token">the environment variable holding a token</label>
-    {# The name of a variable, in upper snake, and the field refuses anything else. A token typed
-       here is not stored and the panel says so (docs/07-security.md). #}
-    <input id="link-token" name="token_env" placeholder="JIRA_TOKEN — the name, not the token"
+    {# Two fields, and the difference between them is the whole of this page's security. The name
+       is stored with the project, in the database. The secret is written to a file on this machine
+       that only its owner can read, and never comes back to a screen (agent_desk/secrets.py). #}
+    <label class="visually-hidden" for="link-var">a name for the token</label>
+    <input id="link-var" name="token_env" placeholder="JIRA_TOKEN — a name for it"
            pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
+    <label class="visually-hidden" for="link-secret">the token itself</label>
+    <input id="link-secret" name="token" type="password" autocomplete="off"
+           placeholder="the token — stays on this machine">
     <button type="submit">Add</button>
   </form>
 
   {% if refused %}<p class="notice small">{{ refused }}</p>{% endif %}
-  <p class="small dim">A token is never typed here and never stored. Name the environment variable
-    this console would read it from, export it in the shell that starts the console, and it stays
-    where the operating system already keeps secrets.</p>
+  <p class="small dim">A token typed here is written to a file only you can read, on this machine,
+    under the name beside it — never into the project's database, never into the shared view, and
+    never back onto a screen. A variable of the same name exported in your shell wins over it, so
+    a secret manager is not quietly shadowed.</p>
 
   {# What this project's agents need in the environment. Names, never values, and never a `.env`
      written into the repository: this program does not edit what it watches (CLAUDE.md). What it

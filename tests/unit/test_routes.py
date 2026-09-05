@@ -52,7 +52,9 @@ def started(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     """Every dispatch this test made, and none of them left the process."""
     calls: list[dict[str, str]] = []
 
-    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
         calls.append({"instruction": instruction, "cwd": cwd, "name": name})
         return dispatch.Started(True, agent_id=f"agent{len(calls)}")
 

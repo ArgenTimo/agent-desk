@@ -837,7 +837,9 @@ async def test_an_instruction_is_written_out_and_started(
 
     told: list[str] = []
 
-    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
         told.append(instruction)
         return dispatch.Started(True, agent_id="agent3")
 
@@ -1063,7 +1065,7 @@ async def test_an_idea_dropped_in_with_take_it_on_starts_an_agent(
     monkeypatch.setattr(
         dispatch,
         "start",
-        lambda instruction, *, cwd, name: (
+        lambda instruction, *, cwd, name, env=None: (
             told.append(instruction),
             dispatch.Started(True, agent_id="agent7"),
         )[1],
@@ -1107,7 +1109,7 @@ async def test_a_question_never_starts_anything(
     """
     from agent_desk import dispatch
 
-    def never(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def never(instruction: str, *, cwd: str, name: str, env: object = None) -> dispatch.Started:
         pytest.fail("a question started an agent")
 
     monkeypatch.setattr(dispatch, "start", never)
@@ -1131,7 +1133,7 @@ async def test_a_second_instruction_waits_for_the_seat_rather_than_taking_anothe
 
     starts: list[str] = []
 
-    def once(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def once(instruction: str, *, cwd: str, name: str, env: object = None) -> dispatch.Started:
         starts.append(name)
         return dispatch.Started(True, agent_id=f"agent{len(starts)}")
 
@@ -1170,7 +1172,9 @@ async def test_a_message_read_as_the_wrong_kind_is_corrected_in_one_click(
     from agent_desk import dispatch
 
     monkeypatch.setattr(
-        dispatch, "start", lambda instruction, *, cwd, name: dispatch.Started(True, agent_id="a1")
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name, env=None: dispatch.Started(True, agent_id="a1"),
     )
     monkeypatch.setenv("KIND", "do")
     block = await blocks.submit(
@@ -1199,7 +1203,9 @@ async def test_a_request_about_the_console_is_done_in_the_console(
 
     told: list[str] = []
 
-    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
         told.append(cwd)
         return dispatch.Started(True, agent_id="desk1")
 
@@ -1228,7 +1234,9 @@ async def test_a_request_about_a_console_whose_code_is_elsewhere_is_written_down
     from agent_desk import dispatch
 
     monkeypatch.setattr(
-        dispatch, "start", lambda instruction, *, cwd, name: pytest.fail("there was nothing to run")
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name, env=None: pytest.fail("there was nothing to run"),
     )
     monkeypatch.setattr(blocks, "own_checkout", lambda: pathlib.Path("/not/a/checkout"))
     monkeypatch.setenv("KIND", "desk")
@@ -1259,3 +1267,70 @@ async def test_a_chat_takes_the_name_of_the_first_thing_said_in_it(
     await blocks.submit(desk, "and what about the ports", [], thread_id=chat.id)
     again = next(one for one in await desk.open_threads() if one.id == chat.id)
     assert again.subject == "what did the migration end up doing"
+
+
+@pytest.mark.unit
+async def test_a_desk_agent_is_given_the_facts_and_the_tokens_it_needs(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Write documentation for all the ideas" cannot be done by an agent that has to guess what
+    the ideas are, and handing it the database would be handing it a file it has no business
+    opening. The facts travel in the prompt; the tokens travel in the environment."""
+    from agent_desk import dispatch
+    from agent_desk import secrets as kept
+
+    seen: dict[str, object] = {}
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
+        seen.update(instruction=instruction, env=env)
+        return dispatch.Started(True, agent_id="desk9")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "desk")
+    await desk.set_link(
+        repo_key="origin:acme/api",
+        name="jira",
+        url="https://acme.atlassian.net/browse/API",
+        token_env="DESK_TEST_JIRA",
+    )
+    kept.keep("DESK_TEST_JIRA", "a-real-looking-secret")
+    await desk.create_idea(
+        text_="cache the probe results",
+        summary="cache probes",
+        source_kind="typed",
+        project_key="origin:acme/api",
+    )
+
+    try:
+        block = await blocks.submit(desk, "составь доки на все идеи", [])
+        assert await _settled(desk, block.id) == "answered"
+    finally:
+        kept.forget("DESK_TEST_JIRA")
+
+    # The thoughts, and which project each is about.
+    assert "cache the probe results" in str(seen["instruction"])
+    assert "origin:acme/api" in str(seen["instruction"])
+    # The token, in the environment, and named on the block rather than hidden.
+    assert seen["env"] == {"DESK_TEST_JIRA": "a-real-looking-secret"}
+    after = await desk.block(block.id)
+    assert after is not None and "DESK_TEST_JIRA" in (after.answer or "")
+    # And what it holds is never written into the prompt.
+    assert "a-real-looking-secret" not in str(seen["instruction"])
+
+
+@pytest.mark.unit
+async def test_an_idea_typed_with_nothing_in_front_of_it_is_about_the_desk(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """A thought typed with nothing on the workbench is about the thing in front of you."""
+    await blocks.submit(desk, "/idea the pool needs sorting", [])
+    (idea,) = await desk.ideas()
+    assert idea.project_key == blocks.desk_key()
+
+    # With a card on the workbench it is about that card's project, as the board stamped it.
+    stamped = replace(make_row("alpha", "main"), project_key="origin:acme/api")
+    await blocks.submit(desk, "/idea the api half is slow", [stamped])
+    newest = (await desk.ideas())[0]
+    assert newest.project_key == "origin:acme/api"
