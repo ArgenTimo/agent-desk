@@ -57,8 +57,12 @@ check-links: ## Prove every relative link in docs/ and design/ resolves
 # for open responses to finish, and the board's server-sent-events response never finishes by
 # design — so Ctrl-C on a running console with a board open hangs forever, and SIGTERM does not
 # end it either. Found by killing the server with a browser attached.
+# --reload-exclude is the second bug fix in this target. A dispatched agent works in a worktree
+# *inside* this repository (.claude/worktrees/), so without it every file that agent touches
+# restarts the console — which kills the loop that started it, mid-run, several times a minute.
 run: ## The console on http://127.0.0.1:8787
 	$(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
+	  --reload-exclude '.claude/worktrees/*' --reload-exclude '*/.claude/worktrees/*' \
 	  --timeout-graceful-shutdown 2 --no-access-log
 
 # The one target that changes the security model of this tool. Everything else binds to
