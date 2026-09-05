@@ -65,8 +65,8 @@
 
 <div class="ideas-head">
   <span class="tree-count">{{ counted }} idea{{ "" if counted == 1 else "s" }}</span>
-  {% if counted > (roots | length) %}
-  <span class="tree-count">{{ roots | length }} group{{ "" if roots | length == 1 else "s" }}</span>
+  {% if grouped %}
+  <span class="tree-count">in {{ grouped }} group{{ "" if grouped == 1 else "s" }}</span>
   {% endif %}
   <span class="spacer"></span>
   <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>

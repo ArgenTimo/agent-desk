@@ -382,6 +382,8 @@ async def render_ideas() -> str:
         roots=list(reversed(roots)),
         children=children,
         counted=len(ideas),
+        # A root with nothing under it is an idea, not a group of one.
+        grouped=len([idea for idea in ideas if children.get(idea.id)]),
         drafted=await store.drafted("ticket"),
         filings={filing.idea_id: filing for filing in await store.filings()},
     )
