@@ -66,6 +66,7 @@ function setWidths(left, right) {
 try {
   const saved = JSON.parse(localStorage.getItem(WIDTHS) || 'null');
   if (saved) setWidths(saved.left, saved.right);
+  if (saved?.blockers) grid.style.setProperty('--blockers', saved.blockers);
 } catch {
   // A browser with storage switched off gets the defaults, which are fine.
 }
@@ -77,6 +78,7 @@ function remember() {
       JSON.stringify({
         left: parseFloat(getComputedStyle(grid).getPropertyValue('--left')),
         right: parseFloat(getComputedStyle(grid).getPropertyValue('--right')),
+        blockers: getComputedStyle(grid).getPropertyValue('--blockers').trim(),
       })
     );
   } catch {
@@ -91,12 +93,21 @@ for (const handle of document.querySelectorAll('.gutter')) {
     event.preventDefault();
     handle.setPointerCapture(event.pointerId);
     handle.classList.add('pulling');
-    document.body.classList.add('pulling');
+    document.body.classList.add(side === 'split' ? 'pulling-across' : 'pulling');
     const startX = event.clientX;
+    const startY = event.clientY;
+    const column = grid.querySelector('.col-right');
+    const startSplit = document.querySelector('.blockers')?.getBoundingClientRect().height || 0;
     const startLeft = grid.querySelector('.col-left').getBoundingClientRect().width;
     const startRight = grid.querySelector('.col-right').getBoundingClientRect().width;
 
     const move = (moved) => {
+      if (side === 'split') {
+        const tall = column?.getBoundingClientRect().height || 1;
+        const share = ((startSplit + moved.clientY - startY) / tall) * 100;
+        grid.style.setProperty('--blockers', `${Math.min(Math.max(share, 10), 85)}%`);
+        return;
+      }
       const dx = moved.clientX - startX;
       if (side === 'left') setWidths(startLeft + dx, null);
       else setWidths(null, startRight - dx);
@@ -104,7 +115,7 @@ for (const handle of document.querySelectorAll('.gutter')) {
     const done = () => {
       handle.removeEventListener('pointermove', move);
       handle.classList.remove('pulling');
-      document.body.classList.remove('pulling');
+      document.body.classList.remove('pulling', 'pulling-across');
       remember();
     };
     handle.addEventListener('pointermove', move);
@@ -130,6 +141,7 @@ for (const handle of document.querySelectorAll('.gutter')) {
   handle.addEventListener('dblclick', () => {
     grid.style.removeProperty('--left');
     grid.style.removeProperty('--right');
+    grid.style.removeProperty('--blockers');
     try {
       localStorage.removeItem(WIDTHS);
     } catch {
@@ -137,6 +149,91 @@ for (const handle of document.querySelectorAll('.gutter')) {
     }
   });
 }
+
+/* --- what is showing, and how big ---------------------------------------------------------------- */
+// Five areas with names — overview, workbench, input, blockers, idea pool (docs/06-console.md) —
+// and any of them can be put away. What somebody wants on the screen at four in the afternoon is
+// not what they wanted at ten, so this is a preference and lives in this browser beside the
+// widths and the order of the chats.
+const PANES = 'agent-desk:panes';
+let away = new Set();
+
+try {
+  away = new Set(JSON.parse(localStorage.getItem(PANES) || '[]'));
+} catch {
+  // Everything shows, which is the default anyway.
+}
+
+function applyPanes() {
+  for (const pane of document.querySelectorAll('[data-pane]')) {
+    pane.hidden = away.has(pane.dataset.pane);
+  }
+  for (const rail of document.querySelectorAll('.rail[data-show]')) {
+    rail.hidden = !away.has(rail.dataset.show);
+  }
+  // The gutter beside a hidden column has nothing left to drag.
+  const left = document.querySelector('.gutter[data-gutter="left"]');
+  const right = document.querySelector('.gutter[data-gutter="right"]');
+  if (left) left.hidden = away.has('overview');
+  if (right) right.hidden = away.has('right');
+  // Inside the right column: the blockers, the split handle, and the pool.
+  const blockers = document.querySelector('.blockers');
+  const split = document.querySelector('.gutter[data-gutter="split"]');
+  const pool = document.getElementById('idea-list');
+  const poolHead = document.querySelector('.col-head.second');
+  const blockersHead = document.querySelector('.col-right .col-head:not(.second)');
+  if (blockers) blockers.hidden = away.has('blockers');
+  if (blockersHead) blockersHead.classList.toggle('folded', away.has('blockers'));
+  if (pool) pool.hidden = away.has('pool');
+  if (poolHead) poolHead.classList.toggle('folded', away.has('pool'));
+  if (split) split.hidden = away.has('blockers') || away.has('pool');
+}
+
+function rememberPanes() {
+  try {
+    localStorage.setItem(PANES, JSON.stringify([...away]));
+  } catch {
+    // It still holds for this window.
+  }
+}
+
+document.addEventListener('click', (event) => {
+  const hide = event.target.closest('.pane-hide');
+  const show = event.target.closest('.rail[data-show]');
+  const head = event.target.closest('.col-head.folded');
+  if (hide) away.add(hide.dataset.hide);
+  else if (show) away.delete(show.dataset.show);
+  else if (head) {
+    // A folded half is brought back by its own heading, which is the only part of it still there.
+    away.delete(head.classList.contains('second') ? 'pool' : 'blockers');
+  } else return;
+  applyPanes();
+  rememberPanes();
+});
+
+applyPanes();
+
+/* --- the menu on a project card ----------------------------------------------------------------- */
+// The `⋯` is a menu, not a place. Without this script it is a link to the project's own page,
+// which has everything the menu offers; with it, the options open where the card is.
+document.addEventListener('click', (event) => {
+  const opener = event.target.closest('.more[data-menu]');
+  const open = document.querySelector('.menu:not([hidden])');
+  if (open && (!opener || open.id !== opener.dataset.menu)) open.hidden = true;
+  if (!opener) return;
+
+  const menu = document.getElementById(opener.dataset.menu);
+  if (!menu) return; // The link still works: it goes to the page.
+  event.preventDefault();
+  menu.hidden = !menu.hidden;
+});
+
+// A menu that outlived the card it belonged to is a menu floating over somebody else's project.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const open = document.querySelector('.menu:not([hidden])');
+  if (open) open.hidden = true;
+});
 
 /* --- what is folded shut ----------------------------------------------------------------------- */
 // The board is re-rendered from the server whenever it changes, and the server has no idea which
@@ -410,6 +507,7 @@ async function pin(card) {
   holder.dataset.deep = 'no';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
+    <button type="button" class="pin-fold" title="fold this away">–</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
     <div class="pin-body">reading…</div>`;
@@ -430,6 +528,16 @@ async function pin(card) {
 }
 
 document.addEventListener('click', (event) => {
+  // Everything a card knows is shown when it lands on the workbench, and folded away by this
+  // when it is more than somebody wants to look at right now.
+  if (event.target.classList.contains('pin-fold')) {
+    const holder = event.target.closest('.pin');
+    const folded = holder.classList.toggle('folded');
+    event.target.textContent = folded ? '+' : '–';
+    event.target.title = folded ? 'open it again' : 'fold this away';
+    return;
+  }
+
   if (event.target.classList.contains('pin-off')) {
     event.target.closest('.pin').remove();
     syncTargets();

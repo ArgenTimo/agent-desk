@@ -20,6 +20,25 @@ way.
 └──────────────────────┴───────────────────────────────────────┴──────────────────┘
 ```
 
+## What the parts are called
+
+The names are used in the code, in these documents and out loud, so that "the thing on the left"
+stops being how anybody refers to it. The owner's Russian is beside each, because this is a
+bilingual project and half the requests arrive in it.
+
+| Name | Где | What it is |
+|---|---|---|
+| **overview** | овервью | the left column: subscriptions, projects, checkouts, consoles, agents |
+| **workbench** | верстак / рабочий стол | the middle: a surface things are carried onto and worked with |
+| **input** | ввод | the bottom of the workbench, where a message is typed |
+| **blockers** | блокеры | the upper right: what is in the way |
+| **idea pool** | пул идей / бэклог | the lower right: what has been written down and not yet built |
+
+Any of them can be resized by dragging the handle beside it, and any except the input can be put
+away — a screen at four in the afternoon is not the one somebody wanted at ten. What is showing
+and how wide it is lives in the browser, not the store: it is a preference about a window, not
+data about the work.
+
 ## The three columns
 
 **Left: what is running**, as cards inside cards — a project holds checkouts, a checkout holds

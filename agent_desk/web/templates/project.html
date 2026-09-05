@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-desk · project</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c1b19'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23e0a250'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+{# A page rather than the panel in the middle: the middle is where the work happens, and settings
+   are not work. This is the one you leave open on a second screen while you fix something. #}
+<div class="bar">
+  <span class="brand">agent-desk</span>
+  <nav><a href="/">the board</a><a href="/ideas">ideas</a><a href="/viewers">viewers</a></nav>
+</div>
+<main>
+  {{ panel }}
+</main>
+<script src="/static/htmx.min.js"></script>
+</body>
+</html>

@@ -35,6 +35,10 @@
   --idle: #3f6f34;
   --shell: #35667a;
   --flag: #a03028;
+  /* Red means stopped or blocked, and nothing else. What merely wants a look is amber: an
+     inference that a session may be waiting is not the same fact as a run that failed, and a
+     board where both are red is a board where neither is read. */
+  --attention: #8a5a00;
   --warn: #7d5100;
   --warn-bg: #fdf4e3;
   --focus: #2f6ecf;
@@ -59,6 +63,7 @@
     --idle: #8cc474;
     --shell: #74b6c8;
     --flag: #e88880;
+    --attention: #e0b070;
     --warn: #e3b264;
     --warn-bg: #2b2413;
     --focus: #7aa8f0;
@@ -107,13 +112,50 @@ body.desk { height: 100vh; overflow: hidden; padding: 0; display: flex; flex-dir
 .desk-grid {
   --left: 320px;
   --right: 300px;
-  display: grid;
-  grid-template-columns: var(--left) 8px minmax(0, 1fr) 8px var(--right);
+  --blockers: 38%;
+  /* Flex rather than grid, for one reason: an area that is put away is `display: none`, and the
+     rest closes over the gap by itself. A grid would need a template per combination of what is
+     showing, which is four rules to keep in step with three buttons. */
+  display: flex;
   gap: 6px;
   flex: 1;
   min-height: 0;
   padding: 10px 12px;
 }
+.col-left { flex: 0 0 var(--left); }
+.col-mid { flex: 1 1 auto; }
+.col-right { flex: 0 0 var(--right); }
+
+/* What is left of an area that has been put away: a strip with its name, and the way back. */
+.rail {
+  flex: 0 0 22px;
+  padding: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.rail span { writing-mode: vertical-rl; letter-spacing: 0.06em; }
+.rail:hover { color: var(--fg); border-color: var(--line-strong); }
+.pane-hide {
+  min-height: 18px;
+  padding: 0 6px 1px;
+  border-color: transparent;
+  background: none;
+  color: var(--fg-dim);
+  line-height: 1;
+}
+.pane-hide:hover { color: var(--flag); }
+
+.gutter.across {
+  height: 8px;
+  align-self: auto;
+  cursor: row-resize;
+  flex: 0 0 8px;
+}
+body.pulling-across { cursor: row-resize; user-select: none; }
 
 .gutter {
   align-self: stretch;
@@ -152,14 +194,13 @@ body.pulling { cursor: col-resize; user-select: none; }
 /* Two columns on a laptop in a side-by-side, one on anything narrower. The middle is the one that
    survives, because it is the one being used. */
 @media (max-width: 1100px) {
-  .desk-grid { grid-template-columns: var(--left) 8px minmax(0, 1fr); }
-  .col-right, .gutter[data-gutter="right"] { display: none; }
+  .col-right, .gutter[data-gutter="right"], .rail[data-show="right"] { display: none; }
 }
 @media (max-width: 760px) {
   body.desk { height: auto; overflow: auto; }
-  .desk-grid { grid-template-columns: 1fr; }
-  .gutter { display: none; }
-  .col-left { max-height: 40vh; }
+  .desk-grid { flex-direction: column; }
+  .gutter, .rail { display: none; }
+  .col-left, .col-right { flex: 0 0 auto; max-height: 40vh; }
 }
 
 .answer, .failure, .verbatim, .card .recorded, #message .full, .draft pre {
@@ -346,7 +387,8 @@ body.stale main { opacity: 0.55; }
 
 /* An instruction ends as a message that has not been sent. It is bordered like the write path
    everywhere else in this program, because that is what it is (docs/adr/0002). */
-.directive { margin: 6px 0 0; padding: 6px 0 0 10px; border-left: 2px solid var(--flag); }
+/* Written and waiting for a click is not blocked: it is ready. */
+.directive { margin: 6px 0 0; padding: 6px 0 0 10px; border-left: 2px solid var(--focus); }
 .directive.sent { border-left-color: var(--idle); }
 .directive-head { font-size: 11px; color: var(--fg-dim); font-family: var(--mono); }
 .directive .target { color: var(--fg); font-weight: 600; }
@@ -402,7 +444,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
 
 /* --- the write path -------------------------------------------------------------------------- */
 #message:not(:empty) {
-  border: 1px solid var(--flag);
+  border: 1px solid var(--attention);
   border-left-width: 3px;
   border-radius: var(--radius);
   background: var(--surface);
@@ -530,7 +572,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
   padding: 0 2px 4px;
 }
 .tree-head { display: flex; gap: 8px; align-items: baseline; padding: 0 2px; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
-.flagged-count { color: var(--flag); }
+.flagged-count { color: var(--attention); }
 
 .card {
   border: 1px solid var(--line);
@@ -543,7 +585,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
    what it farmed out, and the way in are all on the face of it. */
 .tree > .card.project { flex: 0 0 auto; }
 .card.project { background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
-.card.project.flagged { border-color: color-mix(in srgb, var(--flag) 45%, var(--line)); }
+.card.project.flagged { border-color: color-mix(in srgb, var(--attention) 45%, var(--line)); }
 
 .card-head {
   display: flex;
@@ -569,7 +611,7 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .card.session.busy { border-left-color: var(--busy); }
 .card.session.idle { border-left-color: var(--idle); }
 .card.session.shell { border-left-color: var(--shell); }
-.card.session.flagged { border-left-color: var(--flag); border-color: color-mix(in srgb, var(--flag) 35%, var(--line)); }
+.card.session.flagged { border-left-color: var(--attention); border-color: color-mix(in srgb, var(--attention) 35%, var(--line)); }
 .card.session > .card-head { font-size: 12px; }
 
 .twist { width: 10px; flex: none; color: var(--fg-dim); font-family: var(--mono); }
@@ -592,7 +634,10 @@ button[disabled] { opacity: 0.5; cursor: default; }
   color: var(--fg-soft);
   white-space: nowrap;
 }
+/* Red: it stopped, or something it needs is missing. */
 .pill.flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
+/* Amber: it may want somebody, which is a guess and not a stop. */
+.pill.attention { background: color-mix(in srgb, var(--attention) 18%, transparent); color: var(--attention); }
 .pill.quiet { background: none; border: 1px dashed var(--line-strong); color: var(--fg-dim); }
 .pill.agent-started { background: color-mix(in srgb, var(--focus) 18%, transparent); color: var(--focus); }
 .directive-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -686,6 +731,32 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 }
 .more:hover { color: var(--fg); background: var(--raised); }
 
+/* The options on a project. Rendered with the card and hidden, so opening it costs nothing. */
+.card.project { position: relative; }
+.menu {
+  position: absolute;
+  right: 6px;
+  top: 30px;
+  z-index: 5;
+  min-width: 22ch;
+  max-width: 34ch;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+}
+.menu-item {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 3px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.menu-item:hover { background: color-mix(in srgb, var(--focus) 10%, transparent); }
+.menu-what { display: block; font-size: 12px; }
+.menu-why { display: block; font-size: 10px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .settings header { margin-bottom: 8px; }
 .settings .links { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .settings .links li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -749,10 +820,18 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .tab-off:hover { color: var(--flag); }
 .tab-new { display: flex; }
 
+/* The workbench: a surface things are put on, and it looks like one. The grid is faint enough to
+   read text over and present enough that dropping a card onto it feels like putting it down. */
 .out {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+  border-radius: var(--radius);
   /* The gutter is always there, whether or not there is enough to scroll. Without it the moment
      a message makes the column overflow, every block in it jumps narrower by the width of a
      scrollbar — text reflows under somebody's eyes for no reason they can see. */
@@ -760,7 +839,9 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   overscroll-behavior: contain;
   padding: 12px 4px 4px;
 }
-.out.drop-target { outline-offset: -2px; }
+.out.drop-target { outline-offset: -2px; background-color: color-mix(in srgb, var(--focus) 5%, transparent); }
+/* A card put down on it sits on the surface rather than floating over it. */
+.out .block, .out .pin { background-color: var(--surface); }
 .out-empty { display: none; margin: auto; padding: 20px; color: var(--fg-dim); text-align: center; }
 .out.is-empty { display: flex; }
 .out.is-empty .out-empty { display: block; }
@@ -791,6 +872,18 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 .pin-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--prose); }
 .pin-off { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
 .pin-body { margin-top: 4px; }
+.pin.folded .pin-body { display: none; }
+.pin-fold { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
+/* A card carried onto the workbench shows everything it knows: this is where somebody brought it
+   to look at it, and the clamp that keeps the tree readable would be hiding the answer. */
+.pin .card-facts dd {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+  white-space: pre-wrap;
+}
+.pin .card-detail + .card-detail { margin-top: 10px; }
 
 .carried { margin: 4px 0 0; font-size: 11px; color: var(--fg-dim); }
 .carried > summary { cursor: pointer; font-family: var(--mono); }
@@ -816,7 +909,7 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
 }
 .agent-chip { display: inline-block; margin: 0 4px 3px 0; padding: 1px 6px; border: 1px solid var(--line); border-radius: 10px; font-size: 11px; color: var(--fg-dim); }
 .agent-chip.working { color: var(--busy); border-color: color-mix(in srgb, var(--busy) 40%, var(--line)); }
-.hint { display: flex; gap: 6px; align-items: baseline; margin: 6px 0 0; font-size: 11px; color: var(--flag); }
+.hint { display: flex; gap: 6px; align-items: baseline; margin: 6px 0 0; font-size: 11px; color: var(--attention); }
 .hint .evidence { color: var(--fg-dim); }
 .message-link { display: inline-block; margin-top: 6px; font-size: 11px; }
 
@@ -897,7 +990,7 @@ body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft);
 
 /* The blockers keep the top half and the ideas take the rest: two lists that both scroll, in one
    column, neither of them able to push the other off the screen. */
-.blockers { flex: 0 1 auto; max-height: 40%; }
+.blockers { flex: 0 0 auto; max-height: var(--blockers); }
 
 /* --- the right column --------------------------------------------------------------------------- */
 /* Stubs, drawn as stubs. Nothing on disk says what is blocking a session, and a blocker this

@@ -175,6 +175,22 @@ class ProjectLink(BaseModel):
         return bool(self.token_env) and bool(os.environ.get(self.token_env or ""))
 
 
+class ProjectEnv(BaseModel):
+    """A variable this project's agents need. The name, never the value."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    name: str
+    note: str | None = None
+    added_at: int
+
+    @property
+    def present(self) -> bool:
+        """Whether the shell this console was started from has it — not what it holds."""
+        return bool(os.environ.get(self.name))
+
+
 class Idea(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -939,6 +955,40 @@ class Store:
                     "token_env": token_env or None,
                     "added_at": _now_ms(),
                 },
+            )
+
+    async def set_env(self, *, repo_key: str, name: str, note: str | None = None) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO project_env (repo_key, name, note, added_at) "
+                    "VALUES (:repo_key, :name, :note, :added_at) "
+                    "ON CONFLICT (repo_key, name) DO UPDATE SET note = :note"
+                ),
+                {
+                    "repo_key": repo_key,
+                    "name": name,
+                    "note": note or None,
+                    "added_at": _now_ms(),
+                },
+            )
+
+    async def env(self, repo_key: str) -> list[ProjectEnv]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, name, note, added_at FROM project_env "
+                    "WHERE repo_key = :repo_key ORDER BY name"
+                ),
+                {"repo_key": repo_key},
+            )
+            return [ProjectEnv(**row._mapping) for row in rows]
+
+    async def remove_env(self, repo_key: str, name: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM project_env WHERE repo_key = :repo_key AND name = :name"),
+                {"repo_key": repo_key, "name": name},
             )
 
     async def links(self, repo_key: str | None = None) -> list[ProjectLink]:

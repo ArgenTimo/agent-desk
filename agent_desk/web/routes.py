@@ -38,7 +38,15 @@ from agent_desk.observe.model import (
     triage_rank,
 )
 from agent_desk.observe.shape import repository_of
-from agent_desk.store.repo import DRAFT_KINDS, Group, Idea, IdeaState, Store, Thread
+from agent_desk.store.repo import (
+    DRAFT_KINDS,
+    Group,
+    Idea,
+    IdeaState,
+    ProjectLink,
+    Store,
+    Thread,
+)
 from agent_desk.web import autostart
 from agent_desk.web import blocks as block_runs
 
@@ -267,7 +275,17 @@ def board() -> tuple[list[BoardRow], list[str]]:
     return rows, read.notices
 
 
-def render_board(groups: list[Group] | None = None) -> str:
+async def board_links() -> dict[str, list[ProjectLink]]:
+    """Every project's links, keyed by repository, for the menu on its card."""
+    grouped: dict[str, list[ProjectLink]] = {}
+    for link in await store.links():
+        grouped.setdefault(link.repo_key, []).append(link)
+    return grouped
+
+
+def render_board(
+    groups: list[Group] | None = None, links: dict[str, list[ProjectLink]] | None = None
+) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
     projects = shape(rows, groups or [])
@@ -275,6 +293,10 @@ def render_board(groups: list[Group] | None = None) -> str:
         rows=rows,
         projects=projects,
         notices=notices,
+        # What each project is linked to, for the menu on its card. Read with the board rather
+        # than fetched when the menu opens: it is four links, and a click that waits for a round
+        # trip is a click that feels broken.
+        links=links or {},
         flagged=sum(1 for row in rows if row.hint.waiting),
     )
 
@@ -410,6 +432,10 @@ async def render_inbox() -> str:
     return env.get_template("_inbox.html").render(
         ideas=ideas,
         drafts=drafts,
+        # Where an idea went, if it went anywhere. The inbox is the place that keeps the history,
+        # so it is the place that has to show the issue key (docs/05-ideas.md).
+        filings={filing.idea_id: filing for filing in await store.filings()},
+        working=await store.ideas_in_flight(),
         drafting={idea_id for idea_id, _ in block_runs.DRAFTING},
     )
 
@@ -466,6 +492,7 @@ async def render_page(message: str = "") -> str:
             rows=rows,
             projects=projects,
             notices=notices,
+            links=await board_links(),
             flagged=sum(1 for row in rows if row.hint.waiting),
         ),
         projects=projects,
@@ -535,10 +562,102 @@ async def render_project(key: str) -> str:
         name=named.name if named else key,
         links=await store.links(key),
         tasks=await store.tasks(repo_key=key),
+        env_names=await store.env(key),
         arming=await store.autostart(key),
         # The console says exactly what the loop decided, because it asks the same function.
         why_not=await autostart.why_not(store, key),
     )
+
+
+@router.get("/projects/page", response_class=HTMLResponse)
+async def project_page(key: str = "") -> HTMLResponse:
+    """A project's own page: what it is linked to, what it needs in the environment, its queue.
+
+    A page rather than the panel in the middle, because the middle is where the work happens and
+    settings are not work — the `⋯` on a card offers both, and this is the one you leave open on a
+    second screen while you fix something.
+    """
+    return HTMLResponse(
+        env.get_template("project.html").render(panel=Markup(await render_project(key)), key=key)
+    )
+
+
+@router.get("/projects/instance", response_class=HTMLResponse)
+async def new_instance_form(request: Request, key: str = "") -> Response:
+    """The form behind "New instance…": a name, a specialisation, and what it will do."""
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    named = next((project for project in projects if project.key == key), None)
+    panel = env.get_template("_instance.html").render(
+        stage="ask",
+        key=key,
+        name=named.name if named else key,
+        cwd=named.instances[0].path if named and named.instances else "",
+        env_names=await store.env(key),
+    )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/projects/instance", response_class=HTMLResponse)
+async def new_instance(request: Request) -> Response:
+    """Make a copy of the checkout with an agent working in it (docs/adr/0006).
+
+    A worktree of the same repository rather than a clone: the two are linked by the repository
+    itself, which is what the person asking for this described, and it costs no second fetch of
+    anything. The agent is started with an introduction rather than a task — it is a new pair of
+    hands in a project, and the first thing it should do is read.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    who = form.get("name", "").strip()[:40] or "agent"
+    doing = form.get("doing", "").strip()[:200]
+
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    named = next((project for project in projects if project.key == key), None)
+    if named is None or not named.instances:
+        panel = env.get_template("_instance.html").render(
+            stage="failed", detail="that project has no checkout on this machine", key=key
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    cwd = named.instances[0].path
+    needed = [one.name for one in await store.env(key)]
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.introduce(who, project=named.name, doing=doing, env_names=needed),
+        cwd=cwd,
+        name=who,
+    )
+    panel = env.get_template("_instance.html").render(
+        stage="started" if result.started else "failed",
+        detail=result.detail,
+        agent_id=result.agent_id,
+        who=who,
+        key=key,
+        name=named.name,
+    )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/project-env", response_class=HTMLResponse)
+async def set_project_env(request: Request) -> Response:
+    """Name a variable this project's agents need. The name; never the value."""
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    name = form.get("name", "").strip()[:64]
+    if key and name and form.get("remove"):
+        await store.remove_env(key, name)
+    elif key and name:
+        await store.set_env(repo_key=key, name=name, note=form.get("note", "").strip()[:120])
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.get("/project-settings", response_class=HTMLResponse)
@@ -597,7 +716,9 @@ async def create_project(request: Request) -> Response:
         if first:
             await store.add_to_group(group.id, first)
         if _wants_fragment(request):
-            return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+            return HTMLResponse(
+                await asyncio.to_thread(render_board, await store.groups(), await board_links())
+            )
     return RedirectResponse("/", status_code=303)
 
 
@@ -608,7 +729,9 @@ async def add_to_project(group_id: str, request: Request) -> Response:
     if repo_key:
         await store.add_to_group(group_id, repo_key)
     if _wants_fragment(request):
-        return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+        return HTMLResponse(
+            await asyncio.to_thread(render_board, await store.groups(), await board_links())
+        )
     return RedirectResponse("/", status_code=303)
 
 
@@ -617,7 +740,9 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
     """Ungrouping returns every repository in it to being its own project. Nothing is lost."""
     await store.delete_group(group_id)
     if _wants_fragment(request):
-        return HTMLResponse(await asyncio.to_thread(render_board, await store.groups()))
+        return HTMLResponse(
+            await asyncio.to_thread(render_board, await store.groups(), await board_links())
+        )
     return RedirectResponse("/", status_code=303)
 
 
@@ -1170,6 +1295,9 @@ async def file_idea(idea_id: str, request: Request) -> Response:
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
     await store.record_filing(idea_id=idea_id, tracker="jira", issue_key=result.key, url=result.url)
+    # Registered in the tracker: it is somebody's queue now, not a thought waiting to be had, so
+    # it leaves the column. The inbox keeps it with the key it was filed as (docs/05-ideas.md).
+    await store.set_idea_state(idea_id, "done")
     panel = _panel(ToFile("filed", key=result.key, url=result.url))
     if _wants_fragment(request):
         return HTMLResponse(panel)

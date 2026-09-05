@@ -13,15 +13,25 @@
   works — the script below does the same swaps itself — but nothing else on this page can use
   <code>hx-</code> attributes until it is vendored.</p>
 
-{# Three columns, full width: what is running, what you are asking, and what is in the way. #}
+{# Five areas, and they have names (docs/06-console.md, "What the parts are called"): the
+   **overview** on the left, the **workbench** in the middle with its **input** along the bottom,
+   and on the right the **blockers** over the **idea pool**. Any of them can be resized, and any
+   of them can be put away — this window is the whole screen, and what somebody wants on it at
+   four in the afternoon is not what they wanted at ten. #}
 <div class="desk-grid">
 
-  <aside class="col-left" aria-label="what is running">
+  {# Rails: what is left of an area that has been put away, and the way back to it. #}
+  <button type="button" class="rail" data-show="overview" hidden><span>overview</span></button>
+
+  <aside class="col-left" data-pane="overview" aria-label="overview">
     <header class="col-head">
       <span class="brand">agent-desk</span>
+      <span class="col-title">overview</span>
       <span class="spacer"></span>
       <span id="asof" class="tiny">connecting…</span>
       <span id="stream-state" class="tiny" aria-live="polite">·</span>
+      <button type="button" class="pane-hide" data-hide="overview" title="put the overview away"
+              aria-label="hide the overview">–</button>
     </header>
     <div id="board" class="tree">{{ board|safe }}</div>
     <nav class="col-foot"><a href="/ideas">ideas</a><a href="/viewers">viewers</a></nav>
@@ -30,7 +40,7 @@
   <div class="gutter" data-gutter="left" role="separator" aria-orientation="vertical"
        tabindex="0" title="drag to resize · double-click to reset"></div>
 
-  <main class="col-mid" aria-label="asking">
+  <main class="col-mid" data-pane="workbench" aria-label="workbench">
     {% include "_tabs.html" %}
 
     {# The output. Empty by default; every message hangs here and its answer appears under it.
@@ -54,6 +64,7 @@
 
     <div id="message">{{ message|safe }}</div>
 
+    {# The input: the bottom of the workbench, and the only part of it that is never put away. #}
     <form class="say" id="ask" method="post" action="/blocks"
           hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"
           hx-on::after-request="this.reset(); this.text.focus()">
@@ -70,8 +81,17 @@
   <div class="gutter" data-gutter="right" role="separator" aria-orientation="vertical"
        tabindex="0" title="drag to resize · double-click to reset"></div>
 
-  <aside class="col-right" aria-label="what is in the way, and what was written down">
-    <header class="col-head"><span class="col-title">blockers</span></header>
+  <button type="button" class="rail" data-show="right" hidden><span>blockers · ideas</span></button>
+
+  <aside class="col-right" data-pane="right" aria-label="blockers and the idea pool">
+    <header class="col-head">
+      <span class="col-title">blockers</span>
+      <span class="spacer"></span>
+      <button type="button" class="pane-hide" data-hide="blockers" title="put the blockers away"
+              aria-label="hide the blockers">–</button>
+      <button type="button" class="pane-hide" data-hide="right" title="put this column away"
+              aria-label="hide this column">×</button>
+    </header>
     {# Stubs, and labelled as stubs. Nothing on disk says what is blocking a session; inventing a
        blocker would be the guessed status this board refuses to render. #}
     <div class="blockers">
@@ -109,8 +129,17 @@
 
     {# The other half: what has been written down. Same cards, same dragging — an idea dropped
        into the middle is a question about that idea (docs/05-ideas.md). #}
-    <header class="col-head second"><span class="col-title">ideas</span>
-      <span class="spacer"></span><a class="tiny" href="/ideas">the inbox</a></header>
+    {# The one horizontal handle: how much of this column is blockers and how much is the pool. #}
+    <div class="gutter across" data-gutter="split" role="separator" aria-orientation="horizontal"
+         tabindex="0" title="drag to resize · double-click to reset"></div>
+
+    <header class="col-head second">
+      <span class="col-title">idea pool</span>
+      <span class="spacer"></span>
+      <a class="tiny" href="/ideas">the inbox</a>
+      <button type="button" class="pane-hide" data-hide="pool" title="put the idea pool away"
+              aria-label="hide the idea pool">–</button>
+    </header>
     <div id="idea-list" class="ideas-list">{{ ideas|safe }}</div>
   </aside>
 </div>

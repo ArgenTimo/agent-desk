@@ -1,0 +1,49 @@
+{# "New instance": a copy of the checkout with an agent working in it (docs/adr/0006).
+
+   A git worktree of the same repository rather than a clone — the two are linked by the repository
+   itself, which costs no second fetch of anything and is what somebody asking for this described. #}
+{% if stage == "started" %}
+<div class="delivered">
+  <header>{{ who }} is set up in {{ name }} <span class="dim">· {{ agent_id }}</span></header>
+  <p class="detail">It has a worktree of its own and is reading the repository now. It appears on
+    the board while it runs, and nothing can be said to it once it has started — read what it did,
+    and start another if it needs one.</p>
+  <footer><a class="as-button" href="/">the board</a></footer>
+</div>
+
+{% elif stage == "failed" %}
+<div class="refused">
+  <header>no instance was made</header>
+  <p class="detail">{{ detail }}</p>
+  <footer><a class="as-button" href="/">Close</a></footer>
+</div>
+
+{% else %}
+<div class="settings">
+  <header>new instance in <span class="target">{{ name }}</span>
+    <span class="dim">· {{ cwd }}</span></header>
+  <p class="small dim">A git worktree beside that checkout, with one agent in it. It starts by
+    reading the repository — its CLAUDE.md, its docs, enough of the code to be useful — and says
+    what it found. It is not given a task here; give it one from the board.</p>
+
+  <form class="add-link" method="post" action="/projects/instance"
+        hx-post="/projects/instance" hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <label class="visually-hidden" for="instance-name">what to call it</label>
+    <input id="instance-name" name="name" placeholder="a name — biba, api-work, anything"
+           autocomplete="off">
+    <label class="visually-hidden" for="instance-doing">what it is for</label>
+    <input id="instance-doing" name="doing" placeholder="what it is for (optional)"
+           autocomplete="off">
+    <button type="submit" class="send">Create it</button>
+  </form>
+
+  {% if env_names %}
+  <p class="small dim">It will be told this project expects
+    {% for one in env_names %}<span class="pill{{ '' if one.present else ' flag' }}">{{ one.name }}</span>{% endfor %}
+    — names only, and it checks them itself before assuming any of them.</p>
+  {% endif %}
+
+  <footer><a class="as-button" href="/">Cancel</a></footer>
+</div>
+{% endif %}

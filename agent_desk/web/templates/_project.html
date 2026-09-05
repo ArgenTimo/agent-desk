@@ -50,6 +50,43 @@
     this console would read it from, export it in the shell that starts the console, and it stays
     where the operating system already keeps secrets.</p>
 
+  {# What this project's agents need in the environment. Names, never values, and never a `.env`
+     written into the repository: this program does not edit what it watches (CLAUDE.md). What it
+     can do is say which of them the shell it was started from actually has, before an agent goes
+     in and finds out the hard way. #}
+  <h3 class="settings-title">environment this project expects</h3>
+
+  {% if env_names %}
+  <ul class="links">
+    {% for one in env_names %}
+    <li>
+      <span class="mono">{{ one.name }}</span>
+      <span class="pill{{ '' if one.present else ' flag' }}">{{ "set here" if one.present else "not set" }}</span>
+      {% if one.note %}<span class="dim">{{ one.note }}</span>{% endif %}
+      <form method="post" action="/project-env" hx-post="/project-env" hx-target="#message">
+        <input type="hidden" name="key" value="{{ key }}">
+        <input type="hidden" name="name" value="{{ one.name }}">
+        <input type="hidden" name="remove" value="yes">
+        <button type="submit" class="danger">remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty small">Nothing named yet. A variable listed here is checked and passed on to
+    every agent started in this project — the name, never the value.</p>
+  {% endif %}
+
+  <form class="add-link" method="post" action="/project-env" hx-post="/project-env"
+        hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <label class="visually-hidden" for="env-name">the variable</label>
+    <input id="env-name" name="name" placeholder="DATABASE_URL" autocomplete="off" required>
+    <label class="visually-hidden" for="env-note">what it is for</label>
+    <input id="env-note" name="note" placeholder="what it is for (optional)" autocomplete="off">
+    <button type="submit">Add</button>
+  </form>
+
   {# The queue, and the switch that lets it start on its own (docs/adr/0007). The loop decides
      *when*; every line in the queue was written by a person and put here by a person. #}
   <h3 class="settings-title">work queued here</h3>

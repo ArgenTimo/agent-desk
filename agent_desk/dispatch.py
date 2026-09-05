@@ -96,6 +96,40 @@ def build_task(
     return "\n".join(lines)
 
 
+def introduce(who: str, *, project: str, doing: str = "", env_names: Sequence[str] = ()) -> str:
+    """What a new instance is told on its first breath.
+
+    It is a new pair of hands in a repository nobody has introduced it to, so the first thing it
+    is asked to do is read — not to produce something. A session that starts by changing files it
+    has not read is the reason this text exists at all.
+    """
+    lines = [
+        f"You are {who}, working in {project}. This is a fresh worktree of that repository, made "
+        "for you, and you are its only occupant.",
+        "",
+        "Start by reading, not by changing anything: the repository's CLAUDE.md and its docs, "
+        "then enough of the code to know how it is put together. Its conventions are the ones "
+        "that apply here.",
+    ]
+    if doing:
+        lines += ["", f"What you are here for: {doing}"]
+    if env_names:
+        lines += [
+            "",
+            "The environment this project expects: " + ", ".join(env_names) + ". Check what is "
+            "actually set before assuming any of it, and say so if something is missing rather "
+            "than working around it.",
+        ]
+    lines += [
+        "",
+        "You were started from a console and **cannot be asked anything once you begin** — where "
+        "a question would normally be asked, make the reasonable choice, write down what you "
+        "chose, and carry on. When you have read enough to be useful, say in a few lines what you "
+        "found and what you would do first.",
+    ]
+    return "\n".join(lines)
+
+
 def _worktree_name(name: str) -> str:
     """A branch-shaped name from whatever a human typed. Bounded, because it becomes a directory."""
     kept = [character if character.isalnum() else "-" for character in name.lower()]

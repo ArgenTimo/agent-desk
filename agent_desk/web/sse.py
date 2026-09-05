@@ -57,8 +57,9 @@ async def board_events() -> AsyncIterator[str]:
         # page is open must survive the next push. Without them the stream rendered an ungrouped
         # board two seconds after the grouping appeared, and the grouping looked broken.
         groups = await routes.store.groups()
+        links = await routes.board_links()
         for name, html in (
-            ("board", await asyncio.to_thread(routes.render_board, groups)),
+            ("board", await asyncio.to_thread(routes.render_board, groups, links)),
             ("blocks", await routes.render_blocks()),
             ("ideas", await routes.render_ideas()),
         ):

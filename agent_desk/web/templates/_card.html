@@ -25,6 +25,12 @@
       {{ row.tail.last_entry.at | clock }} {{ row.tail.last_entry.role }} · {{ row.tail.last_entry.text or "—" }}
       {% else %}—{% endif %}
     </dd>
+    <dt>where on disk</dt>
+    <dd class="mono">{{ row.session.cwd }}</dd>
+    <dt>session</dt>
+    <dd class="mono">{{ row.session.name }} · {{ row.session.session_id }} · pid {{ row.session.pid }}</dd>
+    <dt>since</dt>
+    <dd>{{ row.session.updated_at | ago }} · status {{ row.session.status }} · {{ row.session.kind }}</dd>
     {% if row.tail and row.tail.agents %}
     <dt>agents</dt>
     <dd>

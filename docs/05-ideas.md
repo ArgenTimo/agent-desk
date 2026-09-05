@@ -56,6 +56,14 @@ An idea has five states: `new`, `kept`, `promoted`, `dropped`, `done`. There is 
 no assignee, no estimate. That is a backlog, and a backlog needs a process to stay honest; this is
 a notebook that remembers its context ([08-non-goals.md](08-non-goals.md)).
 
+**An idea only leaves the column on evidence, never on a guess.** Three things move it, and they
+are all somebody or something actually having done the work: a human pressing **built**, an agent
+that was dispatched *for that idea* finishing, or the idea being filed as an issue — at which
+point it is in somebody's tracker and no longer a thought waiting to be had. A run guessing that a
+request "looks like it is about" an idea changes nothing at all; it draws a button. And while an
+agent has it, the idea is coloured *in progress* wherever it is drawn, which is derived from that
+agent still running rather than stored anywhere.
+
 The fifth was four for three phases, and adding it was the right call for one reason: `dropped`
 was the nearest word and it is the wrong one. *"We decided not to"* and *"it is in the product"*
 are different answers to "what happened to my idea", and an inbox that cannot tell them apart

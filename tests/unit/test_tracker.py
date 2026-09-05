@@ -179,10 +179,10 @@ async def test_without_a_destination_the_console_says_so_rather_than_offering_th
     desk: Store,
 ) -> None:
     idea = await desk.create_idea(
-        text_="a thought", summary="a thought", source_kind="typed", context={}
+        text_="cache the probe results", summary="cache the probe results", source_kind="typed"
     )
     await desk.set_idea_state(idea.id, "kept")
-    await desk.create_draft(idea_id=idea.id, kind="ticket", body="A thought")
+    await desk.create_draft(idea_id=idea.id, kind="ticket", body="Cache the probe results")
 
     plan = await routes._to_file(idea.id)
     assert plan.stage == "gone"
@@ -250,3 +250,31 @@ async def test_nothing_reaches_the_tracker_without_a_request(
     assert "File it" in panel
     assert await desk.filing_of(idea.id) is None
     assert asyncio.get_running_loop() is not None
+
+
+@pytest.mark.unit
+async def test_a_filed_idea_leaves_the_column_and_keeps_its_key(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Registered in the tracker is one of the three things that take an idea off the list — the
+    others being a human pressing built and an agent dispatched for it finishing. A guess is never
+    one of them (docs/05-ideas.md)."""
+    await desk.set_link(repo_key="k", name="jira", url=f"{SITE}/browse/API", token_env="ACME_JIRA")
+    idea = await desk.create_idea(
+        text_="a thought", summary="a thought", source_kind="typed", context={}
+    )
+    await desk.set_idea_state(idea.id, "kept")
+    await desk.create_draft(idea_id=idea.id, kind="ticket", body="A thought")
+    monkeypatch.setattr(jira, "_post", lambda *args: (201, b'{"key": "API-3"}'))
+    monkeypatch.setenv("ACME_JIRA", "token")
+
+    from tests.unit.test_input import _post
+
+    status, _, _ = await _post(f"/ideas/{idea.id}/file", {"key": "k"}, htmx=True)
+
+    assert status == 200
+    settled = await desk.idea(idea.id)
+    assert settled is not None and settled.state == "done"
+    assert "cache the probe results" not in await routes.render_ideas()
+    # And the inbox keeps it, with where it went.
+    assert "API-3" in await routes.render_inbox()
