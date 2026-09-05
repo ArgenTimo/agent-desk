@@ -26,7 +26,7 @@ import structlog
 from agent_desk import dispatch
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
-from agent_desk.ideas import inbox
+from agent_desk.ideas import inbox, kin
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Block, DraftKind, Idea, Store, Thread
@@ -261,8 +261,10 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
 
     if len(parts) < 2:
         # One thought, which is the ordinary case: it gets the generated summary line it has
-        # always got, and the text it was typed as.
+        # always got, and the text it was typed as — and then the notebook is asked whether it
+        # already has this one (agent_desk/ideas/kin.py).
         await _summarise(store, whole)
+        await _place(store, whole)
         return
 
     # A human who has already touched this card has said what they want it to be, and a splitter
@@ -276,7 +278,7 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
     # than as three fragments in a row (docs/05-ideas.md).
     source_kind, source_ref, context = _capture_context(rows)
     for part in parts:
-        await inbox.capture(
+        written = await inbox.capture(
             store,
             part,
             source_kind=source_kind,  # type: ignore[arg-type]
@@ -286,6 +288,21 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
             project_key=project_of(rows),
             parent_id=whole.id,
         )
+        # And then: is this one already in the notebook? (agent_desk/ideas/kin.py) It runs here
+        # rather than inside `capture` for the reason every model call in this file runs after the
+        # write — a list with one honest duplicate in it beats a capture that failed.
+        await _place(store, written)
+
+
+async def _place(store: Store, idea: Idea) -> None:
+    """Put a freshly captured idea where it belongs, and never fail the capture over it."""
+    try:
+        where = await kin.place(store, idea)
+    except Exception:  # a judgement that fails leaves the row exactly where it is
+        log.warning("ideas.place_failed", idea=idea.id)
+        return
+    if where != "new":
+        log.info("ideas.placed", idea=idea.id, where=where)
 
 
 async def _summarise(store: Store, idea: Idea) -> None:
