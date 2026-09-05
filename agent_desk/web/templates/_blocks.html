@@ -56,6 +56,11 @@
           <input type="hidden" name="from" value="card">
           <button type="submit">Discard</button>
         </form>
+        <form method="post" action="/ideas/{{ idea.id }}/done"
+              hx-post="/ideas/{{ idea.id }}/done" hx-target="#blocks">
+          <input type="hidden" name="from" value="card">
+          <button type="submit" title="this is built already">built</button>
+        </form>
         {% else %}
         <span class="state">{{ idea.state }}</span>
         {% endif %}
@@ -131,6 +136,26 @@
   {% endif %}
   {% elif block.error %}
   <p class="failure">{{ block.error }}</p>
+  {% endif %}
+
+  {% if block.id in about and about[block.id] %}
+  {# This request looks like it is about things already written down. A guess, so it is an offer:
+     the thoughts, and one button that starts an agent on them (docs/05-ideas.md). #}
+  <div class="about">
+    <span class="dim small">this looks like it is about</span>
+    {% for idea in about[block.id] %}
+    <span class="chip idea-chip {{ idea.state }}" data-kind="idea" data-id="{{ idea.id }}"
+          data-label="{{ idea.summary }}" draggable="true" title="{{ idea.text }}">
+      {{ idea.summary }}{% if idea.state == "done" %} · built{% endif %}
+    </span>
+    {% endfor %}
+    {% if about[block.id] | selectattr("state", "ne", "done") | list %}
+    <form method="post" action="/blocks/{{ block.id }}/implement"
+          hx-post="/blocks/{{ block.id }}/implement" hx-target="#message">
+      <button type="submit" class="send" title="start an agent on these, in a worktree of its own">implement these ideas</button>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
 
   <footer class="actions">

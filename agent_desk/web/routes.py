@@ -38,7 +38,7 @@ from agent_desk.observe.model import (
     triage_rank,
 )
 from agent_desk.observe.shape import repository_of
-from agent_desk.store.repo import DRAFT_KINDS, Group, Idea, Store, Thread
+from agent_desk.store.repo import DRAFT_KINDS, Group, Idea, IdeaState, Store, Thread
 from agent_desk.web import autostart
 from agent_desk.web import blocks as block_runs
 
@@ -325,10 +325,19 @@ async def render_blocks() -> str:
     ]
     # One message can hold several thoughts, so a block's card is a list rather than a card
     # (docs/05-ideas.md).
+    every = await store.ideas()
     ideas: dict[str, list[Idea]] = {}
-    for idea in reversed(await store.ideas()):
+    for idea in reversed(every):
         if idea.block_id:
             ideas.setdefault(idea.block_id, []).append(idea)
+
+    # Which written-down thoughts a request turned out to be about — a guess by a short run,
+    # rendered as an offer with a button rather than as a fact (docs/05-ideas.md).
+    by_id = {idea.id: idea for idea in every}
+    about = {
+        block_id: [by_id[one] for one in idea_ids if one in by_id]
+        for block_id, idea_ids in (await store.ideas_of_blocks()).items()
+    }
     directives = {d.block_id: d for d in await store.directives()}
     return env.get_template("_blocks.html").render(
         blocks=rows,
@@ -337,6 +346,7 @@ async def render_blocks() -> str:
         open_threads=open_threads + missing,
         threads_by_id={thread.id: thread for thread in open_threads + missing},
         ideas=ideas,
+        about=about,
         directives=directives,
         partial=block_runs.PARTIAL,
     )
@@ -367,7 +377,7 @@ async def render_ideas() -> str:
     Dropped ideas are not shown here. The inbox keeps them — an idea's history is part of what the
     notebook is for — but a column somebody glances at is about what is still live.
     """
-    ideas = [idea for idea in await store.ideas() if idea.state != "dropped"]
+    ideas = [idea for idea in await store.ideas() if idea.state not in ("dropped", "done")]
     known = {idea.id for idea in ideas}
     children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
     roots: list[Idea] = []
@@ -852,6 +862,77 @@ async def set_autostart(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+@router.post("/blocks/{block_id}/implement", response_class=HTMLResponse)
+async def implement_ideas(block_id: str, request: Request) -> Response:
+    """Start an agent on the ideas this request turned out to be about (docs/adr/0006).
+
+    What it is told is the request and the thoughts themselves, verbatim: the summaries are for
+    scanning, and what somebody actually wrote is what the work should be built from. The ideas are
+    not marked built here — that happens when the agent is gone, in one place
+    (agent_desk/web/autostart.py).
+    """
+    block = await store.block(block_id)
+    known = {idea.id: idea for idea in await store.ideas()}
+    wanted = [
+        known[one]
+        for one in (await store.ideas_of_blocks()).get(block_id, [])
+        if one in known and known[one].state != "done"
+    ]
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    # Where the work happens: the project the instruction was aimed at, or the only one there is.
+    directive = next((d for d in await store.directives() if d.block_id == block_id), None)
+    row = next(
+        (r for r in rows if directive and r.session.session_id == directive.session_id), None
+    )
+    named = next(
+        (p for p in projects if row and p.key == row.project_key),
+        projects[0] if projects else None,
+    )
+
+    if block is None or not wanted or named is None or not named.instances:
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail="there is nothing here to build, or no checkout to build it in",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    instruction = "\n\n".join(
+        [block.input, "The ideas this is about, as they were written down:"]
+        + [f"- {idea.text}" for idea in wanted]
+    )
+    task = await store.queue_task(
+        repo_key=named.key,
+        cwd=named.instances[0].path,
+        title=block.input[:60],
+        instruction=instruction,
+        source_kind="idea",
+        # The ideas this task is *for*: what gets marked built when its agent finishes.
+        source_ref=",".join(idea.id for idea in wanted),
+    )
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.build_task(instruction, project=named.name),
+        cwd=named.instances[0].path,
+        name=block.input[:40],
+    )
+    if result.started:
+        await store.take_next_task(named.key)
+        await store.task_started(task.id, result.agent_id)
+    else:
+        await store.task_failed(task.id, result.detail)
+
+    panel = env.get_template("_dispatch.html").render(
+        started=result.started,
+        detail=result.detail,
+        agent_id=result.agent_id,
+        project=named.name,
+    )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
 @router.post("/sessions/{session_id}/dispatch", response_class=HTMLResponse)
 async def dispatch_here(session_id: str, request: Request) -> Response:
     """Start an agent on this text, in the project that session is in (docs/adr/0006).
@@ -1103,7 +1184,7 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
         return HTMLResponse(await render_inbox(), status_code=404)
 
     form = await _form(request)
-    if action not in ("keep", "drop", "summary", *DRAFT_KINDS):
+    if action not in ("keep", "drop", "done", "summary", *DRAFT_KINDS):
         # An action this program does not have is a mistake somewhere, not something to redirect
         # away from quietly — that is how a typo becomes a mystery.
         # The segment is not echoed back: reflecting an unvalidated path into a response is a
@@ -1113,16 +1194,21 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
     # The templates hide a button that does not apply; the route has to mean it. Keeping an idea
     # that was already promoted quietly walked it backwards through its own four states.
     allowed = {
-        "new": {"keep", "drop", "summary"},
-        "kept": {"drop", "summary", *DRAFT_KINDS},
-        "promoted": {"summary", *DRAFT_KINDS},
+        "new": {"keep", "drop", "done", "summary"},
+        "kept": {"drop", "done", "summary", *DRAFT_KINDS},
+        "promoted": {"done", "summary", *DRAFT_KINDS},
         "dropped": {"keep", "summary"},
+        # Built is not final: a human who finds it was not, after all, says so with Keep.
+        "done": {"keep", "summary"},
     }[idea.state]
     if action not in allowed:
         return PlainTextResponse(f"an idea that is {idea.state} cannot do that", status_code=409)
 
-    if action in ("keep", "drop"):
-        await store.set_idea_state(idea_id, "kept" if action == "keep" else "dropped")
+    if action in ("keep", "drop", "done"):
+        reached: IdeaState = (
+            "kept" if action == "keep" else "dropped" if action == "drop" else "done"
+        )
+        await store.set_idea_state(idea_id, reached)
     elif action == "summary":
         summary = form.get("summary", "").strip()
         if summary:

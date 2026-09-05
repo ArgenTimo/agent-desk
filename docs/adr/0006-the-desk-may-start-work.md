@@ -34,6 +34,12 @@ ability to *start a new one*.
 **A written instruction, on a human click, may start a new background agent** in the project it
 names, in a git worktree of its own, with that instruction as its prompt.
 
+- **The click may be the send button.** An instruction typed with the cards it is about dropped
+  into the output — "take this on", with two ideas sitting there — is a person naming the work and
+  saying to do it, and it starts an agent. Both halves are required: the run read it as an
+  instruction *and* a human put those cards there. Neither on its own does anything but prepare a
+  message, and no machine signal is ever the trigger (that is [0007](0007-a-loop-that-decides-when-not-what.md)'s
+  subject, with its own limits).
 - **Starting is not interrupting.** What [0002](0002-read-first-never-interrupt.md) protects is a
   *running* agent's context window; a session that does not exist yet has none to displace. The
   property that made this tool safe to point at a working session — reading is invisible to the

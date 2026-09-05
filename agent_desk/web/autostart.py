@@ -109,14 +109,43 @@ async def _start(store: Store, task: Task) -> None:
         await store.disarm(task.repo_key, why=f"two starts in a row failed: {result.detail}"[:300])
 
 
+async def settle(store: Store, live: set[str]) -> list[str]:
+    """Notice the agents that have gone, and mark what they were dispatched for as built.
+
+    A dispatched agent has no way to report back and this program will not ask it to; what it can
+    see is that the session is no longer in the registry. That is the moment an idea somebody
+    started work on leaves the list — and a human who finds it was not built after all presses
+    Keep (docs/05-ideas.md).
+
+    It says nothing about whether the work was any good. "An agent was dispatched for this and it
+    finished" is the whole of the claim, and it is the only one available.
+    """
+    settled: list[str] = []
+    for task in await store.tasks():
+        if task.started_at is None or task.finished_at or task.failed_at:
+            continue
+        if task.agent_id is None or task.agent_id in live:
+            continue
+        await store.finish_task(task.id)
+        for idea_id in (task.source_ref or "").split(","):
+            idea = await store.idea(idea_id) if idea_id else None
+            if idea is not None and idea.state != "done":
+                await store.set_idea_state(idea.id, "done")
+                settled.append(idea.id)
+    return settled
+
+
 async def tick(store: Store, live: set[str] | None = None) -> Task | None:
-    """One pass over the armed projects. Returns what it started, for a test to assert on."""
+    """One pass: settle what has finished, then start at most one thing that may start."""
     armed = await store.armed_projects()
-    if not armed:
+    started = await store.tasks()
+    if not armed and not any(task.started_at and not task.finished_at for task in started):
         # The ordinary case on most consoles, and it costs nothing: no registry read, no thread.
         return None
     if live is None:
         live = await asyncio.to_thread(live_agents)
+
+    await settle(store, live)
 
     for arming in armed:
         if await why_not(store, arming.repo_key, live):

@@ -208,3 +208,67 @@ async def test_the_window_is_an_hour_and_older_starts_do_not_count(
     now = int(time.time() * 1000)
     assert await desk.started_since(KEY, now - autostart.WINDOW_MS) == 1
     assert await desk.started_since(KEY, now + 1000) == 0
+
+
+# --- what happens when an agent goes ------------------------------------------------------------
+@pytest.mark.unit
+async def test_an_idea_is_built_when_the_agent_dispatched_for_it_finishes(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """The whole claim is "an agent was dispatched for this and it finished", and it is the only
+    one available: nothing reports back, and this program will not ask it to."""
+    idea = await desk.create_idea(text_="cache probes", summary="cache probes", source_kind="typed")
+    other = await desk.create_idea(text_="untouched", summary="untouched", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent9")
+
+    # Still running: nothing is claimed.
+    assert await autostart.settle(desk, {"agent9"}) == []
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+
+    # Gone: the idea it was dispatched for leaves the list, and nothing else moves.
+    assert await autostart.settle(desk, set()) == [idea.id]
+    assert (await desk.idea(idea.id)).state == "done"  # type: ignore[union-attr]
+    assert (await desk.idea(other.id)).state == "new"  # type: ignore[union-attr]
+
+    # And only once: a second sweep has nothing left to settle.
+    assert await autostart.settle(desk, set()) == []
+    settled = next(t for t in await desk.tasks() if t.id == task.id)
+    assert settled.finished_at is not None
+
+
+@pytest.mark.unit
+async def test_a_task_that_never_started_settles_nothing(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+
+    assert await autostart.settle(desk, set()) == []
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_a_human_can_put_a_built_idea_back(desk: Store) -> None:
+    """Built is not final. It is a claim about a dispatch, and a person who looked can disagree."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.set_idea_state(idea.id, "done")
+
+    await desk.set_idea_state(idea.id, "kept")
+
+    assert (await desk.idea(idea.id)).state == "kept"  # type: ignore[union-attr]

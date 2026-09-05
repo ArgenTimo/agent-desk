@@ -142,3 +142,51 @@ async def kind(text: str) -> BlockKind:
     except (AnswerFailed, OSError):
         return "question"
     return read_kind(reply)
+
+
+# --- which of the thoughts already written down does this touch ---------------------------------
+# A request for work is often a thing somebody already had an idea about, and the console can say
+# so: "this looks like it is about these three — implement them?" It is a guess, so it is rendered
+# as an offer with a button, never as a fact and never as an action (docs/05-ideas.md).
+_NUMBERS = re.compile(r"\A[0-9, ]+\Z")
+
+
+def related_prompt(text: str, ideas: Sequence[str]) -> str:
+    lines = [
+        "A developer asked for some work to be done. Below are ideas they wrote down earlier.",
+        "Say which of them this request is about — by number, comma-separated, and nothing else.",
+        "Answer `none` when it is about none of them.",
+        "",
+        "Be strict: an idea belongs in the answer only if doing this request would build it or",
+        "most of it. Two things that are merely in the same area are not the same idea, and a",
+        "wrong number here puts somebody else's thought in front of a button that says built.",
+        "",
+        "## The ideas",
+    ]
+    lines += [f"{index}. {idea}" for index, idea in enumerate(ideas, start=1)]
+    lines += ["", "## The request", text]
+    return "\n".join(lines)
+
+
+def read_related(reply: str, count: int) -> list[int]:
+    """The numbers the reply names, in range and without repeats. Anything else is none."""
+    answer = reply.strip().rstrip(".")
+    if not answer or not _NUMBERS.match(answer):
+        return []
+    picked: list[int] = []
+    for part in answer.split(","):
+        part = part.strip()
+        if part.isdigit() and 1 <= int(part) <= count and int(part) not in picked:
+            picked.append(int(part))
+    return picked
+
+
+async def related(text: str, ideas: Sequence[str]) -> list[int]:
+    """Which ideas this request is about. Never raises: an unavailable model means none of them."""
+    if not ideas:
+        return []
+    try:
+        reply = "".join([chunk async for chunk in stream_answer(related_prompt(text, ideas))])
+    except (AnswerFailed, OSError):
+        return []
+    return read_related(reply, len(ideas))

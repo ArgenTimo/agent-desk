@@ -1042,3 +1042,70 @@ async def test_deleting_a_message_takes_the_run_and_the_prepared_message_with_it
 
     assert status == 200
     assert await desk.directives() == []
+
+
+# --- drop an idea in and say to take it on --------------------------------------------------------
+@pytest.mark.unit
+async def test_an_idea_dropped_in_with_take_it_on_starts_an_agent(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both halves have to be present: the run read it as an instruction, and the human pointed at
+    the thoughts by dropping their cards in (docs/adr/0006)."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+    monkeypatch.setattr(
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name: (
+            told.append(instruction),
+            dispatch.Started(True, agent_id="agent7"),
+        )[1],
+    )
+    monkeypatch.setenv("KIND", "do")
+    idea = await desk.create_idea(
+        text_="cache the probe results per project", summary="cache probes", source_kind="typed"
+    )
+
+    block = await blocks.submit(
+        desk, "бери в работу", [make_row("alpha", "main")], targets=[f"idea:{idea.id}"]
+    )
+    assert await _settled(desk, block.id) == "answered"
+
+    # It started, and what it was told carries the thought as it was written rather than the line
+    # that summarises it.
+    assert len(told) == 1
+    assert "cache the probe results per project" in told[0]
+    assert "бери в работу" in told[0]
+
+    after = await desk.block(block.id)
+    assert after is not None and "an agent is working on 1 idea" in (after.answer or "")
+
+    # A task holds what it was dispatched for, so the sweep can mark it built when the agent goes.
+    (task,) = await desk.tasks()
+    assert task.source_ref == idea.id
+    assert task.agent_id == "agent7"
+    # And nothing is built yet: the agent has not finished.
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_an_instruction_with_nothing_dropped_in_still_only_prepares(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the cards, this program does not guess what to start: it writes the message and
+    waits for the button (docs/adr/0002)."""
+    from agent_desk import dispatch
+
+    monkeypatch.setattr(
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name: pytest.fail("it started an agent nobody pointed at"),
+    )
+    monkeypatch.setenv("KIND", "do")
+
+    block = await blocks.submit(desk, "tell alpha-d0 to test it again", [make_row("alpha", "main")])
+    assert await _settled(desk, block.id) == "answered"
+
+    assert await desk.tasks() == []
+    assert len(await desk.directives()) == 1

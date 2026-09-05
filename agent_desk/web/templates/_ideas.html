@@ -28,6 +28,15 @@
         <button type="submit">Keep</button>
       </form>
       {% endif %}
+      {% if idea.state not in ("dropped", "done") %}
+      {# It was built. The idea leaves the column and keeps its history in the inbox — "we decided
+         not to" and "it is in the product" are different answers (docs/05-ideas.md). #}
+      <form method="post" action="/ideas/{{ idea.id }}/done"
+            hx-post="/ideas/{{ idea.id }}/done" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit" title="this is built — take it off the list">built</button>
+      </form>
+      {% endif %}
       {% if idea.state != "dropped" %}
       <form method="post" action="/ideas/{{ idea.id }}/drop"
             hx-post="/ideas/{{ idea.id }}/drop" hx-target="#idea-list">

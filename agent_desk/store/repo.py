@@ -18,6 +18,7 @@ import json
 import os
 import secrets
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -30,7 +31,10 @@ from agent_desk.store.redact import scrub, scrub_optional
 
 BlockKind = Literal["question", "idea", "observation", "instruction"]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
-IdeaState = Literal["new", "kept", "promoted", "dropped"]
+# Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
+# and "it is in the product" are different answers to "what happened to my idea"
+# (docs/05-ideas.md, and 011-idea-done.sql for why the wrong word was tempting).
+IdeaState = Literal["new", "kept", "promoted", "dropped", "done"]
 SourceKind = Literal["session", "typed", "meeting"]
 DraftKind = Literal["proposal", "ticket", "paste"]
 # The same three, as values. Defined here so a route validating a path segment and the type that
@@ -113,6 +117,7 @@ class Task(BaseModel):
     started_at: int | None = None
     agent_id: str | None = None
     failed_at: int | None = None
+    finished_at: int | None = None
     detail: str | None = None
 
     @property
@@ -685,12 +690,13 @@ class Store:
     async def tasks(self, *, repo_key: str | None = None, limit: int = 100) -> list[Task]:
         one = (
             "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
-            "started_at, agent_id, failed_at, detail FROM task WHERE repo_key = :repo_key "
-            "ORDER BY queued_at LIMIT :limit"
+            "started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "WHERE repo_key = :repo_key ORDER BY queued_at LIMIT :limit"
         )
         every = (
             "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
-            "started_at, agent_id, failed_at, detail FROM task ORDER BY queued_at LIMIT :limit"
+            "started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "ORDER BY queued_at LIMIT :limit"
         )
         async with self.engine.connect() as conn:
             rows = await conn.execute(
@@ -718,6 +724,34 @@ class Store:
             if claimed.rowcount:
                 return task
         return None
+
+    async def finish_task(self, task_id: str) -> None:
+        """Its agent is gone from the registry. What it achieved is not this program's to judge."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE task SET finished_at = :t WHERE id = :id AND finished_at IS NULL"),
+                {"t": _now_ms(), "id": task_id},
+            )
+
+    async def link_block_ideas(self, block_id: str, idea_ids: Sequence[str]) -> None:
+        """Record which ideas a message turned out to be about. A guess, rendered as an offer."""
+        async with self.engine.begin() as conn:
+            for idea_id in idea_ids:
+                await conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO block_idea (block_id, idea_id) "
+                        "VALUES (:block_id, :idea_id)"
+                    ),
+                    {"block_id": block_id, "idea_id": idea_id},
+                )
+
+    async def ideas_of_blocks(self) -> dict[str, list[str]]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT block_id, idea_id FROM block_idea"))
+            found: dict[str, list[str]] = {}
+            for row in rows:
+                found.setdefault(row._mapping["block_id"], []).append(row._mapping["idea_id"])
+            return found
 
     async def task_started(self, task_id: str, agent_id: str) -> None:
         async with self.engine.begin() as conn:

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from agent_desk import dispatch
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox
@@ -472,6 +473,9 @@ async def submit(
     carried = await _context_lines(store, rows, targets, history)
     if carried:
         await store.set_block_context(block.id, "\n".join(carried))
+    dropped_ideas = [_card(target)[1] for target in targets if _card(target)[0] == "idea"]
+    if dropped_ideas:
+        await store.link_block_ideas(block.id, dropped_ideas)
     aimed, about = aim(rows, project, session, targets)
     deep = transcripts(rows, targets)
     written = await notes(store, targets)
@@ -623,6 +627,32 @@ async def _record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> 
     await _write_ideas(store, block, idea, rows)
 
 
+async def _pinned_ideas(store: Store, block: Block) -> list[Idea]:
+    """The ideas already linked to this message because a human dropped their cards in.
+
+    Written at submission from the targets the field carried, so this is not a guess: it is what
+    somebody put in front of the question.
+    """
+    linked = (await store.ideas_of_blocks()).get(block.id, [])
+    known = {idea.id: idea for idea in await store.ideas()}
+    return [known[one] for one in linked if one in known]
+
+
+async def _note_related_ideas(store: Store, block: Block) -> None:
+    """Say which written-down thoughts this request is about, if it is about any.
+
+    A guess by a short run, recorded so the console can offer a button — never acted on. The
+    ideas it names are live ones only: a thought already built or discarded is not something to
+    offer to build again (docs/05-ideas.md).
+    """
+    live = [idea for idea in await store.ideas() if idea.state in ("new", "kept", "promoted")][:40]
+    if not live:
+        return
+    chosen = await classifier.related(block.input, [idea.summary for idea in live])
+    if chosen:
+        await store.link_block_ideas(block.id, [live[index - 1].id for index in chosen])
+
+
 def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
     """The sessions, numbered, for a reply that has to name one of them."""
     return [
@@ -632,16 +662,82 @@ def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
     ]
 
 
-async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
-    """An instruction to a session: written out, addressed, and left for a human to send.
+async def _take_it_on(
+    store: Store, block: Block, rows: Sequence[BoardRow], ideas: Sequence[Idea]
+) -> bool:
+    """Drop an idea into the output, say "take it on", and it is taken on (docs/adr/0006).
 
-    This is the whole of what this program does with "tell Biba to test it again". It does not
-    send it, and it does not wait for a good moment to send it: there is no queue here that
-    decides that (docs/08-non-goals.md §2), and the one write path is a button somebody presses
-    (docs/adr/0002). What arrives is an acknowledgement and a message ready to go.
+    The trigger is a sentence a person typed with cards they dropped there themselves — not a
+    schedule, not an idle agent, not a ticket appearing. Both halves have to be present: the run
+    read this as an instruction *and* the human pointed at the thoughts it is about. One without
+    the other prepares a message and waits, which is what it did before.
+
+    What the agent is told is the request and the ideas as they were written, verbatim. The
+    summaries are for scanning; what somebody actually wrote is what the work is built from.
+    """
+    if not ideas or not rows:
+        return False
+
+    row = rows[0]
+    instruction = "\n\n".join(
+        [block.input, "The ideas this is about, as they were written down:"]
+        + [f"- {idea.text}" for idea in ideas]
+    )
+    project = row.project_name or row.session.project
+    task = await store.queue_task(
+        repo_key=row.project_key or row.session.cwd,
+        cwd=row.session.cwd,
+        title=block.input[:60],
+        instruction=instruction,
+        source_kind="idea",
+        # What gets marked built when this agent is gone from the registry.
+        source_ref=",".join(idea.id for idea in ideas),
+    )
+    await store.take_next_task(row.project_key or row.session.cwd)
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.build_task(
+            instruction, project=project, branch=(row.tail.git_branch if row.tail else "") or ""
+        ),
+        cwd=row.session.cwd,
+        name=block.input[:40],
+    )
+    if not result.started:
+        await store.task_failed(task.id, result.detail)
+        await store.finish_block(
+            block.id,
+            f"I could not start an agent on it: {result.detail}. The ideas are untouched.",
+        )
+        return True
+
+    await store.task_started(task.id, result.agent_id)
+    await store.finish_block(
+        block.id,
+        f"On it — an agent is working on {len(ideas)} idea"
+        f"{'' if len(ideas) == 1 else 's'} in {project}, in a worktree of its own "
+        f"({result.agent_id}). They leave the list when it finishes.",
+    )
+    return True
+
+
+async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+    """An instruction: taken on where somebody pointed at the work, written out where they did not.
+
+    "Tell Biba to test it again" with nothing dropped in produces a message and a button, because
+    nothing can be written into a running session and this program will not guess what to start
+    (docs/adr/0002). The same words *with ideas dropped into the output* are a person naming the
+    work and saying to do it, and that starts an agent (docs/adr/0006).
     """
     await store.set_block_kind(block.id, "instruction")
     await store.set_block_running(block.id)
+
+    pinned = [idea for idea in await _pinned_ideas(store, block) if idea.state != "done"]
+    if pinned:
+        await store.link_block_ideas(block.id, [idea.id for idea in pinned])
+        if await _take_it_on(store, block, rows, pinned):
+            return
+
+    await _note_related_ideas(store, block)
     prompt = session.build_prompt_for_directive(block.input, sessions=_session_lines(rows))
     try:
         reply = "".join([chunk async for chunk in session.stream_answer(prompt)])

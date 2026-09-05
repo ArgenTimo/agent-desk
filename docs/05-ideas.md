@@ -52,9 +52,16 @@ three session-shaped fields it would naturally have been. Today every idea has
 to keep the door open ([`10-meeting-intake.md`](10-meeting-intake.md),
 [`../design/02-data-model.md`](../design/02-data-model.md)).
 
-An idea has exactly four states: `new`, `kept`, `promoted`, `dropped`. There is no priority field,
+An idea has five states: `new`, `kept`, `promoted`, `dropped`, `done`. There is no priority field,
 no assignee, no estimate. That is a backlog, and a backlog needs a process to stay honest; this is
 a notebook that remembers its context ([08-non-goals.md](08-non-goals.md)).
+
+The fifth was four for three phases, and adding it was the right call for one reason: `dropped`
+was the nearest word and it is the wrong one. *"We decided not to"* and *"it is in the product"*
+are different answers to "what happened to my idea", and an inbox that cannot tell them apart
+answers neither — it fills with thoughts that were built months ago and reads as a list of things
+nobody did. A `done` idea leaves the column and keeps its place in the inbox. Nothing sets it from
+a guess: a human presses **built**, or an agent dispatched *for that idea* finishes.
 
 ## Promotion, and the one dangerous button
 

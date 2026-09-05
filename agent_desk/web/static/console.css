@@ -602,6 +602,17 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .pill.state.shell { background: color-mix(in srgb, var(--shell) 18%, transparent); color: var(--shell); }
 .state-line { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 
+/* What a request turned out to be about. An offer, drawn as one: the thoughts, and a button. */
+.about {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px dashed var(--focus);
+}
+.about form { display: contents; }
+.idea-chip { cursor: grab; }
+.idea-chip.done { opacity: 0.6; text-decoration: line-through; }
+
 .dot {
   width: 8px; height: 8px; flex: none;
   border-radius: 50%;
