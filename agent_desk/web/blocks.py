@@ -522,6 +522,8 @@ async def submit(
             deep=deep,
             history=list(history),
             written=written,
+            # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
+            pointed_at=len(targets),
         ),
     )
     return block
@@ -616,6 +618,7 @@ async def _work(
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
     written: Sequence[str] = (),
+    pointed_at: int = 0,
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
 
@@ -624,7 +627,7 @@ async def _work(
     is write into a running session (docs/adr/0002).
     """
     try:
-        kind = await classifier.kind(block.input)
+        kind = await classifier.kind(block.input, pointed_at=pointed_at)
         if kind == "idea":
             await record_idea(store, block, rows)
             return

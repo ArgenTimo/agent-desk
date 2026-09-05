@@ -31,7 +31,7 @@ from markupsafe import Markup, escape
 from agent_desk import dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, chart
+from agent_desk.ideas import appraise, chart, meeting
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -1195,6 +1195,33 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.post("/ideas/meeting", response_class=HTMLResponse)
+async def read_meeting(request: Request) -> Response:
+    """Paste what was said in a meeting; get the ideas in it (docs/10-meeting-intake.md §1+).
+
+    It proposes and does not decide. Everything it finds arrives in the pool as an ordinary idea
+    in the `new` state, marked as having come from a meeting, and a person keeps or discards each
+    one exactly as they would a thought they typed — because a transcript is full of things that
+    were said and not meant.
+    """
+    form = await _form(request)
+    said = form.get("transcript", "").strip()
+    if not said:
+        return HTMLResponse(await render_ideas())
+    # A run rather than a wait: a transcript is read in passes and each one is a model call, and
+    # the field must come back immediately the way every other capture does.
+    where = form.get("key", "").strip() or None
+
+    async def read() -> None:
+        await meeting.read_meeting(store, said, project_key=where)
+
+    block_runs.runs.start(f"meeting:{now_ms()}", read)
+    panel = await render_ideas()
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
 
 
 @router.get("/ideas/map", response_class=HTMLResponse)

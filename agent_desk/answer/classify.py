@@ -111,7 +111,7 @@ _KIND_OF = {
 }
 
 
-def kind_prompt(text: str) -> str:
+def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
     """What was typed, and the one boundary that is hard to draw.
 
     `idea` against `do` is the whole difficulty, and it is not a matter of grammar: in Russian and
@@ -123,7 +123,27 @@ def kind_prompt(text: str) -> str:
     The asymmetry matters because the costs are not equal. A thought recorded as an instruction
     starts an agent in a worktree and takes somebody's attention; an instruction recorded as a
     thought sits in the pool until it is clicked. So the doubtful case is an idea.
+
+    `pointed_at` is how many cards were on the workbench when the line was sent, and it is the
+    piece that used to be missing. **Dropping an idea onto the workbench and typing "take it on"
+    names the thing to act on exactly as clearly as naming a session** — but the classifier only
+    ever saw the line, where "бери в работу" is borderline, and the doubtful-case rule then filed
+    it as an idea. What the person got was a new parent idea with their ideas hanging under it,
+    instead of an agent. That is the bug this argument exists to fix, and it is why the rule below
+    is stated as an addressee rather than as a special case.
     """
+    pointing = (
+        [
+            "",
+            f"**They had {pointed_at} card{'' if pointed_at == 1 else 's'} on the workbench when "
+            "they sent this.** That is an addressee: it is what they are pointing at, and it is "
+            "as explicit as naming a session. A line that tells somebody to act on *those* — "
+            '"take it on", "бери в работу", "делай", "реализуем" — is `do`, not an idea about '
+            "them.",
+        ]
+        if pointed_at
+        else []
+    )
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
@@ -157,6 +177,7 @@ def kind_prompt(text: str) -> str:
             "When you are unsure between idea and do, answer idea. A thought recorded as an",
             "instruction starts an agent nobody asked for; an instruction recorded as a thought",
             "waits one click.",
+            *pointing,
             "",
             "## The line",
             text,
@@ -175,10 +196,17 @@ def read_kind(reply: str) -> BlockKind:
     return _KIND_OF[match.group(1).lower()]  # type: ignore[return-value]
 
 
-async def kind(text: str) -> BlockKind:
-    """What one line of input is. Never raises, for the reason `classify` never does."""
+async def kind(text: str, *, pointed_at: int = 0) -> BlockKind:
+    """What one line of input is. Never raises, for the reason `classify` never does.
+
+    `pointed_at` is how many cards were on the workbench: what somebody is pointing at is part of
+    what they said, and leaving it out is what made "бери в работу" over two dropped ideas produce
+    a third idea instead of an agent.
+    """
     try:
-        reply = "".join([chunk async for chunk in stream_answer(kind_prompt(text))])
+        reply = "".join(
+            [chunk async for chunk in stream_answer(kind_prompt(text, pointed_at=pointed_at))]
+        )
     except (AnswerFailed, OSError):
         return "question"
     return read_kind(reply)

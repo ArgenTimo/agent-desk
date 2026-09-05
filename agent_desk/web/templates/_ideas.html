@@ -153,6 +153,17 @@
     </select>
     <button type="submit" class="visually-hidden">order them</button>
   </form>
+  {# A meeting that already happened, read into the pool (docs/10-meeting-intake.md §1+). It
+     proposes: everything it finds arrives as an ordinary idea somebody keeps or discards. #}
+  <details class="more meeting-form">
+    <summary>paste a meeting</summary>
+    <form method="post" action="/ideas/meeting" hx-post="/ideas/meeting" hx-target="#idea-list">
+      <label class="visually-hidden" for="meeting-text">the transcript</label>
+      <textarea id="meeting-text" name="transcript" rows="5"
+                placeholder="Paste what was said. It writes down the ideas in it — things somebody said should exist, should change, or is wrong today — and nothing else."></textarea>
+      <button type="submit">Read it</button>
+    </form>
+  </details>
   <a class="map-link" href="/ideas/map" title="the whole pool at once, with what depends on what">the map</a>
   <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>
 </div>

@@ -3,10 +3,14 @@
 Beyond v1. Three versions, each a superset of the last, and one principle that already exists
 carried into a room with people in it.
 
-None of this is built. This page exists because two decisions taken now — where a captured thing
-records **where it came from**, and where a second observation source plugs in — are cheap today
-and expensive after the store has a year of rows in it. Everything else here is deliberately not
-designed yet.
+**1+ is built** (`agent_desk/ideas/meeting.py`): paste a transcript into the pool and it writes
+down the ideas in it. 1++ and 1+++ are not, and both need something this machine does not have —
+audio, and consent from a room.
+
+This page was written before any of it existed, because two decisions taken then — where a
+captured thing records **where it came from**, and where a second observation source plugs in —
+were cheap at the time and expensive after a year of rows. `source_kind = "meeting"` is the first
+of those two, and it was already in the store when the reader was written.
 
 ## The three versions
 
@@ -106,3 +110,26 @@ It is not forbidden here, because agent-desk is deliberately a personal tool out
 meeting system. But the overlap is real and it is written down, so that the day someone proposes
 wiring this into a shared deployment, the question "should this be Manager instead" is already on
 the page rather than discovered afterwards.
+
+
+## What 1+ actually does, and what it refuses
+
+**It proposes; it does not decide.** Everything it finds arrives as an ordinary idea in the `new`
+state, marked as having come from a meeting, and a person keeps or discards each one exactly as
+they would a thought they typed. A transcript is full of things that were said and not meant —
+half-sentences, options the room rejected, somebody thinking aloud — and a tool that filed those
+as decisions would have made the pool *less* trustworthy, not more full.
+
+**`none` is a normal answer** and most stretches of most meetings deserve it. That is the opposite
+default from the one the message splitter uses, and the asymmetry is deliberate: an unparsed
+message is something somebody definitely typed, so losing it is the only failure there. An
+unparsed stretch of transcript is a model's reading of a room, and inventing from it is the only
+failure here.
+
+**It reads in passes.** A transcript does not fit in one useful prompt, and one answer over forty
+minutes of talk comes back as four bland lines. Each pass is bounded, and its ideas are captured
+before the next one runs — so a read that is interrupted keeps what it already found.
+
+Everything it writes goes through the same placement as a typed thought
+([`05-ideas.md`](05-ideas.md)), so a meeting that restates last week's decision does not fill the
+pool with it a second time.

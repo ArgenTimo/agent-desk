@@ -877,20 +877,22 @@ async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
     second = await desk.create_idea(text_="the newer one", summary="newer", source_kind="typed")
     await desk.set_idea_project(second.id, "a:project")
 
+    # The order of the *cards*, not of the words: every card carries a select naming every other
+    # idea, so an index of the summary text says nothing about which card came first.
+    def order(html: str) -> list[str]:
+        return [one.split('"')[0] for one in html.split('data-kind="idea" data-id="')[1:]]
+
     # Newest first without anybody choosing.
-    assert (await routes.render_ideas()).index("newer") < (await routes.render_ideas()).index(
-        "older"
-    )
+    assert order(await routes.render_ideas()) == [second.id, first.id]
 
     status, column = await _post("/ideas/sort", {"how": "oldest"})
     assert status == 200
-    assert column.index("older") < column.index("newer")
+    assert order(column) == [first.id, second.id]
     # And it is still that way on the next push, which is what a query parameter could not do.
-    again = await routes.render_ideas()
-    assert again.index("older") < again.index("newer")
+    assert order(await routes.render_ideas()) == [first.id, second.id]
 
     status, column = await _post("/ideas/sort", {"how": "project"})
-    assert column.index("newer") < column.index("older")  # a:project before b:project
+    assert order(column) == [second.id, first.id]  # a:project before b:project
 
     # A sort nobody offers changes nothing rather than raising.
     await _post("/ideas/sort", {"how": "by vibes"})

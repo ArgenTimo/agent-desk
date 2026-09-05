@@ -1251,3 +1251,20 @@ svg.map a:hover .node rect { stroke: var(--focus); }
 .card.plan .bar > span { display: block; height: 100%; background: var(--busy); }
 .card.plan.close .bar > span { background: var(--attention); }
 .card.plan.out .bar > span { background: var(--flag); }
+
+/* Pasting a meeting into the pool. Folded, because it is a rare thing to do and the column is
+   mostly for reading. */
+.meeting-form { flex: 0 0 auto; }
+.meeting-form form { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.meeting-form textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.meeting-form button { align-self: flex-start; }

@@ -353,3 +353,25 @@ def test_a_reply_that_is_more_than_one_token_is_a_new_subject() -> None:
 
     # And a digit that is not an ASCII one is not a choice either.
     assert classifier.read_choice("١", threads) is None
+
+
+@pytest.mark.unit
+def test_what_is_on_the_workbench_is_part_of_what_was_said() -> None:
+    """The bug this fixes: dropping two ideas and typing "бери в работу" produced a third idea
+    with them hanging under it, because the classifier only ever saw the line — where that phrase
+    is borderline, and the doubtful-case rule files it as an idea."""
+    alone = classifier.kind_prompt("бери в работу")
+    pointing = classifier.kind_prompt("бери в работу", pointed_at=2)
+
+    assert "on the workbench" not in alone
+    assert "2 cards on the workbench" in pointing
+    assert "That is an addressee" in pointing
+    # And the doubtful-case rule is still there, because it is right for a line with nothing
+    # dropped on it.
+    assert "unsure between idea and do, answer idea" in alone
+    assert "unsure between idea and do, answer idea" in pointing
+
+
+@pytest.mark.unit
+def test_one_card_is_said_in_the_singular() -> None:
+    assert "1 card on the workbench" in classifier.kind_prompt("делай", pointed_at=1)
