@@ -54,7 +54,7 @@ from agent_desk.store.repo import (
     Store,
     Thread,
 )
-from agent_desk.web import autostart, blockers
+from agent_desk.web import autostart, blockers, plans
 from agent_desk.web import blocks as block_runs
 from agent_desk.web import kicking as nudge
 
@@ -339,6 +339,26 @@ async def board_work() -> dict[str, dict[str, int]]:
     return counted
 
 
+async def board_rows_and_kicks() -> tuple[list[BoardRow], dict[str, Kicking]]:
+    """What the plans strip needs, read once. A convenience for the stream, which has no board row
+    of its own to hand over."""
+    rows, _ = await asyncio.to_thread(board)
+    return rows, await board_kicks()
+
+
+async def board_plans(rows: list[BoardRow], kicks: dict[str, Kicking]) -> str:
+    """The subscriptions strip above the projects (agent_desk/web/plans.py)."""
+    return env.get_template("_plans.html").render(
+        plans=plans.plans(
+            await store.subscriptions(),
+            rows,
+            await store.session_subscriptions(),
+            kicks,
+            now_ms(),
+        )
+    )
+
+
 async def board_canaries() -> dict[str, str]:
     """The signature each session this console started was told to keep (023-canary.sql)."""
     return await store.canaries()
@@ -367,6 +387,7 @@ def render_board(
     work: dict[str, dict[str, int]] | None = None,
     kicks: dict[str, Kicking] | None = None,
     canaries: dict[str, str] | None = None,
+    plans_html: str = "",
 ) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
@@ -388,6 +409,9 @@ def render_board(
         # The signature each session this console started was told to keep, so the card can say
         # when one stops (023-canary.sql).
         canaries=canaries or {},
+        # The plans strip above the projects, rendered separately because it is about sessions
+        # across projects rather than about any one of them (agent_desk/web/plans.py).
+        plans=plans_html,
         # A reading of the text, in one place rather than in the template.
         signed=signed,
         flagged=sum(1 for row in rows if row.hint.waiting),
@@ -705,6 +729,7 @@ async def render_page(message: str = "") -> str:
             work=await board_work(),
             kicks=await board_kicks(),
             canaries=await board_canaries(),
+            plans=await board_plans(rows, await board_kicks()),
             flagged=sum(1 for row in rows if row.hint.waiting),
         ),
         projects=projects,
@@ -979,6 +1004,7 @@ async def create_project(request: Request) -> Response:
                     await board_work(),
                     await board_kicks(),
                     await board_canaries(),
+                    await board_plans(*await board_rows_and_kicks()),
                 )
             )
     return RedirectResponse("/", status_code=303)
@@ -1546,6 +1572,67 @@ async def set_kicking_here(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))
+
+
+@router.post("/plans", response_class=HTMLResponse)
+async def manage_plans(request: Request) -> Response:
+    """Declare a subscription, or forget one (025-subscriptions.sql).
+
+    The limit is a number a person types, and the card says so: there is no account balance on
+    this machine and nothing here to ask for one. Without a limit the card shows what this console
+    observed and no percentage, which is honest and still useful.
+    """
+    form = await _form(request)
+    drop = form.get("drop", "").strip()
+    if drop:
+        await store.drop_subscription(drop)
+    else:
+        try:
+            limit = int(form.get("limit_tokens", "").replace("_", "").strip() or 0)
+        except ValueError:
+            limit = 0
+        await store.add_subscription(
+            name=form.get("name", ""),
+            service=form.get("service", ""),
+            limit_tokens=limit,
+        )
+    return HTMLResponse(await render_plans_page())
+
+
+async def render_plans_page() -> str:
+    """The page where subscriptions are declared and sessions are put on them."""
+    rows, _ = await asyncio.to_thread(board)
+    return env.get_template("plans.html").render(
+        subscriptions=await store.subscriptions(),
+        placed=await store.session_subscriptions(),
+        rows=rows,
+        plans=await board_plans(rows, await board_kicks()),
+    )
+
+
+@router.get("/plans", response_class=HTMLResponse)
+async def plans_page() -> HTMLResponse:
+    return HTMLResponse(await render_plans_page())
+
+
+@router.post("/sessions/{session_id}/plan", response_class=HTMLResponse)
+async def move_session(session_id: str, request: Request) -> Response:
+    """Put one session on a subscription, or take it off.
+
+    "Временно" is an hours field: after it the row is ignored and the session goes back to
+    wherever it was, without anybody having to remember to move it back.
+    """
+    form = await _form(request)
+    try:
+        hours = int(form.get("hours", "").strip() or 0)
+    except ValueError:
+        hours = 0
+    await store.move_session(
+        session_id.split("-")[0],
+        form.get("plan", "").strip(),
+        until=now_ms() + hours * 3_600_000 if hours > 0 else None,
+    )
+    return HTMLResponse(await render_plans_page())
 
 
 @router.post("/sessions/{session_id}/say", response_class=HTMLResponse)

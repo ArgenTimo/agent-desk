@@ -314,6 +314,23 @@ class IdeaLink(BaseModel):
     created_at: int
 
 
+class Subscription(BaseModel):
+    """A plan a session's tokens are spent against (025-subscriptions.sql).
+
+    `limit_tokens` is a number a person typed, not one this console read: there is no account
+    balance on this machine to read. Null is the ordinary state and means the card shows what was
+    observed and no percentage.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    service: str = ""
+    limit_tokens: int | None = None
+    created_at: int
+
+
 class Viewer(BaseModel):
     """A person who may open the shared ideas list, and nothing else (docs/07-security.md)."""
 
@@ -1509,6 +1526,92 @@ class Store:
                 ),
                 {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
             )
+
+    # --- the plan a session's tokens are spent against (025-subscriptions.sql) ----------------
+    async def add_subscription(
+        self, *, name: str, service: str = "", limit_tokens: int | None = None
+    ) -> Subscription | None:
+        if not name.strip():
+            return None
+        row = Subscription(
+            id=_new_id(),
+            name=name.strip()[:60],
+            service=service.strip()[:60],
+            limit_tokens=limit_tokens if limit_tokens and limit_tokens > 0 else None,
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO subscription (id, name, service, limit_tokens, created_at) "
+                    "VALUES (:id, :name, :service, :limit_tokens, :created_at)"
+                ),
+                row.model_dump(),
+            )
+        return row
+
+    async def subscriptions(self) -> list[Subscription]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, name, service, limit_tokens, created_at FROM subscription "
+                    "ORDER BY created_at"
+                )
+            )
+            return [Subscription(**row._mapping) for row in rows]
+
+    async def drop_subscription(self, subscription_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM session_subscription WHERE subscription_id = :id"),
+                {"id": subscription_id},
+            )
+            await conn.execute(
+                text("DELETE FROM subscription WHERE id = :id"), {"id": subscription_id}
+            )
+
+    async def move_session(
+        self, short_id: str, subscription_id: str, *, until: int | None = None
+    ) -> None:
+        """Put one session on a subscription, or take it off with an empty id.
+
+        `until` is what "temporarily" means: after it the row is ignored and the session goes back
+        to wherever it was.
+        """
+        async with self.engine.begin() as conn:
+            if not subscription_id:
+                await conn.execute(
+                    text("DELETE FROM session_subscription WHERE short_id = :short_id"),
+                    {"short_id": short_id},
+                )
+                return
+            await conn.execute(
+                text(
+                    "INSERT INTO session_subscription (short_id, subscription_id, until, moved_at) "
+                    "VALUES (:short_id, :subscription_id, :until, :t) "
+                    "ON CONFLICT (short_id) DO UPDATE SET subscription_id = :subscription_id, "
+                    "until = :until, moved_at = :t"
+                ),
+                {
+                    "short_id": short_id,
+                    "subscription_id": subscription_id,
+                    "until": until,
+                    "t": _now_ms(),
+                },
+            )
+
+    async def session_subscriptions(self) -> dict[str, str]:
+        """Which subscription each session is on, by short id. A move that has expired is gone."""
+        now = _now_ms()
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT short_id, subscription_id FROM session_subscription "
+                    "WHERE until IS NULL OR until > :now"
+                ),
+                {"now": now},
+            )
+            return {str(row[0]): str(row[1]) for row in rows}
 
     # --- how ideas relate to each other (024-idea-links.sql) ----------------------------------
     async def link_ideas(self, *, from_id: str, to_id: str, kind: LinkKind) -> IdeaLink | None:

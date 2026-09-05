@@ -1,0 +1,44 @@
+{# The plans a session's tokens are spent against, above the projects — the "сверх блок" the pool
+   asked for, and the thing that actually spans them: a subscription holds sessions from several
+   projects at once.
+
+   The header is careful about what it claims. There is no account balance on this machine and
+   nothing here to ask for one, so a card says **what this console has seen** — the context every
+   session on the plan is carrying, added up — and shows a percentage only against a limit somebody
+   typed in, which it names. "Out until 14:20" is the one hard fact available and it comes from a
+   `--resume` the CLI refused (docs/adr/0009, agent_desk/web/plans.py). #}
+{% if plans %}
+<div class="plans">
+  {% for plan in plans %}
+  <div class="card plan{{ ' out' if plan.out else (' close' if plan.close else '') }}">
+    <div class="card-head">
+      <span class="dot {{ 'flag' if plan.out else ('idle' if plan.close else 'busy') }}" aria-hidden="true"></span>
+      <span class="card-name">{{ plan.subscription.name }}</span>
+      {% if plan.subscription.service %}
+      <span class="pill quiet">{{ plan.subscription.service }}</span>
+      {% endif %}
+      <span class="spacer"></span>
+      {% if plan.out %}
+      <span class="pill attention" title="a request was refused for want of budget, and this is when the CLI said to come back">
+        🍽 out until {{ plan.out_until | at }}</span>
+      {% elif plan.percent is not none %}
+      <span class="pill quiet" title="what this console has seen, as a share of the limit you typed in — not a reading of your account">
+        {{ plan.percent }}% of {{ plan.subscription.limit_tokens | tokens }}</span>
+      {% endif %}
+      <span class="pill quiet" title="the context every session on this plan is carrying right now — observed, not billed">
+        {{ plan.seen_tokens | tokens }} in the air</span>
+    </div>
+    {% if plan.percent is not none %}
+    <div class="bar" role="img" aria-label="{{ plan.percent }} percent of the limit you stated">
+      <span style="width: {{ plan.percent }}%"></span>
+    </div>
+    {% endif %}
+    <p class="small dim">
+      {{ plan.sessions }} session{{ "" if plan.sessions == 1 else "s" }}{% if plan.projects %}
+      · {{ plan.projects | join(", ") }}{% endif %}
+      {% if plan.percent is none %} · no limit stated, so there is no percentage to show{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

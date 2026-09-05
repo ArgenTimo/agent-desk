@@ -1187,3 +1187,41 @@ async def test_the_map_draws_the_whole_pool_including_what_is_built(
     assert "node done built" in page
     # What was discarded is not: the map is the pool, and a discarded thought left it.
     assert "never mind" not in page
+
+
+@pytest.mark.unit
+async def test_the_plans_page_declares_one_and_moves_a_session_onto_it(
+    home: Home, desk: Store
+) -> None:
+    """A subscription holds sessions from more than one project, which is what makes it the block
+    above them (025-subscriptions.sql)."""
+    session_id = _a_session(home)
+
+    status, page = await _get("/plans")
+    assert status == 200
+    assert "Declare one" in page
+
+    status, page = await _post(
+        "/plans", {"name": "Claude Max", "service": "claude code", "limit_tokens": "1000000"}
+    )
+    assert status == 200
+    (plan,) = await desk.subscriptions()
+    assert plan.limit_tokens == 1_000_000
+
+    status, page = await _post(f"/sessions/{session_id}/plan", {"plan": plan.id})
+    assert status == 200
+    assert await desk.session_subscriptions() == {session_id.split("-")[0]: plan.id}
+
+    # The strip on the board shows it, and says which number is which.
+    strip = await routes.board_plans(*await routes.board_rows_and_kicks())
+    assert "Claude Max" in strip
+    assert "in the air" in strip
+
+    # A limit that is not a number is left out rather than crashing the page.
+    await _post("/plans", {"name": "Team", "limit_tokens": "lots"})
+    team = next(one for one in await desk.subscriptions() if one.name == "Team")
+    assert team.limit_tokens is None
+
+    status, _ = await _post("/plans", {"drop": plan.id})
+    assert status == 200
+    assert [one.name for one in await desk.subscriptions()] == ["Team"]

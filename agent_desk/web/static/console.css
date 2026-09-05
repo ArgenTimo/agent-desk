@@ -1233,3 +1233,21 @@ svg.map .node.built text.tick { fill: var(--busy); font-size: 13px; }
 svg.map a:hover .node rect { stroke: var(--focus); }
 .page-head { padding: 16px 16px 8px; }
 .page-head h1 { margin: 0 0 4px; font-size: 18px; }
+
+/* --- the plans above the projects (agent_desk/web/plans.py) ------------------------------- */
+.plans { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.card.plan { flex: 0 0 auto; }
+.card.plan.close { border-left-color: var(--attention); }
+/* Red for a plan that is actually out, because that is a fact rather than a projection — and
+   stopped is exactly what it is until the time on the card. */
+.card.plan.out { border-left-color: var(--flag); }
+.card.plan .bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 4px 0;
+}
+.card.plan .bar > span { display: block; height: 100%; background: var(--busy); }
+.card.plan.close .bar > span { background: var(--attention); }
+.card.plan.out .bar > span { background: var(--flag); }

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>plans · agent-desk</title>
+  <link rel="stylesheet" href="/static/console.css">
+</head>
+<body class="page">
+<header class="page-head">
+  <h1>plans</h1>
+  <p class="dim">A subscription holds sessions from more than one project, which is what makes it
+    the block above them. What a card can say is limited by what is on this machine: there is no
+    account balance here to read, so it shows the context its sessions are carrying right now —
+    observed, not billed — and a percentage only against a limit you state.</p>
+  <nav><a href="/">the board</a> · <a href="/ideas">the inbox</a></nav>
+</header>
+
+{{ plans | safe }}
+
+<section class="settings">
+  <h3>Declare one</h3>
+  <form class="add-link" method="post" action="/plans">
+    <label class="visually-hidden" for="plan-name">what to call it</label>
+    <input id="plan-name" name="name" placeholder="Claude Max" autocomplete="off" required>
+    <label class="visually-hidden" for="plan-service">the service</label>
+    <input id="plan-service" name="service" placeholder="claude code" autocomplete="off">
+    <label class="visually-hidden" for="plan-limit">the limit you are working to, in tokens</label>
+    <input id="plan-limit" name="limit_tokens" placeholder="limit in tokens (optional)"
+           inputmode="numeric" autocomplete="off">
+    <button type="submit">Add it</button>
+  </form>
+  <p class="dim small">The limit is yours, not one this console read. Leave it out and the card
+    shows the number it observed with no percentage against it.</p>
+
+  {% if subscriptions %}
+  <ul class="links">
+    {% for one in subscriptions %}
+    <li>
+      <strong>{{ one.name }}</strong>
+      <span class="dim">{{ one.service }}{% if one.limit_tokens %} · limit {{ one.limit_tokens | tokens }}{% endif %}</span>
+      <form method="post" action="/plans">
+        <input type="hidden" name="drop" value="{{ one.id }}">
+        <button type="submit" title="forget this plan; the sessions on it go back to none">×</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="settings">
+  <h3>Which session is on which</h3>
+  {% if not rows %}
+  <p class="empty small">No live sessions to put anywhere.</p>
+  {% elif not subscriptions %}
+  <p class="empty small">Declare a plan above and the sessions will be movable onto it.</p>
+  {% else %}
+  <ul class="links">
+    {% for row in rows %}
+    {% set short = row.session.session_id.split("-")[0] %}
+    <li>
+      <strong>{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</strong>
+      <span class="dim">{{ row.session.project }}</span>
+      <form method="post" action="/sessions/{{ row.session.session_id }}/plan">
+        <label class="visually-hidden" for="plan-{{ short }}">which plan</label>
+        <select id="plan-{{ short }}" name="plan">
+          <option value="">— none —</option>
+          {% for one in subscriptions %}
+          <option value="{{ one.id }}"{% if placed.get(short) == one.id %} selected{% endif %}>{{ one.name }}</option>
+          {% endfor %}
+        </select>
+        <label class="visually-hidden" for="hours-{{ short }}">for how many hours</label>
+        <input id="hours-{{ short }}" name="hours" placeholder="hours (optional)"
+               inputmode="numeric" size="6" autocomplete="off">
+        <button type="submit">Move it</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="dim small">Leave the hours empty to move it for good. With a number, it goes back on
+    its own when the time is up — which is what "temporarily" has to mean if nobody is going to
+    remember to move it back.</p>
+  {% endif %}
+</section>
+</body>
+</html>
