@@ -454,12 +454,20 @@ async def test_a_project_with_no_checkout_here_is_not_explored(
 async def test_two_failed_explorations_switch_the_project_off(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same rule as the queue: a rule that keeps firing into a broken condition stops."""
-    monkeypatch.setattr(
-        dispatch,
-        "start",
-        lambda instruction, *, cwd, name, env=None: dispatch.Started(False, detail="no disk space"),
-    )
+    """The same rule as the queue: a rule that keeps firing into a broken condition stops.
+
+    `armed is False` is not the assertion that matters here and never was: this project was never
+    armed, so that line held on the day exploring kept running anyway. The switch that has to go
+    off is the one that started this — otherwise a project whose worktrees will not create asks
+    for another every thirty seconds, all night, which is the failure the rule exists to end.
+    """
+    tried: list[str] = []
+
+    def refuses(instruction: str, *, cwd: str, name: str, env: object = None) -> dispatch.Started:
+        tried.append(instruction)
+        return dispatch.Started(False, detail="no disk space")
+
+    monkeypatch.setattr(dispatch, "start", refuses)
     await desk.explore(KEY, per_day=9, on=True)
     seed = await desk.queue_task(
         repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
@@ -473,7 +481,11 @@ async def test_two_failed_explorations_switch_the_project_off(
 
     arming = await desk.autostart(KEY)
     assert arming.armed is False
+    assert arming.exploring is False
     assert arming.disarmed_why is not None and "no disk space" in arming.disarmed_why
+
+    await autostart.tick(desk, live=set())
+    assert len(tried) == 2, "it went looking again after switching itself off"
 
 
 @pytest.mark.unit

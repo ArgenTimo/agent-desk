@@ -225,6 +225,11 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
         await store.disarm(
             arming.repo_key, why=f"two starts in a row failed: {result.detail}"[:300]
         )
+        # And the switch that started *this*. Arming and exploring are two decisions
+        # (docs/adr/0008), so disarming the queue leaves exploring exactly where it was — which
+        # meant a project whose starts kept failing went looking again on the next tick, and the
+        # one after, for as long as the console stayed open. The rule is that it stops.
+        await store.explore(arming.repo_key, per_day=arming.per_day, on=False)
     return task
 
 
