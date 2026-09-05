@@ -31,6 +31,13 @@
     <span class="card-name">{{ project.name }}</span>
     <span class="pill">{{ project.sessions }}</span>
     {% if project.flagged %}<span class="pill attention" title="{{ project.flagged }} may want you">{{ project.flagged }} ⚑</span>{% endif %}
+    {% set tally = work.get(project.key) %}
+    {% if tally %}
+    {# What this console started here and what it got through. Counted from its own queue, which
+       is the only work it can honestly account for (docs/adr/0007). #}
+    <span class="pill quiet" title="{{ tally.running }} running · {{ tally.waiting }} waiting · {{ tally.done }} finished">
+      {{ tally.running }}/{{ tally.waiting }}/{{ tally.done }}</span>
+    {% endif %}
     <a class="more" href="/projects/page?key={{ project.key | urlencode }}"
        data-menu="menu-{{ loop.index }}" title="what can be done with this project"
        aria-label="project menu">⋯</a>
@@ -49,7 +56,7 @@
 
       <div class="card-body">
         {% for row in instance.rows %}
-        <details class="node card session {{ row.session.status }}{% if row.hint.waiting %} flagged{% endif %}" open
+        <details class="node card session {{ row.session.status }}{% if row.session.kind == "bg" %} bg{% endif %}{% if row.hint.waiting %} flagged{% endif %}" open
                  data-session="{{ row.session.session_id }}"
                  data-kind="session" data-id="{{ row.session.session_id }}"
                  data-label="{{ row.tail.title if row.tail and row.tail.title else row.session.name }}"

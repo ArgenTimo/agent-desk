@@ -59,7 +59,12 @@ async def board_events() -> AsyncIterator[str]:
         groups = await routes.store.groups()
         links = await routes.board_links()
         for name, html in (
-            ("board", await asyncio.to_thread(routes.render_board, groups, links)),
+            (
+                "board",
+                await asyncio.to_thread(
+                    routes.render_board, groups, links, await routes.board_work()
+                ),
+            ),
             ("blocks", await routes.render_blocks()),
             ("ideas", await routes.render_ideas()),
         ):

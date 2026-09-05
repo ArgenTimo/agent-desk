@@ -34,7 +34,10 @@
               aria-label="hide the overview">–</button>
     </header>
     <div id="board" class="tree">{{ board|safe }}</div>
-    <nav class="col-foot"><a href="/ideas">ideas</a><a href="/viewers">viewers</a></nav>
+    <nav class="col-foot">
+      <a href="/ideas">ideas</a><a href="/viewers">viewers</a>
+      <a href="/board.csv" title="the board as a spreadsheet">csv</a>
+    </nav>
   </aside>
 
   <div class="gutter" data-gutter="left" role="separator" aria-orientation="vertical"

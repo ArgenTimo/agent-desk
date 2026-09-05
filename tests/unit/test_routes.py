@@ -10,6 +10,7 @@ agent on this machine, which is the sort of thing a test suite must never do by 
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
@@ -662,3 +663,46 @@ async def test_filing_a_ticket_answers_a_page_when_the_browser_has_no_script(
     status, page, _ = await post_form(f"/ideas/{idea.id}/file", {}, htmx=False)
     assert status == 200
     assert "<!doctype html>" in page.lower()
+
+
+# --- the board as a file, and what a project has got through ---------------------------------------
+@pytest.mark.unit
+async def test_the_board_can_be_taken_away_as_a_spreadsheet(home: Home, desk: Store) -> None:
+    """ "How much of last week was that session" is a spreadsheet question, and a console that
+    refuses to hand over its rows makes somebody screenshot them."""
+    _a_session(home)
+
+    status, body = await _get("/board.csv")
+
+    assert status == 200
+    lines = body.strip().splitlines()
+    assert lines[0].startswith("project,checkout,session,name,status,kind,branch,context_tokens")
+    assert len(lines) == 2
+    assert "aaaaaaaa-0000-4000-8000-000000000001" in lines[1]
+    # Nothing inferred: the flag is a guess and guesses do not belong in a column somebody sums.
+    assert "may want you" not in body
+    assert "waiting" not in lines[0]
+
+
+@pytest.mark.unit
+async def test_a_project_card_counts_what_this_console_started(home: Home, desk: Store) -> None:
+    key = await _the_project(home)
+    waiting = await desk.queue_task(
+        repo_key=key, cwd=str(home.root), title="one", instruction="one", source_kind="typed"
+    )
+    running = await desk.queue_task(
+        repo_key=key, cwd=str(home.root), title="two", instruction="two", source_kind="typed"
+    )
+    await desk.take_next_task(key)  # claims "one"
+    await desk.task_started(waiting.id, "agent1")
+    await desk.take_next_task(key)  # claims "two"
+    await desk.task_started(running.id, "agent2")
+    await desk.finish_task(running.id)
+
+    counted = await routes.board_work()
+
+    assert counted[key] == {"waiting": 0, "running": 1, "done": 1}
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), await routes.board_links(), counted
+    )
+    assert "1/0/1" in board

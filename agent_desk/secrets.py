@@ -47,14 +47,25 @@ def _read() -> dict[str, str]:
 
 
 def _write(values: dict[str, str]) -> None:
+    """Replace the file, and never let it exist readable — not even for a moment.
+
+    The obvious version writes the file and then chmods it, which leaves every secret in it
+    world-readable for as long as that takes. On a shared machine that window is the whole
+    vulnerability, so the mode is given to `open` rather than applied after it: the descriptor
+    never exists at any other permission (docs/07-security.md).
+    """
     target = path()
     target.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(target.parent, _DIR_MODE)
+
     # Written to a neighbour and moved into place: a crash halfway through a rewrite would
-    # otherwise leave every secret in the file truncated.
+    # otherwise leave every secret in the file truncated. `O_EXCL` so that a stale one left by a
+    # crash is not written into blindly.
     beside = target.with_suffix(".writing")
-    beside.write_text(json.dumps(values, indent=2, sort_keys=True))
-    os.chmod(beside, _FILE_MODE)
+    beside.unlink(missing_ok=True)
+    descriptor = os.open(beside, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _FILE_MODE)
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(json.dumps(values, indent=2, sort_keys=True))
     beside.replace(target)
 
 

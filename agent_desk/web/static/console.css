@@ -31,9 +31,13 @@
   --line: #e2dfd8;
   --line-strong: #cdc9c0;
 
-  --busy: #a35c00;
-  --idle: #3f6f34;
+  /* The mood of a card, and it is read across the room rather than looked at: green is working,
+     amber is having a smoke, red is stopped or blocked, blue is an agent that will be gone when
+     it finishes. Every other use of colour on this page is one of these four meanings. */
+  --busy: #3f6f34;
+  --idle: #8a5a00;
   --shell: #35667a;
+  --temporary: #2f6ecf;
   --flag: #a03028;
   /* Red means stopped or blocked, and nothing else. What merely wants a look is amber: an
      inference that a session may be waiting is not the same fact as a run that failed, and a
@@ -59,9 +63,10 @@
     --line: #2e2c28;
     --line-strong: #423f3a;
 
-    --busy: #e2a55a;
-    --idle: #8cc474;
+    --busy: #8cc474;
+    --idle: #e0b070;
     --shell: #74b6c8;
+    --temporary: #7aa8f0;
     --flag: #e88880;
     --attention: #e0b070;
     --warn: #e3b264;
@@ -689,6 +694,12 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .dot.shell { background: var(--shell); }
 .dot.flag { background: var(--flag); }
 .dot.done { background: var(--line-strong); }
+/* A session this console started: working, and gone when it finishes. */
+.card.session.bg > .card-head .dot { background: var(--temporary); }
+.pill.agent-started {
+  background: color-mix(in srgb, var(--temporary) 18%, transparent);
+  color: var(--temporary);
+}
 
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip {
@@ -854,6 +865,8 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   overscroll-behavior: contain;
   padding: 12px 4px 4px;
 }
+/* Folded up out of the way, the way a terminal is cleared — and back with the same key. */
+.out.folded { flex: 0 0 0; padding: 0; overflow: hidden; border: none; }
 .out.drop-target { outline-offset: -2px; background-color: color-mix(in srgb, var(--focus) 5%, transparent); }
 /* A card put down on it sits on the surface rather than floating over it. */
 .out .block, .out .pin { background-color: var(--surface); }
@@ -1000,7 +1013,10 @@ body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft);
 .idea-card > .card-head { cursor: grab; }
 .idea-card.kept { border-left: 3px solid var(--idle); }
 .idea-card.promoted { border-left: 3px solid var(--busy); }
-.idea-card.new { border-left: 3px solid var(--line-strong); }
+/* Nobody has touched it yet: gold, so that what has been read is visibly separate from what has
+   not. It is a thought waiting for its first decision. */
+.idea-card.new { border-left: 3px solid #b8860b; }
+:root:not([data-theme="light"]) .idea-card.new { border-left-color: #d4a017; }
 .idea-card .card-body { padding-bottom: 7px; }
 /* A group holds its thoughts the way a project holds checkouts, and one indent says so. */
 .idea-card .idea-card { margin-left: 8px; background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }

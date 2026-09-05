@@ -14,6 +14,8 @@ surface whose job is triage (docs/06-console.md).
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -288,6 +290,25 @@ def board() -> tuple[list[BoardRow], list[str]]:
     return rows, read.notices
 
 
+async def board_work() -> dict[str, dict[str, int]]:
+    """How much work each project has waiting, running and finished.
+
+    Counted from the queue rather than from a tracker: this is what the console started and can
+    account for. A number taken from somewhere it cannot see would be a number nobody can check
+    (docs/adr/0005, which refuses to read a tracker back).
+    """
+    counted: dict[str, dict[str, int]] = {}
+    for task in await store.tasks(limit=500):
+        tally = counted.setdefault(task.repo_key, {"waiting": 0, "running": 0, "done": 0})
+        if task.waiting:
+            tally["waiting"] += 1
+        elif task.finished_at or task.failed_at:
+            tally["done"] += 1
+        else:
+            tally["running"] += 1
+    return counted
+
+
 async def board_links() -> dict[str, list[ProjectLink]]:
     """Every project's links, keyed by repository, for the menu on its card."""
     grouped: dict[str, list[ProjectLink]] = {}
@@ -297,7 +318,9 @@ async def board_links() -> dict[str, list[ProjectLink]]:
 
 
 def render_board(
-    groups: list[Group] | None = None, links: dict[str, list[ProjectLink]] | None = None
+    groups: list[Group] | None = None,
+    links: dict[str, list[ProjectLink]] | None = None,
+    work: dict[str, dict[str, int]] | None = None,
 ) -> str:
     """The fragment the page holds and every server-sent event replaces."""
     rows, notices = board()
@@ -310,6 +333,9 @@ def render_board(
         # than fetched when the menu opens: it is four links, and a click that waits for a round
         # trip is a click that feels broken.
         links=links or {},
+        # What it has going on and what it has got through — from this program's own queue, which
+        # is the only work it can honestly count (docs/adr/0007).
+        work=work or {},
         flagged=sum(1 for row in rows if row.hint.waiting),
     )
 
@@ -463,6 +489,61 @@ async def page() -> HTMLResponse:
     return HTMLResponse(await render_page())
 
 
+@router.get("/board.csv", response_class=PlainTextResponse)
+async def board_csv() -> Response:
+    """The board as a file, for the questions a board cannot answer.
+
+    "How much of last week was llm-developer-2" is a spreadsheet question, and a console that
+    refuses to hand over its rows makes somebody screenshot them. One row a session, the same
+    facts the cards show and nothing inferred: the flag is a guess and guesses do not belong in a
+    column somebody will sum (docs/03-session-observation.md).
+    """
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    out = io.StringIO()
+    sheet = csv.writer(out)
+    sheet.writerow(
+        [
+            "project",
+            "checkout",
+            "session",
+            "name",
+            "status",
+            "kind",
+            "branch",
+            "context_tokens",
+            "updated_at",
+            "title",
+            "last_entry",
+        ]
+    )
+    for project in projects:
+        for instance in project.instances:
+            for row in instance.rows:
+                tail = row.tail
+                last = tail.last_entry if tail else None
+                sheet.writerow(
+                    [
+                        project.name,
+                        instance.path,
+                        row.session.session_id,
+                        row.session.name,
+                        row.session.status,
+                        row.session.kind,
+                        (tail.git_branch if tail else "") or "",
+                        (tail.context_tokens if tail else "") or "",
+                        row.session.updated_at,
+                        (tail.title if tail else "") or "",
+                        (last.text if last else "") or "",
+                    ]
+                )
+    return PlainTextResponse(
+        out.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="board.csv"'},
+    )
+
+
 @router.get("/sessions/{session_id}/tail", response_class=HTMLResponse)
 async def session_tail(session_id: str) -> HTMLResponse:
     """A row expands to the tail of its transcript. That is the whole drill-down in v1."""
@@ -511,6 +592,7 @@ async def render_page(message: str = "") -> str:
             projects=projects,
             notices=notices,
             links=await board_links(),
+            work=await board_work(),
             flagged=sum(1 for row in rows if row.hint.waiting),
         ),
         projects=projects,
@@ -757,7 +839,9 @@ async def create_project(request: Request) -> Response:
             await store.add_to_group(group.id, first)
         if _wants_fragment(request):
             return HTMLResponse(
-                await asyncio.to_thread(render_board, await store.groups(), await board_links())
+                await asyncio.to_thread(
+                    render_board, await store.groups(), await board_links(), await board_work()
+                )
             )
     return RedirectResponse("/", status_code=303)
 
@@ -770,7 +854,9 @@ async def add_to_project(group_id: str, request: Request) -> Response:
         await store.add_to_group(group_id, repo_key)
     if _wants_fragment(request):
         return HTMLResponse(
-            await asyncio.to_thread(render_board, await store.groups(), await board_links())
+            await asyncio.to_thread(
+                render_board, await store.groups(), await board_links(), await board_work()
+            )
         )
     return RedirectResponse("/", status_code=303)
 
@@ -781,7 +867,9 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
     await store.delete_group(group_id)
     if _wants_fragment(request):
         return HTMLResponse(
-            await asyncio.to_thread(render_board, await store.groups(), await board_links())
+            await asyncio.to_thread(
+                render_board, await store.groups(), await board_links(), await board_work()
+            )
         )
     return RedirectResponse("/", status_code=303)
 

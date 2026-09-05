@@ -709,6 +709,16 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     document.getElementById('ask-text').focus();
   }
+  // Ctrl+L clears a terminal; here it folds the conversation up out of the way and leaves the
+  // field where it was. Pressing it again brings the conversation back.
+  if (event.key === 'l' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    const folded = out.classList.toggle('folded');
+    document.getElementById('ask-text').focus();
+    if (!folded) out.scrollTop = out.scrollHeight;
+    return;
+  }
+
   if (event.key === 'Escape') {
     const panel = document.getElementById('message');
     if (panel.innerHTML.trim()) panel.innerHTML = '';
