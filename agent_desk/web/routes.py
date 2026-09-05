@@ -39,6 +39,7 @@ from agent_desk.observe.model import (
 )
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import DRAFT_KINDS, Group, Idea, Store, Thread
+from agent_desk.web import autostart
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -517,6 +518,10 @@ async def render_project(key: str) -> str:
         key=key,
         name=named.name if named else key,
         links=await store.links(key),
+        tasks=await store.tasks(repo_key=key),
+        arming=await store.autostart(key),
+        # The console says exactly what the loop decided, because it asks the same function.
+        why_not=await autostart.why_not(store, key),
     )
 
 
@@ -763,6 +768,128 @@ async def group_idea(idea_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(await render_ideas())
     return RedirectResponse("/", status_code=303)
+
+
+@router.post("/tasks", response_class=HTMLResponse)
+async def queue_task(request: Request) -> Response:
+    """Put approved work in a project's queue (docs/adr/0007).
+
+    Only this route writes to that queue, and only a person reaches this route. Nothing enqueues
+    itself — not the classifier, not an answer run, not a failed task, and not the loop that
+    starts them.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    instruction = form.get("instruction", "").strip()
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    named = next((project for project in projects if project.key == key), None)
+    if named and instruction and named.instances:
+        await store.queue_task(
+            repo_key=key,
+            # The checkout it runs in, resolved now: a queue that remembered a path that moved is
+            # a queue that starts an agent in the wrong place.
+            cwd=named.instances[0].path,
+            title=form.get("title", "").strip()[:60] or instruction[:60],
+            instruction=instruction,
+            source_kind=form.get("source_kind", "typed").strip()[:20],
+            source_ref=form.get("source_ref", "").strip() or None,
+        )
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/tasks/{task_id}/{action}", response_class=HTMLResponse)
+async def task_action(task_id: str, action: str, request: Request) -> Response:
+    """Take one out of the queue, or put a failed one back. Retry is a click (docs/adr/0007)."""
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    if action == "drop":
+        await store.drop_task(task_id)
+    elif action == "retry":
+        task = next((t for t in await store.tasks() if t.id == task_id), None)
+        if task is not None and task.failed_at is not None:
+            await store.drop_task(task_id)
+            await store.queue_task(
+                repo_key=task.repo_key,
+                cwd=task.cwd,
+                title=task.title,
+                instruction=task.instruction,
+                source_kind=task.source_kind,
+                source_ref=task.source_ref,
+            )
+    else:
+        return PlainTextResponse("no such action", status_code=404)
+    panel = await render_project(key)
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+
+@router.post("/autostart", response_class=HTMLResponse)
+async def set_autostart(request: Request) -> Response:
+    """Arm or disarm one project's queue.
+
+    Off is the default everywhere and stays that way until somebody switches it on for a named
+    project. Arming clears whatever disarmed it last time, because the person doing it has just
+    looked at the reason (docs/adr/0007).
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    if key and form.get("armed") == "yes":
+        try:
+            per_hour = int(form.get("per_hour", "2"))
+        except ValueError:
+            per_hour = 2
+        await store.arm(key, per_hour=per_hour)
+    elif key:
+        await store.disarm(key, why="switched off here")
+    panel = await render_project(key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/sessions/{session_id}/dispatch", response_class=HTMLResponse)
+async def dispatch_here(session_id: str, request: Request) -> Response:
+    """Start an agent on this text, in the project that session is in (docs/adr/0006).
+
+    Reached from the refusal panel: nothing can be said to a session that is already running, and
+    this is the thing that *can* be done with the same words instead of ending at a wall.
+    """
+    form = await _form(request)
+    text_ = form.get("text", "").strip()
+    directive_id = form.get("directive", "").strip()
+    rows, _ = await asyncio.to_thread(board)
+    row = next((r for r in rows if r.session.session_id == session_id), None)
+    if row is None or not text_:
+        panel = env.get_template("_dispatch.html").render(
+            started=False, detail="that session is not on the board any more"
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.build_task(
+            text_,
+            project=row.session.project,
+            branch=(row.tail.git_branch if row.tail else "") or "",
+        ),
+        cwd=row.session.cwd,
+        name=text_[:40],
+    )
+    if result.started and directive_id:
+        await store.mark_directive_dispatched(directive_id, result.agent_id)
+
+    panel = env.get_template("_dispatch.html").render(
+        started=result.started,
+        detail=result.detail,
+        agent_id=result.agent_id,
+        project=row.session.project,
+    )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/directives/{directive_id}/dispatch", response_class=HTMLResponse)

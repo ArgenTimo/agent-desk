@@ -140,12 +140,20 @@ No button that **steers** an interactive session — no follow-up into a running
 keystrokes, no `tmux send-keys`. No button that edits a file in an observed repository. No
 approval, no merge, no "mark as done".
 
-One thing on that list moved, deliberately and with an argument:
+Two things on that list moved, each deliberately and with an argument.
+
 [adr/0006](adr/0006-the-desk-may-start-work.md) allows a written instruction to **start** a new
 background agent, in a git worktree of its own, when a human clicks. Starting is not interrupting:
 a session that does not exist yet has no context to displace. It can be stopped from here and it
-cannot be steered from here, and nothing dispatches without a click — not on a timer, not when a
-session goes idle, not when a tracker has an unassigned ticket.
+cannot be steered from here.
+
+[adr/0007](adr/0007-a-loop-that-decides-when-not-what.md) allows a loop to decide **when** to start
+something a human already queued — and nothing else. It never invents a task, never reads a
+tracker for work, and never queues anything itself. It is off in every project until somebody arms
+that one, starts one agent at a time, spends a small hourly budget, runs only while this console
+is open, and switches itself off after two starts in a row fail. What it will not do is the half
+that matters: an agent that goes looking for its own work is a different feature and a different
+argument.
 
 This tool watches work it does not own, and the moment it can change that work it needs to be
 trusted the way the thing doing the work is trusted — an audit trail, a permission model, an

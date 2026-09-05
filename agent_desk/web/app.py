@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_desk.web import blocks, routes, sse
+from agent_desk.web import autostart, blocks, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -41,9 +41,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         async with asyncio.TaskGroup() as group:
             blocks.runs.attach(group)
+            # The loop that starts queued work lives here rather than in a daemon: it runs while
+            # the console does and stops when it stops, which is the simplest kill switch there is
+            # (docs/adr/0007). On a console where nothing is armed it wakes, finds no armed
+            # project, and sleeps again.
+            watching = group.create_task(autostart.run(routes.store))
             try:
                 yield
             finally:
+                watching.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

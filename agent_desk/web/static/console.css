@@ -678,6 +678,21 @@ body.dragging-card .drop-hint, .drop-hint.standing { display: block; }
   background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius);
 }
 .settings .dim { color: var(--fg-dim); }
+.settings-title { margin: 14px 0 6px; font-size: 12px; color: var(--fg-soft); }
+.queue { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.task { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.task-title { flex: 1; min-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task.failed .task-title { color: var(--fg-dim); }
+.task form { display: contents; }
+/* The switch that lets a project start its own queued work. It is a sentence and a button rather
+   than a toggle, because what it turns on is worth reading before it is pressed (docs/adr/0007). */
+.arming { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px;
+  padding-top: 10px; border-top: 1px solid var(--line); }
+.arming input[type="number"] {
+  width: 6ch; padding: 4px 6px; font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+.arming .dim { flex: 1 0 100%; }
 .settings footer { margin-top: 8px; }
 
 .new-project { display: flex; gap: 6px; padding: 8px 2px 0; }

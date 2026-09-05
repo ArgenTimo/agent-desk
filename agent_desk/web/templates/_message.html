@@ -40,12 +40,21 @@
 <div class="refused">
   <header>not delivered to <span class="target">{{ row.session.project }}</span></header>
   <p class="detail">{{ detail }}</p>
-  {# The path that does work: the human is the transport, at a moment they choose. #}
   <pre class="full" id="unsent">{{ text }}</pre>
-  <footer>
-    <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('unsent').textContent)">Copy it</button>
-    <a class="as-button" href="/">Close</a>
-  </footer>
+  {# The path that does work. Nothing can be said to a session that is already running, but an
+     agent can be started on the same words, in a worktree of its own, right here
+     (docs/adr/0006) — so the refusal offers it rather than ending at a wall. #}
+  <form method="post" action="/sessions/{{ row.session.session_id }}/dispatch"
+        hx-post="/sessions/{{ row.session.session_id }}/dispatch" hx-target="#message">
+    <input type="hidden" name="text" value="{{ text }}">
+    <input type="hidden" name="directive" value="{{ directive_id }}">
+    <footer>
+      <button type="submit" class="send" title="start a new agent in this project on this text">Have an agent do it instead</button>
+      {# And the oldest transport there is, for a moment you choose. #}
+      <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('unsent').textContent)">Copy it</button>
+      <a class="as-button" href="/">Close</a>
+    </footer>
+  </form>
 </div>
 
 {% else %}

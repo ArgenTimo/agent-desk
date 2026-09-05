@@ -93,6 +93,49 @@ class Directive(BaseModel):
     dispatched_at: int | None = None
 
 
+class Task(BaseModel):
+    """Work a person approved and put in a queue (docs/adr/0007).
+
+    No priority, no assignee, no estimate. It is a list of things somebody said to do, in the
+    order they said them, and the loop that starts them decides only when.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    repo_key: str
+    cwd: str
+    title: str
+    instruction: str
+    source_kind: str
+    source_ref: str | None = None
+    queued_at: int
+    started_at: int | None = None
+    agent_id: str | None = None
+    failed_at: int | None = None
+    detail: str | None = None
+
+    @property
+    def waiting(self) -> bool:
+        return self.started_at is None and self.failed_at is None
+
+
+class Autostart(BaseModel):
+    """Whether one project may start its own queued work, and what it has spent doing it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    armed_at: int | None = None
+    per_hour: int = 2
+    failures: int = 0
+    disarmed_why: str | None = None
+
+    @property
+    def armed(self) -> bool:
+        return self.armed_at is not None
+
+
 class Filing(BaseModel):
     """Where an idea went, once a human sent it there (docs/adr/0005)."""
 
@@ -603,6 +646,180 @@ class Store:
         # (docs/07-security.md).
         fields["context"] = scrub_optional(fields["context"])
         return Block(**fields)
+
+    # --- approved work, and the arming that starts it -----------------------------------------
+    async def queue_task(
+        self,
+        *,
+        repo_key: str,
+        cwd: str,
+        title: str,
+        instruction: str,
+        source_kind: str,
+        source_ref: str | None = None,
+    ) -> Task:
+        """Put one piece of approved work in the queue. Only a route reaches this: nothing
+        enqueues itself (docs/adr/0007)."""
+        task = Task(
+            id=_new_id(),
+            repo_key=repo_key,
+            cwd=cwd,
+            title=title,
+            instruction=instruction,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            queued_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO task (id, repo_key, cwd, title, instruction, source_kind, "
+                    "source_ref, queued_at, started_at, agent_id, failed_at, detail) VALUES "
+                    "(:id, :repo_key, :cwd, :title, :instruction, :source_kind, :source_ref, "
+                    ":queued_at, NULL, NULL, NULL, NULL)"
+                ),
+                task.model_dump(exclude={"started_at", "agent_id", "failed_at", "detail"}),
+            )
+        return task
+
+    async def tasks(self, *, repo_key: str | None = None, limit: int = 100) -> list[Task]:
+        one = (
+            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
+            "started_at, agent_id, failed_at, detail FROM task WHERE repo_key = :repo_key "
+            "ORDER BY queued_at LIMIT :limit"
+        )
+        every = (
+            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
+            "started_at, agent_id, failed_at, detail FROM task ORDER BY queued_at LIMIT :limit"
+        )
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(one if repo_key else every),
+                {"repo_key": repo_key, "limit": limit} if repo_key else {"limit": limit},
+            )
+            return [Task(**row._mapping) for row in rows]
+
+    async def take_next_task(self, repo_key: str) -> Task | None:
+        """The oldest waiting task in this project, claimed so that two ticks cannot take it.
+
+        The claim is the `started_at` write itself, guarded by `started_at IS NULL`: one statement,
+        one winner, and the loser sees the row already taken.
+        """
+        waiting = [task for task in await self.tasks(repo_key=repo_key) if task.waiting]
+        for task in waiting:
+            async with self.engine.begin() as conn:
+                claimed = await conn.execute(
+                    text(
+                        "UPDATE task SET started_at = :t WHERE id = :id AND started_at IS NULL "
+                        "AND failed_at IS NULL"
+                    ),
+                    {"t": _now_ms(), "id": task.id},
+                )
+            if claimed.rowcount:
+                return task
+        return None
+
+    async def task_started(self, task_id: str, agent_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE task SET agent_id = :agent_id WHERE id = :id"),
+                {"agent_id": agent_id, "id": task_id},
+            )
+
+    async def task_failed(self, task_id: str, detail: str) -> None:
+        """It stays failed and says why. Retry is a click (docs/adr/0007)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE task SET failed_at = :t, started_at = NULL, detail = :detail "
+                    "WHERE id = :id"
+                ),
+                {"t": _now_ms(), "detail": detail[:500], "id": task_id},
+            )
+
+    async def drop_task(self, task_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM task WHERE id = :id"), {"id": task_id})
+
+    async def started_since(self, repo_key: str, since_ms: int) -> int:
+        """How much of the budget this project has spent in the window (docs/adr/0007)."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM task WHERE repo_key = :repo_key "
+                    "AND started_at IS NOT NULL AND started_at >= :since"
+                ),
+                {"repo_key": repo_key, "since": since_ms},
+            )
+            row = rows.first()
+            return int(row._mapping["n"]) if row else 0
+
+    async def autostart(self, repo_key: str) -> Autostart:
+        """Absent is disarmed, which is what every project is until somebody says otherwise."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why FROM autostart "
+                    "WHERE repo_key = :repo_key"
+                ),
+                {"repo_key": repo_key},
+            )
+            row = rows.first()
+            return Autostart(repo_key=repo_key) if row is None else Autostart(**row._mapping)
+
+    async def armed_projects(self) -> list[Autostart]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why FROM autostart "
+                    "WHERE armed_at IS NOT NULL"
+                )
+            )
+            return [Autostart(**row._mapping) for row in rows]
+
+    async def arm(self, repo_key: str, *, per_hour: int) -> None:
+        """Switch it on for one project. Arming clears whatever disarmed it last time."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, disarmed_why) "
+                    "VALUES (:repo_key, :t, :per_hour, 0, NULL) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET armed_at = :t, per_hour = :per_hour, "
+                    "failures = 0, disarmed_why = NULL"
+                ),
+                {"repo_key": repo_key, "t": _now_ms(), "per_hour": max(1, min(per_hour, 20))},
+            )
+
+    async def disarm(self, repo_key: str, why: str | None = None) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, disarmed_why) "
+                    "VALUES (:repo_key, NULL, 2, 0, :why) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET armed_at = NULL, disarmed_why = :why"
+                ),
+                {"repo_key": repo_key, "why": why},
+            )
+
+    async def note_failure(self, repo_key: str) -> int:
+        """One more failed start, and the count back. Two in a row disarms it (docs/adr/0007)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, disarmed_why) "
+                    "VALUES (:repo_key, NULL, 2, 1, NULL) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET failures = autostart.failures + 1"
+                ),
+                {"repo_key": repo_key},
+            )
+        return (await self.autostart(repo_key)).failures
+
+    async def clear_failures(self, repo_key: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE autostart SET failures = 0 WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
 
     # --- what left through the one door ------------------------------------------------------
     async def record_filing(

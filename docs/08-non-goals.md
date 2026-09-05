@@ -5,12 +5,19 @@ assumption to test, so that adding it later is a decision with evidence rather t
 
 ## 1. Orchestrating sessions
 
-No starting, stopping, queueing or steering of interactive sessions. The board watches; it does not
-drive.
+No **steering** of interactive sessions: nothing written into a running context, no keystrokes, no
+stopping somebody else's terminal. The board watches the sessions it did not start.
 
 **Why:** a tool that changes the work needs to be trusted like the thing doing the work — audit,
 identity, permissions. **Entry condition:** never, in this program. If it is wanted, it is a
 different one ([adr/0001](adr/0001-a-separate-repository.md)).
+
+**Narrowed twice, and the ADRs carry the argument.** The console may *start* a background agent in
+a worktree of its own when a human clicks ([adr/0006](adr/0006-the-desk-may-start-work.md)), and a
+loop may decide *when* to start something a human already queued
+([adr/0007](adr/0007-a-loop-that-decides-when-not-what.md)). Both are about work this program
+creates and can stop. Neither touches a session somebody else is sitting in, which is what this
+section was written to protect.
 
 ## 2. Sending work to a busy session
 
@@ -22,6 +29,11 @@ a session goes idle, and no rule that decides a good moment.
 **Assumption to test:** count how often a captured idea is later pasted into a session by hand. If
 it is most of them, and always at the same moment — the session going idle — a hold-and-offer queue
 has evidence behind it.
+
+**Still true for a session that is already running**, and that is the whole of what this section
+is about. [adr/0007](adr/0007-a-loop-that-decides-when-not-what.md) allows a queue whose items are
+started as *new* agents — the judgement it makes is when to start work somebody approved, never
+when to interrupt work somebody is doing.
 
 ## 3. `tmux send-keys` into a terminal
 
