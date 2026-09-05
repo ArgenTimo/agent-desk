@@ -1011,3 +1011,42 @@ async def test_every_path_that_starts_an_agent_carries_the_same_context(
     assert about["glossary"] == [("верстак", "the middle column")]
     said = dispatch.build_task("do the thing", **about)  # type: ignore[arg-type]
     assert "no build step here" in said and "верстак" in said
+
+
+@pytest.mark.unit
+async def test_what_a_pass_made_of_an_idea_shows_as_a_reading_not_a_state(
+    home: Home, desk: Store
+) -> None:
+    """A colour and a word, and nothing is hidden or reordered away."""
+    ready = await desk.create_idea(text_="a small fix", summary="a small fix", source_kind="typed")
+    await desk.appraise_idea(ready.id, size="small", shape="ready")
+    waiting = await desk.create_idea(text_="a big one", summary="a big one", source_kind="typed")
+    await desk.appraise_idea(waiting.id, size="large", shape="decide")
+
+    column = await routes.render_ideas()
+
+    assert "needs-decide" in column
+    assert "needs you to decide something" in column
+    assert "small" in column and "big" in column
+    # Both are still there: the pass never hides a row.
+    assert "a small fix" in column and "a big one" in column
+
+    _, column = await _post("/ideas/sort", {"how": "needs"})
+    assert column.index("a big one") < column.index("a small fix")
+
+
+@pytest.mark.unit
+async def test_an_idea_that_reads_as_already_built_is_a_question_not_a_claim(
+    home: Home, desk: Store
+) -> None:
+    """ "This is already built" from a reading of the text is exactly the claim CLAUDE.md's fifth
+    rule says not to make, so it is offered with a button rather than applied."""
+    idea = await desk.create_idea(text_="add hotkeys", summary="add hotkeys", source_kind="typed")
+    await desk.appraise_idea(idea.id, size="small", shape="built")
+
+    column = await routes.render_ideas()
+
+    assert "is it?" in column
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+    # And the button that would settle it is the one a person presses.
+    assert f"/ideas/{idea.id}/done" in column

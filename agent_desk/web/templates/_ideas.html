@@ -8,7 +8,7 @@
    Every card drags into the middle, where it becomes what the next question is about
    (docs/05-ideas.md). #}
 {% macro card(idea, children) %}
-<details class="node card idea-card {{ idea.state }}{% if idea.id in working %} working{% endif %}" open
+<details class="node card idea-card {{ idea.state }}{% if idea.id in working %} working{% endif %}{% if idea.shape %} needs-{{ idea.shape }}{% endif %}" open
          data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}"
          data-drop="idea" draggable="true">
   <summary class="card-head">
@@ -18,12 +18,25 @@
     {% if idea.id in working %}
     <span class="pill working" title="an agent is working on this right now">in progress</span>
     {% else %}
+    {# What a background pass made of it, rendered as a reading rather than as a fact: it never
+       writes `state`, which is the column a person sets (agent_desk/ideas/appraise.py). #}
+    {% if idea.size %}
+    <span class="pill quiet size" title="how much work this looks like — read from the text, not an estimate">{{ says[idea.size] }}</span>
+    {% endif %}
     <span class="pill {{ idea.state }}">{{ idea.state }}</span>
     {% endif %}
   </summary>
 
   <div class="card-body">
     {% if idea.text != idea.summary %}<p class="last-line">{{ idea.text }}</p>{% endif %}
+    {% if idea.shape == "decide" %}
+    <p class="small attention-line" title="a reading of the text, not a fact about the world">
+      ⚑ {{ says["decide"] }} before anybody can start.</p>
+    {% elif idea.shape == "built" %}
+    {# Offered as a question with a button, never as a state: "this is already built" from a
+       reading of the text is exactly the claim CLAUDE.md's fifth rule says not to make. #}
+    <p class="small attention-line">🤔 This reads like something that already exists — is it?</p>
+    {% endif %}
     <div class="idea-buttons">
       {% if idea.state == "new" %}
       <form method="post" action="/ideas/{{ idea.id }}/keep"

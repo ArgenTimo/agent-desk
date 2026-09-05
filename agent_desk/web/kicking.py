@@ -33,6 +33,7 @@ from collections.abc import Sequence
 import structlog
 
 from agent_desk import dispatch
+from agent_desk.ideas import appraise
 from agent_desk.observe import registry
 from agent_desk.observe.model import Session
 from agent_desk.observe.shape import repository_of
@@ -230,3 +231,21 @@ async def run(store: Store) -> None:
             except Exception:
                 log.exception("kicking.tick_failed")
         await asyncio.sleep(TICK_SECONDS)
+
+
+# --- and the pass that reads the pool (agent_desk/ideas/appraise.py) -----------------------------
+# It lives beside this loop rather than in a fourth task because it is the same shape and the same
+# lifetime: slow, allowed to fail, and gone when the console is. Fifteen minutes because a
+# notebook does not change between blinks, and because reading an idea costs a model call.
+APPRAISE_SECONDS = 900.0
+
+
+async def appraising(store: Store) -> None:
+    """Read the ideas nobody has read yet, for as long as the console runs."""
+    while True:
+        with contextlib.suppress(asyncio.CancelledError):
+            try:
+                await appraise.sweep(store)
+            except Exception:
+                log.exception("ideas.sweep_failed")
+        await asyncio.sleep(APPRAISE_SECONDS)

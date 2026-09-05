@@ -31,6 +31,7 @@ from markupsafe import Markup, escape
 from agent_desk import dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
+from agent_desk.ideas import appraise
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -475,6 +476,7 @@ IDEA_SORTS: tuple[tuple[str, str], ...] = (
     ("oldest", "oldest first"),
     ("project", "by project"),
     ("state", "by what has happened to it"),
+    ("needs", "by what it needs next"),
 )
 IDEA_SORT_KEY = "ideas.sort"
 
@@ -483,6 +485,10 @@ IDEA_SORT_KEY = "ideas.sort"
 _NO_PROJECT = "\uffff"
 # The order states are read in: what is still a question first, what is settled last.
 _STATE_ORDER = {"new": 0, "kept": 1, "promoted": 2, "done": 3, "dropped": 4}
+# What a background pass made of an idea, in the order somebody would work through them: the ones
+# that need a decision first, because nothing else can start until those are made. Unread last —
+# an idea nobody has looked at is not a judgement about it (agent_desk/ideas/appraise.py).
+_SHAPE_ORDER = {"decide": 0, "ready": 1, "built": 2}
 
 
 def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
@@ -497,6 +503,8 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
         return sorted(roots, key=lambda idea: idea.project_key or _NO_PROJECT)
     if how == "state":
         return sorted(roots, key=lambda idea: _STATE_ORDER.get(idea.state, 9))
+    if how == "needs":
+        return sorted(roots, key=lambda idea: _SHAPE_ORDER.get(idea.shape or "", 9))
     return roots
 
 
@@ -529,6 +537,8 @@ async def render_ideas() -> str:
         children=children,
         sorts=IDEA_SORTS,
         sorted_by=how,
+        # The words the pass's two answers are shown as, in one place rather than in the template.
+        says=appraise.SAYS,
         counted=len(ideas),
         # A root with nothing under it is an idea, not a group of one.
         grouped=len([idea for idea in ideas if children.get(idea.id)]),

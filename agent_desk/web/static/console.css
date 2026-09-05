@@ -1133,3 +1133,14 @@ body.stale .col-left { opacity: 0.55; }
 .settings .glossary h3 { font-size: 12px; margin: 0 0 6px; font-weight: 600; }
 .settings .glossary .links strong { flex: 0 0 auto; }
 .settings .glossary label.tiny { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* What a background pass made of an idea. A colour and a word, and nothing is hidden or reordered
+   by it (agent_desk/ideas/appraise.py).
+
+   Amber for the ones that need a person to choose something, because that is what amber means
+   everywhere else on this page: look at this eventually. Never red — an idea waiting on a decision
+   is not stopped work, it is unstarted work, and red is reserved for stopped. */
+.idea-card.needs-decide { border-left-color: var(--attention); }
+.idea-card.needs-built { opacity: 0.85; }
+.pill.size { font-variant-numeric: tabular-nums; }
+.attention-line { color: var(--attention); margin: 4px 0 0; }

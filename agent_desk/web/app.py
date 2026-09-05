@@ -49,11 +49,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
             # Same lifetime, same kill switch: it runs while the console does.
             nudging = group.create_task(kicking.run(routes.store))
+            # And the pass that reads the idea pool, so a list of sixty is a list
+            # somebody can scan (agent_desk/ideas/appraise.py).
+            reading = group.create_task(kicking.appraising(routes.store))
             try:
                 yield
             finally:
                 watching.cancel()
                 nudging.cancel()
+                reading.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

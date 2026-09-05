@@ -290,6 +290,13 @@ class Idea(BaseModel):
     # Which project it is about, as a repository key. Editable, and defaulted rather than guessed:
     # a thought typed with nothing on the workbench is about the thing in front of you.
     project_key: str | None = None
+    # What a background pass made of it, kept apart from what a person made of it: `state` is the
+    # human's column and nothing here is ever written into it (022-idea-appraisal.sql). All three
+    # are nullable because "nobody has looked at this yet" is a real state, and a default that
+    # reads like a judgement is the guessed status CLAUDE.md's fifth rule is about.
+    size: str | None = None
+    shape: str | None = None
+    appraised_at: int | None = None
 
 
 class Viewer(BaseModel):
@@ -1453,12 +1460,40 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id, project_key FROM idea "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at FROM idea "
                     "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
                 ),
                 {"state": state, "limit": limit},
             )
             return [self._idea(row._mapping) for row in rows]
+
+    async def unappraised_ideas(self, limit: int = 5) -> list[Idea]:
+        """Ideas a background pass has not read yet (022-idea-appraisal.sql).
+
+        A handful at a time: the pass costs one model call each, and a sweep that took sixty in
+        one tick would be a sweep that hurts on the day somebody pastes a meeting into the box.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at "
+                    "FROM idea WHERE appraised_at IS NULL AND state IN ('new', 'kept') "
+                    "ORDER BY id DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
+            return [self._idea(row._mapping) for row in rows]
+
+    async def appraise_idea(self, idea_id: str, *, size: str, shape: str) -> None:
+        """What the pass made of it. Never touches `state`, which is the human's column."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE idea SET size = :size, shape = :shape, appraised_at = :t WHERE id = :id"
+                ),
+                {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
+            )
 
     # --- the names somebody uses for things (021-glossary.sql) --------------------------------
     async def add_term(self, *, repo_key: str, term: str, means: str) -> Term | None:
@@ -1584,7 +1619,8 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id, project_key FROM idea WHERE id = :id"
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at "
+                    "FROM idea WHERE id = :id"
                 ),
                 {"id": idea_id},
             )
