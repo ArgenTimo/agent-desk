@@ -82,6 +82,19 @@
   <span class="tree-count">in {{ grouped }} group{{ "" if grouped == 1 else "s" }}</span>
   {% endif %}
   <span class="spacer"></span>
+  {# Sixty ideas are not read from the end, they are searched — so the column can be ordered.
+     A form rather than a script: it works with no JavaScript, and the choice is kept in the
+     store because a server-sent event replaces this column every couple of seconds. #}
+  <form class="idea-sort" method="post" action="/ideas/sort"
+        hx-post="/ideas/sort" hx-target="#idea-list">
+    <label class="visually-hidden" for="idea-sort">order the ideas by</label>
+    <select id="idea-sort" name="how" onchange="this.form.requestSubmit()">
+      {% for name, says in sorts %}
+      <option value="{{ name }}"{% if name == sorted_by %} selected{% endif %}>{{ says }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="visually-hidden">order them</button>
+  </form>
   <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>
 </div>
 

@@ -864,3 +864,34 @@ async def test_a_whole_project_can_be_told_not_to_idle_one_session_at_a_time(
     status, _ = await _post("/projects/kicking", {"key": key, "kicking": "no"})
     assert status == 200
     assert not (await desk.kicking("dddddddd")).armed
+
+
+@pytest.mark.unit
+async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
+    home: Home, desk: Store
+) -> None:
+    """Sixty ideas are not read from the end, they are searched. The choice lives in the store
+    because a server-sent event replaces this column every couple of seconds."""
+    first = await desk.create_idea(text_="the older one", summary="older", source_kind="typed")
+    await desk.set_idea_project(first.id, "b:project")
+    second = await desk.create_idea(text_="the newer one", summary="newer", source_kind="typed")
+    await desk.set_idea_project(second.id, "a:project")
+
+    # Newest first without anybody choosing.
+    assert (await routes.render_ideas()).index("newer") < (await routes.render_ideas()).index(
+        "older"
+    )
+
+    status, column = await _post("/ideas/sort", {"how": "oldest"})
+    assert status == 200
+    assert column.index("older") < column.index("newer")
+    # And it is still that way on the next push, which is what a query parameter could not do.
+    again = await routes.render_ideas()
+    assert again.index("older") < again.index("newer")
+
+    status, column = await _post("/ideas/sort", {"how": "project"})
+    assert column.index("newer") < column.index("older")  # a:project before b:project
+
+    # A sort nobody offers changes nothing rather than raising.
+    await _post("/ideas/sort", {"how": "by vibes"})
+    assert await desk.setting(routes.IDEA_SORT_KEY) == "project"

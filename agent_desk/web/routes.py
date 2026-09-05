@@ -467,12 +467,46 @@ def render_message(
     )
 
 
+# How the ideas column may be ordered, and the word each one shows. Newest first is the default
+# because a notebook is read from the end; the others exist because a list of sixty is not read
+# from the end at all, it is searched.
+IDEA_SORTS: tuple[tuple[str, str], ...] = (
+    ("newest", "newest first"),
+    ("oldest", "oldest first"),
+    ("project", "by project"),
+    ("state", "by what has happened to it"),
+)
+IDEA_SORT_KEY = "ideas.sort"
+
+# Where an idea with no project sorts: last, and named rather than blank — "no project" is a fact
+# about it, and a group of them at the top would push the answered ones down.
+_NO_PROJECT = "\uffff"
+# The order states are read in: what is still a question first, what is settled last.
+_STATE_ORDER = {"new": 0, "kept": 1, "promoted": 2, "done": 3, "dropped": 4}
+
+
+def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
+    """The top-level ideas in the order somebody asked for. Newest first when nobody has.
+
+    Every order is a *stable* re-sort of newest-first, so two ideas in the same project or the
+    same state still read newest first inside their group — which is the order a notebook has.
+    """
+    if how == "oldest":
+        return list(reversed(roots))
+    if how == "project":
+        return sorted(roots, key=lambda idea: idea.project_key or _NO_PROJECT)
+    if how == "state":
+        return sorted(roots, key=lambda idea: _STATE_ORDER.get(idea.state, 9))
+    return roots
+
+
 async def render_ideas() -> str:
     """The bottom half of the right column: what has been written down.
 
     Dropped ideas are not shown here. The inbox keeps them — an idea's history is part of what the
     notebook is for — but a column somebody glances at is about what is still live.
     """
+    how = await store.setting(IDEA_SORT_KEY, "newest")
     ideas = [idea for idea in await store.ideas() if idea.state not in ("dropped", "done")]
     known = {idea.id for idea in ideas}
     children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
@@ -486,8 +520,10 @@ async def render_ideas() -> str:
             roots.append(idea)
     return env.get_template("_ideas.html").render(
         working=await store.ideas_in_flight(),
-        roots=list(reversed(roots)),
+        roots=_sorted_roots(list(reversed(roots)), how),
         children=children,
+        sorts=IDEA_SORTS,
+        sorted_by=how,
         counted=len(ideas),
         # A root with nothing under it is an idea, not a group of one.
         grouped=len([idea for idea in ideas if children.get(idea.id)]),
@@ -1064,6 +1100,24 @@ async def ask(request: Request) -> Response:
 @router.get("/blocks", response_class=HTMLResponse)
 async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
+
+
+@router.post("/ideas/sort", response_class=HTMLResponse)
+async def sort_ideas(request: Request) -> Response:
+    """How the ideas column is ordered. Kept in the store rather than in the URL.
+
+    The column is replaced by a server-sent event every couple of seconds, and a choice held in a
+    query parameter would last exactly until the next one — which is the shape of a control that
+    looks broken rather than one that is off.
+    """
+    form = await _form(request)
+    how = form.get("how", "newest").strip()
+    if how in {name for name, _ in IDEA_SORTS}:
+        await store.set_setting(IDEA_SORT_KEY, how)
+    panel = await render_ideas()
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
 
 
 @router.post("/ideas/{idea_id}/parent", response_class=HTMLResponse)

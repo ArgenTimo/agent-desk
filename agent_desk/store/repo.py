@@ -1417,6 +1417,25 @@ class Store:
             )
             return [self._idea(row._mapping) for row in rows]
 
+    # --- the handful of choices a person makes about the console itself -----------------------
+    async def setting(self, key: str, default: str = "") -> str:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT value FROM setting WHERE key = :key"), {"key": key}
+            )
+            row = rows.first()
+            return default if row is None else str(row[0])
+
+    async def set_setting(self, key: str, value: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO setting (key, value) VALUES (:key, :value) "
+                    "ON CONFLICT (key) DO UPDATE SET value = :value"
+                ),
+                {"key": key, "value": value},
+            )
+
     async def set_idea_project(self, idea_id: str, project_key: str | None) -> None:
         """Point an idea at a project, or at nothing in particular."""
         async with self.engine.begin() as conn:
