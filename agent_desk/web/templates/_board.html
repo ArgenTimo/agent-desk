@@ -113,6 +113,19 @@
             <a class="node-open" href="/sessions/{{ row.session.session_id }}/tail"
                data-card="session:{{ row.session.session_id }}">what it is doing…</a>
 
+            {# Answering it. This is the case docs/adr/0002 was written *for*: the words are
+               somebody's, the click is theirs, and it goes nowhere else. A session that is busy
+               gets no field — a message into work in progress is the half of 0002 that stands. #}
+            {% if row.session.kind == "bg" and row.session.status == "idle" %}
+            <form class="say" method="post" action="/sessions/{{ row.session.session_id }}/say"
+                  hx-post="/sessions/{{ row.session.session_id }}/say" hx-target="#message">
+              <label class="visually-hidden" for="say-{{ row.session.session_id }}">say something to this session</label>
+              <input id="say-{{ row.session.session_id }}" name="text" autocomplete="off"
+                     placeholder="answer it, or tell it what to do next…">
+              <button type="submit" title="send this to the session and let it carry on">↵</button>
+            </form>
+            {% endif %}
+
             {# The switch that will not let this session sit idle (docs/adr/0009). It is the
                explicit click docs/adr/0002 requires, so it says what it will do before it is
                pressed — and where it cannot be offered it says why instead of showing a button

@@ -1050,3 +1050,78 @@ async def test_an_idea_that_reads_as_already_built_is_a_question_not_a_claim(
     assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
     # And the button that would settle it is the one a person presses.
     assert f"/ideas/{idea.id}/done" in column
+
+
+@pytest.mark.unit
+async def test_a_background_session_can_be_answered_from_its_card(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case docs/adr/0002 was written *for*: "a message to a session is a deliberate human act
+    with a button behind it, never a side effect of a background loop"."""
+    import os
+    import time
+
+    sent: list[tuple[str, str]] = []
+
+    def fake_kick(
+        session_id: str, instruction: str, *, cwd: str, agent_id: str = ""
+    ) -> dispatch.Started:
+        sent.append((session_id, instruction))
+        return dispatch.Started(True, agent_id=agent_id)
+
+    monkeypatch.setattr(dispatch, "kick", fake_kick)
+    session_id = "ffffffff-0000-4000-8000-000000000006"
+    home.session(
+        os.getpid(),
+        session_id,
+        cwd=str(home.root.parent),
+        kind="bg",
+        status="idle",
+        updatedAt=int(time.time() * 1000),
+    )
+
+    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {}, {})
+    assert "answer it, or tell it what to do next" in board
+
+    status, panel = await _post(f"/sessions/{session_id}/say", {"text": "  use the other one  "})
+
+    assert status == 200
+    assert sent == [(session_id, "use the other one")]
+    assert "started" in panel or "agent" in panel
+
+    # Nothing typed sends nothing.
+    await _post(f"/sessions/{session_id}/say", {"text": "   "})
+    assert len(sent) == 1
+
+
+@pytest.mark.unit
+async def test_a_session_that_is_working_is_offered_no_field(home: Home, desk: Store) -> None:
+    """A message into work in progress is the half of docs/adr/0002 that stands whole."""
+    import os
+    import time
+
+    session_id = "0a0a0a0a-0000-4000-8000-000000000007"
+    home.session(
+        os.getpid(),
+        session_id,
+        cwd=str(home.root.parent),
+        kind="bg",
+        status="busy",
+        updatedAt=int(time.time() * 1000),
+    )
+
+    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {}, {})
+
+    assert "answer it, or tell it what to do next" not in board
+
+
+@pytest.mark.unit
+async def test_a_terminal_session_is_told_the_rule_rather_than_the_symptom(
+    home: Home, desk: Store
+) -> None:
+    session_id = _a_session(home)  # the fixture's session is interactive
+
+    status, panel = await _post(f"/sessions/{session_id}/say", {"text": "hello"})
+
+    assert status == 200
+    assert "only a background session" in panel

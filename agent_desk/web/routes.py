@@ -55,6 +55,7 @@ from agent_desk.store.repo import (
 )
 from agent_desk.web import autostart, blockers
 from agent_desk.web import blocks as block_runs
+from agent_desk.web import kicking as nudge
 
 router = APIRouter()
 
@@ -1463,6 +1464,50 @@ async def set_kicking_here(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))
+
+
+@router.post("/sessions/{session_id}/say", response_class=HTMLResponse)
+async def say_to_session(session_id: str, request: Request) -> Response:
+    """Answer a background session that is waiting for something, from its card.
+
+    This is the case docs/adr/0002 was written *for*, not against: "a message to a session is a
+    deliberate human act with a button behind it, never a side effect of a background loop." The
+    words are somebody's, the click is theirs, and it goes nowhere else.
+
+    The door is the one docs/adr/0009 found: `stop` keeps the conversation and `--bg --resume`
+    continues it. A session in a terminal has no such door and the card offers no field.
+    """
+    form = await _form(request)
+    said = form.get("text", "").strip()
+    rows, _ = await asyncio.to_thread(board)
+    row = next((r for r in rows if r.session.session_id == session_id), None)
+    if row is None or not said:
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail="that session is not on the board any more" if row is None else "nothing typed",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    refused = nudge.kickable(row.session)
+    if refused and row.session.kind not in nudge.KICKABLE_KINDS:
+        # A session in a terminal. The refusal names the rule rather than the symptom.
+        panel = env.get_template("_dispatch.html").render(started=False, detail=refused)
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    result = await asyncio.to_thread(
+        dispatch.kick,
+        row.session.session_id,
+        said,
+        cwd=row.session.cwd,
+        agent_id=session_id.split("-")[0],
+    )
+    panel = env.get_template("_dispatch.html").render(
+        started=result.started,
+        detail=result.detail,
+        agent_id=result.agent_id,
+        project=row.session.project,
+    )
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
 
 @router.post("/sessions/{session_id}/kicking", response_class=HTMLResponse)

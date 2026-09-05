@@ -1144,3 +1144,20 @@ body.stale .col-left { opacity: 0.55; }
 .idea-card.needs-built { opacity: 0.85; }
 .pill.size { font-variant-numeric: tabular-nums; }
 .attention-line { color: var(--attention); margin: 4px 0 0; }
+
+/* Answering a session from its card. One line, because it is a reply and not a brief — anything
+   longer belongs in the input field where it can be read before it is sent. */
+.card .say { display: flex; gap: 4px; margin-top: 0.35rem; }
+.card .say input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.card .say input:focus { border-color: var(--focus); outline: none; }
+.card .say button { flex: 0 0 auto; }
