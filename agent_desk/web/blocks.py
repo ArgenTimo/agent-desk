@@ -65,6 +65,16 @@ class Runs:
     def attach(self, group: asyncio.TaskGroup | None) -> None:
         self._group = group
 
+    @property
+    def running(self) -> bool:
+        """Is there a group to start a run in?
+
+        Asked by the one caller that starts a run nobody clicked for — the write-up drafted when
+        an idea is kept. Every other caller is behind a click that only exists while the console
+        is up, and a click that cannot run is a bug rather than a state to check for.
+        """
+        return self._group is not None
+
     def start(self, block_id: str, make: Callable[[], Coroutine[object, object, None]]) -> None:
         """Start one run, replacing any run already in flight for the same block.
 

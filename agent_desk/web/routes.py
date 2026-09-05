@@ -1879,6 +1879,17 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
             "kept" if action == "keep" else "dropped" if action == "drop" else "done"
         )
         await store.set_idea_state(idea_id, reached)
+        if reached == "kept":
+            # "Каждая идея при апруве преобразуется как минимум в часть документации." Keeping an
+            # idea is somebody saying it is worth doing, and the smallest useful thing to have
+            # afterwards is it written up — so the proposal is drafted there and then instead of
+            # waiting for a second click nobody makes.
+            #
+            # The *maximum* the idea asks for — a list of Jira tickets — stays a click, and that
+            # is docs/adr/0005 unchanged: filing into somebody else's queue is a door a human
+            # opens. The draft that would be filed is ready by the time they reach for it.
+            if block_runs.runs.running:
+                await block_runs.draft(store, idea, "proposal")
     elif action == "summary":
         summary = form.get("summary", "").strip()
         if summary:

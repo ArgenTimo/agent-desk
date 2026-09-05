@@ -289,7 +289,15 @@ async def test_asking_for_a_draft_promotes_the_idea(desk: Store, fake_claude: pa
     stored = await desk.idea(idea.id)
     assert stored is not None
     assert stored.state == "promoted"
-    assert [d.kind for d in await desk.drafts_for(idea.id)] == ["paste"]
+
+    # Keeping it wrote the proposal on its own — "каждая идея при апруве преобразуется как минимум
+    # в часть документации" — and that is a run, so it lands when it lands. Both are there; which
+    # arrived first is not the subject of this test.
+    async def written() -> bool:
+        return len(blocks.runs) == 0
+
+    await _settle(written)
+    assert {d.kind for d in await desk.drafts_for(idea.id)} == {"proposal", "paste"}
 
 
 @pytest.mark.unit
@@ -729,3 +737,43 @@ async def test_a_related_run_that_cannot_run_names_nothing(monkeypatch: pytest.M
     monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
 
     assert await classify.related("do the thing", ["an idea"]) == []
+
+
+@pytest.mark.unit
+async def test_keeping_an_idea_writes_it_up_without_a_second_click(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """ "Каждая идея при апруве преобразуется как минимум в часть документации." Keeping an idea is
+    somebody saying it is worth doing, and the smallest useful thing to have afterwards is it
+    written up — so the proposal is drafted there and then."""
+    await blocks.submit(desk, "/idea cache the probes", [])
+    (idea,) = await desk.ideas()
+
+    await _card_post(f"/ideas/{idea.id}/keep", {"from": "card"})
+
+    # The write-up is a run, so it lands when it lands.
+    async def written() -> bool:
+        return len(blocks.runs) == 0
+
+    await _settle(written)
+
+    assert [d.kind for d in await desk.drafts_for(idea.id)] == ["proposal"]
+    # And it stays `kept`: a write-up nobody asked for does not promote it past what a person said.
+    assert (await desk.idea(idea.id)).state == "kept"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_discarding_an_idea_writes_nothing(desk: Store, fake_claude: pathlib.Path) -> None:
+    """The maximum the idea asks for — a list of Jira tickets — stays a click, and so does every
+    other door out of this program (docs/adr/0005)."""
+    await blocks.submit(desk, "/idea never mind", [])
+    (idea,) = await desk.ideas()
+
+    await _card_post(f"/ideas/{idea.id}/drop", {"from": "card"})
+
+    async def nothing_running() -> bool:
+        return len(blocks.runs) == 0
+
+    await _settle(nothing_running)
+
+    assert await desk.drafts_for(idea.id) == []
