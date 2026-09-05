@@ -139,6 +139,40 @@ def introduce(who: str, *, project: str, doing: str = "", env_names: Sequence[st
     return "\n".join(lines)
 
 
+def go_looking(project: str) -> str:
+    """What an agent is told when it was sent to find its own work (docs/adr/0008).
+
+    Every clause of this is a fence. One thing, because an agent asked to improve a project
+    without a bound improves it until its context runs out. Something already there, because
+    fixing is maintenance and inventing is design — and design is the human's. A test, because a
+    fix nobody can check is a claim. And stop, because the next thing it finds is the next run's.
+    """
+    return "\n".join(
+        [
+            f"Nothing is queued for {project}, so you were sent to find one thing worth fixing.",
+            "",
+            "Find exactly one, of these kinds and no others:",
+            "- something that is broken, or wrong at an edge nobody covered",
+            "- a behaviour the documentation or a docstring claims and the code no longer does",
+            "- a test that is missing where a mistake would be silent",
+            "- a dependency with a known advisory, or an obvious vulnerability in this code",
+            "- code nothing reaches any more",
+            "",
+            "Then: make the smallest change that fixes it, prove it with a test that fails without",
+            "the change, and run whatever this repository uses as its gate. Stop there — the next",
+            "thing you find is the next run's, and a branch with one clear fix in it is worth more",
+            "than one with five.",
+            "",
+            "What you must not do: add a feature, change an interface anybody depends on, rewrite",
+            "something that works, or start a redesign. You were not asked to improve the product;",
+            "you were asked to fix what is already there. If you find nothing worth a change, say",
+            "so and stop — that is a good outcome and it costs nobody anything.",
+            "",
+            "Write in the commit message what you found and how you know it was real.",
+        ]
+    )
+
+
 def _worktree_name(name: str) -> str:
     """A branch-shaped name from whatever a human typed. Bounded, because it becomes a directory."""
     kept = [character if character.isalnum() else "-" for character in name.lower()]

@@ -143,7 +143,11 @@ class Task(BaseModel):
 
 
 class Autostart(BaseModel):
-    """Whether one project may start its own queued work, and what it has spent doing it."""
+    """What one project is allowed to do on its own, and what it has spent doing it.
+
+    Two switches, because they are two decisions (docs/adr/0008): `armed` starts work somebody
+    queued, and `exploring` goes looking for something to fix when there is nothing queued.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -152,10 +156,16 @@ class Autostart(BaseModel):
     per_hour: int = 2
     failures: int = 0
     disarmed_why: str | None = None
+    exploring_at: int | None = None
+    per_day: int = 3
 
     @property
     def armed(self) -> bool:
         return self.armed_at is not None
+
+    @property
+    def exploring(self) -> bool:
+        return self.exploring_at is not None
 
 
 class Filing(BaseModel):
@@ -874,8 +884,8 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why FROM autostart "
-                    "WHERE repo_key = :repo_key"
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
+                    "exploring_at, per_day FROM autostart WHERE repo_key = :repo_key"
                 ),
                 {"repo_key": repo_key},
             )
@@ -886,11 +896,46 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why FROM autostart "
-                    "WHERE armed_at IS NOT NULL"
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
+                    "exploring_at, per_day FROM autostart "
+                    "WHERE armed_at IS NOT NULL OR exploring_at IS NOT NULL"
                 )
             )
             return [Autostart(**row._mapping) for row in rows]
+
+    async def explore(self, repo_key: str, *, per_day: int, on: bool) -> None:
+        """Switch exploring on or off for one project (docs/adr/0008).
+
+        Separate from arming on purpose: "start what I queued" and "find something to do" are
+        different permissions, and a project can have the first without the second.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
+                    "disarmed_why, exploring_at, per_day) VALUES (:repo_key, NULL, 2, 0, NULL, "
+                    ":t, :per_day) ON CONFLICT (repo_key) DO UPDATE SET exploring_at = :t, "
+                    "per_day = :per_day"
+                ),
+                {
+                    "repo_key": repo_key,
+                    "t": _now_ms() if on else None,
+                    "per_day": max(1, min(per_day, 12)),
+                },
+            )
+
+    async def explored_since(self, repo_key: str, since_ms: int) -> int:
+        """How much of the day's budget this project has spent looking for work of its own."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM task WHERE repo_key = :repo_key "
+                    "AND source_kind = 'found' AND started_at IS NOT NULL AND started_at >= :since"
+                ),
+                {"repo_key": repo_key, "since": since_ms},
+            )
+            row = rows.first()
+            return int(row._mapping["n"]) if row else 0
 
     async def arm(self, repo_key: str, *, per_hour: int) -> None:
         """Switch it on for one project. Arming clears whatever disarmed it last time."""

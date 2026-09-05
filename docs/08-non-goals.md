@@ -12,12 +12,15 @@ stopping somebody else's terminal. The board watches the sessions it did not sta
 identity, permissions. **Entry condition:** never, in this program. If it is wanted, it is a
 different one ([adr/0001](adr/0001-a-separate-repository.md)).
 
-**Narrowed twice, and the ADRs carry the argument.** The console may *start* a background agent in
+**Narrowed three times, and the ADRs carry the argument.** The console may *start* a background agent in
 a worktree of its own when a human clicks ([adr/0006](adr/0006-the-desk-may-start-work.md)), and a
 loop may decide *when* to start something a human already queued
-([adr/0007](adr/0007-a-loop-that-decides-when-not-what.md)). Both are about work this program
-creates and can stop. Neither touches a session somebody else is sitting in, which is what this
-section was written to protect.
+([adr/0007](adr/0007-a-loop-that-decides-when-not-what.md)), and a project switched on for it may
+send one agent to *find* something worth fixing when its queue is empty
+([adr/0008](adr/0008-an-agent-that-finds-its-own-work.md)) — fixing, never designing, everything it
+produces marked as its own, and never merged. All three are about work this program creates and
+can stop. None of them touches a session somebody else is sitting in, which is what this section
+was written to protect.
 
 ## 2. Sending work to a busy session
 

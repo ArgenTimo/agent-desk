@@ -167,7 +167,9 @@ a session that does not exist yet has no context to displace. It can be stopped 
 cannot be steered from here.
 
 [adr/0007](adr/0007-a-loop-that-decides-when-not-what.md) allows a loop to decide **when** to start
-something a human already queued — and nothing else. It never invents a task, never reads a
+something a human already queued, and [adr/0008](adr/0008-an-agent-that-finds-its-own-work.md) lets
+a project that was switched on for it find its own work when the queue is empty — one defect at a
+time, marked as found by an agent wherever it appears, never merged. It never invents a task, never reads a
 tracker for work, and never queues anything itself. It is off in every project until somebody arms
 that one, starts one agent at a time, spends a small hourly budget, runs only while this console
 is open, and switches itself off after two starts in a row fail. What it will not do is the half

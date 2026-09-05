@@ -706,3 +706,49 @@ async def test_a_project_card_counts_what_this_console_started(home: Home, desk:
         routes.render_board, await desk.groups(), await routes.board_links(), counted
     )
     assert "1/0/1" in board
+
+
+@pytest.mark.unit
+async def test_the_second_switch_says_what_it_will_do_before_it_is_pressed(
+    home: Home, desk: Store
+) -> None:
+    """docs/adr/0008: what it authorises is a machine deciding what is worth doing, so the page
+    says so in a sentence and the queue marks everything it produces."""
+    key = await _the_project(home)
+
+    status, panel = await _post("/explore", {"key": key, "exploring": "yes", "per_day": "2"})
+    assert status == 200
+    assert "Exploring:" in panel
+    assert "It fixes; it does not design, and it never merges." in panel
+    arming = await desk.autostart(key)
+    assert arming.exploring is True
+    assert arming.per_day == 2
+    # Two switches, two decisions: this one did not arm the queue.
+    assert arming.armed is False
+
+    status, panel = await _post("/explore", {"key": key, "exploring": "no"})
+    assert status == 200
+    assert "It starts only what you put in the queue." in panel
+    assert (await desk.autostart(key)).exploring is False
+
+    # A budget that is not a number falls back rather than failing.
+    status, _ = await _post("/explore", {"key": key, "exploring": "yes", "per_day": "lots"})
+    assert (await desk.autostart(key)).per_day == 3
+
+
+@pytest.mark.unit
+async def test_work_an_agent_found_is_marked_as_its_own_in_the_queue(
+    home: Home, desk: Store
+) -> None:
+    key = await _the_project(home)
+    await desk.queue_task(
+        repo_key=key,
+        cwd=str(home.root),
+        title="looking for something to fix",
+        instruction="go and look",
+        source_kind="found",
+    )
+
+    panel = await routes.render_project(key)
+
+    assert "found by an agent" in panel

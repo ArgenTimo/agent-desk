@@ -274,3 +274,102 @@ async def test_a_human_can_put_a_built_idea_back(desk: Store) -> None:
     await desk.set_idea_state(idea.id, "kept")
 
     assert (await desk.idea(idea.id)).state == "kept"  # type: ignore[union-attr]
+
+
+# --- an agent that finds its own work (docs/adr/0008) ---------------------------------------------
+@pytest.mark.unit
+async def test_nothing_is_explored_in_a_project_that_was_not_switched_on(
+    desk: Store, tmp_path: pathlib.Path, started: list[str]
+) -> None:
+    """Arming the queue says "start what I put here"; exploring is a second decision."""
+    await desk.arm(KEY, per_hour=5)
+
+    assert await autostart.tick(desk, live=set()) is None
+    assert started == []
+    assert await autostart.why_not_explore(desk, KEY, live=set()) == "not exploring"
+
+
+@pytest.mark.unit
+async def test_queued_work_always_comes_before_anything_it_finds(
+    desk: Store, tmp_path: pathlib.Path, started: list[str]
+) -> None:
+    """Exploration happens when there is nothing a human chose, and never instead of it."""
+    await desk.arm(KEY, per_hour=5)
+    await desk.explore(KEY, per_day=3, on=True)
+    await _queue(desk, tmp_path, "what a person asked for")
+
+    task = await autostart.tick(desk, live=set())
+
+    assert task is not None and task.title == "what a person asked for"
+    assert task.source_kind == "typed"
+    assert len(started) == 1
+
+
+@pytest.mark.unit
+async def test_with_an_empty_queue_it_goes_looking_and_says_so(
+    desk: Store, tmp_path: pathlib.Path, started: list[str]
+) -> None:
+    """And what it produces is marked as its own, which is the whole of docs/adr/0008."""
+    await desk.explore(KEY, per_day=3, on=True)
+    # It needs somewhere to work: a project it has run something in before.
+    done = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="an earlier task",
+        instruction="earlier",
+        source_kind="typed",
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(done.id, "old")
+    await desk.finish_task(done.id)
+
+    found = await autostart.tick(desk, live=set())
+
+    assert found is not None
+    assert found.source_kind == "found"
+    assert "looking for something to fix" in found.title
+    # One thing, small, tested, and not a redesign.
+    assert "exactly one" in started[0]
+    assert "must not do: add a feature" in started[0]
+
+
+@pytest.mark.unit
+async def test_the_day_s_budget_stops_it_looking_again(
+    desk: Store, tmp_path: pathlib.Path, started: list[str]
+) -> None:
+    await desk.explore(KEY, per_day=1, on=True)
+    seed = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(seed.id, "old")
+    await desk.finish_task(seed.id)
+
+    first = await autostart.tick(desk, live=set())
+    assert first is not None
+    (running,) = [t for t in await desk.tasks() if t.source_kind == "found"]
+    await desk.finish_task(running.id)
+
+    assert await autostart.tick(desk, live=set()) is None
+    assert len(started) == 1
+    assert "day's budget is spent" in await autostart.why_not_explore(desk, KEY, live=set())
+
+
+@pytest.mark.unit
+async def test_it_does_not_look_while_its_own_agent_is_still_out(
+    desk: Store, tmp_path: pathlib.Path, started: list[str]
+) -> None:
+    """One agent per project, whatever started it."""
+    await desk.explore(KEY, per_day=9, on=True)
+    seed = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(seed.id, "agent1")
+    await desk.finish_task(seed.id)
+
+    await autostart.tick(desk, live=set())
+    assert len(started) == 1
+
+    assert await autostart.tick(desk, live={"agent1"}) is None
+    assert len(started) == 1

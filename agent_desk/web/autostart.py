@@ -14,12 +14,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from pathlib import Path
 
 import structlog
 
 from agent_desk import dispatch
 from agent_desk.observe import registry
-from agent_desk.store.repo import Store, Task
+from agent_desk.store.repo import Autostart, Store, Task
 
 log = structlog.get_logger()
 
@@ -32,6 +33,10 @@ TICK_SECONDS = 30.0
 # than by a person, is the shape of the mess docs/adr/0007 is careful about.
 WINDOW_MS = 60 * 60 * 1000
 AT_ONCE = 1
+
+# A day, for the budget that bounds an agent looking for its own work. Exploration is not urgent
+# by definition, and an hourly budget for it would be an invitation (docs/adr/0008).
+DAY_MS = 24 * 60 * 60 * 1000
 
 # Two consecutive failures disarm a project. A rule that keeps firing into a broken condition — a
 # full disk, an expired token, a worktree that will not create — is the three-in-the-morning
@@ -135,6 +140,77 @@ async def settle(store: Store, live: set[str]) -> list[str]:
     return settled
 
 
+async def _may_explore(store: Store, arming: Autostart, live: set[str]) -> str:
+    """Why this project may not go looking right now, or an empty string (docs/adr/0008).
+
+    The queue comes first, always: exploration happens when there is nothing a human chose, and
+    the moment something is queued the queue wins.
+    """
+    if not arming.exploring:
+        return "not exploring"
+    if await running_for(store, arming.repo_key, live) >= AT_ONCE:
+        return "one is already running"
+    if any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
+        return "there is queued work, which comes first"
+    spent = await store.explored_since(arming.repo_key, int(time.time() * 1000) - DAY_MS)
+    if spent >= arming.per_day:
+        return f"the day's budget is spent ({spent} of {arming.per_day})"
+    return ""
+
+
+async def why_not_explore(store: Store, repo_key: str, live: set[str] | None = None) -> str:
+    """The reason this project is not looking for work right now, in the loop's own words."""
+    if live is None:
+        live = await asyncio.to_thread(live_agents)
+    return await _may_explore(store, await store.autostart(repo_key), live)
+
+
+async def _explore(store: Store, arming: Autostart) -> Task | None:
+    """Send one agent to find one thing worth fixing, and mark what it produces as its own.
+
+    The marking is the whole of docs/adr/0008: a queue that mixes what somebody asked for with
+    what a machine proposed is a queue that has stopped meaning anything.
+    """
+    cwd = arming.repo_key.split(":", 1)[1] if arming.repo_key.startswith("desk:") else ""
+    if not cwd:
+        # Only a project whose checkout this program knows. The queue's tasks carry their own
+        # directory; an exploration has none until one is found here.
+        for task in await store.tasks(repo_key=arming.repo_key):
+            cwd = task.cwd
+            break
+    if not cwd or not Path(cwd).is_dir():
+        return None
+
+    project = Path(cwd).name
+    task = await store.queue_task(
+        repo_key=arming.repo_key,
+        cwd=cwd,
+        title=f"looking for something to fix in {project}",
+        instruction=dispatch.go_looking(project),
+        source_kind="found",
+    )
+    await store.take_next_task(arming.repo_key)
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.build_task(dispatch.go_looking(project), project=project),
+        cwd=cwd,
+        name=f"found-{project}",
+    )
+    if result.started:
+        await store.task_started(task.id, result.agent_id)
+        await store.clear_failures(arming.repo_key)
+        log.info("autostart.exploring", repo=arming.repo_key, agent=result.agent_id)
+        return task
+
+    await store.task_failed(task.id, result.detail)
+    failures = await store.note_failure(arming.repo_key)
+    if failures >= FAILURES_BEFORE_DISARM:
+        await store.disarm(
+            arming.repo_key, why=f"two starts in a row failed: {result.detail}"[:300]
+        )
+    return task
+
+
 async def tick(store: Store, live: set[str] | None = None) -> Task | None:
     """One pass: settle what has finished, then start at most one thing that may start."""
     armed = await store.armed_projects()
@@ -148,15 +224,19 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
     await settle(store, live)
 
     for arming in armed:
-        if await why_not(store, arming.repo_key, live):
-            continue
-        task = await store.take_next_task(arming.repo_key)
-        if task is None:
-            continue
-        await _start(store, task)
-        # One start per tick, across every project. Nothing here is urgent, and a burst is the
-        # thing this file exists to not do.
-        return task
+        if not await why_not(store, arming.repo_key, live):
+            task = await store.take_next_task(arming.repo_key)
+            if task is not None:
+                await _start(store, task)
+                # One start per tick, across every project. Nothing here is urgent, and a burst is
+                # the thing this file exists to not do.
+                return task
+
+        # Nothing queued, and this project was told it may find something (docs/adr/0008).
+        if not await _may_explore(store, arming, live):
+            found = await _explore(store, arming)
+            if found is not None:
+                return found
     return None
 
 

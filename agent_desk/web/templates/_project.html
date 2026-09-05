@@ -106,6 +106,11 @@
     {% for task in tasks %}
     <li class="task {{ 'failed' if task.failed_at else 'running' if task.started_at else 'waiting' }}">
       <span class="task-title" title="{{ task.instruction }}">{{ task.title }}</span>
+      {% if task.source_kind == "found" %}
+      {# Marked, because a queue that mixes what somebody asked for with what a machine proposed
+         is a queue that has stopped meaning anything (docs/adr/0008). #}
+      <span class="pill quiet" title="nobody asked for this one — an agent found it">found by an agent</span>
+      {% endif %}
       {% if task.agent_id %}
       <span class="pill agent-started" title="a background agent is on it">{{ task.agent_id }}</span>
       {% elif task.failed_at %}
@@ -160,6 +165,30 @@
       {% else %}
       Off. Nothing here starts without you.
       {% if arming.disarmed_why %}<br>It switched off because {{ arming.disarmed_why }}.{% endif %}
+      {% endif %}
+    </span>
+  </form>
+
+  {# The second switch (docs/adr/0008). It says what it will do in a sentence before it is
+     pressed, because what it authorises is a machine deciding what is worth doing — and
+     everything it produces is marked as its own so that no queue mixes the two. #}
+  <form class="arming" method="post" action="/explore" hx-post="/explore" hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <input type="hidden" name="exploring" value="{{ 'no' if arming.exploring else 'yes' }}">
+    <label class="visually-hidden" for="per-day">runs allowed per day</label>
+    <input id="per-day" name="per_day" type="number" min="1" max="12"
+           value="{{ arming.per_day }}" {{ 'disabled' if arming.exploring }}>
+    <button type="submit" class="{{ '' if arming.exploring else 'send' }}">
+      {{ "Stop looking for its own work" if arming.exploring else "Let it find its own work" }}
+    </button>
+    <span class="small dim">
+      {% if arming.exploring %}
+      Exploring: when nothing is queued here, one agent goes looking for a defect, a missing test,
+      a stale docstring or a known advisory — at most {{ arming.per_day }} a day, one at a time,
+      each in a worktree of its own. It fixes; it does not design, and it never merges.
+      {% if explore_why %}<br>Right now: {{ explore_why }}.{% endif %}
+      {% else %}
+      Off. It starts only what you put in the queue.
       {% endif %}
     </span>
   </form>

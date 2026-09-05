@@ -671,6 +671,7 @@ async def render_project(key: str, refused: str = "") -> str:
         arming=await store.autostart(key),
         # The console says exactly what the loop decided, because it asks the same function.
         why_not=await autostart.why_not(store, key),
+        explore_why=await autostart.why_not_explore(store, key),
     )
 
 
@@ -1226,6 +1227,27 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         agent_id=result.agent_id,
         project=named.name,
     )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/explore", response_class=HTMLResponse)
+async def set_exploring(request: Request) -> Response:
+    """Let a project find its own work when its queue is empty (docs/adr/0008).
+
+    A second switch rather than a wider one: arming says "start what I put here", this says "and
+    when there is nothing, find something". Two decisions, made separately.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    if key:
+        try:
+            per_day = int(form.get("per_day", "3"))
+        except ValueError:
+            per_day = 3
+        await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes")
+    panel = await render_project(key)
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))
