@@ -83,7 +83,19 @@ request whose `Sec-Fetch-Site` says it came from another page is refused. A requ
 metadata is not a browser: it is a script run by the same operating-system user, who can already
 read `~/.claude/` and needs no form.
 
-No outbound network calls. The `claude` CLI makes its own; this tool makes none.
+**One outbound network call, and it is drawn narrowly.** For most of this program's life there
+were none — the `claude` CLI makes its own, and this tool made none at all. Filing an idea in Jira
+([adr/0005](adr/0005-one-door-out-to-a-tracker.md)) is the exception, and every clause of it is a
+limit: one host, named in a link a human typed on a project card; one request, made only when
+somebody clicks the second of two buttons; one payload, the ticket draft that person had already
+read. No polling, no retry, no read back, and no other destination.
+
+The credential for it is **not in this program**. `project_link.token_env` records the *name* of
+an environment variable, the value is read from the environment at the moment of the request and
+passed straight into it, and nothing logs it: a network failure reports the exception type and the
+host, never the call. There is no field anywhere in this console to type a token into, because a
+token in a SQLite file with no encryption, in the process that also serves a page to other people,
+is exactly the thing this page exists to refuse.
 
 ## Phase 4, where the model changed
 

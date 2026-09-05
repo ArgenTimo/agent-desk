@@ -66,8 +66,16 @@ An idea can grow up. The actions are:
 | **Draft a ticket** | the same, shaped as a ticket body, on the clipboard |
 | **Copy for a session** | the text, formatted to paste into a session yourself, at a moment you choose |
 
-All three produce **text in this tool**. None of them writes into another repository, opens a pull
-request, or files a ticket.
+All three produce **text in this tool**. None of them writes into another repository or opens a
+pull request.
+
+**One of them can now leave, and only by hand.** A ticket that has been drafted can be filed in
+Jira: the ticket is rendered in full beside the project it would land in, and a button sends it.
+Three human acts stand between a typed thought and an issue — keep it, draft it, file it — and
+there is no path to that route that does not pass through a person. It creates an issue and stops:
+nothing reads the tracker back, nothing retries, nothing files anything on a signal. That is
+[adr/0005](adr/0005-one-door-out-to-a-tracker.md), which exists because the rule below said it
+would have to.
 
 That is the rule this page exists for, and it is worth being explicit about why, because "integrate
 into the documentation" is the button everyone wants:
@@ -83,7 +91,10 @@ repository through that repository's normal path — a branch, a review, a gate.
 to make sure the thought was still there and still had its context. It did that.
 
 **Corollary for anyone extending this:** an action that writes outside `~/.local/share/agent-desk/`
-is not a feature of the ideas module. If one is ever wanted, it is an ADR, not a commit.
+is not a feature of the ideas module. If one is ever wanted, it is an ADR, not a commit. One was
+wanted, and it is [adr/0005](adr/0005-one-door-out-to-a-tracker.md) — which narrows rather than
+lifts the rule: what leaves is a document a human generated on purpose, read on a screen, and
+pressed a button to send.
 
 ## Where the non-technical teammate fits
 

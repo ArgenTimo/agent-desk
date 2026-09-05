@@ -41,7 +41,17 @@
         <input type="hidden" name="from" value="column">
         <button type="submit" title="write it up as a ticket, in this tool">draft a ticket</button>
       </form>
-      {% endif %}
+    {% endif %}
+    {% if idea.id in filings %}
+    <a class="as-button" href="{{ filings[idea.id].url }}" target="_blank" rel="noreferrer noopener"
+       title="this idea is already an issue">{{ filings[idea.id].issue_key }}</a>
+    {% elif idea.id in drafted and idea.state in ("kept", "promoted") %}
+    {# The third of the three human acts docs/adr/0005 puts between a thought and an issue. It
+       opens the ticket in full beside where it would land; the button that sends it is there. #}
+    <a class="as-button" href="/ideas/{{ idea.id }}/file"
+       hx-get="/ideas/{{ idea.id }}/file" hx-target="#message"
+       title="read it once more, then file it">file it…</a>
+    {% endif %}
     </div>
   </div>
 </div>

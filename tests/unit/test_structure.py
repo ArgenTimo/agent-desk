@@ -23,10 +23,12 @@ PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 #                       by name in design/02-data-model.md.
 #   answer/session.py   the stream-json of a subprocess this program started itself, which
 #                       design/01-module-layout.md names as this module's job.
+#   tracker/jira.py     the answer to a request this program made a second earlier, which is the
+#                       only thing that module does at all (docs/adr/0005).
 #
-# Both are paths, not categories. A third module that starts parsing JSON still fails this test,
-# which is the point of it.
-_NOT_AN_ON_DISK_FORMAT = {"store/repo.py", "answer/session.py"}
+# All three are paths, not categories. A fourth module that starts parsing JSON still fails this
+# test, which is the point of it.
+_NOT_AN_ON_DISK_FORMAT = {"store/repo.py", "answer/session.py", "tracker/jira.py"}
 
 
 def _modules() -> list[Path]:
@@ -115,6 +117,29 @@ def test_only_web_imports_the_write_path() -> None:
     assert not offenders, (
         "only agent_desk/web/ may import the peer-messaging path (docs/adr/0002); "
         f"found in: {offenders}"
+    )
+
+
+@pytest.mark.unit
+def test_only_web_imports_the_door_to_a_tracker() -> None:
+    """docs/adr/0005: filing an idea is a human clicking a button, structurally.
+
+    `tracker` is the second door out of this program, and it gets the second half of the rule that
+    guards the first. A background task that could reach it would make "one direction, once, on a
+    click" a sentence in a document rather than a property of the code.
+    """
+    offenders = []
+    for path in _modules():
+        rel = path.relative_to(PKG)
+        if rel.parts[0] in {"web", "tracker"}:
+            continue
+        if any(
+            name.startswith(("agent_desk.tracker", "tracker.")) for name in _imported_names(path)
+        ):
+            offenders.append(str(rel))
+
+    assert not offenders, (
+        f"only agent_desk/web/ may import the tracker path (docs/adr/0005); found in: {offenders}"
     )
 
 

@@ -1,0 +1,42 @@
+{# The second step of the one door out (docs/adr/0005): the ticket rendered in full, beside the
+   place it would land, and then a button. No shortcut between the two — the cost of the next step
+   is somebody else's queue. #}
+{% if stage == "gone" %}
+<p class="empty">{{ detail }}</p>
+
+{% elif stage == "filed" %}
+<div class="delivered">
+  <header>filed as <a href="{{ url }}" target="_blank" rel="noreferrer noopener">{{ key }}</a></header>
+  <p class="detail">What happens to it now is Jira's to answer; this program does not ask.</p>
+  <footer><a class="as-button" href="/">Close</a></footer>
+</div>
+
+{% elif stage == "refused" %}
+<div class="refused">
+  <header>not filed</header>
+  <p class="detail">{{ detail }}</p>
+  {# Nothing retried it, and nothing will: a retry loop against somebody's tracker is the
+     automatic queue docs/adr/0005 exists to avoid, arriving through the back door. #}
+  <pre class="full">{{ body }}</pre>
+  <footer><a class="as-button" href="/">Close</a></footer>
+</div>
+
+{% else %}
+<div class="confirm">
+  <header>
+    this would create an issue in <span class="target">{{ destination.project_key }}</span>
+    <span class="dim">· {{ destination.site }} · as {{ destination.token_env }}</span>
+  </header>
+  <p class="detail small">It is the ticket you drafted, sent as it is. Nothing is improved on the
+    way out: what you read is what lands.</p>
+  <pre class="full">{{ body }}</pre>
+  <form method="post" action="/ideas/{{ idea.id }}/file"
+        hx-post="/ideas/{{ idea.id }}/file" hx-target="#message">
+    <input type="hidden" name="key" value="{{ repo_key }}">
+    <footer>
+      <button type="submit" class="send">File it</button>
+      <a class="as-button" href="/">Cancel</a>
+    </footer>
+  </form>
+</div>
+{% endif %}

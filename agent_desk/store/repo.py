@@ -90,6 +90,19 @@ class Directive(BaseModel):
     sent_at: int | None = None
 
 
+class Filing(BaseModel):
+    """Where an idea went, once a human sent it there (docs/adr/0005)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    idea_id: str
+    tracker: str
+    issue_key: str
+    url: str
+    created_at: int
+
+
 class ProjectLink(BaseModel):
     """Somewhere a project also lives: a board, a repository page, a dashboard.
 
@@ -585,6 +598,51 @@ class Store:
         fields["context"] = scrub_optional(fields["context"])
         return Block(**fields)
 
+    # --- what left through the one door ------------------------------------------------------
+    async def record_filing(
+        self, *, idea_id: str, tracker: str, issue_key: str, url: str
+    ) -> Filing:
+        """Written after the issue exists, so a row here means an issue there."""
+        filing = Filing(
+            id=_new_id(),
+            idea_id=idea_id,
+            tracker=tracker,
+            issue_key=issue_key,
+            url=url,
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO filing (id, idea_id, tracker, issue_key, url, created_at) "
+                    "VALUES (:id, :idea_id, :tracker, :issue_key, :url, :created_at)"
+                ),
+                filing.model_dump(),
+            )
+        return filing
+
+    async def filings(self) -> list[Filing]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
+                    "ORDER BY created_at DESC"
+                )
+            )
+            return [Filing(**row._mapping) for row in rows]
+
+    async def filing_of(self, idea_id: str) -> Filing | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
+                    "WHERE idea_id = :idea_id"
+                ),
+                {"idea_id": idea_id},
+            )
+            row = rows.first()
+            return None if row is None else Filing(**row._mapping)
+
     # --- where a project also lives ----------------------------------------------------------
     async def set_link(
         self, *, repo_key: str, name: str, url: str, token_env: str | None = None
@@ -902,6 +960,18 @@ class Store:
                 draft.model_dump(),
             )
         return draft
+
+    async def drafted(self, kind: DraftKind) -> set[str]:
+        """The ideas that have a draft of this kind, which is the same as "somebody read one".
+
+        Filing needs it: what goes to a tracker is the ticket a human asked for and could read,
+        never a body generated on the way out (docs/adr/0005).
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT DISTINCT idea_id FROM draft WHERE kind = :kind"), {"kind": kind}
+            )
+            return {str(row._mapping["idea_id"]) for row in rows}
 
     async def drafts_for(self, idea_id: str) -> list[Draft]:
         async with self.engine.connect() as conn:

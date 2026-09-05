@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import peer
+from agent_desk import peer, tracker
 from agent_desk.config import settings
 from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import (
@@ -331,6 +331,8 @@ async def render_blocks() -> str:
     directives = {d.block_id: d for d in await store.directives()}
     return env.get_template("_blocks.html").render(
         blocks=rows,
+        drafted=await store.drafted("ticket"),
+        filings={filing.idea_id: filing for filing in await store.filings()},
         open_threads=open_threads + missing,
         threads_by_id={thread.id: thread for thread in open_threads + missing},
         ideas=ideas,
@@ -365,7 +367,11 @@ async def render_ideas() -> str:
     notebook is for — but a column somebody glances at is about what is still live.
     """
     ideas = [idea for idea in await store.ideas() if idea.state != "dropped"]
-    return env.get_template("_ideas.html").render(ideas=ideas[:40])
+    return env.get_template("_ideas.html").render(
+        ideas=ideas[:40],
+        drafted=await store.drafted("ticket"),
+        filings={filing.idea_id: filing for filing in await store.filings()},
+    )
 
 
 async def render_inbox() -> str:
@@ -758,6 +764,124 @@ async def retry_block(block_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     return RedirectResponse("/", status_code=303)
+
+
+async def _destinations() -> list[tuple[str, tracker.Destination]]:
+    """Every project that has a Jira link with a variable named on it, in the order they were set.
+
+    A link with no variable is a link and not a destination: this program refuses rather than
+    reaching for an ambient credential (docs/adr/0005).
+    """
+    found = []
+    for link in await store.links():
+        destination = tracker.destination_of(link.url, link.token_env)
+        if destination is not None:
+            found.append((link.repo_key, destination))
+    return found
+
+
+@dataclass(frozen=True)
+class ToFile:
+    """Whether an idea can go out through the door, and what would go.
+
+    Three human acts stand between a typed thought and an issue — keep it, draft it, file it — and
+    the first two are decided here rather than hidden in a template (docs/adr/0005).
+    """
+
+    stage: str
+    detail: str = ""
+    idea: Idea | None = None
+    body: str = ""
+    destinations: list[tuple[str, tracker.Destination]] = field(default_factory=list)
+    key: str = ""
+    url: str = ""
+
+
+async def _to_file(idea_id: str) -> ToFile:
+    idea = await store.idea(idea_id)
+    if idea is None:
+        return ToFile("gone", detail="that idea is not in the inbox any more")
+
+    filing = await store.filing_of(idea_id)
+    if filing is not None:
+        return ToFile("filed", key=filing.issue_key, url=filing.url)
+    if idea.state not in ("kept", "promoted"):
+        return ToFile("gone", detail="an idea is filed after it is kept, not before")
+
+    ticket = next((d for d in await store.drafts_for(idea_id) if d.kind == "ticket"), None)
+    if ticket is None:
+        return ToFile("gone", detail="draft the ticket first — what is filed is what you read")
+
+    destinations = await _destinations()
+    if not destinations:
+        return ToFile(
+            "gone",
+            detail="no project has a Jira link with an environment variable on it yet — "
+            "add one with the ⋯ on a project card",
+        )
+    return ToFile("confirm", idea=idea, body=ticket.body, destinations=destinations)
+
+
+def _panel(plan: ToFile, repo_key: str = "") -> str:
+    """The panel for whichever of the four endings this is."""
+    chosen = repo_key or (plan.destinations[0][0] if plan.destinations else "")
+    destination = next(
+        (d for key, d in plan.destinations if key == chosen),
+        plan.destinations[0][1] if plan.destinations else None,
+    )
+    return env.get_template("_file.html").render(
+        stage=plan.stage,
+        detail=plan.detail,
+        idea=plan.idea,
+        body=plan.body,
+        key=plan.key,
+        url=plan.url,
+        destination=destination,
+        repo_key=chosen,
+    )
+
+
+@router.get("/ideas/{idea_id}/file", response_class=HTMLResponse)
+async def review_filing(idea_id: str, request: Request, key: str = "") -> Response:
+    """Step one: the ticket in full, beside where it would land. Nothing is sent by opening it."""
+    panel = _panel(await _to_file(idea_id), key)
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/ideas/{idea_id}/file", response_class=HTMLResponse)
+async def file_idea(idea_id: str, request: Request) -> Response:
+    """Step two: the click. One issue, once, and whatever came back is what is rendered.
+
+    The checks of step one run again here rather than being trusted from it: a page can be stale,
+    a second tab can have filed it, and the one thing this route must never do is create the same
+    issue twice (docs/adr/0005).
+    """
+    form = await _form(request)
+    plan = await _to_file(idea_id)
+    if plan.stage != "confirm":
+        panel = _panel(plan)
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    repo_key = form.get("key", "").strip() or plan.destinations[0][0]
+    destination = next(
+        (d for key, d in plan.destinations if key == repo_key), plan.destinations[0][1]
+    )
+    summary, _, description = plan.body.partition("\n")
+
+    result = await asyncio.to_thread(
+        tracker.file_issue, destination, summary.strip() or "an idea", description.strip()
+    )
+    if not result.filed:
+        panel = _panel(ToFile("refused", detail=result.detail, body=plan.body))
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    await store.record_filing(idea_id=idea_id, tracker="jira", issue_key=result.key, url=result.url)
+    panel = _panel(ToFile("filed", key=result.key, url=result.url))
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/ideas/{idea_id}/{action}", response_class=HTMLResponse)
