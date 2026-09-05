@@ -601,3 +601,90 @@ def test_the_branch_the_cli_actually_made_is_preferred_over_a_second_guess() -> 
     # No job file, or one from a CLI that stopped recording it: the derivation is the fallback.
     assert autostart._worktree_of(task, None) == dispatch._worktree_name(task.title)
     assert autostart._worktree_of(task, JobEnd(state="done")) == dispatch._worktree_name(task.title)
+
+
+@pytest.mark.unit
+async def test_an_agent_still_working_settles_nothing_even_when_the_registry_forgot_it(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The registry is a weak signal and this is the direction it is weak in."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "busyone")
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: JobEnd(state="working"))
+
+    assert await autostart.settle(desk, set()) == []
+
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+    assert await autostart.running_for(desk, KEY, set()) == 1
+
+
+@pytest.mark.unit
+async def test_a_finished_agent_gives_up_its_seat_though_its_process_lives_on(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `--bg` agent idles at its prompt for as long as the machine is up. A seat rule that
+    watched only the registry would hold that project's seat forever, and nothing would start."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="instruction",
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "doneone")
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: JobEnd(state="done"))
+
+    assert await autostart.running_for(desk, KEY, {"doneone"}) == 0
+    assert await autostart.settle(desk, {"doneone"}) == []
+    finished = next(one for one in await desk.tasks() if one.id == task.id)
+    assert finished.finished_at is not None and finished.failed_at is None
+
+
+@pytest.mark.unit
+def test_only_the_two_states_the_cli_writes_when_it_is_over_end_a_task() -> None:
+    """The safe direction: a value this program has not seen must not end somebody's task."""
+    assert JobEnd(state="done").terminal
+    assert JobEnd(state="failed").terminal
+    assert not JobEnd(state="working").terminal
+    assert not JobEnd(state="a state nobody has seen yet").terminal
+
+
+@pytest.mark.unit
+def test_with_no_job_file_the_registry_is_the_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A job `claude rm` has forgotten: a weak signal, used as the weak signal it is."""
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: None)
+    assert autostart.still_going("gone", {"gone"}) == (True, None)
+    assert autostart.still_going("gone", set()) == (False, None)
+
+
+@pytest.mark.unit
+async def test_an_agent_this_module_cannot_name_keeps_its_seat(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A started task with no agent recorded is unanswerable, and the safe answer changes
+    nothing."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "")
+
+    assert autostart.still_going(None, set()) == (True, None)
+    assert await autostart.settle(desk, set()) == []
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]

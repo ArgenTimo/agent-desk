@@ -84,6 +84,19 @@ class JobEnd(BaseModel):
     def failed(self) -> bool:
         return self.state == "failed"
 
+    @property
+    def terminal(self) -> bool:
+        """Has this job stopped being work in progress?
+
+        Recorded rather than reasoned about: a `--bg` job reads `working` both while it holds a
+        turn *and* while it sits at the prompt afterwards, and its process outlives either — so
+        "the session is gone from the registry" never becomes true for an agent that succeeds.
+        `done` and `failed` are the two values the CLI writes when it is over, and both carry a
+        `firstTerminalAt`. Anything else is treated as still going, which is the safe direction:
+        a state this program has not seen must not end somebody's task.
+        """
+        return self.state in ("done", "failed")
+
 
 class RegistryRead(BaseModel):
     """What one pass over the registry found, including what it could not read.

@@ -56,11 +56,33 @@ def live_agents() -> set[str]:
     return {session.session_id.split("-")[0] for session in registry.read_registry().sessions}
 
 
+def still_going(agent_id: str | None, live: set[str]) -> tuple[bool, JobEnd | None]:
+    """Is this agent's work still ours to wait for, and what the CLI says about it.
+
+    Two sources, in the order of how much they know. The job file (`observe/jobs.py`) says
+    `working`, `done` or `failed` and is the only one that distinguishes them; the registry says
+    only who is alive. Absence from the registry is the fallback for a job the CLI has forgotten,
+    and it is a weak signal on purpose — a `--bg` process outlives the work it was started for, so
+    presence in the registry proves nothing on its own.
+    """
+    if not agent_id:
+        # A started task with no agent recorded is a thing this module cannot answer for, and the
+        # safe answer to that is the one that changes nothing: it keeps its seat and it is not
+        # settled.
+        return True, None
+    ended = jobs.read_job(agent_id)
+    if ended is not None:
+        return not ended.terminal, ended
+    return agent_id in live, None
+
+
 async def running_for(store: Store, repo_key: str, live: set[str]) -> int:
     """How many of this project's started tasks still have an agent on them.
 
-    A task whose agent has gone is finished, whatever it achieved: this module does not judge the
-    work, only whether the seat is free.
+    A task whose agent is over is over, whatever it achieved: this module does not judge the work,
+    only whether the seat is free. Getting this wrong in the other direction is worse than it
+    sounds — a finished `--bg` agent idles at its prompt for as long as the machine is up, and a
+    seat rule that watched only the registry would hold that project's seat forever.
     """
     return len(
         [
@@ -68,7 +90,7 @@ async def running_for(store: Store, repo_key: str, live: set[str]) -> int:
             for task in await store.tasks(repo_key=repo_key)
             if task.started_at is not None
             and task.failed_at is None
-            and (task.agent_id is None or task.agent_id in live)
+            and still_going(task.agent_id, live)[0]
         ]
     )
 
@@ -128,34 +150,39 @@ def _worktree_of(task: Task, ended: JobEnd | None = None) -> str:
 
 
 async def settle(store: Store, live: set[str]) -> list[str]:
-    """Notice the agents that have gone, and mark what they were dispatched for as built.
+    """Notice the agents that are over, and mark what they were dispatched for as built.
 
-    A dispatched agent has no way to report back and this program will not ask it to; what it can
-    see is that the session is no longer in the registry. That is the moment an idea somebody
-    started work on leaves the list — and a human who finds it was not built after all presses
-    Keep (docs/05-ideas.md).
+    A dispatched agent has no way to report back and this program will not ask it to. What it can
+    see is the state the CLI writes down for the job (`observe/jobs.py`), and that is the moment an
+    idea somebody started work on leaves the list — a human who finds it was not built after all
+    presses Keep (docs/05-ideas.md).
 
     It says nothing about whether the work was any good. "An agent was dispatched for this and it
     finished" is the whole of the claim about *quality*, and it is the only one available.
 
-    It does say whether the agent ran at all, and that is a different claim with a different source
-    (`observe/jobs.py`). An agent that exits before its first turn — a worktree name the CLI will
-    not take, a directory that is not a checkout — is gone from the registry in under a second and
-    looks from here exactly like one that worked all night. Six of them once did, and every idea
-    they were dispatched for was marked built. So: the job file is asked, and a job the CLI calls
-    `failed` fails the task, keeps the ideas in the list, and counts towards the two failures that
-    disarm a project. Where the CLI has nothing to say — an old job tidied away by `claude rm` —
-    the claim stays the weak one, because a guess in either direction is worse than the truth about
+    It does say whether the agent ran at all, and that is a different claim. An agent that exits
+    before its first turn — a worktree name the CLI will not take, a directory that is not a
+    checkout — looks from the registry exactly like one that worked all night. Six of them once
+    did, and every idea they were dispatched for was marked built. So a job the CLI calls `failed`
+    fails the task, keeps its ideas in the list, and counts towards the two failures that disarm a
+    project.
+
+    The other half of the same mistake was the signal itself: absence from the registry. A `--bg`
+    process outlives the work it was started for and idles at its prompt for as long as the machine
+    is up, so an agent that *succeeds* is never absent, its task never settles and its seat is
+    never given up. `still_going` is the fix and the job file is what it reads. Where the CLI has
+    nothing to say — a job tidied away by `claude rm` — the weak signal is the fallback and the
+    claim stays the weak one, because a guess in either direction is worse than the truth about
     what is known (CLAUDE.md, rule five).
     """
     settled: list[str] = []
     for task in await store.tasks():
         if task.started_at is None or task.finished_at or task.failed_at:
             continue
-        if task.agent_id is None or task.agent_id in live:
+        going, ended = await asyncio.to_thread(still_going, task.agent_id, live)
+        if going:
             continue
 
-        ended = await asyncio.to_thread(jobs.read_job, task.agent_id)
         if ended is not None and ended.failed:
             detail = ended.detail or "its agent exited without saying why"
             await store.task_failed(task.id, detail)
