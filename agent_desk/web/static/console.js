@@ -709,6 +709,25 @@ document.addEventListener(
   true
 );
 
+/* --- plain words, and the technical half behind a toggle ---------------------------------------- */
+// A card dropped on the workbench opens in plain words: a card that leads with paths and pids is a
+// card only a programmer can use, and this board is meant to be readable by whoever is looking at
+// it. The details are real and useful and one press away (docs/06-console.md).
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-detail-toggle]');
+  if (!button) return;
+  const card = button.closest('[data-detail]');
+  if (!card) return;
+  const technical = card.dataset.detail !== 'technical';
+  card.dataset.detail = technical ? 'technical' : 'plain';
+  button.setAttribute('aria-pressed', String(technical));
+  button.textContent = technical ? 'plain words' : 'technical details';
+  // `hidden` rather than a style, so a card with no script still shows the plain half and nothing
+  // is stuck invisible.
+  card.querySelector('.plain-only').hidden = technical;
+  card.querySelector('.technical-only').hidden = !technical;
+});
+
 /* --- go to it ---------------------------------------------------------------------------------- */
 // A page cannot open a terminal on somebody's desktop, and a button that claimed to would be one
 // more thing on this board that says something it does not know. What it can do is hand over the

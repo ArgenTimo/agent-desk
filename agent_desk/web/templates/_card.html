@@ -1,59 +1,103 @@
 {# What a card contains, shown where somebody asked for it: in the middle, after they dragged it
-   there. Everything here is deliberately absent from the left column. #}
+   there. Everything here is deliberately absent from the left column.
+
+   Two views, and which one you get by default is the point. A card dropped on the workbench opens
+   in **plain words** — what this session is for and what it is doing, in a sentence somebody who
+   does not use a terminal can read. Paths, pids, session ids, branch names and the raw log are
+   real and useful and behind a toggle, because a card that leads with them is a card that only a
+   programmer can use, and this board is meant to be readable by whoever is looking at it
+   (docs/06-console.md). #}
 {% if not rows %}
 <p class="empty small">that one is not on the board any more</p>
 {% else %}
 {% for row in rows %}
-<div class="card-detail">
+<div class="card-detail" data-detail="plain">
   <div class="card-line">
     <span class="dot {{ row.session.status }}"></span>
     <span class="card-title">{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</span>
     <span class="tiny">{{ row.session.updated_at | ago }}</span>
+    <span class="spacer"></span>
+    {# The toggle. A button rather than a link: it changes what you are looking at, it does not
+       go anywhere, and it works with the keyboard for free. #}
+    <button type="button" class="chip detail-toggle" data-detail-toggle
+            aria-pressed="false" title="show the branch, the paths, the ids and the log">
+      technical details</button>
   </div>
-  {% if not row.tail %}
-  <p class="hint small"><span aria-hidden="true">·</span> registry facts only — no transcript was
-    read for this one, so what it is doing is not known here.</p>
-  {% endif %}
-  <dl class="card-facts">
-    <dt>where</dt>
-    <dd>{{ row.session.project }} · {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</dd>
-    <dt>asked</dt>
-    <dd>{{ row.tail.last_prompt if row.tail and row.tail.last_prompt else "—" }}</dd>
-    <dt>did</dt>
-    <dd>
-      {% if row.tail and row.tail.last_entry %}
-      {{ row.tail.last_entry.at | clock }} {{ row.tail.last_entry.role }} · {{ row.tail.last_entry.text or "—" }}
-      {% else %}—{% endif %}
-    </dd>
-    <dt>where on disk</dt>
-    <dd class="mono">{{ row.session.cwd }}</dd>
-    <dt>session</dt>
-    <dd class="mono">{{ row.session.name }} · {{ row.session.session_id }} · pid {{ row.session.pid }}</dd>
-    <dt>since</dt>
-    <dd>{{ row.session.updated_at | ago }} · status {{ row.session.status }} · {{ row.session.kind }}</dd>
-    {% if row.tail and row.tail.agents %}
-    <dt>agents</dt>
-    <dd>
-      {% for agent in row.tail.agents[:5] %}
-      <span class="agent-chip{% if agent.running %} working{% endif %}">{{ agent.kind }}: {{ agent.description or "—" }}</span>
-      {% endfor %}
-    </dd>
+
+  {# --- plain words ---------------------------------------------------------------------- #}
+  <div class="plain-only">
+    <p class="plain-what">
+      {% if row.session.status == "busy" %}Working right now
+      {% elif row.session.status == "idle" %}Not doing anything at the moment
+      {% elif row.session.status == "shell" %}Running a command
+      {% else %}{{ row.session.status | plainly }}{% endif %}
+      in <strong>{{ row.session.project }}</strong>{% if row.session.kind == "bg" %}, on its own
+      copy of the project{% endif %}.
+    </p>
+
+    {% if row.tail and row.tail.last_entry and row.tail.last_entry.text %}
+    <p class="plain-doing">Last thing it said: {{ row.tail.last_entry.text }}</p>
+    {% elif not row.tail %}
+    <p class="hint small"><span aria-hidden="true">·</span> Nothing has been read about this one
+      yet, so what it is doing is not known here — only that it is running.</p>
     {% endif %}
-  </dl>
-  {% if row.hint.waiting %}
-  <p class="hint small"><span aria-hidden="true">⚑</span> may be waiting for you
-    <span class="evidence">— {{ row.hint.observation }}; a guess, not a signal</span></p>
-  {% endif %}
-  {# Three views of one card (docs/06-console.md): the **hint** is what the overview shows, the
-     **metadata** is this — what goes into a question and what opens on the workbench — and the
-     **whole thing** is below, folded, because it is a console's worth of text and nobody wants it
-     by default. #}
-  <details class="whole">
-    <summary>everything this session has said</summary>
-    <div class="whole-body" data-tail="{{ row.session.session_id }}">
-      <a href="/sessions/{{ row.session.session_id }}/tail">read it</a>
-    </div>
-  </details>
+
+    {% if row.tail and row.tail.last_prompt %}
+    <details class="more">
+      <summary>what it was asked to do</summary>
+      <p class="plain-asked">{{ row.tail.last_prompt }}</p>
+    </details>
+    {% endif %}
+
+    {% if row.tail and row.tail.agents %}
+    <p class="plain-doing">It has {{ row.tail.agents | length }} helper{{ "" if row.tail.agents | length == 1 else "s" }}
+      of its own: {{ row.tail.agents[:3] | map(attribute="description") | select | join("; ") or "—" }}</p>
+    {% endif %}
+
+    {% if row.hint.waiting %}
+    <p class="hint small"><span aria-hidden="true">⚑</span> It may be waiting for you
+      <span class="evidence">— {{ row.hint.observation }}; a guess, not a signal</span></p>
+    {% endif %}
+  </div>
+
+  {# --- and the technical half, for whoever wants it ------------------------------------- #}
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>where</dt>
+      <dd>{{ row.session.project }} · {{ row.tail.git_branch if row.tail and row.tail.git_branch else "—" }}</dd>
+      <dt>asked</dt>
+      <dd>{{ row.tail.last_prompt if row.tail and row.tail.last_prompt else "—" }}</dd>
+      <dt>did</dt>
+      <dd>
+        {% if row.tail and row.tail.last_entry %}
+        {{ row.tail.last_entry.at | clock }} {{ row.tail.last_entry.role }} · {{ row.tail.last_entry.text or "—" }}
+        {% else %}—{% endif %}
+      </dd>
+      <dt>where on disk</dt>
+      <dd class="mono">{{ row.session.cwd }}</dd>
+      <dt>session</dt>
+      <dd class="mono">{{ row.session.name }} · {{ row.session.session_id }} · pid {{ row.session.pid }}</dd>
+      <dt>since</dt>
+      <dd>{{ row.session.updated_at | ago }} · status {{ row.session.status }} · {{ row.session.kind }}</dd>
+      {% if row.tail and row.tail.agents %}
+      <dt>agents</dt>
+      <dd>
+        {% for agent in row.tail.agents[:5] %}
+        <span class="agent-chip{% if agent.running %} working{% endif %}">{{ agent.kind }}: {{ agent.description or "—" }}</span>
+        {% endfor %}
+      </dd>
+      {% endif %}
+    </dl>
+
+    {# The whole log. A console's worth of text, so it is folded even inside the half that asked
+       for technical detail (docs/06-console.md). #}
+    <details class="whole">
+      <summary>everything this session has said</summary>
+      <div class="whole-body" data-tail="{{ row.session.session_id }}">
+        <a href="/sessions/{{ row.session.session_id }}/tail">read it</a>
+      </div>
+    </details>
+  </div>
 
   <a class="message-button message-link" href="/sessions/{{ row.session.session_id }}/message"
      hx-get="/sessions/{{ row.session.session_id }}/message" hx-target="#message">message this session…</a>

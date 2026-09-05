@@ -171,7 +171,7 @@ def test_a_session_with_no_transcript_says_so_rather_than_guessing(home: Home) -
     """docs/02-architecture.md, failure posture: registry facts only, marked as such."""
     home.session(os.getpid(), "cccccccc-0000-4000-8000-000000000003")
     assert "registry only" in routes.render_board()
-    assert "registry facts only" in routes.render_card(
+    assert "is not known here" in routes.render_card(
         "session", "cccccccc-0000-4000-8000-000000000003"
     )
 
@@ -385,7 +385,7 @@ def test_a_transcript_that_cannot_be_read_leaves_the_row_marked(home: Home) -> N
     (directory / "aaaaaaaa-0000-4000-8000-000000000001.jsonl").write_text("torn\n")
 
     assert "registry only" in routes.render_board()
-    assert "registry facts only" in routes.render_card(
+    assert "is not known here" in routes.render_card(
         "session", "aaaaaaaa-0000-4000-8000-000000000001"
     )
 
@@ -591,3 +591,29 @@ def test_a_size_is_said_the_way_a_person_says_it() -> None:
     assert routes._tokens(900) == "900"
     assert routes._tokens(None) == ""
     assert routes._tokens(0) == ""
+
+
+@pytest.mark.unit
+def test_a_card_opens_in_plain_words_and_keeps_the_technical_half_a_press_away(
+    home: Home,
+) -> None:
+    """A card that leads with paths and pids is a card only a programmer can use, and this board
+    is meant to be readable by whoever is looking at it (docs/06-console.md)."""
+    session_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    home.session(os.getpid(), session_id, status="busy")
+    home.transcript(session_id, _entry("assistant", "rewriting the parser"))
+
+    card = routes.render_card("session", session_id)
+
+    # The half you get first says what is happening, in a sentence.
+    assert 'data-detail="plain"' in card
+    assert "Working right now" in card
+
+    # And the half with the paths and the ids in it is present, and hidden until asked for.
+    assert '<div class="technical-only" hidden>' in card
+    assert session_id in card.split('class="technical-only"')[1]
+    assert "pid" in card.split('class="technical-only"')[1]
+    # Nothing technical leaked into the plain half.
+    plain = card.split('class="plain-only"')[1].split('class="technical-only"')[0]
+    assert "pid" not in plain
+    assert str(os.getpid()) not in plain
