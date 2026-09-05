@@ -118,3 +118,21 @@ non-developer needs is exactly this — a box to put an idea in, and a list of w
 ideas already there. That view is Phase 3 and gated on redaction, because the context an idea
 carries includes a branch name, a project and a moment in a transcript
 ([07-security.md](07-security.md)).
+
+## The other thing a project has
+
+An idea is a thing somebody *had*. It goes in the pool, it is argued with, and one day it is built
+and leaves the list.
+
+A **project note** is a thing that is simply true, and it never leaves: the conventions, the
+preferences, the "we do not add a build step here", the "always run the gate before you say you
+are done". It is not a backlog item and it will never be built, so a list of things to do is the
+wrong place for it — which is why it is a second entity rather than an idea with a flag on it.
+
+One body of text per project, written on that project's settings page. What makes it worth having
+is what happens to it: **every agent this console starts in that project is told it, verbatim**,
+under a heading that says whose it is (`agent_desk/dispatch.py`, `build_task`). An agent has to be
+able to tell a standing preference from the task it was given, and a heading is how.
+
+Splitting it into fields was rejected. It is prose nobody has written yet, and a schema invented
+ahead of the prose is a schema the prose then has to fit.

@@ -97,6 +97,7 @@ def build_task(
     branch: str = "",
     notes: Sequence[str] = (),
     secrets: Sequence[str] = (),
+    standing: str = "",
 ) -> str:
     """What the agent is actually told.
 
@@ -116,6 +117,16 @@ def build_task(
     written = [note for note in notes if note.strip()]
     if written:
         lines += ["", "Context that came with the request:", *written]
+    # What is true in this project whatever the task is: the conventions and the wishes somebody
+    # wrote once so they would not have to say them again (020-project-note.sql). Verbatim, and
+    # under a heading that says who it came from — an agent has to be able to tell a standing
+    # preference from the thing it was asked to do.
+    if standing.strip():
+        lines += [
+            "",
+            "What the person who runs this project asked anybody working here to know:",
+            standing.strip(),
+        ]
     if secrets:
         lines += [
             "",

@@ -925,3 +925,34 @@ async def test_an_idle_row_says_why_it_is_idle_when_the_console_knows(
     )
     assert "on a break until" in board
     assert "having a smoke" not in board
+
+
+@pytest.mark.unit
+async def test_what_anybody_working_here_should_know_reaches_every_agent(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """The second entity next to the ideas. An idea is a thing somebody had and will one day be
+    built; this is a thing that is simply true and never will be — so it goes into the briefing
+    rather than into the pool."""
+    key = await _the_project(home)
+
+    status, panel = await _post(
+        "/project-note", {"key": key, "note": "  We never add a build step here.  "}
+    )
+    assert status == 200
+    assert "We never add a build step here." in panel
+    assert await desk.project_note(key) == "We never add a build step here."
+
+    # And it is in what the agent is actually told, verbatim and under a heading that says whose
+    # it is — an agent has to tell a standing preference from the task it was given.
+    said = dispatch.build_task(
+        "do the thing", project="a-project", standing=await desk.project_note(key)
+    )
+    assert "asked anybody working here to know" in said
+    assert "We never add a build step here." in said
+    assert said.index("do the thing") < said.index("We never add a build step")
+
+    # Cleared rather than left as a heading with nothing under it.
+    await _post("/project-note", {"key": key, "note": "   "})
+    assert await desk.project_note(key) == ""
+    assert "asked anybody working here" not in dispatch.build_task("do the thing", standing="")

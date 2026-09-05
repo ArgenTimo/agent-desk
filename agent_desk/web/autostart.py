@@ -120,7 +120,11 @@ async def _start(store: Store, task: Task) -> None:
     """Start one claimed task, and record either half of what happens."""
     result = await asyncio.to_thread(
         dispatch.start,
-        dispatch.build_task(task.instruction, project=task.title),
+        dispatch.build_task(
+            task.instruction,
+            project=task.title,
+            standing=await store.project_note(task.repo_key),
+        ),
         cwd=task.cwd,
         name=task.title,
     )
@@ -265,7 +269,11 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
     # looks for afterwards.
     result = await asyncio.to_thread(
         dispatch.start,
-        dispatch.build_task(dispatch.go_looking(project), project=project),
+        dispatch.build_task(
+            dispatch.go_looking(project),
+            project=project,
+            standing=await store.project_note(arming.repo_key),
+        ),
         cwd=cwd,
         name=task.title,
     )

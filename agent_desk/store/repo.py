@@ -1448,6 +1448,29 @@ class Store:
             )
             return [self._idea(row._mapping) for row in rows]
 
+    # --- what anybody working in a project should know (020-project-note.sql) -----------------
+    async def project_note(self, repo_key: str) -> str:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT body FROM project_note WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
+            row = rows.first()
+            return "" if row is None else str(row[0])
+
+    async def set_project_note(self, repo_key: str, body: str) -> None:
+        """One body of text per project. Empty clears it rather than leaving a heading with
+        nothing under it in every briefing."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO project_note (repo_key, body, updated_at) "
+                    "VALUES (:repo_key, :body, :t) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET body = :body, updated_at = :t"
+                ),
+                {"repo_key": repo_key, "body": body.strip(), "t": _now_ms()},
+            )
+
     # --- the handful of choices a person makes about the console itself -----------------------
     async def setting(self, key: str, default: str = "") -> str:
         async with self.engine.connect() as conn:

@@ -34,6 +34,7 @@ import structlog
 from agent_desk import dispatch
 from agent_desk.observe import registry
 from agent_desk.observe.model import Session
+from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Kicking, Store
 
 log = structlog.get_logger()
@@ -72,6 +73,15 @@ def kickable(session: Session) -> str:
     return ""
 
 
+def _repo_key(session: Session) -> str:
+    """The key a project's standing note is filed under, from the directory the session is in.
+
+    The same shape the board keys projects by, so a note written on a project's page reaches the
+    sessions inside it — including the ones running in a worktree of that checkout.
+    """
+    return repository_of(session.cwd).key
+
+
 def _sessions() -> dict[str, Session]:
     """Every live session, by the short id everything else in this program keys on."""
     return {
@@ -107,7 +117,7 @@ def _spent(arming: Kicking, now_ms: int) -> int:
     return arming.kicks
 
 
-def carry_on(arming: Kicking, session: Session) -> str:
+def carry_on(arming: Kicking, session: Session, standing: str = "") -> str:
     """What to say to a session that has stopped. Two prompts, and there is no third.
 
     It never invents the work. Either the session carries on with what it was doing — which it
@@ -120,6 +130,15 @@ def carry_on(arming: Kicking, session: Session) -> str:
     makes this survivable (docs/adr/0008, docs/adr/0009).
     """
     project = session.project
+    standing_lines = (
+        [
+            "",
+            "What the person who runs this project asked anybody working here to know:",
+            standing.strip(),
+        ]
+        if standing.strip()
+        else []
+    )
     return "\n".join(
         [
             "This turn was sent by agent-desk, not by a person: you went idle and this project is "
@@ -132,6 +151,7 @@ def carry_on(arming: Kicking, session: Session) -> str:
             "If it is finished, then:",
             "",
             dispatch.go_looking(project),
+            *standing_lines,
         ]
     )
 
@@ -141,7 +161,7 @@ async def kick_one(store: Store, arming: Kicking, session: Session) -> bool:
     result = await asyncio.to_thread(
         dispatch.kick,
         arming.session_id or session.session_id,
-        carry_on(arming, session),
+        carry_on(arming, session, await store.project_note(_repo_key(session))),
         cwd=arming.cwd or session.cwd,
         agent_id=arming.short_id,
     )

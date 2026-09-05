@@ -1111,3 +1111,18 @@ body.stale .col-left { opacity: 0.55; }
 /* A break is a wait, not a failure: amber like every other "look at this eventually", never red.
    Red is stopped, and a session on a break comes back on its own (docs/adr/0009). */
 .pill.state.break { color: var(--attention); border-color: color-mix(in srgb, var(--attention) 45%, transparent); }
+
+/* What anybody working in a project should know. A field, not a card: it is written once and then
+   read by every agent, so it looks like the thing you edit rather than the thing you scan. */
+.settings .note { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.settings .note textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.settings .note button { align-self: flex-start; }

@@ -742,6 +742,9 @@ async def render_project(key: str, refused: str = "") -> str:
         # The console says exactly what the loop decided, because it asks the same function.
         why_not=await autostart.why_not(store, key),
         explore_why=await autostart.why_not_explore(store, key),
+        # What is simply true here, whatever the task is. It goes verbatim into every agent this
+        # console starts in this project (020-project-note.sql).
+        note=await store.project_note(key),
     )
 
 
@@ -1327,6 +1330,25 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         agent_id=result.agent_id,
         project=named.name,
     )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/project-note", response_class=HTMLResponse)
+async def set_project_note(request: Request) -> Response:
+    """What anybody working in this project should know, besides the thing they were asked to do.
+
+    The second entity next to the ideas, and the difference is what happens to it: an idea is a
+    thing somebody *had* and will one day be built; this is a thing that is simply true and never
+    will be. It goes into every agent this console starts here, verbatim, under a heading that
+    says where it came from — an agent has to be able to tell a standing preference from the task.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    if key:
+        await store.set_project_note(key, form.get("note", ""))
+    panel = await render_project(key)
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))
