@@ -851,6 +851,14 @@ class Store:
                 {"agent_id": agent_id, "id": task_id},
             )
 
+    async def task_landed(self, task_id: str, detail: str) -> None:
+        """What happened when its branch was offered to the project (docs/adr/0008)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE task SET detail = :detail WHERE id = :id"),
+                {"detail": detail[:500], "id": task_id},
+            )
+
     async def task_failed(self, task_id: str, detail: str) -> None:
         """It stays failed and says why. Retry is a click (docs/adr/0007)."""
         async with self.engine.begin() as conn:

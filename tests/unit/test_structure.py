@@ -151,6 +151,29 @@ def test_only_web_imports_the_door_to_a_tracker() -> None:
 
 
 @pytest.mark.unit
+def test_only_web_imports_the_door_that_merges() -> None:
+    """docs/adr/0008: what lands is decided by a gate, and reached from one place.
+
+    `land` is the fourth door. An observer or an answer run that could reach it would be a program
+    that merges as a side effect of reading, which is the whole of what these tests exist to stop.
+    """
+    offenders = [
+        str(path.relative_to(PKG))
+        for path in _modules()
+        if path.relative_to(PKG).parts[0] != "web"
+        and path.name != "land.py"
+        and any(
+            name in ("agent_desk.land", "land") or name.startswith("agent_desk.land.")
+            for name in _imported_names(path)
+        )
+    ]
+
+    assert not offenders, (
+        f"only agent_desk/web/ may import the landing path (docs/adr/0008); found in: {offenders}"
+    )
+
+
+@pytest.mark.unit
 def test_only_observe_parses_the_on_disk_formats() -> None:
     """docs/adr/0004: the formats under ~/.claude/ live behind one parser.
 

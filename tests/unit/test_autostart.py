@@ -7,6 +7,8 @@ three in the morning.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import pathlib
 import time
 from collections.abc import AsyncIterator
@@ -373,3 +375,126 @@ async def test_it_does_not_look_while_its_own_agent_is_still_out(
 
     assert await autostart.tick(desk, live={"agent1"}) is None
     assert len(started) == 1
+
+
+@pytest.mark.unit
+async def test_what_it_found_is_offered_to_the_project_when_its_agent_goes(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docs/adr/0008, as amended: the branch is merged when the project's own gate passes on it,
+    and what happened is written against the task either way."""
+    from agent_desk import land
+    from agent_desk.web import autostart as loop
+
+    offered: list[tuple[str, str]] = []
+
+    def fake_land(cwd: str, worktree_name: str) -> land.Landed:
+        offered.append((cwd, worktree_name))
+        return land.Landed(True, "merged and pushed — `make verify` passed")
+
+    monkeypatch.setattr(loop.land, "land", fake_land)
+
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="looking for something to fix in project",
+        instruction="go and look",
+        source_kind="found",
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent4")
+
+    await loop.settle(desk, set())
+
+    # Offered under the same name its worktree was made with.
+    assert offered == [(str(tmp_path), loop._worktree_of(task))]
+    settled = next(one for one in await desk.tasks() if one.id == task.id)
+    assert settled.finished_at is not None
+    assert settled.detail is not None and "merged and pushed" in settled.detail
+
+
+@pytest.mark.unit
+async def test_work_a_person_queued_is_never_merged_by_the_loop(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only what the loop found itself. A task somebody wrote is theirs to land."""
+    from agent_desk.web import autostart as loop
+
+    monkeypatch.setattr(
+        loop.land, "land", lambda cwd, name: pytest.fail("it merged somebody's own task")
+    )
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="what a person asked for",
+        instruction="do it",
+        source_kind="typed",
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent5")
+
+    await loop.settle(desk, set())
+
+    settled = next(one for one in await desk.tasks() if one.id == task.id)
+    assert settled.finished_at is not None
+
+
+@pytest.mark.unit
+async def test_a_project_with_no_checkout_here_is_not_explored(
+    desk: Store, started: list[str]
+) -> None:
+    """It has to know where to work. A repository key alone is not a directory."""
+    await desk.explore(KEY, per_day=3, on=True)
+
+    assert await autostart.tick(desk, live=set()) is None
+    assert started == []
+
+
+@pytest.mark.unit
+async def test_two_failed_explorations_switch_the_project_off(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rule as the queue: a rule that keeps firing into a broken condition stops."""
+    monkeypatch.setattr(
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name, env=None: dispatch.Started(False, detail="no disk space"),
+    )
+    await desk.explore(KEY, per_day=9, on=True)
+    seed = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(seed.id, "old")
+    await desk.finish_task(seed.id)
+
+    await autostart.tick(desk, live=set())
+    await autostart.tick(desk, live=set())
+
+    arming = await desk.autostart(KEY)
+    assert arming.armed is False
+    assert arming.disarmed_why is not None and "no disk space" in arming.disarmed_why
+
+
+@pytest.mark.unit
+async def test_the_loop_survives_a_tick_that_raises(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A loop that took the console down with it would be a worse failure than anything it was
+    started to do."""
+    calls: list[int] = []
+
+    async def explodes(store: Store, live: set[str] | None = None) -> None:
+        calls.append(1)
+        raise RuntimeError("something went wrong in a pass")
+
+    monkeypatch.setattr(autostart, "tick", explodes)
+    monkeypatch.setattr(autostart, "TICK_SECONDS", 0.01)
+
+    running = asyncio.create_task(autostart.run(desk))
+    await asyncio.sleep(0.05)
+    running.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await running
+
+    assert len(calls) > 1, "it stopped after the first failure"

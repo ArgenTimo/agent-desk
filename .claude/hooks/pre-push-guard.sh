@@ -2,7 +2,11 @@
 #
 # pre-push-guard.sh — PreToolUse hook for `git push`.
 #
-#   1. never push to the default branch
+#   1. (lifted 2026-09-05, by the owner) pushing to the default branch is allowed. This repository
+#      is one person and their agents; the pull-request round trip was protecting a review nobody
+#      was doing. What replaced it is mechanical and stricter in the way that matters: an agent's
+#      branch is merged only when the repository's own gate passes on it (agent_desk/land.py), and
+#      nothing lands that this project's tests would fail.
 #   2. never force-push
 #   3. never push a branch that is BEHIND its own remote — the phantom revert: the push silently
 #      undoes commits somebody else already landed
@@ -38,11 +42,8 @@ default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null
 
 block() { { echo "pre-push-guard: BLOCKED — $1"; shift; [ $# -gt 0 ] && printf '%s\n' "$@"; } >&2; exit 2; }
 
-if [ "$branch" = "$default" ] || printf '%s' "$cmd" | grep -Eq "[[:space:]]${default}(:|[[:space:]]|$)"; then
-  block "a push to '${default}'." \
-        "The default branch is reached through a reviewed pull request. Always." \
-        "Create a task branch, open a draft PR, and let a human merge it."
-fi
+# Rule 1 was here and is lifted; see the header. The force-push and behind-remote rules below are
+# not, and they are the two that protect somebody else's work rather than a process.
 
 if printf '%s' "$cmd" | grep -Eq '(--force([^-]|$)|--force-with-lease|[[:space:]]-f([[:space:]]|$))'; then
   block "a force-push." \

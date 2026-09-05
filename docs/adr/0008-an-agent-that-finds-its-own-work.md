@@ -71,6 +71,22 @@ something to fix, fixes it in a worktree of its own, and stops.
 - **It never merges.** Every result is a branch somebody reads. That is the property that makes
   all of this survivable, and it is the one thing that must not be relaxed later "to save a click".
 
+  **Amended the same day, by the owner: it merges, when the project's own gate passes on it.**
+  Recorded rather than quietly edited, because the paragraph above is the argument this ADR was
+  written to make and it deserves to be read next to what replaced it.
+
+  What was actually being bought by "a human reads every branch" was *not breaking the project*,
+  and in a repository whose owner is one person with a queue of agents, that review was not
+  happening — the branches were piling up unread, which buys nothing at all. So the guarantee is
+  mechanical now and narrower: `agent_desk/land.py` runs the repository's **own** gate — its
+  `make verify`, its exit code, no judgement — in the agent's worktree, and merges only if it
+  passes. It refuses a dirty checkout, a branch with no commits, a repository with no gate to
+  check against, and a merge that conflicts, which it undoes at once.
+
+  That is a weaker promise about taste and a stronger one about breakage. It is also *checkable*,
+  which the promise about reading was not. The thing to watch is unchanged: branches kept over
+  branches made, and a merge commit that says `agent:` is how anybody tells them apart afterwards.
+
 ## Why the marking is the whole of it
 
 A queue with two kinds of row in it is only honest if the two kinds *look* different. So: the
@@ -99,9 +115,9 @@ on, and the switch lives on that project's own page.
 [05-ideas.md](../05-ideas.md) is about, and no amount of marking would fix it: an idea is a thing
 somebody *had*.
 
-**Rejected: merging, opening pull requests, or filing what it finds in a tracker.** It leaves a
-branch. Everything after that is a person, which is [adr/0005](0005-one-door-out-to-a-tracker.md)
-and [adr/0006](0006-the-desk-may-start-work.md) unchanged.
+**Amended: it merges what its own gate accepts** (above). Opening pull requests and filing what it
+finds in a tracker are still refused: those are somebody else's queue, which is
+[adr/0005](0005-one-door-out-to-a-tracker.md) unchanged.
 
 **Rejected: a second agent while one is exploring.** The seat rule of
 [0007](0007-a-loop-that-decides-when-not-what.md) covers exploration too — one agent per project,

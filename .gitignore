@@ -23,3 +23,7 @@ build/
 
 # Somebody's own notes, kept beside the project and not part of it.
 идеи.md
+
+# Worktrees a dispatched agent works in. They live inside this directory because that is where
+# the CLI puts them; they are checkouts, not source.
+.claude/worktrees/

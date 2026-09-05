@@ -18,7 +18,7 @@ from pathlib import Path
 
 import structlog
 
-from agent_desk import dispatch
+from agent_desk import dispatch, land
 from agent_desk.observe import registry
 from agent_desk.store.repo import Autostart, Store, Task
 
@@ -114,6 +114,11 @@ async def _start(store: Store, task: Task) -> None:
         await store.disarm(task.repo_key, why=f"two starts in a row failed: {result.detail}"[:300])
 
 
+def _worktree_of(task: Task) -> str:
+    """The name this task's worktree was made under, which is how its branch is found."""
+    return dispatch._worktree_name(task.title)
+
+
 async def settle(store: Store, live: set[str]) -> list[str]:
     """Notice the agents that have gone, and mark what they were dispatched for as built.
 
@@ -132,6 +137,14 @@ async def settle(store: Store, live: set[str]) -> list[str]:
         if task.agent_id is None or task.agent_id in live:
             continue
         await store.finish_task(task.id)
+
+        # What it found, merged if the project's own gate passes on it (docs/adr/0008, as the
+        # owner amended it). A failing gate leaves the branch exactly where it is and says why.
+        if task.source_kind == "found":
+            result = await asyncio.to_thread(land.land, task.cwd, _worktree_of(task))
+            await store.task_landed(task.id, result.detail)
+            log.info("autostart.landed", repo=task.repo_key, landed=result.landed)
+
         for idea_id in (task.source_ref or "").split(","):
             idea = await store.idea(idea_id) if idea_id else None
             if idea is not None and idea.state != "done":
@@ -190,11 +203,13 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
         source_kind="found",
     )
     await store.take_next_task(arming.repo_key)
+    # The name is what its worktree and branch are called, so it is the same string the landing
+    # looks for afterwards.
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(dispatch.go_looking(project), project=project),
         cwd=cwd,
-        name=f"found-{project}",
+        name=task.title,
     )
     if result.started:
         await store.task_started(task.id, result.agent_id)
