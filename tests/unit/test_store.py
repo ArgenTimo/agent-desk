@@ -438,3 +438,34 @@ def test_the_splitter_knows_every_way_sqlite_quotes_a_name() -> None:
     assert parsed[0].startswith('CREATE TABLE "odd;name"')
     assert "[d;e]" in parsed[0]
     assert "`b;c`" in parsed[0]
+
+
+@pytest.mark.unit
+async def test_the_token_field_cannot_be_given_a_token(store: Store) -> None:
+    """It asks for the name of an environment variable, and somebody pasted a token into it — of
+    course they did. A field that accepts a secret is a field that will be given one, so this is
+    the check that makes docs/07-security.md's promise true rather than merely written down.
+    """
+    await store.set_link(
+        repo_key="k", name="jira", url="https://example.invalid/browse/A", token_env="JIRA_TOKEN"
+    )
+    (kept,) = await store.links("k")
+    assert kept.token_env == "JIRA_TOKEN"
+
+    for pasted in (
+        "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "ATATTyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy==",
+        "me@example.com:secret",
+        "not a name",
+        "x" * 200,
+    ):
+        await store.set_link(
+            repo_key="k", name="jira", url="https://example.invalid/browse/A", token_env=pasted
+        )
+        (after,) = await store.links("k")
+        assert after.token_env is None, f"{pasted[:8]}… was stored"
+
+    # The same field on the environment list, and the same answer.
+    assert await store.set_env(repo_key="k", name="DATABASE_URL") is True
+    assert await store.set_env(repo_key="k", name="postgres://user:pw@host/db") is False
+    assert [one.name for one in await store.env("k")] == ["DATABASE_URL"]

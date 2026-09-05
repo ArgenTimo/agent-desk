@@ -569,12 +569,17 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
     return HTMLResponse(markup, status_code=200 if markup else 404)
 
 
-async def render_project(key: str) -> str:
+async def _kept_the_variable(key: str, name: str, typed: str) -> bool:
+    return any(link.name == name and link.token_env == typed for link in await store.links(key))
+
+
+async def render_project(key: str, refused: str = "") -> str:
     """The settings panel for one project, rendered where the write path's panel goes."""
     rows, _ = await asyncio.to_thread(board)
     projects = shape(rows, await store.groups())
     named = next((project for project in projects if project.key == key), None)
     return env.get_template("_project.html").render(
+        refused=refused,
         key=key,
         name=named.name if named else key,
         links=await store.links(key),
@@ -694,9 +699,18 @@ async def add_project_link(request: Request) -> Response:
     key = form.get("key", "").strip()
     name = form.get("name", "").strip()[:40]
     url = form.get("url", "").strip()
+    typed = form.get("token_env", "").strip()[:64]
     if key and name and url.startswith(("http://", "https://")):
-        await store.set_link(
-            repo_key=key, name=name, url=url, token_env=form.get("token_env", "").strip()[:64]
+        await store.set_link(repo_key=key, name=name, url=url, token_env=typed)
+    if typed and not await _kept_the_variable(key, name, typed):
+        # It was a value, not a name. Say so where it was typed: a refused token that looks saved
+        # is worse than no field at all (docs/07-security.md).
+        return HTMLResponse(
+            await render_project(
+                key,
+                refused="that is not the name of an environment variable — "
+                "nothing was stored. Export the token in your shell and name the variable here.",
+            )
         )
     panel = await render_project(key)
     if _wants_fragment(request):

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from collections.abc import Sequence
@@ -32,6 +33,17 @@ from agent_desk.store.redact import scrub, scrub_optional
 # The fifth is a request about *this console* — "tidy up the ideas", "put a button here" — as
 # opposed to one about a project it watches. It is an instruction with a different address, and
 # the address is the difference that matters (docs/04-threads-and-blocks.md).
+# The shape of an environment variable's name, and the reason it is checked: the token field asks
+# for a name, and a field that accepts a secret is a field that will be given one
+# (docs/07-security.md).
+#
+# Upper snake case, and that is not fussiness. The obvious rule — "letters, digits and
+# underscores" — accepts `ghp_R7Sz…`, which is exactly the thing being kept out: a GitHub token is
+# letters, digits and underscores. Every environment variable anybody writes is upper snake, every
+# example in the console is upper snake, and no secret this program has seen is. Short, too:
+# names are short and secrets are not.
+_ENV_NAME = re.compile(r"\A[A-Z][A-Z0-9_]{0,47}\Z")
+
 BlockKind = Literal["question", "idea", "observation", "instruction", "master"]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
@@ -963,7 +975,15 @@ class Store:
     async def set_link(
         self, *, repo_key: str, name: str, url: str, token_env: str | None = None
     ) -> None:
-        """Add or replace one link. One name per project, because a second "jira" is a typo."""
+        """Add or replace one link. One name per project, because a second "jira" is a typo.
+
+        `token_env` is refused unless it is shaped like the name of an environment variable. The
+        field asks for a name and somebody pasted a token into it — of course they did; a field
+        that accepts a secret is a field that will be given one. This is the check that makes the
+        promise in 006-project-links.sql true rather than merely written down.
+        """
+        if token_env and not _ENV_NAME.match(token_env):
+            token_env = None
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
@@ -980,7 +1000,10 @@ class Store:
                 },
             )
 
-    async def set_env(self, *, repo_key: str, name: str, note: str | None = None) -> None:
+    async def set_env(self, *, repo_key: str, name: str, note: str | None = None) -> bool:
+        """Name a variable this project needs. Refused unless it is shaped like a name."""
+        if not _ENV_NAME.match(name):
+            return False
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
@@ -995,6 +1018,7 @@ class Store:
                     "added_at": _now_ms(),
                 },
             )
+        return True
 
     async def env(self, repo_key: str) -> list[ProjectEnv]:
         async with self.engine.connect() as conn:

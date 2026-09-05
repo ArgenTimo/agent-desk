@@ -42,10 +42,14 @@
     <label class="visually-hidden" for="link-url">the address</label>
     <input id="link-url" name="url" type="url" placeholder="https://…" autocomplete="off" required>
     <label class="visually-hidden" for="link-token">the environment variable holding a token</label>
-    <input id="link-token" name="token_env" placeholder="JIRA_TOKEN (optional)" autocomplete="off">
+    {# The name of a variable, in upper snake, and the field refuses anything else. A token typed
+       here is not stored and the panel says so (docs/07-security.md). #}
+    <input id="link-token" name="token_env" placeholder="JIRA_TOKEN — the name, not the token"
+           pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
     <button type="submit">Add</button>
   </form>
 
+  {% if refused %}<p class="notice small">{{ refused }}</p>{% endif %}
   <p class="small dim">A token is never typed here and never stored. Name the environment variable
     this console would read it from, export it in the shell that starts the console, and it stays
     where the operating system already keeps secrets.</p>
@@ -81,7 +85,8 @@
         hx-target="#message">
     <input type="hidden" name="key" value="{{ key }}">
     <label class="visually-hidden" for="env-name">the variable</label>
-    <input id="env-name" name="name" placeholder="DATABASE_URL" autocomplete="off" required>
+    <input id="env-name" name="name" placeholder="DATABASE_URL — the name, not the value"
+           pattern="[A-Z][A-Z0-9_]*" autocomplete="off" required>
     <label class="visually-hidden" for="env-note">what it is for</label>
     <input id="env-note" name="note" placeholder="what it is for (optional)" autocomplete="off">
     <button type="submit">Add</button>
