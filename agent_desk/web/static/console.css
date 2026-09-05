@@ -72,6 +72,13 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Every scroller is a positioning context. Without this, an absolutely positioned descendant —
+   every `.visually-hidden` label, of which the ideas column has dozens — is laid out against the
+   page instead of against the box that clips it, and the document grows a scrollbar two thousand
+   pixels tall while every column inside it still reports that it fits. The console then restores
+   that scroll position on reload and renders halfway up the screen. */
+.tree, .blockers, .ideas-list, .out, .pins, .queue, .links { position: relative; }
+
 /* Present for a screen reader, absent for everyone else. */
 .visually-hidden {
   position: absolute;
@@ -103,6 +110,10 @@ body {
 /* The board is the one page that owns the whole window rather than scrolling in it. A column,
    not a block: the notice above the grid takes the height it needs and the grid takes the rest,
    which is what stops the input field being pushed off the bottom of the screen by it. */
+/* `overflow: hidden` on the body alone is not enough: the document element scrolls instead, and
+   the console slides off the top of the screen while every column inside it still says it fits.
+   Found by taking a screenshot and wondering why the input field was halfway up. */
+html:has(body.desk) { height: 100%; overflow: hidden; }
 body.desk { height: 100vh; overflow: hidden; padding: 0; display: flex; flex-direction: column; }
 
 /* Three columns and two handles. The widths are variables because the right width for them is
