@@ -585,3 +585,48 @@ async def test_a_child_whose_group_was_discarded_is_shown_rather_than_hidden(des
 
     assert child.id in column
     assert parent.id not in column
+
+
+@pytest.mark.unit
+async def test_an_idea_an_agent_has_in_hand_says_so_wherever_it_is_drawn(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """One word, one colour, in the request that took it on and in the list it came from.
+
+    Derived from the task rather than stored on the idea: a sixth state would be a second copy of
+    the same fact, and a second copy goes wrong quietly (design/02-data-model.md).
+    """
+    idea = await desk.create_idea(text_="cache probes", summary="cache probes", source_kind="typed")
+    quiet = await desk.create_idea(text_="untouched", summary="untouched", source_kind="typed")
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="бери в работу",
+        thread_set_by="human",
+    )
+    await desk.link_block_ideas(block.id, [idea.id, quiet.id])
+    task = await desk.queue_task(
+        repo_key="k",
+        cwd=str(tmp_path),
+        title="take it on",
+        instruction="take it on",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task("k")
+    await desk.task_started(task.id, "agent5")
+
+    assert await desk.ideas_in_flight() == {idea.id}
+
+    column = await routes.render_ideas()
+    assert "in progress" in column
+
+    said = await routes.render_blocks()
+    assert "taken on" in said
+    assert "cache probes · in progress" in said
+    # The one nobody started is still just an idea, and still offered.
+    assert "implement these ideas" in said
+
+    # And when its agent has gone, nothing is in flight any more.
+    await desk.finish_task(task.id)
+    assert await desk.ideas_in_flight() == set()

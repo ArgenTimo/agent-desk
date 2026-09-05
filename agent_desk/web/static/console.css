@@ -612,6 +612,14 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .about form { display: contents; }
 .idea-chip { cursor: grab; }
 .idea-chip.done { opacity: 0.6; text-decoration: line-through; }
+/* In somebody's hands right now. One colour, in every place an idea is drawn. */
+.idea-chip.working, .pill.working {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 45%, var(--line));
+  background: color-mix(in srgb, var(--busy) 12%, transparent);
+}
+.about.taken { border-left-color: var(--busy); }
+.idea-card.working { border-left-color: var(--busy); background: color-mix(in srgb, var(--busy) 7%, var(--surface)); }
 
 .dot {
   width: 8px; height: 8px; flex: none;

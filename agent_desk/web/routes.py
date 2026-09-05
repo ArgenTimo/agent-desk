@@ -347,6 +347,9 @@ async def render_blocks() -> str:
         threads_by_id={thread.id: thread for thread in open_threads + missing},
         ideas=ideas,
         about=about,
+        # Which of them an agent has in its hands right now, so the console can say so wherever an
+        # idea appears rather than only where the work was started.
+        working=await store.ideas_in_flight(),
         directives=directives,
         partial=block_runs.PARTIAL,
     )
@@ -389,6 +392,7 @@ async def render_ideas() -> str:
         else:
             roots.append(idea)
     return env.get_template("_ideas.html").render(
+        working=await store.ideas_in_flight(),
         roots=list(reversed(roots)),
         children=children,
         counted=len(ideas),

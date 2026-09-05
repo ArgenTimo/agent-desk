@@ -745,6 +745,26 @@ class Store:
                     {"block_id": block_id, "idea_id": idea_id},
                 )
 
+    async def ideas_in_flight(self) -> set[str]:
+        """The ideas an agent is working on right now.
+
+        Derived rather than stored: a task that started, has not finished and has not failed is an
+        agent in a worktree, and the ideas it was dispatched for are the ones in its hands. A sixth
+        idea state would be a second copy of that fact, and a second copy of a fact goes wrong
+        quietly (design/02-data-model.md).
+        """
+        working: set[str] = set()
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT source_ref FROM task WHERE started_at IS NOT NULL "
+                    "AND finished_at IS NULL AND failed_at IS NULL AND source_ref IS NOT NULL"
+                )
+            )
+            for row in rows:
+                working.update(one for one in str(row._mapping["source_ref"]).split(",") if one)
+        return working
+
     async def ideas_of_blocks(self) -> dict[str, list[str]]:
         async with self.engine.connect() as conn:
             rows = await conn.execute(text("SELECT block_id, idea_id FROM block_idea"))

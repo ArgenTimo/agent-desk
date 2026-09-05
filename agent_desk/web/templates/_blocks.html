@@ -139,17 +139,22 @@
   {% endif %}
 
   {% if block.id in about and about[block.id] %}
-  {# This request looks like it is about things already written down. A guess, so it is an offer:
-     the thoughts, and one button that starts an agent on them (docs/05-ideas.md). #}
-  <div class="about">
-    <span class="dim small">this looks like it is about</span>
+  {# The ideas this request is about, joined to it: dropped in by a person, or found by a short
+     run against what is written down. Where an agent has them, the request and the thoughts are
+     one thing on the screen, because they are one thing (docs/05-ideas.md). #}
+  {% set taken = about[block.id] | selectattr("id", "in", working) | list %}
+  <div class="about{% if taken %} taken{% endif %}">
+    <span class="dim small">
+      {% if taken %}taken on{% else %}this looks like it is about{% endif %}
+    </span>
     {% for idea in about[block.id] %}
-    <span class="chip idea-chip {{ idea.state }}" data-kind="idea" data-id="{{ idea.id }}"
-          data-label="{{ idea.summary }}" draggable="true" title="{{ idea.text }}">
-      {{ idea.summary }}{% if idea.state == "done" %} · built{% endif %}
+    <span class="chip idea-chip {{ idea.state }}{% if idea.id in working %} working{% endif %}"
+          data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}"
+          draggable="true" title="{{ idea.text }}">
+      {{ idea.summary }}{% if idea.id in working %} · in progress{% elif idea.state == "done" %} · built{% endif %}
     </span>
     {% endfor %}
-    {% if about[block.id] | selectattr("state", "ne", "done") | list %}
+    {% if about[block.id] | rejectattr("state", "eq", "done") | rejectattr("id", "in", working) | list %}
     <form method="post" action="/blocks/{{ block.id }}/implement"
           hx-post="/blocks/{{ block.id }}/implement" hx-target="#message">
       <button type="submit" class="send" title="start an agent on these, in a worktree of its own">implement these ideas</button>
