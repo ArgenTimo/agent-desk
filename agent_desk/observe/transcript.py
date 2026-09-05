@@ -115,6 +115,28 @@ def _flatten(message: Any) -> str:
     return " ".join(p for p in parts if p)[:_MAX_ENTRY_CHARS]
 
 
+def _context_tokens(message: Any) -> int | None:
+    """How much this turn was carrying, from the usage the CLI writes on an assistant message.
+
+    Input plus both cache halves: what the model was handed. The output is deliberately not in it
+    — the question a card answers is "how big has this session got", and the answer to that is the
+    size of what goes in. A message with no usage returns None rather than nought, because a
+    missing number and a zero are different facts (docs/03-session-observation.md).
+    """
+    if not isinstance(message, dict):
+        return None
+    usage = message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    counted = [
+        usage.get("input_tokens"),
+        usage.get("cache_creation_input_tokens"),
+        usage.get("cache_read_input_tokens"),
+    ]
+    numbers = [one for one in counted if isinstance(one, int)]
+    return sum(numbers) if numbers else None
+
+
 def _agent_calls(message: Any) -> list[tuple[str, str, str]]:
     """Every `Agent` tool call in one entry: its id, the kind of agent, and what it was asked for.
 
@@ -183,6 +205,7 @@ def read_tail(
     # both halves are collected and matched once the window has been read.
     calls: list[tuple[str, str, str]] = []
     returned: set[str] = set()
+    context_tokens: int | None = None
 
     for raw in window:
         try:
@@ -202,6 +225,7 @@ def read_tail(
         elif kind in ("user", "assistant"):
             # gitBranch is what makes the board legible across worktrees of one repository.
             git_branch = line.get("gitBranch") or git_branch
+            context_tokens = _context_tokens(line.get("message")) or context_tokens
             calls.extend(_agent_calls(line.get("message")))
             returned.update(_tool_results(line.get("message")))
             entries.append(
@@ -221,6 +245,7 @@ def read_tail(
         title=title,
         last_prompt=last_prompt,
         git_branch=git_branch,
+        context_tokens=context_tokens,
         entries=entries[-lines:],
         # Most recent first, which is the order a card reads them in.
         agents=[

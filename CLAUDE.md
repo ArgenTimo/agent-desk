@@ -104,9 +104,17 @@ what you ran and what the Stop hook runs are the same thing:
 ```
 make install   dependencies, dev group included
 make gate      ruff · mypy · pytest -m unit     — what stop-verify.sh runs at every turn end
-make verify    gate + check-links
+make verify    gate + check-links + coverage
+make coverage  the suite with a floor under it
 make run       the console
 ```
+
+**The coverage floor is where the suite already stands, not an aspiration.** A threshold nobody
+meets is a threshold that gets lowered; this one is set to what is true today so that a change
+which stops covering something has to say so. What is deliberately outside it is the handful of
+lines that talk to the network or fork a real session — one function in `tracker/jira.py`, one in
+`dispatch.py` — each with everything around it tested and each impossible to exercise without
+doing the thing to somebody's machine.
 
 Two async mistakes that hurt most here: blocking IO in an async path stalls the whole console, and
 a fire-and-forget `create_task` produces a failure nobody observes. Use `TaskGroup`.

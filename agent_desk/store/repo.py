@@ -113,6 +113,9 @@ class Task(BaseModel):
     instruction: str
     source_kind: str
     source_ref: str | None = None
+    # The message that asked for it, where one did. Matched by title once, which was the same
+    # thing until two messages started with the same sixty characters.
+    block_id: str | None = None
     queued_at: int
     started_at: int | None = None
     agent_id: str | None = None
@@ -546,6 +549,19 @@ class Store:
                 text("UPDATE idea SET block_id = NULL WHERE block_id = :id"), {"id": block_id}
             )
             await conn.execute(text("DELETE FROM directive WHERE block_id = :id"), {"id": block_id})
+            await conn.execute(
+                text("DELETE FROM block_idea WHERE block_id = :id"), {"id": block_id}
+            )
+            # Work that never started goes with the message that asked for it: nothing should be
+            # waiting to run for a reason nobody can read any more. Work that *did* start keeps its
+            # row and loses only the pointer — an agent exists whatever happened to the message.
+            await conn.execute(
+                text("DELETE FROM task WHERE block_id = :id AND started_at IS NULL"),
+                {"id": block_id},
+            )
+            await conn.execute(
+                text("UPDATE task SET block_id = NULL WHERE block_id = :id"), {"id": block_id}
+            )
             await conn.execute(text("DELETE FROM block WHERE id = :id"), {"id": block_id})
 
     async def set_block_kind(self, block_id: str, kind: BlockKind) -> None:
@@ -678,6 +694,7 @@ class Store:
         instruction: str,
         source_kind: str,
         source_ref: str | None = None,
+        block_id: str | None = None,
     ) -> Task:
         """Put one piece of approved work in the queue. Only a route reaches this: nothing
         enqueues itself (docs/adr/0007)."""
@@ -689,29 +706,32 @@ class Store:
             instruction=instruction,
             source_kind=source_kind,
             source_ref=source_ref,
+            block_id=block_id,
             queued_at=_now_ms(),
         )
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO task (id, repo_key, cwd, title, instruction, source_kind, "
-                    "source_ref, queued_at, started_at, agent_id, failed_at, detail) VALUES "
-                    "(:id, :repo_key, :cwd, :title, :instruction, :source_kind, :source_ref, "
-                    ":queued_at, NULL, NULL, NULL, NULL)"
+                    "source_ref, block_id, queued_at, started_at, agent_id, failed_at, detail) "
+                    "VALUES (:id, :repo_key, :cwd, :title, :instruction, :source_kind, "
+                    ":source_ref, :block_id, :queued_at, NULL, NULL, NULL, NULL)"
                 ),
-                task.model_dump(exclude={"started_at", "agent_id", "failed_at", "detail"}),
+                task.model_dump(
+                    exclude={"started_at", "agent_id", "failed_at", "finished_at", "detail"}
+                ),
             )
         return task
 
     async def tasks(self, *, repo_key: str | None = None, limit: int = 100) -> list[Task]:
         one = (
-            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
-            "started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, block_id, "
+            "queued_at, started_at, agent_id, failed_at, finished_at, detail FROM task "
             "WHERE repo_key = :repo_key ORDER BY queued_at LIMIT :limit"
         )
         every = (
-            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, queued_at, "
-            "started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, block_id, "
+            "queued_at, started_at, agent_id, failed_at, finished_at, detail FROM task "
             "ORDER BY queued_at LIMIT :limit"
         )
         async with self.engine.connect() as conn:

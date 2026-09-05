@@ -64,8 +64,21 @@
             {# Plain words, because the person reading this may not know what a shell is. The
                registry's own word is on the tooltip: this is a rendering of a fact, not a
                different claim about it (docs/03-session-observation.md). #}
+            {# Five things, and nothing else: what it is called, how it is, how long, how big, and
+               one line of what it is doing. Everything a card said beyond that was noise on a
+               surface somebody glances at (docs/06-console.md). #}
             <div class="state-line">
+              {% if row.session.status == "idle" %}
+              {# A picture and plain words, because "idle" says nothing to somebody who does not
+                 use a terminal. The registry's own word stays on the tooltip: this renders a
+                 fact, it does not replace one (docs/03-session-observation.md). #}
+              <span class="pill state idle" title="the registry says: idle">🚬 having a smoke</span>
+              {% else %}
               <span class="pill state {{ row.session.status }}" title="the registry says: {{ row.session.status }}">{{ row.session.status | plainly }}</span>
+              {% endif %}
+              {% if row.tail and row.tail.context_tokens %}
+              <span class="pill quiet" title="what this session is carrying right now">{{ row.tail.context_tokens | tokens }}</span>
+              {% endif %}
               {% if row.session.kind == "bg" %}
               {# Started from here, in a worktree of its own, rather than by a human in a terminal.
                  A thing this console caused is a thing it has to show (docs/adr/0006). #}
@@ -78,10 +91,7 @@
             </div>
 
             {% if row.tail and row.tail.last_entry %}
-            <p class="last-line">
-              <span class="who">{{ row.tail.last_entry.role }}</span>
-              {{ row.tail.last_entry.text or "—" }}
-            </p>
+            <p class="last-line one">{{ row.tail.last_entry.text or "—" }}</p>
             {% endif %}
 
             {# Opening a card with the keyboard, or with no JavaScript running at all, has to lead

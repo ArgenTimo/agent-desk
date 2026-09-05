@@ -16,7 +16,7 @@ SHARE_PORT ?= 8788
 POETRY = unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT; poetry
 URL  := http://127.0.0.1:$(PORT)
 
-.PHONY: help install gate verify test lint typecheck run share overlay check-links clean
+.PHONY: help install gate verify test coverage lint typecheck run share overlay check-links clean
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -38,9 +38,17 @@ typecheck: ## mypy
 test: ## pytest -m unit
 	$(POETRY) run pytest -m unit -q
 
+# The floor is where the suite already stands, not an aspiration: a threshold nobody meets is a
+# threshold that gets lowered, and the number is here so that a change which stops covering
+# something says so out loud. What is deliberately not covered is the handful of lines that talk
+# to the network or fork a real session — `tracker/jira.py`'s one request, `dispatch`'s subprocess
+# — and each of those is one function with everything around it tested.
+coverage: ## pytest with a coverage floor
+	$(POETRY) run pytest -m unit -q --cov=agent_desk --cov-report=term-missing --cov-fail-under=93
+
 gate: lint typecheck test ## What stop-verify.sh runs at every turn end
 
-verify: gate check-links ## Everything green before a human sees it
+verify: gate check-links coverage ## Everything green before a human sees it
 
 check-links: ## Prove every relative link in docs/ and design/ resolves
 	@scripts/check-doc-links.sh

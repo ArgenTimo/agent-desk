@@ -122,6 +122,18 @@ def _plainly(status: str) -> str:
     return PLAINLY.get(status, status)
 
 
+def _tokens(count: int | None) -> str:
+    """A context size the way a person says it: 767k, 12k, 900."""
+    if not count:
+        return ""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M".replace(".0M", "M")
+    if count >= 1_000:
+        return f"{count // 1000}k"
+    return str(count)
+
+
+env.filters["tokens"] = _tokens
 env.filters["plainly"] = _plainly
 env.filters["prose"] = _prose
 env.filters["ago"] = _ago
@@ -374,7 +386,9 @@ async def render_blocks() -> str:
         working=await store.ideas_in_flight(),
         # Work that was written down and is waiting for a seat: a request is not done until it is
         # done, and a console that said nothing about it would be pretending otherwise.
-        waiting={task.title: task for task in await store.tasks() if task.waiting},
+        waiting={
+            task.block_id: task for task in await store.tasks() if task.waiting and task.block_id
+        },
         directives=directives,
         partial=block_runs.PARTIAL,
     )
@@ -1081,6 +1095,7 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         source_kind="idea",
         # The ideas this task is *for*: what gets marked built when its agent finishes.
         source_ref=",".join(idea.id for idea in wanted),
+        block_id=block.id,
     )
     result = await asyncio.to_thread(
         dispatch.start,

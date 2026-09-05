@@ -167,10 +167,10 @@
   </div>
   {% endif %}
 
-  {% if block.input[:60] in waiting %}
+  {% if block.id in waiting %}
   {# Written down, not started: something is already running where it would run. It is not done,
      and it does not pretend to be (docs/adr/0007). #}
-  {% set task = waiting[block.input[:60]] %}
+  {% set task = waiting[block.id] %}
   <div class="about waiting">
     <span class="pill attention">waiting</span>
     <span class="dim small">queued in {{ task.repo_key }} — it starts when the seat is free</span>

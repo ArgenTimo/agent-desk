@@ -1,0 +1,662 @@
+"""The routes added after Phase 4: projects, instances, the queue, the arming, the agents.
+
+Every one of these is a button somebody presses, and most of them start or stop something. The
+tests are shaped around the two questions that matter for such a route: does the thing it claims
+to do happen, and does it refuse cleanly when it cannot.
+
+`dispatch` is replaced everywhere here. A test that reached the real one would start a background
+agent on this machine, which is the sort of thing a test suite must never do by accident.
+"""
+
+from __future__ import annotations
+
+import pathlib
+from collections.abc import AsyncIterator
+from urllib.parse import urlencode
+
+import pytest
+from agent_desk import dispatch
+from agent_desk.config import Settings
+from agent_desk.observe import registry, transcript
+from agent_desk.store.repo import Store
+from agent_desk.web import autostart, routes, sse
+
+from tests.unit.test_board import Home, _entry
+
+
+@pytest.fixture
+def home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Home:
+    """A fake `~/.claude` with one live session, wired into every module that reads a path."""
+    fake = Settings(
+        claude_home=tmp_path / "claude",
+        data_dir=tmp_path / "data",
+        registry_poll_seconds=0.0,
+        idle_hint_seconds=300,
+    )
+    for module in (registry, transcript, routes, sse):
+        monkeypatch.setattr(module, "settings", fake)
+    return Home(tmp_path / "claude")
+
+
+@pytest.fixture
+async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Store]:
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    monkeypatch.setattr(routes, "store", store)
+    yield store
+    await store.close()
+
+
+@pytest.fixture
+def started(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
+    """Every dispatch this test made, and none of them left the process."""
+    calls: list[dict[str, str]] = []
+
+    def fake_start(instruction: str, *, cwd: str, name: str) -> dispatch.Started:
+        calls.append({"instruction": instruction, "cwd": cwd, "name": name})
+        return dispatch.Started(True, agent_id=f"agent{len(calls)}")
+
+    def fake_stop(agent_id: str) -> dispatch.Started:
+        calls.append({"stopped": agent_id})
+        return dispatch.Started(True, agent_id=agent_id)
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setattr(dispatch, "stop", fake_stop)
+    return calls
+
+
+async def _get(path: str) -> tuple[int, str]:
+    from tests.unit.test_board import _request
+
+    return await _request(path, "127.0.0.1")
+
+
+async def _post(path: str, fields: dict[str, str] | None = None) -> tuple[int, str]:
+    from tests.unit.test_input import _post as post_form
+
+    status, body, _ = await post_form(path, fields or {}, htmx=True)
+    return status, body
+
+
+def _a_session(home: Home) -> str:
+    import os
+    import time
+
+    now = int(time.time() * 1000)
+    session_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    home.session(os.getpid(), session_id, cwd=str(home.root.parent), updatedAt=now)
+    home.transcript(session_id, _entry("assistant", "doing something"))
+    return session_id
+
+
+async def _the_project(home: Home) -> str:
+    """The repository key of the one project on the board."""
+    _a_session(home)
+    rows, _ = routes.board()
+    projects = routes.shape(rows, await routes.store.groups())
+    return projects[0].key
+
+
+# --- a project's own page and its menu ------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_project_has_a_page_of_its_own(home: Home, desk: Store) -> None:
+    key = await _the_project(home)
+
+    status, body = await _get(f"/projects/page?key={urlencode({'k': key})[2:]}")
+
+    assert status == 200
+    assert "work queued here" in body
+    assert "environment this project expects" in body
+    # A page, not a fragment: it has to stand on its own on a second screen.
+    assert "<!doctype html>" in body.lower()
+
+
+@pytest.mark.unit
+async def test_the_environment_a_project_expects_is_names_and_never_values(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docs/07-security.md: this file has no encryption and a second application reads out of it."""
+    key = await _the_project(home)
+    monkeypatch.setenv("DESK_TEST_URL", "postgres://not-in-the-database")
+
+    status, panel = await _post(
+        "/project-env", {"key": key, "name": "DESK_TEST_URL", "note": "where the data is"}
+    )
+
+    assert status == 200
+    assert "DESK_TEST_URL" in panel
+    assert "set here" in panel
+    assert "postgres://" not in panel
+    (named,) = await desk.env(key)
+    assert named.name == "DESK_TEST_URL"
+    assert named.note == "where the data is"
+
+    status, panel = await _post(
+        "/project-env", {"key": key, "name": "DESK_TEST_URL", "remove": "yes"}
+    )
+    assert status == 200
+    assert await desk.env(key) == []
+
+
+# --- new instances --------------------------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_new_instance_is_offered_before_it_is_made(home: Home, desk: Store) -> None:
+    key = await _the_project(home)
+
+    status, panel = await _get(f"/projects/instance?key={key}")
+
+    assert status == 200
+    assert "new instance in" in panel
+    assert "Create it" in panel
+
+
+@pytest.mark.unit
+async def test_a_new_instance_starts_an_agent_that_reads_before_it_writes(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """It is a new pair of hands in a repository nobody has introduced it to (docs/adr/0006)."""
+    key = await _the_project(home)
+    await desk.set_env(repo_key=key, name="DESK_NEEDS_THIS")
+
+    status, panel = await _post(
+        "/projects/instance", {"key": key, "name": "biba", "doing": "the api half"}
+    )
+
+    assert status == 200
+    assert "biba is set up" in panel
+    assert "agent1" in panel
+
+    (call,) = started
+    assert call["name"] == "biba"
+    assert "You are biba" in call["instruction"]
+    assert "Start by reading" in call["instruction"]
+    assert "the api half" in call["instruction"]
+    # It is told what the project expects, by name, and told to check rather than assume.
+    assert "DESK_NEEDS_THIS" in call["instruction"]
+
+
+@pytest.mark.unit
+async def test_an_instance_in_a_project_that_is_not_here_says_so(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    status, panel = await _post("/projects/instance", {"key": "origin:nobody/nothing"})
+
+    assert status == 200
+    assert "no checkout on this machine" in panel
+    assert started == []
+
+
+# --- the queue and the arming ---------------------------------------------------------------------
+@pytest.mark.unit
+async def test_work_is_queued_started_and_dropped_by_the_buttons_that_say_so(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    key = await _the_project(home)
+
+    status, panel = await _post("/tasks", {"key": key, "instruction": "check the ports"})
+    assert status == 200
+    assert "check the ports" in panel
+    (task,) = await desk.tasks()
+    assert task.waiting
+
+    status, panel = await _post(f"/tasks/{task.id}/start", {"key": key})
+    assert status == 200
+    assert len(started) == 1
+    after = next(one for one in await desk.tasks() if one.id == task.id)
+    assert after.agent_id == "agent1"
+
+    status, panel = await _post(f"/tasks/{task.id}/drop", {"key": key})
+    assert status == 200
+    assert await desk.tasks() == []
+
+
+@pytest.mark.unit
+async def test_a_failed_task_goes_back_in_the_queue_only_when_asked(
+    home: Home, desk: Store
+) -> None:
+    """Nothing retries by itself: a task that failed stays failed and says why (docs/adr/0007)."""
+    key = await _the_project(home)
+    task = await desk.queue_task(
+        repo_key=key,
+        cwd=str(home.root),
+        title="check the ports",
+        instruction="check the ports",
+        source_kind="typed",
+    )
+    await desk.take_next_task(key)
+    await desk.task_failed(task.id, "no disk space")
+
+    status, panel = await _post(f"/tasks/{task.id}/retry", {"key": key})
+
+    assert status == 200
+    waiting = [one for one in await desk.tasks() if one.waiting]
+    assert [one.title for one in waiting] == ["check the ports"]
+
+
+@pytest.mark.unit
+async def test_an_action_the_queue_does_not_have_is_not_a_shrug(home: Home, desk: Store) -> None:
+    status, _ = await _post("/tasks/whatever/explode", {"key": "k"})
+    assert status == 404
+
+
+@pytest.mark.unit
+async def test_arming_and_disarming_a_project_says_what_it_will_do(home: Home, desk: Store) -> None:
+    key = await _the_project(home)
+
+    status, panel = await _post("/autostart", {"key": key, "armed": "yes", "per_hour": "3"})
+    assert status == 200
+    assert "Armed" in panel
+    assert (await desk.autostart(key)).per_hour == 3
+
+    status, panel = await _post("/autostart", {"key": key, "armed": "no"})
+    assert status == 200
+    assert "Nothing here starts without you" in panel
+    assert (await desk.autostart(key)).armed is False
+
+
+@pytest.mark.unit
+async def test_a_budget_that_is_not_a_number_falls_back_rather_than_failing(
+    home: Home, desk: Store
+) -> None:
+    key = await _the_project(home)
+
+    status, _ = await _post("/autostart", {"key": key, "armed": "yes", "per_hour": "lots"})
+
+    assert status == 200
+    assert (await desk.autostart(key)).per_hour == 2
+
+
+# --- agents ----------------------------------------------------------------------------------------
+@pytest.mark.unit
+async def test_stopping_an_agent_frees_the_seat_it_was_holding(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    key = await _the_project(home)
+    task = await desk.queue_task(
+        repo_key=key, cwd=str(home.root), title="one", instruction="one", source_kind="typed"
+    )
+    await desk.take_next_task(key)
+    await desk.task_started(task.id, "agent9")
+
+    status, panel = await _post("/agents/agent9/stop", {})
+
+    assert status == 200
+    assert "was stopped" in panel
+    assert started == [{"stopped": "agent9"}]
+    settled = next(one for one in await desk.tasks() if one.id == task.id)
+    assert settled.finished_at is not None
+    # The seat is free again: with the project armed, the only thing left to say is that the
+    # queue is empty.
+    await desk.arm(key, per_hour=2)
+    assert await autostart.why_not(desk, key, live=set()) == "nothing is queued"
+
+
+@pytest.mark.unit
+async def test_an_agent_that_will_not_stop_says_what_came_back(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        dispatch, "stop", lambda agent_id: dispatch.Started(False, detail="no such session")
+    )
+
+    status, panel = await _post("/agents/nope/stop", {})
+
+    assert status == 200
+    assert "would not stop" in panel
+    assert "no such session" in panel
+
+
+@pytest.mark.unit
+async def test_dispatching_from_a_session_card_starts_work_in_its_checkout(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    session_id = _a_session(home)
+
+    status, panel = await _post(f"/sessions/{session_id}/dispatch", {"text": "run the tests again"})
+
+    assert status == 200
+    assert "an agent is on it" in panel
+    (call,) = started
+    assert "run the tests again" in call["instruction"]
+    assert call["cwd"] == str(home.root.parent)
+
+
+@pytest.mark.unit
+async def test_dispatching_at_a_session_that_has_gone_says_so(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    status, panel = await _post("/sessions/no-such-session/dispatch", {"text": "do it"})
+
+    assert status == 200
+    assert "not on the board any more" in panel
+    assert started == []
+
+
+# --- ideas, from the other side ---------------------------------------------------------------------
+@pytest.mark.unit
+async def test_implementing_the_ideas_a_message_is_about(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    await _the_project(home)
+    idea = await desk.create_idea(
+        text_="cache the probe results", summary="cache probes", source_kind="typed"
+    )
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="do the caching thing",
+        thread_set_by="human",
+    )
+    await desk.link_block_ideas(block.id, [idea.id])
+
+    status, panel = await _post(f"/blocks/{block.id}/implement", {})
+
+    assert status == 200
+    assert "an agent is on it" in panel
+    (call,) = started
+    # The thought as it was written, not the line that summarises it.
+    assert "cache the probe results" in call["instruction"]
+    (task,) = await desk.tasks()
+    assert task.source_ref == idea.id
+    assert task.block_id == block.id
+
+
+@pytest.mark.unit
+async def test_implementing_nothing_is_refused_rather_than_started(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="question",
+        input="what is happening",
+        thread_set_by="human",
+    )
+
+    status, panel = await _post(f"/blocks/{block.id}/implement", {})
+
+    assert status == 200
+    assert "nothing here to build" in panel
+    assert started == []
+
+
+@pytest.mark.unit
+async def test_grouping_an_idea_under_another_and_taking_it_back_out(
+    home: Home, desk: Store
+) -> None:
+    parent = await desk.create_idea(text_="the whole", summary="the whole", source_kind="typed")
+    child = await desk.create_idea(text_="a part", summary="a part", source_kind="typed")
+
+    status, column = await _post(f"/ideas/{child.id}/parent", {"parent": parent.id})
+    assert status == 200
+    assert (await desk.idea(child.id)).parent_id == parent.id  # type: ignore[union-attr]
+
+    status, column = await _post(f"/ideas/{child.id}/parent", {"parent": ""})
+    assert status == 200
+    assert (await desk.idea(child.id)).parent_id is None  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_an_idea_is_a_card_that_opens_on_the_workbench(home: Home, desk: Store) -> None:
+    idea = await desk.create_idea(
+        text_="cache the probe results per project",
+        summary="cache probes",
+        source_kind="typed",
+        context={"project": "alpha"},
+    )
+
+    status, card = await _get(f"/cards/idea?id={idea.id}")
+    assert status == 200
+    assert "cache the probe results per project" in card
+    assert "alpha" in card
+
+    status, card = await _get("/cards/idea?id=no-such-idea")
+    assert status == 404
+    assert "not in the inbox any more" in card
+
+
+# --- chats ------------------------------------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_chat_is_opened_and_closed_and_the_last_one_stays(home: Home, desk: Store) -> None:
+    """An interaction area with no tab has nowhere to put an answer."""
+    first = await routes.open_chats()
+    assert len(first) == 1
+
+    status, tabs = await _post("/threads", {})
+    assert status == 200
+    assert tabs.count("data-thread=") == 2
+
+    (newest,) = [thread for thread in await routes.open_chats() if thread.id != first[0].id]
+    status, tabs = await _post(f"/threads/{newest.id}/close", {})
+    assert status == 200
+    assert tabs.count("data-thread=") == 1
+
+    # The last one cannot be closed: there would be nowhere to put an answer.
+    status, tabs = await _post(f"/threads/{first[0].id}/close", {})
+    assert status == 200
+    assert tabs.count("data-thread=") == 1
+
+
+# --- links, projects, and the one write path's neighbours -------------------------------------------
+@pytest.mark.unit
+async def test_a_link_is_added_and_removed_and_only_a_real_address_is_kept(
+    home: Home, desk: Store
+) -> None:
+    key = await _the_project(home)
+
+    status, panel = await _post(
+        "/project-links",
+        {
+            "key": key,
+            "name": "jira",
+            "url": "https://acme.atlassian.net/browse/API",
+            "token_env": "ACME_JIRA",
+        },
+    )
+    assert status == 200
+    assert "acme.atlassian.net" in panel
+    (link,) = await desk.links(key)
+    assert link.token_env == "ACME_JIRA"
+
+    # Not an address: nothing is stored, and the panel comes back unchanged rather than erroring.
+    status, _ = await _post("/project-links", {"key": key, "name": "bad", "url": "javascript:x"})
+    assert status == 200
+    assert [one.name for one in await desk.links(key)] == ["jira"]
+
+    status, panel = await _post("/project-links/remove", {"key": key, "name": "jira"})
+    assert status == 200
+    assert await desk.links(key) == []
+
+
+@pytest.mark.unit
+async def test_a_project_is_declared_dissolved_and_carries_its_first_member(
+    home: Home, desk: Store
+) -> None:
+    key = await _the_project(home)
+
+    status, board = await _post("/projects", {"name": "one product", "repo_key": key})
+    assert status == 200
+    assert "one product" in board
+    (group,) = await desk.groups()
+    assert list(group.repo_keys) == [key]
+
+    status, board = await _post(f"/projects/{group.id}/dissolve", {})
+    assert status == 200
+    assert await desk.groups() == []
+
+
+@pytest.mark.unit
+async def test_dispatching_a_directive_once_and_then_not_again(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """Twice is two agents in two worktrees editing one repository."""
+    session_id = _a_session(home)
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="run the tests",
+        thread_set_by="human",
+    )
+    directive = await desk.record_directive(
+        block_id=block.id, session_id=session_id, session_name="alpha", text_="run the tests"
+    )
+
+    status, panel = await _post(f"/directives/{directive.id}/dispatch", {})
+    assert status == 200
+    assert "an agent is on it" in panel
+    assert len(started) == 1
+
+    status, _ = await _post(f"/directives/{directive.id}/dispatch", {})
+    assert status == 200
+    assert len(started) == 1
+
+    status, _ = await _post("/directives/no-such-directive/dispatch", {})
+    assert status == 404
+
+
+@pytest.mark.unit
+async def test_a_directive_whose_session_has_gone_starts_nothing(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="run the tests",
+        thread_set_by="human",
+    )
+    directive = await desk.record_directive(
+        block_id=block.id, session_id="gone", session_name="gone", text_="run the tests"
+    )
+
+    status, panel = await _post(f"/directives/{directive.id}/dispatch", {})
+
+    assert status == 200
+    assert "not on the board any more" in panel
+    assert started == []
+
+
+# --- and all of it without JavaScript ----------------------------------------------------------
+@pytest.mark.unit
+async def test_every_control_still_works_with_no_javascript_at_all(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """htmx upgrades this console; it does not enable it (docs/06-console.md).
+
+    Each of these posts arrives without the header htmx sends, which is what a browser with no
+    script does. The answer must be a whole page or a redirect to one — never a fragment somebody
+    would see on its own, and never a 500.
+    """
+    from tests.unit.test_input import _post as post_form
+
+    key = await _the_project(home)
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=key, cwd=str(home.root), title="one", instruction="one", source_kind="typed"
+    )
+    thread = await desk.create_thread("chat 1")
+    await desk.create_thread("chat 2")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="what now", thread_set_by="human"
+    )
+
+    plain = [
+        ("/threads", {}),
+        (f"/threads/{thread.id}/close", {}),
+        ("/projects", {"name": "one product"}),
+        ("/project-links", {"key": key, "name": "jira", "url": "https://example.invalid/browse/A"}),
+        ("/project-links/remove", {"key": key, "name": "jira"}),
+        ("/project-env", {"key": key, "name": "SOME_VAR"}),
+        ("/tasks", {"key": key, "instruction": "check the ports"}),
+        (f"/tasks/{task.id}/drop", {"key": key}),
+        ("/autostart", {"key": key, "armed": "yes", "per_hour": "2"}),
+        ("/projects/instance", {"key": key, "name": "biba"}),
+        ("/agents/agent1/stop", {}),
+        (f"/ideas/{idea.id}/keep", {}),
+        (f"/ideas/{idea.id}/parent", {"parent": ""}),
+        (f"/blocks/{block.id}/as-idea", {}),
+        (f"/blocks/{block.id}/implement", {}),
+        (f"/sessions/{_a_session(home)}/dispatch", {"text": "do it"}),
+    ]
+
+    for path, fields in plain:
+        status, body, headers = await post_form(path, fields, htmx=False)
+        assert status in (200, 303), f"{path} answered {status}"
+        if status == 303:
+            assert headers["location"].startswith("/"), path
+        else:
+            assert "<!doctype html>" in body.lower(), f"{path} answered a fragment"
+
+
+@pytest.mark.unit
+async def test_a_card_dropped_on_a_project_joins_it(home: Home, desk: Store) -> None:
+    """The other half of declaring a project: dragging a repository into one that exists."""
+    key = await _the_project(home)
+    group = await desk.create_group("one product")
+
+    status, board = await _post(f"/projects/{group.id}/members", {"repo_key": key})
+
+    assert status == 200
+    assert "one product" in board
+    (declared,) = await desk.groups()
+    assert list(declared.repo_keys) == [key]
+
+
+@pytest.mark.unit
+async def test_a_viewer_link_is_minted_once_and_shown_once(home: Home, desk: Store) -> None:
+    """A refresh must not mint a second credential for the same person (docs/07-security.md)."""
+    from tests.unit.test_input import _post as post_form
+
+    status, _, headers = await post_form("/viewers", {"name": "a teammate"}, htmx=False)
+    assert status == 303
+    shown = headers["location"]
+    assert shown.startswith("/viewers?shown=")
+    (viewer,) = await desk.viewers()
+
+    status, page = await _get(shown)
+    assert status == 200
+    assert "a teammate" in page
+    # Shown once: the slot is emptied by the render that used it.
+    status, again = await _get(shown)
+    assert status == 200
+    assert page != again
+
+    status, _, _ = await post_form(f"/viewers/{viewer.id}/revoke", {}, htmx=False)
+    assert status == 303
+    (revoked,) = await desk.viewers()
+    assert revoked.revoked_at is not None
+
+    # A name is required: nothing is minted for an empty one.
+    status, _, headers = await post_form("/viewers", {"name": "  "}, htmx=False)
+    assert status == 303
+    assert len(await desk.viewers()) == 1
+
+
+@pytest.mark.unit
+async def test_the_write_path_panel_opens_on_a_full_page_too(home: Home, desk: Store) -> None:
+    session_id = _a_session(home)
+
+    status, page = await _get(f"/sessions/{session_id}/message")
+
+    assert status == 200
+    assert "<!doctype html>" in page.lower()
+    assert "message to" in page
+
+
+@pytest.mark.unit
+async def test_filing_a_ticket_answers_a_page_when_the_browser_has_no_script(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.unit.test_input import _post as post_form
+
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.set_idea_state(idea.id, "kept")
+    await desk.create_draft(idea_id=idea.id, kind="ticket", body="A thought")
+
+    # No destination configured: the panel says which step is missing, on a whole page.
+    status, page = await _get(f"/ideas/{idea.id}/file")
+    assert status == 200
+    assert "<!doctype html>" in page.lower()
+    assert "no project has a Jira link" in page
+
+    status, page, _ = await post_form(f"/ideas/{idea.id}/file", {}, htmx=False)
+    assert status == 200
+    assert "<!doctype html>" in page.lower()

@@ -520,3 +520,73 @@ def test_an_answer_is_rendered_as_prose_and_never_as_markup() -> None:
     assert "<code>x</code>" in rendered
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
+
+
+@pytest.mark.unit
+def test_a_card_says_five_things_and_the_fifth_is_how_big_it_has_got(home: Home) -> None:
+    """docs/06-console.md: name, state, how long, how big, and one line of what it is doing.
+
+    The size is read from the usage the CLI writes on an assistant turn — input plus both cache
+    halves, which is what the model was handed. Output is deliberately not in it: the question a
+    card answers is "how big has this session got".
+    """
+    now = int(time.time() * 1000)
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", status="busy", updatedAt=now)
+    home.transcript(
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        {"type": "ai-title", "aiTitle": "Docker client"},
+        {
+            **_entry("assistant", "reading the client"),
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "reading the client"}],
+                "usage": {
+                    "input_tokens": 2,
+                    "cache_creation_input_tokens": 1658,
+                    "cache_read_input_tokens": 765_466,
+                    "output_tokens": 1804,
+                },
+            },
+        },
+    )
+
+    html = routes.render_board()
+
+    assert "Docker client" in html
+    assert "working" in html
+    assert "767k" in html  # 2 + 1658 + 765466, and the output is not in it
+    assert "reading the client" in html
+
+
+@pytest.mark.unit
+def test_a_session_doing_nothing_is_having_a_smoke(home: Home) -> None:
+    """ "idle" says nothing to somebody who does not use a terminal; the registry's word stays on
+    the tooltip, because this renders a fact rather than replacing one."""
+    home.session(os.getpid(), "bbbbbbbb-0000-4000-8000-000000000002", status="idle")
+
+    html = routes.render_board()
+
+    assert "having a smoke" in html
+    assert 'title="the registry says: idle"' in html
+
+
+@pytest.mark.unit
+def test_a_turn_with_no_usage_reports_no_size_rather_than_nought(home: Home) -> None:
+    """A missing number and a zero are different facts (docs/03-session-observation.md)."""
+    home.session(os.getpid(), "cccccccc-0000-4000-8000-000000000003")
+    home.transcript("cccccccc-0000-4000-8000-000000000003", _entry("assistant", "no usage here"))
+
+    tail = transcript.read_tail("cccccccc-0000-4000-8000-000000000003")
+
+    assert tail is not None
+    assert tail.context_tokens is None
+
+
+@pytest.mark.unit
+def test_a_size_is_said_the_way_a_person_says_it() -> None:
+    assert routes._tokens(767_126) == "767k"
+    assert routes._tokens(1_200_000) == "1.2M"
+    assert routes._tokens(1_000_000) == "1M"
+    assert routes._tokens(900) == "900"
+    assert routes._tokens(None) == ""
+    assert routes._tokens(0) == ""

@@ -630,3 +630,85 @@ async def test_an_idea_an_agent_has_in_hand_says_so_wherever_it_is_drawn(
     # And when its agent has gone, nothing is in flight any more.
     await desk.finish_task(task.id)
     assert await desk.ideas_in_flight() == set()
+
+
+# --- the two runs that read what was typed -----------------------------------------------------
+KINDS = """#!/bin/sh
+prompt=$(cat)
+case "$prompt" in
+  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$SAY" ;;
+  *"which of them this request is about"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$SAY" ;;
+  *) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n' ;;
+esac
+"""
+
+
+@pytest.fixture
+def says(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    binary = tmp_path / "says" / "claude"
+    binary.parent.mkdir()
+    binary.write_text(KINDS)
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(binary), answer_timeout_seconds=10.0)
+    )
+    return binary
+
+
+@pytest.mark.unit
+async def test_what_the_kind_run_says_is_read_strictly(
+    says: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One token, and the whole reply. Anything else is a question, which is the safe reading."""
+    from agent_desk.answer import classify
+
+    monkeypatch.setenv("SAY", "idea")
+    assert await classify.kind("cache the probes") == "idea"
+
+    monkeypatch.setenv("SAY", "do")
+    assert await classify.kind("бери в работу") == "instruction"
+
+    monkeypatch.setenv("SAY", "I think it is an idea")
+    assert await classify.kind("something") == "question"
+
+
+@pytest.mark.unit
+async def test_a_kind_run_that_cannot_run_says_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unavailable model must not turn a question into an agent (docs/adr/0006)."""
+    from agent_desk.answer import classify
+
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
+
+    assert await classify.kind("do the thing") == "question"
+
+
+@pytest.mark.unit
+async def test_which_ideas_a_request_is_about_is_read_as_numbers_or_nothing(
+    says: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_desk.answer import classify
+
+    ideas = ["cache the probes", "fix the ports", "add an export"]
+
+    monkeypatch.setenv("SAY", "1, 3")
+    assert await classify.related("do the caching and the export", ideas) == [1, 3]
+
+    monkeypatch.setenv("SAY", "none")
+    assert await classify.related("something else", ideas) == []
+
+    # A reply that is prose names nothing: a wrong number here puts somebody else's thought in
+    # front of a button that says built.
+    monkeypatch.setenv("SAY", "probably the first one")
+    assert await classify.related("something", ideas) == []
+
+    # And with nothing written down, the run does not happen at all.
+    assert await classify.related("anything", []) == []
+
+
+@pytest.mark.unit
+async def test_a_related_run_that_cannot_run_names_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_desk.answer import classify
+
+    monkeypatch.setattr(session, "settings", Settings(claude_bin="not-installed-anywhere"))
+
+    assert await classify.related("do the thing", ["an idea"]) == []

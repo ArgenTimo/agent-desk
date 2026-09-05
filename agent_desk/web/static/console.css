@@ -717,6 +717,8 @@ button[disabled] { opacity: 0.5; cursor: default; }
   overflow: hidden;
 }
 .last-line .who { font-family: var(--mono); font-size: 10px; color: var(--fg-soft); }
+/* One line on a card somebody glances at. The rest of it is one click away. */
+.last-line.one { -webkit-line-clamp: 1; line-clamp: 1; }
 .node-open { display: inline-block; font-size: 11px; }
 
 .dragging { opacity: 0.45; }

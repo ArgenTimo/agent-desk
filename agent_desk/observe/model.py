@@ -117,6 +117,10 @@ class TranscriptTail(BaseModel):
     git_branch: str | None = None
     entries: list[TailEntry] = []
     agents: list[AgentCall] = []
+    # What the session is carrying: the input of its last assistant turn, cache included. It is
+    # the number a person means by "how big has this got" — not a bill, and not a total of
+    # everything ever spent, which the window this is read from could not see anyway.
+    context_tokens: int | None = None
 
     @property
     def last_entry(self) -> TailEntry | None:

@@ -708,9 +708,10 @@ async def _take_it_on(
         cwd=row.session.cwd,
         title=block.input[:60],
         instruction=instruction,
-        source_kind="idea",
+        source_kind="idea" if ideas else "instruction",
         # What gets marked built when this agent is gone from the registry.
         source_ref=",".join(idea.id for idea in ideas),
+        block_id=block.id,
     )
     # Somebody else is already in that repository on this program's behalf. Two agents in two
     # worktrees of one project, started a minute apart, is the mess docs/adr/0007 is careful
@@ -813,7 +814,7 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
     if await _take_it_on(store, block, rows, row=row, message=message.strip()):
         if directive is not None:
             started = next(
-                (task for task in await store.tasks() if task.title == block.input[:60]), None
+                (task for task in await store.tasks() if task.block_id == block.id), None
             )
             if started is not None and started.agent_id:
                 await store.mark_directive_dispatched(directive.id, started.agent_id)

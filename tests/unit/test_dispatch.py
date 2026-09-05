@@ -168,3 +168,53 @@ async def test_an_instruction_starts_one_agent_and_only_one(desk: Store) -> None
     assert again is not None
     assert again.agent_id == "1a2b3c4d"
     assert again.dispatched_at is not None
+
+
+@pytest.mark.unit
+def test_stopping_an_agent_asks_the_cli_and_reports_what_it_said(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its conversation is kept — `claude attach` opens it again — so this is not a delete."""
+    binary = _fake_cli(tmp_path, '#!/bin/sh\ntest "$1" = stop && echo stopped $2\n')
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin=str(binary)))
+
+    assert dispatch.stop("1a2b3c4d").started is True
+
+    refusing = _fake_cli(tmp_path, "#!/bin/sh\necho 'no such session' >&2\nexit 1\n")
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin=str(refusing)))
+    said = dispatch.stop("nope")
+    assert not said.started
+    assert "no such session" in said.detail
+
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin="not-installed-anywhere"))
+    missing = dispatch.stop("nope")
+    assert not missing.started
+    assert "could not stop it" in missing.detail
+
+
+@pytest.mark.unit
+def test_a_started_agent_that_prints_nothing_useful_is_not_a_success(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit nought and no id is the CLI having changed under this, which is loud rather than
+    plausible (docs/adr/0004, one layer out)."""
+    binary = _fake_cli(tmp_path, "#!/bin/sh\necho 'started, probably'\n")
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin=str(binary)))
+
+    result = dispatch.start("do it", cwd=str(tmp_path), name="x")
+
+    assert not result.started
+    assert "started, probably" in result.detail
+
+
+@pytest.mark.unit
+def test_an_introduction_says_what_it_is_for_and_what_it_cannot_ask(tmp_path: pathlib.Path) -> None:
+    bare = dispatch.introduce("biba", project="alpha")
+    assert "You are biba, working in alpha" in bare
+    assert "Start by reading" in bare
+    assert "cannot be asked anything once you begin" in bare
+    assert "The environment this project expects" not in bare
+
+    full = dispatch.introduce("biba", project="alpha", doing="the api half", env_names=["A", "B"])
+    assert "What you are here for: the api half" in full
+    assert "A, B" in full

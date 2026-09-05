@@ -256,3 +256,45 @@ def test_the_request_log_is_off_for_this_process_and_not_by_luck() -> None:
     access = logging.getLogger("uvicorn.access")
     assert access.disabled
     assert not access.hasHandlers() or access.handlers == []
+
+
+@pytest.mark.unit
+def test_the_shared_view_is_only_served_when_somebody_asked_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`share_host` empty is the default, and it is what keeps the second application off the
+    network (docs/07-security.md, docs/09-roadmap.md Phase 4).
+
+    The servers are built and never started: `serve()` would bind two ports, and a test that binds
+    a port is a test that fails on somebody else's machine.
+    """
+    from agent_desk import __main__ as entry
+    from agent_desk.config import Settings
+
+    monkeypatch.setattr(entry, "settings", Settings(share_host="", port=8787))
+    one = entry._config(entry.console, entry.settings.host, entry.settings.port)
+    assert one.port == 8787
+    assert one.access_log is False
+    # The stream never ends by design; a graceful stop that waits for it waits forever.
+    assert one.timeout_graceful_shutdown == 2
+
+    monkeypatch.setattr(
+        entry, "settings", Settings(share_host="127.0.0.1", share_port=8788, port=8787)
+    )
+    both = entry._config(entry.shared.asgi, entry.settings.share_host, entry.settings.share_port)
+    assert both.port == 8788
+    assert both.access_log is False
+
+
+@pytest.mark.unit
+def test_the_entry_point_survives_a_ctrl_c(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ctrl-C is how this program is stopped, and it is not a failure."""
+    from agent_desk import __main__ as entry
+
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(entry.asyncio, "run", lambda _coro: interrupted())
+    monkeypatch.setattr(entry, "serve", lambda: None)
+
+    entry.main()  # no exception leaves this
