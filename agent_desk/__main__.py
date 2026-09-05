@@ -55,7 +55,6 @@ def _config(target: ASGIApp, host: str, port: int) -> uvicorn.Config:
 
 
 async def serve() -> None:
-    silence_access_logging()
     servers = [uvicorn.Server(_config(console, settings.host, settings.port))]
 
     if settings.share_host:
@@ -64,6 +63,13 @@ async def serve() -> None:
         servers.append(
             uvicorn.Server(_config(shared.asgi, settings.share_host, settings.share_port))
         )
+
+    # After every server is built, and that ordering is the whole of it. Constructing a
+    # `uvicorn.Config` runs the library's own logging configuration, which re-enables
+    # `uvicorn.access` — so silencing it first and building the servers second undoes the
+    # silencing, and what is left holding the request log off is `access_log=False` on each
+    # config: exactly the per-server flag this function exists not to depend on.
+    silence_access_logging()
 
     async with asyncio.TaskGroup() as group:
         for server in servers:
