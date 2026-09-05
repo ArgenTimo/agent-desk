@@ -745,6 +745,8 @@ async def render_project(key: str, refused: str = "") -> str:
         # What is simply true here, whatever the task is. It goes verbatim into every agent this
         # console starts in this project (020-project-note.sql).
         note=await store.project_note(key),
+        # The words they use here, and the ones that mean the same everywhere (021-glossary.sql).
+        terms=await store.terms(key),
     )
 
 
@@ -1330,6 +1332,31 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         agent_id=result.agent_id,
         project=named.name,
     )
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(panel))
+
+
+@router.post("/glossary", response_class=HTMLResponse)
+async def add_term(request: Request) -> Response:
+    """A word somebody uses, and what they mean by it (021-glossary.sql).
+
+    An agent dispatched into a project does not have its vocabulary, and today that costs a
+    paragraph of explanation in every instruction or a wrong guess. Everything written here goes
+    into every briefing this console builds for this project.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    drop = form.get("drop", "").strip()
+    if drop:
+        await store.drop_term(drop)
+    else:
+        await store.add_term(
+            repo_key=key if form.get("everywhere") != "yes" else "",
+            term=form.get("term", ""),
+            means=form.get("means", ""),
+        )
+    panel = await render_project(key)
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))

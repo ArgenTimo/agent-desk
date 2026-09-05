@@ -1126,3 +1126,10 @@ body.stale .col-left { opacity: 0.55; }
   color: var(--fg);
 }
 .settings .note button { align-self: flex-start; }
+
+/* The words used in a project. Same list shape as the links above it — it is the same kind of
+   thing: a short list of facts about this project that somebody maintains by hand. */
+.settings .glossary { margin: 12px 0; }
+.settings .glossary h3 { font-size: 12px; margin: 0 0 6px; font-weight: 600; }
+.settings .glossary .links strong { flex: 0 0 auto; }
+.settings .glossary label.tiny { display: flex; align-items: center; gap: 4px; white-space: nowrap; }

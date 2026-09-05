@@ -202,6 +202,18 @@ class Kicking(BaseModel):
         return self.resume_at is not None and self.resume_at > now_ms
 
 
+class Term(BaseModel):
+    """One word somebody uses, and what they mean by it (021-glossary.sql)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    repo_key: str
+    term: str
+    means: str
+    created_at: int
+
+
 class Filing(BaseModel):
     """Where an idea went, once a human sent it there (docs/adr/0005)."""
 
@@ -1447,6 +1459,50 @@ class Store:
                 {"state": state, "limit": limit},
             )
             return [self._idea(row._mapping) for row in rows]
+
+    # --- the names somebody uses for things (021-glossary.sql) --------------------------------
+    async def add_term(self, *, repo_key: str, term: str, means: str) -> Term | None:
+        """A word and what it means. Nothing without both halves — a term with no meaning in a
+        glossary is worse than no entry, because it reads as one."""
+        if not term.strip() or not means.strip():
+            return None
+        row = Term(
+            id=_new_id(),
+            repo_key=repo_key,
+            term=term.strip()[:80],
+            means=means.strip()[:500],
+            created_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO glossary (id, repo_key, term, means, created_at) "
+                    "VALUES (:id, :repo_key, :term, :means, :created_at)"
+                ),
+                row.model_dump(),
+            )
+        return row
+
+    async def terms(self, repo_key: str = "", *, everywhere: bool = True) -> list[Term]:
+        """This project's words, and the ones that mean the same thing everywhere.
+
+        `everywhere` is what makes the empty key useful: a word defined once, for every project,
+        without writing it into each of them.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, repo_key, term, means, created_at FROM glossary "
+                    "WHERE repo_key = :repo_key OR (:everywhere AND repo_key = '') "
+                    "ORDER BY term COLLATE NOCASE"
+                ),
+                {"repo_key": repo_key, "everywhere": everywhere},
+            )
+            return [Term(**row._mapping) for row in rows]
+
+    async def drop_term(self, term_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM glossary WHERE id = :id"), {"id": term_id})
 
     # --- what anybody working in a project should know (020-project-note.sql) -----------------
     async def project_note(self, repo_key: str) -> str:

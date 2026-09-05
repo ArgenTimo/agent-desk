@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Sequence
 
 import structlog
 
@@ -36,6 +37,7 @@ from agent_desk.observe import registry
 from agent_desk.observe.model import Session
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Kicking, Store
+from agent_desk.web import autostart
 
 log = structlog.get_logger()
 
@@ -117,7 +119,12 @@ def _spent(arming: Kicking, now_ms: int) -> int:
     return arming.kicks
 
 
-def carry_on(arming: Kicking, session: Session, standing: str = "") -> str:
+def carry_on(
+    arming: Kicking,
+    session: Session,
+    standing: str = "",
+    glossary: Sequence[tuple[str, str]] = (),
+) -> str:
     """What to say to a session that has stopped. Two prompts, and there is no third.
 
     It never invents the work. Either the session carries on with what it was doing — which it
@@ -130,15 +137,19 @@ def carry_on(arming: Kicking, session: Session, standing: str = "") -> str:
     makes this survivable (docs/adr/0008, docs/adr/0009).
     """
     project = session.project
-    standing_lines = (
-        [
+    standing_lines: list[str] = []
+    if standing.strip():
+        standing_lines += [
             "",
             "What the person who runs this project asked anybody working here to know:",
             standing.strip(),
         ]
-        if standing.strip()
-        else []
-    )
+    if glossary:
+        standing_lines += [
+            "",
+            "Words they use here, and what they mean by them:",
+            *[f"- **{term}** — {means}" for term, means in glossary],
+        ]
     return "\n".join(
         [
             "This turn was sent by agent-desk, not by a person: you went idle and this project is "
@@ -161,7 +172,7 @@ async def kick_one(store: Store, arming: Kicking, session: Session) -> bool:
     result = await asyncio.to_thread(
         dispatch.kick,
         arming.session_id or session.session_id,
-        carry_on(arming, session, await store.project_note(_repo_key(session))),
+        carry_on(arming, session, **await autostart.about(store, _repo_key(session))),  # type: ignore[arg-type]
         cwd=arming.cwd or session.cwd,
         agent_id=arming.short_id,
     )

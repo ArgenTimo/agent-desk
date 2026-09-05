@@ -164,6 +164,41 @@
     {% endif %}
   </form>
 
+  {# The words somebody uses for things. An agent dispatched here does not have this project's
+     vocabulary, and today that costs a paragraph in every instruction or a wrong guess. Every
+     line here goes into every briefing this console builds (021-glossary.sql). #}
+  <div class="glossary">
+    <h3>Words used here</h3>
+    {% if terms %}
+    <ul class="links">
+      {% for term in terms %}
+      <li>
+        <strong>{{ term.term }}</strong>
+        <span class="dim">{{ term.means }}</span>
+        {% if not term.repo_key %}<span class="pill quiet" title="defined for every project">everywhere</span>{% endif %}
+        <form method="post" action="/glossary" hx-post="/glossary" hx-target="#message">
+          <input type="hidden" name="key" value="{{ key }}">
+          <input type="hidden" name="drop" value="{{ term.id }}">
+          <button type="submit" title="forget this word">×</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="dim small">Nothing yet. A word you are tired of explaining belongs here — every
+      agent started in {{ name }} is told what it means.</p>
+    {% endif %}
+    <form class="add-link" method="post" action="/glossary" hx-post="/glossary" hx-target="#message">
+      <input type="hidden" name="key" value="{{ key }}">
+      <label class="visually-hidden" for="term">the word</label>
+      <input id="term" name="term" placeholder="верстак" autocomplete="off">
+      <label class="visually-hidden" for="means">what it means</label>
+      <input id="means" name="means" placeholder="the middle column, where cards are dropped to be worked on" autocomplete="off">
+      <label class="tiny"><input type="checkbox" name="everywhere" value="yes"> everywhere</label>
+      <button type="submit">Add it</button>
+    </form>
+  </div>
+
   <form class="arming" method="post" action="/autostart" hx-post="/autostart" hx-target="#message">
     <input type="hidden" name="key" value="{{ key }}">
     <input type="hidden" name="armed" value="{{ 'no' if arming.armed else 'yes' }}">

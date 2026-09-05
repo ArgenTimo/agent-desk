@@ -956,3 +956,58 @@ async def test_what_anybody_working_here_should_know_reaches_every_agent(
     await _post("/project-note", {"key": key, "note": "   "})
     assert await desk.project_note(key) == ""
     assert "asked anybody working here" not in dispatch.build_task("do the thing", standing="")
+
+
+@pytest.mark.unit
+async def test_the_words_somebody_uses_are_told_to_every_agent_started_here(
+    home: Home, desk: Store
+) -> None:
+    """An agent dispatched into a project does not have its vocabulary, and today that costs a
+    paragraph in every instruction or a wrong guess."""
+    key = await _the_project(home)
+
+    status, panel = await _post(
+        "/glossary", {"key": key, "term": "верстак", "means": "the middle column"}
+    )
+    assert status == 200
+    assert "верстак" in panel
+
+    # A word that means the same thing everywhere is written once, not into each project.
+    await _post(
+        "/glossary", {"key": key, "term": "the pool", "means": "the ideas", "everywhere": "yes"}
+    )
+    assert [t.term for t in await desk.terms(key)] == ["the pool", "верстак"]
+    assert [t.term for t in await desk.terms("some:other")] == ["the pool"]
+
+    # Half an entry is worse than none, because it reads as one.
+    await _post("/glossary", {"key": key, "term": "блокер", "means": "  "})
+    assert len(await desk.terms(key)) == 2
+
+    said = dispatch.build_task(
+        "do the thing",
+        glossary=[(t.term, t.means) for t in await desk.terms(key)],
+    )
+    assert "Words they use here" in said
+    assert "**верстак** — the middle column" in said
+
+    dropped = next(t for t in await desk.terms(key) if t.term == "верстак")
+    await _post("/glossary", {"key": key, "drop": dropped.id})
+    assert [t.term for t in await desk.terms(key)] == ["the pool"]
+
+
+@pytest.mark.unit
+async def test_every_path_that_starts_an_agent_carries_the_same_context(
+    home: Home, desk: Store
+) -> None:
+    """One helper, so a word added on a project's page reaches the queue, an exploration and a
+    session being kept going — rather than the one path somebody remembered to wire it into."""
+    key = await _the_project(home)
+    await desk.set_project_note(key, "no build step here")
+    await desk.add_term(repo_key=key, term="верстак", means="the middle column")
+
+    about = await autostart.about(desk, key)
+
+    assert about["standing"] == "no build step here"
+    assert about["glossary"] == [("верстак", "the middle column")]
+    said = dispatch.build_task("do the thing", **about)  # type: ignore[arg-type]
+    assert "no build step here" in said and "верстак" in said

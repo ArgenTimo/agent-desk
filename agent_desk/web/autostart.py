@@ -116,6 +116,19 @@ async def why_not(store: Store, repo_key: str, live: set[str] | None = None) -> 
     return ""
 
 
+async def about(store: Store, repo_key: str) -> dict[str, object]:
+    """What is true in this project whatever the task is, for `dispatch.build_task`.
+
+    One place, so that a note or a word added on a project's page reaches the queue, an
+    exploration and a session being kept going — rather than the one path somebody remembered to
+    wire it into (020-project-note.sql, 021-glossary.sql).
+    """
+    return {
+        "standing": await store.project_note(repo_key),
+        "glossary": [(term.term, term.means) for term in await store.terms(repo_key)],
+    }
+
+
 async def _start(store: Store, task: Task) -> None:
     """Start one claimed task, and record either half of what happens."""
     result = await asyncio.to_thread(
@@ -123,7 +136,7 @@ async def _start(store: Store, task: Task) -> None:
         dispatch.build_task(
             task.instruction,
             project=task.title,
-            standing=await store.project_note(task.repo_key),
+            **await about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,
         name=task.title,
@@ -272,7 +285,7 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
         dispatch.build_task(
             dispatch.go_looking(project),
             project=project,
-            standing=await store.project_note(arming.repo_key),
+            **await about(store, arming.repo_key),  # type: ignore[arg-type]
         ),
         cwd=cwd,
         name=task.title,

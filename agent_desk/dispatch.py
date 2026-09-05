@@ -98,6 +98,7 @@ def build_task(
     notes: Sequence[str] = (),
     secrets: Sequence[str] = (),
     standing: str = "",
+    glossary: Sequence[tuple[str, str]] = (),
 ) -> str:
     """What the agent is actually told.
 
@@ -126,6 +127,15 @@ def build_task(
             "",
             "What the person who runs this project asked anybody working here to know:",
             standing.strip(),
+        ]
+    # The words they use for things. An agent dispatched into a project does not have its
+    # vocabulary, and today that costs a paragraph in every instruction or a wrong guess
+    # (021-glossary.sql).
+    if glossary:
+        lines += [
+            "",
+            "Words they use here, and what they mean by them:",
+            *[f"- **{term}** — {means}" for term, means in glossary],
         ]
     if secrets:
         lines += [
