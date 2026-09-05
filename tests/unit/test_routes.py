@@ -752,3 +752,16 @@ async def test_work_an_agent_found_is_marked_as_its_own_in_the_queue(
     panel = await routes.render_project(key)
 
     assert "found by an agent" in panel
+
+
+@pytest.mark.unit
+async def test_the_switch_records_where_the_project_is(home: Home, desk: Store) -> None:
+    """An exploration is the first task in a project and has no earlier one to take a directory
+    from, so the panel that knows which project the button belongs to writes it down."""
+    key = await _the_project(home)
+
+    await _post("/explore", {"key": key, "exploring": "yes", "per_day": "2"})
+
+    arming = await desk.autostart(key)
+    assert arming.cwd == str(home.root.parent)
+    assert await autostart.why_not_explore(desk, key, live=set()) == ""

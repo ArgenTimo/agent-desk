@@ -184,10 +184,12 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
     The marking is the whole of docs/adr/0008: a queue that mixes what somebody asked for with
     what a machine proposed is a queue that has stopped meaning anything.
     """
-    cwd = arming.repo_key.split(":", 1)[1] if arming.repo_key.startswith("desk:") else ""
+    # Where the switch was pressed, then this console's own checkout, then whatever an earlier
+    # task in this project used. A project whose directory is not known is not explored.
+    cwd = arming.cwd or ""
+    if not cwd and arming.repo_key.startswith("desk:"):
+        cwd = arming.repo_key.split(":", 1)[1]
     if not cwd:
-        # Only a project whose checkout this program knows. The queue's tasks carry their own
-        # directory; an exploration has none until one is found here.
         for task in await store.tasks(repo_key=arming.repo_key):
             cwd = task.cwd
             break

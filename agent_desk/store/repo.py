@@ -158,6 +158,9 @@ class Autostart(BaseModel):
     disarmed_why: str | None = None
     exploring_at: int | None = None
     per_day: int = 3
+    # Where this project is on disk, recorded by the panel that pressed the switch: an exploration
+    # is the first task in a project and has none to inherit a directory from.
+    cwd: str | None = None
 
     @property
     def armed(self) -> bool:
@@ -893,7 +896,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day FROM autostart WHERE repo_key = :repo_key"
+                    "exploring_at, per_day, cwd FROM autostart WHERE repo_key = :repo_key"
                 ),
                 {"repo_key": repo_key},
             )
@@ -905,13 +908,13 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day FROM autostart "
+                    "exploring_at, per_day, cwd FROM autostart "
                     "WHERE armed_at IS NOT NULL OR exploring_at IS NOT NULL"
                 )
             )
             return [Autostart(**row._mapping) for row in rows]
 
-    async def explore(self, repo_key: str, *, per_day: int, on: bool) -> None:
+    async def explore(self, repo_key: str, *, per_day: int, on: bool, cwd: str = "") -> None:
         """Switch exploring on or off for one project (docs/adr/0008).
 
         Separate from arming on purpose: "start what I queued" and "find something to do" are
@@ -921,14 +924,15 @@ class Store:
             await conn.execute(
                 text(
                     "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
-                    "disarmed_why, exploring_at, per_day) VALUES (:repo_key, NULL, 2, 0, NULL, "
-                    ":t, :per_day) ON CONFLICT (repo_key) DO UPDATE SET exploring_at = :t, "
-                    "per_day = :per_day"
+                    "disarmed_why, exploring_at, per_day, cwd) VALUES (:repo_key, NULL, 2, 0, "
+                    "NULL, :t, :per_day, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
+                    "exploring_at = :t, per_day = :per_day, cwd = COALESCE(:cwd, autostart.cwd)"
                 ),
                 {
                     "repo_key": repo_key,
                     "t": _now_ms() if on else None,
                     "per_day": max(1, min(per_day, 12)),
+                    "cwd": cwd or None,
                 },
             )
 

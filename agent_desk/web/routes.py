@@ -1246,7 +1246,13 @@ async def set_exploring(request: Request) -> Response:
             per_day = int(form.get("per_day", "3"))
         except ValueError:
             per_day = 3
-        await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes")
+        # The checkout goes with the switch: an exploration is the first task in a project and
+        # has none to inherit a directory from (docs/adr/0008).
+        rows, _ = await asyncio.to_thread(board)
+        projects = shape(rows, await store.groups())
+        named = next((project for project in projects if project.key == key), None)
+        where = named.instances[0].path if named and named.instances else ""
+        await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes", cwd=where)
     panel = await render_project(key)
     if _wants_fragment(request):
         return HTMLResponse(panel)
