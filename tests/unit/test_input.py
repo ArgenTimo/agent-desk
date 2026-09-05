@@ -770,12 +770,20 @@ async def test_a_tab_that_no_longer_exists_does_not_lose_the_question(
     assert await desk.block(block.id) is not None
 
 
+# Twenty seconds rather than five. A block settles by way of a subprocess, and the budget has to
+# be for the worst machine this suite runs on rather than for an idle one: this file went red once
+# on a laptop with three test runs and twenty agents on it, which is a gate lying about the code.
+# Polling means a generous budget costs nothing when things are quick.
+SETTLE_SECONDS = 20.0
+_POLL = 0.05
+
+
 async def _settled(store: Store, block_id: str) -> str:
-    for _ in range(100):
+    for _ in range(int(SETTLE_SECONDS / _POLL)):
         state = await _state(store, block_id)
         if state in ("answered", "failed", "cancelled"):
             return state
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(_POLL)
     raise AssertionError("the block never settled")
 
 
