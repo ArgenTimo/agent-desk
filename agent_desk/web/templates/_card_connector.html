@@ -1,0 +1,30 @@
+{# One connector on the workbench. "Временные коннекторы на верстаке как блоки-карточки": a place
+   this project also lives, dragged in so the next question is asked with it in view.
+
+   It says what this console can actually do with it, which is the thing the old undifferentiated
+   list could not (agent_desk/connectors.py). A card that implied a Drive was readable would be
+   worse than no card. #}
+{% if not link %}
+<p class="empty small">that connector is not on this project any more</p>
+{% else %}
+<div class="card-detail">
+  <div class="card-line">
+    <span class="dot {{ 'busy' if kind.integrated else 'shell' }}"></span>
+    <span class="card-title">{{ link.name }}</span>
+    <span class="pill quiet{{ ' works' if kind.integrated else '' }}">{{ kind.label }}</span>
+  </div>
+
+  <p class="plain-what">{{ project }} · {{ kind.does }}.</p>
+
+  <p class="plain-doing"><a href="{{ link.url }}" target="_blank" rel="noreferrer noopener">{{ link.url }}</a></p>
+
+  {% if link.token_env %}
+  <p class="small dim">It would use <span class="mono">{{ link.token_env }}</span> from the
+    environment{{ " — which is set on this machine" if link.token_present else ", which is not set" }}.
+    The name is stored here; the value never is (docs/07-security.md).</p>
+  {% elif kind.wants_token %}
+  <p class="hint small"><span aria-hidden="true">⚑</span> No token variable is named on this one,
+    so this console can only open it. Name one on the project's page and it can read the board.</p>
+  {% endif %}
+</div>
+{% endif %}

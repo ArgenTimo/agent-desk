@@ -211,3 +211,21 @@ adding a login form.
 - Never put transcript text into a log line, an error message, or a subprocess argument.
 - Never pass a session's socket key to anything, including the peer-messaging client — that client
   reads it itself, from a path this code does not open.
+
+
+## Connectors say what they can do
+
+A project's connectors are a list of places it also lives, and each one now says *what this
+console can do with it* rather than only where it points
+([`agent_desk/connectors.py`](../agent_desk/connectors.py)).
+
+That is a security property as much as a usability one. A list where a Jira board this program
+reads and files into looks identical to a Google Drive link it merely opens is a list where nobody
+can tell which connectors are reachable from this process. Marking the one that is — and saying in
+as many words that the others are links — is how somebody deciding whether to name a token
+variable knows what naming it would authorise.
+
+**Naming a kind never creates an integration.** Adding `drive` as a kind does not make this
+program able to read a Drive, and its card says "a link; nothing reads it yet". An integration is
+a piece of work per service, with a credential flow and a recorded response behind it. An icon
+that implied otherwise would be worse than the undifferentiated list this replaced.

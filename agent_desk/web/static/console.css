@@ -1461,3 +1461,15 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   outline-offset: 1px;
   transition: outline-color 0.12s ease;
 }
+
+/* --- connectors (agent_desk/connectors.py) ---------------------------------------------------- */
+/* A connector says what kind it is, because that is what decides what this console can do with
+   it. The one that reads and writes is marked; the rest say plainly that they are links. */
+.settings .connector { flex-wrap: wrap; cursor: grab; }
+.settings .connector:active { cursor: grabbing; }
+.connector-does { flex: 1 0 100%; margin-left: 2px; }
+.pill.quiet.works {
+  border-color: var(--busy);
+  color: var(--busy);
+  background: color-mix(in srgb, var(--busy) 10%, transparent);
+}

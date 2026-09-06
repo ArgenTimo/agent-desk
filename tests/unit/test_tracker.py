@@ -483,3 +483,85 @@ def test_a_network_failure_reading_never_quotes_the_request(
     assert "URLError" in read.detail
     assert "a-token" not in read.detail
     assert "Authorization" not in read.detail
+
+
+async def _get(path: str) -> tuple[int, str]:
+    from tests.unit.test_board import _request
+
+    return await _request(path, "127.0.0.1")
+
+
+# --- what a connector is, and what this console can do with it ----------------------------------
+@pytest.mark.unit
+def test_a_connector_says_what_this_console_can_actually_do_with_it() -> None:
+    """A Jira link with a credential is a board this program reads and files into; a Drive link is
+    a link. They used to render identically, which is how five connectors become five things
+    nobody can predict the behaviour of."""
+    from agent_desk import connectors
+
+    assert connectors.kind_of("jira").integrated
+    assert connectors.kind_of("jira").wants_token
+    for only_a_link in ("github", "drive", "slack", "gmail", "confluence", "dashboard", "other"):
+        kind = connectors.kind_of(only_a_link)
+        assert not kind.integrated, only_a_link
+        assert "nothing reads it" in kind.does or "git does that" in kind.does, only_a_link
+
+
+@pytest.mark.unit
+def test_a_kind_nobody_has_heard_of_promises_nothing() -> None:
+    """A stored row from before the column existed, or a value somebody typed by hand."""
+    from agent_desk import connectors
+
+    kind = connectors.kind_of("quantum-fax")
+
+    assert kind.name == "other"
+    assert not kind.integrated
+
+
+@pytest.mark.unit
+def test_the_kind_is_guessed_from_the_address_so_the_field_arrives_filled_in() -> None:
+    from agent_desk import connectors
+
+    assert connectors.guess("https://batmslec.atlassian.net/jira/software/projects/DUCK") == "jira"
+    assert connectors.guess("https://batmslec.atlassian.net/wiki/spaces/X") == "confluence"
+    assert connectors.guess("https://github.com/owner/name") == "github"
+    assert connectors.guess("https://drive.google.com/drive/folders/x") == "drive"
+    assert connectors.guess("https://acme.slack.com/archives/C1") == "slack"
+    # Nothing suggests itself: the kind that promises nothing.
+    assert connectors.guess("https://grafana.internal/d/abc") == "other"
+    # A name is consulted second and only as a whole word.
+    assert connectors.guess("https://grafana.internal/d/abc", "jira") == "jira"
+    assert connectors.guess("https://grafana.internal/d/abc", "the github mirror") == "other"
+
+
+@pytest.mark.unit
+async def test_a_connector_is_stored_with_its_kind_and_opens_as_a_card(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await desk.set_link(
+        repo_key="origin:acme/api",
+        name="jira",
+        url="https://acme.atlassian.net/browse/API",
+        token_env="API_TOKEN",
+        kind="jira",
+    )
+
+    (link,) = await desk.links("origin:acme/api")
+    assert link.kind == "jira"
+
+    status, card = await _get("/cards/connector?id=origin:acme/api::jira")
+
+    assert status == 200
+    # The apostrophe is escaped in the rendered page, so the assertion is on either side of it.
+    assert "unfinished tickets into the queue" in card
+    assert "API_TOKEN" in card
+    # Never the value, only whether there is one.
+    assert "is not set" in card or "is set on this machine" in card
+
+
+@pytest.mark.unit
+async def test_a_connector_that_has_gone_is_not_a_stack_trace(desk: Store) -> None:
+    status, card = await _get("/cards/connector?id=origin:acme/api::vanished")
+
+    assert status == 404
+    assert "not on this project any more" in card

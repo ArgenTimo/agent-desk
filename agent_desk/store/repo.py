@@ -240,6 +240,10 @@ class ProjectLink(BaseModel):
     name: str
     url: str
     token_env: str | None = None
+    # What kind of service it is, and therefore what this console can do with it
+    # (agent_desk/connectors.py). Null on every row written before the column existed, which is
+    # why it is read through `connectors.guess` rather than trusted raw.
+    kind: str | None = None
     added_at: int
 
     @property
@@ -1256,7 +1260,13 @@ class Store:
 
     # --- where a project also lives ----------------------------------------------------------
     async def set_link(
-        self, *, repo_key: str, name: str, url: str, token_env: str | None = None
+        self,
+        *,
+        repo_key: str,
+        name: str,
+        url: str,
+        token_env: str | None = None,
+        kind: str | None = None,
     ) -> None:
         """Add or replace one link. One name per project, because a second "jira" is a typo.
 
@@ -1270,15 +1280,17 @@ class Store:
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO project_link (repo_key, name, url, token_env, added_at) "
-                    "VALUES (:repo_key, :name, :url, :token_env, :added_at) "
-                    "ON CONFLICT (repo_key, name) DO UPDATE SET url = :url, token_env = :token_env"
+                    "INSERT INTO project_link (repo_key, name, url, token_env, kind, added_at) "
+                    "VALUES (:repo_key, :name, :url, :token_env, :kind, :added_at) "
+                    "ON CONFLICT (repo_key, name) DO UPDATE SET url = :url, "
+                    "token_env = :token_env, kind = :kind"
                 ),
                 {
                     "repo_key": repo_key,
                     "name": name,
                     "url": url,
                     "token_env": token_env or None,
+                    "kind": kind or None,
                     "added_at": _now_ms(),
                 },
             )
@@ -1325,10 +1337,13 @@ class Store:
         """Every link, or one project's. Two statements rather than one with a hole in it: a
         query built by concatenation is a query somebody eventually concatenates a value into."""
         one = (
-            "SELECT repo_key, name, url, token_env, added_at FROM project_link "
+            "SELECT repo_key, name, url, token_env, kind, added_at FROM project_link "
             "WHERE repo_key = :repo_key ORDER BY name"
         )
-        every = "SELECT repo_key, name, url, token_env, added_at FROM project_link ORDER BY repo_key, name"
+        every = (
+            "SELECT repo_key, name, url, token_env, kind, added_at FROM project_link "
+            "ORDER BY repo_key, name"
+        )
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(one if repo_key else every),

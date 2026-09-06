@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import dispatch, peer, tracker
+from agent_desk import connectors, dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, meeting
@@ -804,6 +804,22 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_idea.html").render(idea=idea),
             status_code=200 if idea else 404,
         )
+    if kind == "connector":
+        # A connector dragged onto the bench: what it is, what this console can do with it, and
+        # the address — so a question asked with it there is asked with that in front of both of
+        # you (agent_desk/connectors.py).
+        repo_key, _, name = id.partition("::")
+        link = next((one for one in await store.links(repo_key) if one.name == name), None)
+        return HTMLResponse(
+            env.get_template("_card_connector.html").render(
+                link=link,
+                kind=connectors.kind_of(
+                    (link.kind or connectors.guess(link.url, link.name)) if link else "other"
+                ),
+                project=await _project_name(repo_key),
+            ),
+            status_code=200 if link else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
@@ -831,6 +847,11 @@ async def render_project(key: str, refused: str = "") -> str:
         key=key,
         name=named.name if named else key,
         links=await store.links(key),
+        # What each connector is, and therefore what this console can do with it. The functions
+        # rather than the answers, because the template asks one per row (agent_desk/connectors.py).
+        kinds=connectors.KINDS,
+        kind_of=connectors.kind_of,
+        guess=connectors.guess,
         tasks=await store.tasks(repo_key=key),
         env_names=await store.env(key),
         arming=await store.autostart(key),
@@ -962,7 +983,12 @@ async def add_project_link(request: Request) -> Response:
     url = form.get("url", "").strip()
     variable = form.get("token_env", "").strip()[:64]
     if key and name and url.startswith(("http://", "https://")):
-        await store.set_link(repo_key=key, name=name, url=url, token_env=variable)
+        # What kind of connector it is decides what this console can do with it. Chosen where
+        # somebody chose, and worked out from the address where they left it to us — a guess that
+        # saves a decision rather than making one (agent_desk/connectors.py).
+        chosen = form.get("kind", "").strip()
+        kind = chosen if chosen in connectors.BY_NAME else connectors.guess(url, name)
+        await store.set_link(repo_key=key, name=name, url=url, token_env=variable, kind=kind)
 
     # The token itself, if one was typed. It goes to this machine's own secret file under the name
     # on the link — never to the store, which a second application serves a view out of, and never

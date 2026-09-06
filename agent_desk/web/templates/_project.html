@@ -13,9 +13,16 @@
   {% if links %}
   <ul class="links">
     {% for link in links %}
-    <li>
+    {# A connector says what kind it is, because that is what decides what this console can do with
+       it (agent_desk/connectors.py). A Jira link with a credential is a board this program reads
+       and files into; a Drive link is a link. They used to render identically. #}
+    {% set kind = kind_of(link.kind or guess(link.url, link.name)) %}
+    <li class="node connector" data-kind="connector" data-id="{{ key }}::{{ link.name }}"
+        data-label="{{ link.name }} · {{ link.url }}" data-about="{{ key }}" draggable="true">
       <a href="{{ link.url }}" target="_blank" rel="noreferrer noopener">{{ link.name }}</a>
+      <span class="pill quiet{{ ' works' if kind.integrated else '' }}" title="{{ kind.does }}">{{ kind.label }}</span>
       <span class="dim">{{ link.url }}</span>
+      <span class="dim small connector-does">{{ kind.does }}</span>
       {% if link.token_env %}
       <span class="pill{{ ' flag' if not link.token_present }}"
             title="whether there is a token under this name — never what it is">{{ link.token_env }}{{ " · set here" if link.token_present else " · not set" }}</span>
@@ -30,8 +37,9 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="empty small">Nothing linked yet. A tracker, a repository page, a dashboard — whatever
-    you open when you think about this project.</p>
+  <p class="empty small">No connectors yet. A tracker, a repository page, a drive, a channel —
+    whatever you open when you think about this project. Jira is the one this console reads and
+    writes; the rest it opens for you, and each card says which it is.</p>
   {% endif %}
 
   <form class="add-link" method="post" action="/project-links"
@@ -41,6 +49,13 @@
     <input id="link-name" name="name" placeholder="jira" autocomplete="off" required>
     <label class="visually-hidden" for="link-url">the address</label>
     <input id="link-url" name="url" type="url" placeholder="https://…" autocomplete="off" required>
+    <label class="visually-hidden" for="link-kind">what kind of service</label>
+    <select id="link-kind" name="kind" title="what this console will be able to do with it">
+      <option value="">work it out from the address</option>
+      {% for one in kinds %}
+      <option value="{{ one.name }}">{{ one.label }}{{ " — reads and writes" if one.integrated else "" }}</option>
+      {% endfor %}
+    </select>
     {# Two fields, and the difference between them is the whole of this page's security. The name
        is stored with the project, in the database. The secret is written to a file on this machine
        that only its owner can read, and never comes back to a screen (agent_desk/secrets.py). #}
