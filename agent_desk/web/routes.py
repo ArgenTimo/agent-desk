@@ -35,7 +35,7 @@ from fastapi.responses import (
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import connectors, dispatch, land, peer, roles, tracker
+from agent_desk import connectors, dispatch, land, peer, roles, ties, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
@@ -1515,6 +1515,72 @@ async def workbench_ties(cards: str = "") -> HTMLResponse:
     drawn = bench.lay_out(picked, stamped, await store.ideas(limit=400), await store.idea_links())
     ties = [{"from": tie.from_id, "to": tie.to_id, "says": tie.says} for tie in drawn.ties]
     return HTMLResponse(json.dumps(ties), media_type="application/json")
+
+
+@router.post("/workbench/tie", response_class=JSONResponse)
+async def tie_cards(request: Request) -> JSONResponse:
+    """Draw a line between two cards, or change one (034-card-ties.sql).
+
+    The kind is chosen by the page from the roles at both ends and can be overridden; anything
+    that is not one of the five is refused rather than stored, for the same reason a sixth role
+    is: five words with a meaning each is a language, and a free-text label with an arrow on it
+    is a note.
+    """
+    form = await _form(request)
+    from_name = form.get("from", "").strip()
+    to_name = form.get("to", "").strip()
+    kind = form.get("kind", "").strip() or ties.ORDINARILY
+    if not from_name or not to_name or not ties.is_a_kind(kind):
+        return JSONResponse({"drawn": False}, status_code=400)
+    await store.tie_cards(
+        from_name=from_name, to_name=to_name, kind=kind, says=form.get("says", "").strip()
+    )
+    return JSONResponse({"drawn": True})
+
+
+@router.post("/workbench/untie", response_class=JSONResponse)
+async def untie_cards(request: Request) -> JSONResponse:
+    form = await _form(request)
+    await store.untie_cards(form.get("id", "").strip())
+    return JSONResponse({"gone": True})
+
+
+@router.get("/workbench/lines", response_class=JSONResponse)
+async def workbench_lines() -> JSONResponse:
+    """Every line somebody has drawn, and the five kinds a line can be.
+
+    Both together, and the vocabulary from `agent_desk/ties.py` rather than a copy in the script —
+    the same argument as the roles: a second list is a second place to be wrong, silently.
+
+    Which of these actually get drawn is the page's business: a line with one end off the bench
+    explains nothing, and this has no way of knowing what somebody has put on it.
+    """
+    return JSONResponse(
+        {
+            "lines": [
+                {
+                    "id": tie.id,
+                    "from": tie.from_name,
+                    "to": tie.to_name,
+                    "kind": tie.kind,
+                    "says": tie.says,
+                }
+                for tie in await store.card_ties()
+            ],
+            "kinds": {
+                name: {
+                    "says": one.says,
+                    "means": one.means,
+                    "wants_words": one.wants_words,
+                    "one_way": one.one_way,
+                }
+                for name, one in ties.KINDS.items()
+            },
+            "from_role": ties.FROM_ROLE,
+            "into_role": ties.INTO_ROLE,
+            "ordinarily": ties.ORDINARILY,
+        }
+    )
 
 
 @router.get("/workbench", response_class=HTMLResponse)

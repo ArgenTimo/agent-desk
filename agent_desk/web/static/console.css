@@ -2249,3 +2249,14 @@ button.go:hover, button.yes:hover {
 .role-pick[data-shape="round"] .role-mark { border-radius: 999px; }
 .role-pick[data-shape="double"] .role-mark { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--fg-dim); }
 .role-pick[data-shape="corner"] .role-mark { clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }
+
+/* --- lines that say what happens --------------------------------------------------------------- */
+/* then · if · when · makes · with (agent_desk/ties.py). The word on the line is the whole point:
+   a bench of unlabelled arrows says that six things are related, which you already knew, because
+   they are on the same bench. */
+.tie-label.can-press { cursor: pointer; }
+.tie-label.can-press:hover { fill: var(--focus); text-decoration: underline; }
+/* A branch is the one that reads differently from the rest, because it is the one carrying a
+   condition rather than a word from a list of five. */
+.tie-label.is-if { font-style: italic; }
+.tie-label.is-with { opacity: 0.65; }

@@ -1902,6 +1902,139 @@ document.addEventListener('click', (event) => {
 
 readRoles();
 
+
+/* --- lines that say what happens --------------------------------------------------------------- */
+// then · if · when · makes · with (agent_desk/ties.py).
+//
+// A line that says only "these two are related" is a picture: read a bench of them and you learn
+// that somebody thought six things belong together, which you already knew, because they are on
+// the same bench. A line that says **then**, **if**, **when** is a sentence — it can be read top
+// to bottom by somebody who was not there.
+//
+// The kind is *suggested* from the roles at both ends and never enforced. Somebody sketching is
+// thinking, and a constructor that rejects the line you drew because the boxes are not yet the
+// right shape is a constructor you fight.
+let tieKinds = {};
+let tieFromRole = {};
+let tieIntoRole = {};
+let tieOrdinarily = 'then';
+let drawnTies = [];
+
+async function readLines() {
+  try {
+    const answer = await fetch('/workbench/lines');
+    if (!answer.ok) return;
+    const said = await answer.json();
+    tieKinds = said.kinds || {};
+    tieFromRole = said.from_role || {};
+    tieIntoRole = said.into_role || {};
+    tieOrdinarily = said.ordinarily || 'then';
+    drawnTies = said.lines || [];
+    drawTies();
+  } catch {
+    // A console that cannot reach itself still shows the cards.
+  }
+}
+
+// Which of the five a line between these two probably is. The same rule as `ties.natural`, asked
+// of the server's own answer rather than reimplemented: what a line is is decided by what it
+// comes out of.
+function naturalTie(fromPin, toPin) {
+  const out = fromPin ? roleOf(fromPin) : '';
+  const into = toPin ? roleOf(toPin) : '';
+  return tieFromRole[out] || tieIntoRole[into] || tieOrdinarily;
+}
+
+// Only the lines with both ends on the bench. A line to something you cannot see explains nothing,
+// which is the rule the idea map has always followed.
+function processTies() {
+  return drawnTies
+    .filter(
+      (line) =>
+        surface?.querySelector(`.pin[data-name="${CSS.escape(line.from)}"]`) &&
+        surface?.querySelector(`.pin[data-name="${CSS.escape(line.to)}"]`)
+    )
+    .map((line) => ({
+      from: line.from,
+      to: line.to,
+      says: line.says || tieKinds[line.kind]?.says || line.kind,
+      kind: line.kind,
+      id: line.id,
+      drawn: true,
+    }));
+}
+
+async function drawLine(from, to, kind, says = '') {
+  const body = new URLSearchParams({ from, to, kind, says });
+  // On the page first, so the line appears under the hand that drew it.
+  drawnTies = drawnTies.filter((line) => !(line.from === from && line.to === to));
+  drawnTies.push({ id: `new-${from}-${to}`, from, to, kind, says });
+  drawTies();
+  try {
+    await fetch('/workbench/tie', { method: 'POST', headers: FORM, body });
+    await readLines();
+  } catch {
+    // It is drawn here for this session; the next load reads what was stored.
+  }
+}
+
+async function rubOutLine(id) {
+  drawnTies = drawnTies.filter((line) => line.id !== id);
+  drawTies();
+  try {
+    await fetch('/workbench/untie', { method: 'POST', headers: FORM, body: new URLSearchParams({ id }) });
+  } catch {
+    // Gone from this page either way.
+  }
+}
+
+const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
+
+// What a line is, changed after it is drawn — and the words on it, which only a branch really
+// needs: "if" with no condition is a fork nobody can follow.
+function showLineMenu(line, x, y) {
+  document.getElementById('role-menu')?.remove();
+  const menu = document.createElement('menu');
+  menu.id = 'role-menu';
+  menu.className = 'role-menu';
+  for (const [name, one] of Object.entries(tieKinds)) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `role-pick${name === line.kind ? ' at' : ''}`;
+    button.innerHTML = '<span class="role-says"></span><span class="role-means"></span>';
+    button.querySelector('.role-says').textContent = one.says;
+    button.querySelector('.role-means').textContent = one.means;
+    button.addEventListener('click', async () => {
+      menu.remove();
+      // A branch is asked for its condition then and there. Anywhere else and it is a field
+      // somebody fills in later, which means never.
+      const words = one.wants_words
+        ? (prompt('When does it go this way?', line.says === one.says ? '' : line.says) || '').trim()
+        : '';
+      await drawLine(line.from, line.to, name, words);
+    });
+    row.appendChild(button);
+    menu.appendChild(row);
+  }
+  const off = document.createElement('li');
+  const rub = document.createElement('button');
+  rub.type = 'button';
+  rub.className = 'role-pick plain';
+  rub.textContent = 'rub the line out';
+  rub.addEventListener('click', () => {
+    menu.remove();
+    rubOutLine(line.id);
+  });
+  off.appendChild(rub);
+  menu.appendChild(off);
+  document.body.appendChild(menu);
+  menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 8)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`;
+}
+
+readLines();
+
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
 const FULL_SIZE = ZOOMS.indexOf(1);
@@ -1975,7 +2108,7 @@ async function loadTies() {
 // The server knows how ideas relate to each other; the page knows what a question went out with.
 // Both are lines on the same surface.
 function everyTie() {
-  return [...tieList, ...ownTies];
+  return [...tieList, ...ownTies, ...processTies()];
 }
 
 function drawTies() {
@@ -2013,8 +2146,18 @@ function drawTies() {
     label.setAttribute('x', String(bend + 5));
     label.setAttribute('y', String((from.y + to.y) / 2 - 4));
     label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('class', 'tie-label');
+    label.setAttribute('class', `tie-label${tie.kind ? ` is-${tie.kind}` : ''}`);
     label.textContent = tie.says;
+    if (tie.drawn) {
+      // Only a line somebody drew can be changed. The ones this console works out for itself —
+      // which project a session is in, what a question went out with — are readings of facts, and
+      // a menu offering to edit one would be offering to edit the fact.
+      label.classList.add('can-press');
+      label.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showLineMenu(tie, event.clientX, event.clientY);
+      });
+    }
     ties.appendChild(label);
     drew += 1;
   }
@@ -2223,15 +2366,22 @@ function startJoin(name) {
   surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)?.classList.add('joining');
 }
 
-function finishJoin(name) {
+async function finishJoin(name) {
   if (!joiningFrom || joiningFrom === name) return;
-  // The page's own line, like the ones a question draws to what it went out with. The console
-  // does not decide these mean anything — somebody said they belong together, and that is what is
-  // drawn.
-  ownTies.push({ from: joiningFrom, to: name, says: 'goes with' });
+  const from = joiningFrom;
   surface?.querySelector('.pin.joining')?.classList.remove('joining');
   joiningFrom = null;
-  drawTies();
+  // Typed from the roles at both ends, and kept. It used to be a line held in the tab saying
+  // "goes with", which vanished when the tab did and said nothing either way — draw a line out of
+  // a Decision and it is a branch before anybody has chosen anything.
+  const kind = naturalTie(
+    surface?.querySelector(`.pin[data-name="${CSS.escape(from)}"]`),
+    surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)
+  );
+  const words = tieKinds[kind]?.wants_words
+    ? (prompt('When does it go this way?', '') || '').trim()
+    : '';
+  await drawLine(from, name, kind, words);
 }
 
 function showCardMenu(pin, x, y) {

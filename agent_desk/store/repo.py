@@ -233,6 +233,23 @@ class Filing(BaseModel):
     created_at: int
 
 
+class CardTie(BaseModel):
+    """One line somebody drew between two cards, and what happens along it (034-card-ties.sql).
+
+    The ends are card *names* — `kind:id` — rather than ids of anything, because the two things a
+    line joins may be an idea and a session, and only one of those is in this database.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    from_name: str
+    to_name: str
+    kind: str
+    says: str
+    created_at: int
+
+
 class ProjectLink(BaseModel):
     """Somewhere a project also lives: a board, a repository page, a dashboard.
 
@@ -1945,6 +1962,50 @@ class Store:
                 keys,
             )
             return {str(row[0]): str(row[1]) for row in rows}
+
+    # --- lines between cards, and what they mean (034-card-ties.sql) --------------------------
+    async def tie_cards(self, *, from_name: str, to_name: str, kind: str, says: str = "") -> None:
+        """Draw one line, or change the one that is already there.
+
+        A card is never tied to itself: a line from a thing to itself says nothing and draws as a
+        dot on top of the card. The pair is unique, so pressing twice changes the line rather than
+        stacking a second one behind it.
+        """
+        if not from_name or not to_name or from_name == to_name:
+            return
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO card_tie (id, from_name, to_name, kind, says, created_at) "
+                    "VALUES (:id, :from_name, :to_name, :kind, :says, :t) "
+                    "ON CONFLICT (from_name, to_name) DO UPDATE SET kind = :kind, says = :says"
+                ),
+                {
+                    "id": _new_id(),
+                    "from_name": from_name,
+                    "to_name": to_name,
+                    "kind": kind,
+                    "says": says[:200],
+                    "t": _now_ms(),
+                },
+            )
+
+    async def untie_cards(self, tie_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM card_tie WHERE id = :id"), {"id": tie_id})
+
+    async def card_ties(self) -> list[CardTie]:
+        """Every line somebody has drawn. Read whole: there are as many as somebody has drawn by
+        hand, and the workbench needs the ones whose both ends are on it — which it cannot ask for
+        in SQL, because what is on the bench is a fact about a browser."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, from_name, to_name, kind, says, created_at FROM card_tie "
+                    "ORDER BY created_at"
+                )
+            )
+            return [CardTie(**row._mapping) for row in rows]
 
     # --- what a card is in a process (033-card-roles.sql) -------------------------------------
     async def set_card_role(self, name: str, role: str) -> None:
