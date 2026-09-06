@@ -1262,9 +1262,8 @@ async def test_choosing_a_project_narrows_the_right_hand_column(home: Home, desk
         text_="about another", summary="about another", source_kind="typed"
     )
     await desk.set_idea_project(theirs.id, "origin:someone/else")
-    loose = await desk.create_idea(
-        text_="about nothing", summary="about nothing", source_kind="typed"
-    )
+    # One with no project at all: it must survive the narrowing.
+    await desk.create_idea(text_="about nothing", summary="about nothing", source_kind="typed")
 
     # Without a choice: everything.
     column = await routes.render_ideas()
