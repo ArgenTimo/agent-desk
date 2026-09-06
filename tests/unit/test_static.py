@@ -206,3 +206,146 @@ def test_what_went_out_as_one_question_moves_as_one_group() -> None:
         "a line is being treated as a group; dragging one end of a relation away from the other "
         "is a thing somebody does on purpose"
     )
+
+
+@pytest.mark.unit
+def test_a_drag_ends_even_when_the_card_does_not() -> None:
+    """ "При передвижении с помощью ЛКМ на верстаке некорректное поведение."
+
+    The pointer was captured on the card and the release was listened for on the canvas. Cards are
+    removed and rebuilt while an answer streams in, so a card that went away mid-drag took the
+    capture with it, `pointerup` fired on nothing, and `moving` stayed set — the card then followed
+    the cursor with no button held.
+
+    Two halves to the fix, and both are asserted: the capture goes on the canvas, which does not
+    come and go, and the release is heard on the window, which catches a mouse let go anywhere.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "canvas.setPointerCapture" in console, "the gesture is captured on the card again"
+    assert "pin.setPointerCapture" not in console, (
+        "the card still captures the pointer, so removing it mid-drag strands the gesture"
+    )
+    for event in ("pointerup", "pointercancel", "lostpointercapture", "blur"):
+        assert f"window.addEventListener('{event}', endMove)" in console, (
+            f"a drag is not ended on {event}, so it can outlive the button being let go"
+        )
+
+
+@pytest.mark.unit
+def test_a_drag_does_not_write_to_disk_on_every_pointer_event() -> None:
+    """The other half of "не всегда получается адекватно перемещаться": it stuttered.
+
+    `place` serialises the position of every card on the bench into localStorage. A pointer
+    reports faster than the screen refreshes, so a drag was doing a synchronous disk write and a
+    full rebuild of the tie layer per event, most of it thrown away before it was ever painted.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "remember = true" in console, "place has no way to defer the write"
+    assert console.count("{ avoid: false, remember: false }") >= 2, (
+        "the drag still writes the whole layout to localStorage on every pointer event"
+    )
+    assert "requestAnimationFrame" in console and "function redrawSoon(" in console, (
+        "the ties and rings are still redrawn per pointer event rather than per frame"
+    )
+
+    move = console[console.index("canvas?.addEventListener('pointermove'") :]
+    move = move[: move.index("\n});")]
+    assert "drawTies()" not in move, "drawTies is still called straight from the move handler"
+
+
+@pytest.mark.unit
+def test_a_card_is_a_handle_and_not_only_its_title_bar() -> None:
+    """Only `.pin-head` could move a card — a strip a few pixels tall on a card of 260 by 200.
+
+    A press anywhere else did nothing at all: not a move, because it was not on the head, and not
+    a pan, because it was inside a card. Most of what somebody aims at is the card.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function gripOf(" in console, "there is no rule for what may be grabbed"
+    grip = console[console.index("function gripOf(") :]
+    grip = grip[: grip.index("\n}\n")]
+    assert "NOT_A_GRIP" in grip, "buttons and links are grabbable, so pressing one drags the card"
+    assert "'hint'" in grip, (
+        "a folded card is not a handle all over; only its head moves it, which is the dead zone "
+        "this was reported as"
+    )
+
+
+@pytest.mark.unit
+def test_a_settling_pass_does_not_take_a_card_out_of_somebody_s_hand() -> None:
+    """A press that has not travelled four pixels is not yet a drag and has not set `data-moved`.
+
+    `settleOverlaps` moves every card without that mark, and it fires 60ms after any card's body
+    updates — which, while an answer streams, is constantly. Landing in that window teleported the
+    card the mouse was holding.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    settle = console[console.index("function settleOverlaps(") :]
+    settle = settle[: settle.index("\n}\n")]
+    assert "moving" in settle, "a settling pass will still move the card being dragged"
+
+
+@pytest.mark.unit
+def test_the_arrow_keys_move_a_card_and_pan_when_none_is_chosen() -> None:
+    """ "На стрелочки тоже добавь перемещение."
+
+    And the two things that make it usable rather than nominal: a card has to be able to take
+    focus, or there is nothing for a key to move; and typing in the message field has to keep
+    moving the caret, or the page steals the arrow keys from the thing it is mostly used for.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "const ARROWS" in console and "function nudge(" in console
+    assert console.count("tabIndex = 0") >= 3, (
+        "not every kind of card can take focus, so the arrow keys reach only some of them"
+    )
+
+    handler = console[
+        console.index("document.addEventListener('keydown', (event) => {\n  const step = ARROWS") :
+    ]
+    handler = handler[: handler.index("\n});")]
+    assert "input, textarea, select" in handler, (
+        "the arrow keys are taken from the message field, where they move the caret"
+    )
+    assert "alsoMoving" in console[console.index("function nudge(") :][:400], (
+        "a keyboard move breaks up a group that a pointer move keeps together"
+    )
+
+
+@pytest.mark.unit
+def test_the_column_handles_have_a_width_to_grab() -> None:
+    """ "Куда-то пропала возможность менять ширину столбцов."
+
+    Here is where it went: two empty divs in a flex row with no size on them anywhere in the
+    stylesheet laid out at zero pixels wide. Present in the markup, keyboard-reachable, and
+    impossible to hit with a mouse — while `.gutter.across`, which sets its own flex, kept
+    working. That asymmetry is why it read as something that had disappeared.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert board.count('class="gutter"') == 2, "the two vertical handles are not on the page"
+
+    rule = css[css.index("\n.gutter {") :]
+    rule = rule[: rule.index("}")]
+    assert "width:" in rule and "flex:" in rule, (
+        "the vertical gutters have no size, so they lay out at zero pixels and cannot be grabbed"
+    )
+
+
+@pytest.mark.unit
+def test_nothing_sits_between_the_bench_and_the_columns_but_the_handle() -> None:
+    """ "Давай сделаем промежуток между верстаком и столбцами меньше, либо вообще уберём."
+
+    The gap was six pixels of nothing on each side, on top of a handle that was zero wide. Now the
+    handle is the space: seven pixels that can be grabbed, and no dead gap beside it.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    grid = css[css.index(".desk-grid {") :]
+    grid = grid[: grid.index("}")]
+    assert "gap: 0" in grid, "there is dead space between the columns again"

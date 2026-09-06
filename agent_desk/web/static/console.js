@@ -599,6 +599,9 @@ async function pin(card, how) {
   if (surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) return;
   const holder = document.createElement('div');
   holder.className = 'pin';
+  // Focusable, because that is what the arrow keys move: a card somebody tabbed
+  // or clicked to is the one that answers a key press.
+  holder.tabIndex = 0;
   holder.dataset.kind = card.kind;
   holder.dataset.id = card.id;
   // Its own name, so a line can find it without re-deriving the pair every time it is drawn.
@@ -1042,6 +1045,10 @@ function settleOverlaps() {
   clearTimeout(settling);
   settling = setTimeout(() => {
     for (const pin of surface?.querySelectorAll('.pin:not([data-moved])') || []) {
+      // Not the one in somebody's hand. A press that has not yet passed the four pixels that make
+      // it a drag has not set `data-moved`, and a settle landing in that window used to teleport
+      // the card out from under the cursor.
+      if (moving && (moving.pin === pin || moving.with?.some((one) => one.pin === pin))) continue;
       const at = placed.get(cardName(pin));
       if (!at) continue;
       const free = freeSpot(pin, at);
@@ -1053,7 +1060,7 @@ function settleOverlaps() {
   }, 60);
 }
 
-function place(pin, at, { avoid = true } = {}) {
+function place(pin, at, { avoid = true, remember = true } = {}) {
   const known = placed.get(cardName(pin));
   const wanted = at || known || nextFreeSpot();
   // A card somebody put somewhere stays where they put it. Collision avoidance is for cards this
@@ -1062,7 +1069,10 @@ function place(pin, at, { avoid = true } = {}) {
   placed.set(cardName(pin), where);
   pin.style.left = `${where.x}px`;
   pin.style.top = `${where.y}px`;
-  rememberLayout();
+  // `remember: false` is for the middle of a drag. Writing the whole layout to localStorage is
+  // synchronous and it happened once per pointer event; the map above is already up to date, so
+  // the only thing deferred is the disk, and it is written when the card is let go.
+  if (remember) rememberLayout();
 }
 
 // Down and to the right of whatever is already there, wrapping when it runs off the bottom. Not a
@@ -1081,18 +1091,56 @@ function nextFreeSpot() {
 }
 
 /* --- moving a card ---------------------------------------------------------------------------- */
-// By its head, which is where every tool like this puts the grip. A press that does not move is
-// still a click, so taking a card out of the message (below) keeps working.
+// Moving a card, and four things that were wrong with it.
+//
+// **The grip was a thin strip.** Only `.pin-head` moved a card, and a press anywhere else on it
+// did nothing at all — not even a pan, because the press was inside a card. Most of what somebody
+// aims at is the card, so most attempts to move one did nothing: "не всегда получается адекватно
+// перемещаться". A folded card is now a grip all over, which is how every tool of this kind
+// behaves; an opened one keeps its head as the grip, because its body is text somebody reads and
+// selects.
+//
+// **The gesture was captured on the card.** `syncBlocks` removes and rebuilds cards while an
+// answer streams in, and a card removed mid-drag took the capture with it — `pointerup` then had
+// nothing to fire on, `moving` stayed set, and the card followed the cursor with no button held.
+// The capture goes on the canvas, which does not come and go, and the release is listened for on
+// the window, which catches a mouse let go anywhere on the screen.
+//
+// **Every move wrote to disk.** `place` calls `rememberLayout`, which serialises the position of
+// every card on the bench into localStorage — synchronously, at the rate the pointer reports,
+// which on a fast mouse is over a hundred times a second, with the tie and ring geometry rebuilt
+// alongside it. That is the stutter. The layout is now written once, when the card is let go.
+//
+// **A card with no remembered position started from 0,0** and jumped to the corner on the first
+// touch. Where it actually is on screen is a better answer than the origin.
 let moving = null;
 
-canvas?.addEventListener('pointerdown', (event) => {
-  const head = event.target.closest('.pin-head');
-  const pin = event.target.closest('.pin');
-  if (event.button !== 0) return;
-  if (event.target.closest('button, a, input, textarea, select')) return;
+// What may be grabbed, and what is somebody trying to press or read instead.
+const NOT_A_GRIP = 'button, a, input, textarea, select, summary, details, option, label';
 
-  if (head && pin) {
-    const at = placed.get(cardName(pin)) || { x: 0, y: 0 };
+function gripOf(target) {
+  if (target.closest(NOT_A_GRIP)) return null;
+  const pin = target.closest('.pin');
+  if (!pin) return null;
+  // A folded card is a handle all over. An opened one is text, so it keeps its head.
+  if (target.closest('.pin-head')) return pin;
+  return pin.dataset.view === 'hint' ? pin : null;
+}
+
+// Where a card is now, from the layout if it is known and from the page if it is not.
+function whereIs(pin) {
+  const at = placed.get(cardName(pin));
+  if (at) return { ...at };
+  return { x: pin.offsetLeft || 0, y: pin.offsetTop || 0 };
+}
+
+canvas?.addEventListener('pointerdown', (event) => {
+  const pin = gripOf(event.target);
+  if (event.button !== 0) return;
+  if (event.target.closest(NOT_A_GRIP)) return;
+
+  if (pin) {
+    const at = whereIs(pin);
     moving = {
       pin,
       from: { ...at },
@@ -1104,14 +1152,17 @@ canvas?.addEventListener('pointerdown', (event) => {
       startY: event.clientY,
       moved: false,
     };
-    pin.setPointerCapture?.(event.pointerId);
+    // On the canvas, not on the card: a card can be rebuilt out from under a drag, and the
+    // canvas cannot.
+    canvas.setPointerCapture?.(event.pointerId);
     pin.classList.add('moving');
     for (const other of moving.with) other.pin.classList.add('moving');
     return;
   }
 
-  // Empty surface: pan. The same gesture the whole class of tool uses.
-  if (!pin) {
+  // Empty surface, or a part of a card that is not a grip: pan. The same gesture the whole class
+  // of tool uses.
+  if (!event.target.closest('.pin')) {
     moving = {
       pan: true,
       from: { x: view.x, y: view.y },
@@ -1142,7 +1193,7 @@ canvas?.addEventListener('pointermove', (event) => {
       x: Math.round(moving.from.x + dx / view.scale),
       y: Math.round(moving.from.y + dy / view.scale),
     },
-    { avoid: false }
+    { avoid: false, remember: false }
   );
   moving.pin.dataset.moved = 'yes';
   // The rest of the group, by the same offset — the shape of the group is what makes it one.
@@ -1153,13 +1204,28 @@ canvas?.addEventListener('pointermove', (event) => {
         x: Math.round(other.from.x + dx / view.scale),
         y: Math.round(other.from.y + dy / view.scale),
       },
-      { avoid: false }
+      { avoid: false, remember: false }
     );
     other.pin.dataset.moved = 'yes';
   }
-  drawTies();
-  drawRings();
+  redrawSoon();
 });
+
+// The lines and the frames follow the card, but once a frame rather than once an event.
+//
+// A pointer reports faster than a screen refreshes, and each of these rebuilds the whole tie
+// layer and measures every ringed card. Doing that per event is work thrown away between paints,
+// and it is what made a drag feel like it was catching.
+let redrawing = 0;
+
+function redrawSoon() {
+  if (redrawing) return;
+  redrawing = requestAnimationFrame(() => {
+    redrawing = 0;
+    drawTies();
+    drawRings();
+  });
+}
 
 // The other cards that move when this one does: the rest of whatever rings hold it.
 //
@@ -1190,13 +1256,80 @@ function endMove() {
   for (const other of moving.with || []) other.pin.classList.remove('moving');
   canvas?.classList.remove('panning');
   const wasAMove = moving.moved;
+  const wasACard = Boolean(moving.pin);
   moving = null;
-  if (wasAMove) drawTies();
+  if (wasAMove) {
+    drawTies();
+    drawRings();
+    // Once, here, rather than on every event of the drag.
+    if (wasACard) rememberLayout();
+  }
   return wasAMove;
 }
 
-canvas?.addEventListener('pointerup', endMove);
-canvas?.addEventListener('pointercancel', endMove);
+// On the window, not the canvas. A mouse let go over the input field, over the browser's own
+// chrome, or over a card that has since been rebuilt still ends the drag — before this, any of
+// those left the card stuck to the cursor with no button held, which is the behaviour that had to
+// be explained rather than the one that had to be used.
+window.addEventListener('pointerup', endMove);
+window.addEventListener('pointercancel', endMove);
+window.addEventListener('lostpointercapture', endMove);
+// And a window that loses focus mid-drag — an alt-tab — does not come back holding a card.
+window.addEventListener('blur', endMove);
+
+/* --- moving a card without a mouse ------------------------------------------------------------ */
+// "На стрелочки тоже добавь перемещение."
+//
+// The same move, by keyboard: a card that has focus moves; with nothing focused the arrows pan the
+// bench, which is the other thing arrows mean on a surface like this one. Shift makes the step a
+// long one, because nudging a card across a bench twelve pixels at a time is not moving it.
+//
+// A card in a ring moves with its ring, exactly as it does under the pointer — one rule for what a
+// group is, whichever hand moved it.
+const NUDGE = 12;
+const NUDGE_FAR = 96;
+const ARROWS = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
+
+function nudge(pin, dx, dy) {
+  const at = whereIs(pin);
+  place(pin, { x: at.x + dx, y: at.y + dy }, { avoid: false });
+  pin.dataset.moved = 'yes';
+  for (const other of alsoMoving(pin)) {
+    place(other.pin, { x: other.from.x + dx, y: other.from.y + dy }, { avoid: false });
+    other.pin.dataset.moved = 'yes';
+  }
+  drawTies();
+  drawRings();
+  markOffEdge();
+}
+
+document.addEventListener('keydown', (event) => {
+  const step = ARROWS[event.key];
+  if (!step) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // Somebody typing is not somebody steering, and the message field is where this page is mostly
+  // used. An arrow key inside a field moves the caret and nothing else.
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+
+  const pin = document.activeElement?.closest?.('.pin');
+  const far = event.shiftKey ? NUDGE_FAR : NUDGE;
+  event.preventDefault();
+  if (pin) {
+    nudge(pin, step.x * far, step.y * far);
+    return;
+  }
+  // Nothing has focus: the arrows move the view instead. Right shows what is to the right, which
+  // means the surface goes left — the direction people expect is the one the content appears from.
+  view.x -= step.x * far;
+  view.y -= step.y * far;
+  applyView();
+  markOffEdge();
+});
 
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
@@ -1651,6 +1784,7 @@ function syncBlocks() {
     if (!node) {
       node = document.createElement('div');
       node.className = 'pin block-card';
+      node.tabIndex = 0;
       node.dataset.kind = 'block';
       node.dataset.id = id;
       node.dataset.name = `block:${id}`;
@@ -1776,6 +1910,7 @@ function addOwnBlock(kind = 'note') {
 
   const holder = document.createElement('div');
   holder.className = 'pin own';
+  holder.tabIndex = 0;
   holder.dataset.kind = 'note';
   holder.dataset.id = `note-${++ownBlocks}`;
   holder.dataset.name = `note:${holder.dataset.id}`;

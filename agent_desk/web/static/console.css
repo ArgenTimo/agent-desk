@@ -145,10 +145,15 @@ body.desk { height: 100vh; overflow: hidden; padding: 0; display: flex; flex-dir
      rest closes over the gap by itself. A grid would need a template per combination of what is
      showing, which is four rules to keep in step with three buttons. */
   display: flex;
-  gap: 6px;
+  /* No gap. The space between two columns is the handle between them, which is a thing you can
+     grab; a gap is space that does nothing, and it was taking it from the bench — "давай сделаем
+     промежуток между верстаком и столбцами меньше, либо вообще уберём". */
+  gap: 0;
   flex: 1;
   min-height: 0;
-  padding: 10px 12px;
+  /* And the frame around the whole thing is as thin as it can be while the panels still read as
+     panels rather than as one wall of text. */
+  padding: 4px 5px;
 }
 .col-left { flex: 0 0 var(--left); }
 .col-mid { flex: 1 1 auto; }
@@ -185,14 +190,36 @@ body.desk { height: 100vh; overflow: hidden; padding: 0; display: flex; flex-dir
 }
 body.pulling-across { cursor: row-resize; user-select: none; }
 
+/* A handle with no width is not a handle.
+   
+   "Куда-то пропала возможность менять ширину столбцов" — this is where it went. The two vertical
+   gutters are empty divs in a flex row, and nothing here gave them a size, so they laid out at
+   zero pixels wide: present in the markup, keyboard-reachable, and impossible to hit with a
+   mouse. Only the horizontal one worked, because `.gutter.across` sets its own `flex`.
+   
+   Seven pixels, which is the width the gap between the columns used to be — so the handle *is*
+   the gap now rather than sitting invisibly inside it, and the bench got the difference. */
 .gutter {
+  flex: 0 0 7px;
+  width: 7px;
   align-self: stretch;
   border-radius: 3px;
   cursor: col-resize;
   background: transparent;
   transition: background 0.12s;
 }
+/* And it says it is a handle before somebody has found it by accident: a hairline down the middle,
+   the way every splitter in every tool of this kind is drawn. */
+.gutter:not(.across)::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 100%;
+  margin: 0 auto;
+  background: var(--line);
+}
 .gutter:hover, .gutter:focus-visible, .gutter.pulling { background: var(--line-strong); }
+.gutter:hover::after, .gutter.pulling::after { background: transparent; }
 body.pulling { cursor: col-resize; user-select: none; }
 .col-left, .col-mid, .col-right { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .col-left, .col-right { overflow: hidden; }
@@ -1556,7 +1583,16 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   box-shadow: var(--shadow, 0 2px 8px rgb(0 0 0 / 18%));
 }
 .pins > .pin.moving { z-index: 3; box-shadow: 0 8px 24px rgb(0 0 0 / 30%); }
+/* A folded card is a handle all over — that is what the pointer says it is, and it is what the
+   pointer does. An opened card keeps its head as the grip, because its body is text to read. */
+.pin[data-view="hint"] { cursor: grab; }
+.pin[data-view="hint"] .pin-body { cursor: default; }
 .pin-head { cursor: grab; user-select: none; }
+/* Which card the arrow keys will move. Without this the keyboard moves something invisible. */
+.pin:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .pin.moving .pin-head { cursor: grabbing; }
 
 /* The lines live on the surface, so they pan and zoom with the cards they join. */
