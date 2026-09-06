@@ -28,9 +28,13 @@ import signal
 from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from pathlib import Path
 
+import structlog
+
 from agent_desk.config import settings
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Block, Store
+
+log = structlog.get_logger()
 
 # What a run may do: read. Nothing on this list can change a byte anywhere.
 ALLOWED_TOOLS = ("Read", "Grep", "Glob")
@@ -129,10 +133,15 @@ def denials() -> str:
     return json.dumps({"permissions": {"deny": list(DENIED_PATHS)}})
 
 
-def argv(*, add_dirs: Sequence[Path] = ()) -> list[str]:
-    """The command line. The prompt is deliberately absent from it — it arrives on stdin."""
+def argv(*, add_dirs: Sequence[Path] = (), binary: str = "") -> list[str]:
+    """The command line. The prompt is deliberately absent from it — it arrives on stdin.
+
+    `binary` names which engine to run and defaults to the configured one. A second engine — a
+    model running on this machine — is given the same flags: it is asked the same question in the
+    same shape, and anything that had to differ would be a second parser to keep in step.
+    """
     command = [
-        settings.claude_bin,
+        binary or settings.claude_bin,
         "--print",
         "--output-format",
         "stream-json",
@@ -171,12 +180,13 @@ def _text_of(event: dict[str, object]) -> str:
     return "".join(parts)
 
 
-async def stream_answer(
+async def _run(
     prompt: str,
     *,
     add_dirs: Sequence[Path] = (),
+    binary: str = "",
 ) -> AsyncIterator[str]:
-    """Yield the answer as it arrives, or raise `AnswerFailed`.
+    """One engine, one question. Yields the answer as it arrives, or raises `AnswerFailed`.
 
     Cancellation is the caller's to perform and this generator's to survive: the subprocess is
     killed in `finally`, so a cancelled block does not leave a headless Claude running against a
@@ -184,7 +194,7 @@ async def stream_answer(
     """
     try:
         process = await asyncio.create_subprocess_exec(
-            *argv(add_dirs=add_dirs),
+            *argv(add_dirs=add_dirs, binary=binary),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             # A pipe that is actually drained, into a bounded buffer. Discarding it made every
@@ -196,7 +206,8 @@ async def stream_answer(
         )
     except FileNotFoundError as exc:
         raise AnswerFailed(
-            f"needs_toolchain: {settings.claude_bin} is not on PATH, so nothing can answer a block"
+            f"needs_toolchain: {binary or settings.claude_bin} is not on PATH, so nothing can "
+            "answer a block"
         ) from exc
 
     said_something = False
@@ -259,6 +270,69 @@ async def stream_answer(
             # problem, and the run itself is already dead by here.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(process.wait(), _REAP_SECONDS)
+
+
+# What makes a failure worth trying a second engine for. Every one of these is the engine being
+# *unavailable* — out of budget, not installed, unreachable — and none of them is an answer.
+#
+# The distinction is the whole of this feature and it is worth stating plainly: a refusal is an
+# answer. It arrives as text, `stream_answer` yields it, nothing raises, and no fallback can
+# possibly fire — which is a structural property rather than a rule anybody has to remember, and a
+# test asserts it. Routing a declined request to a model that will not decline it is not something
+# this program does (docs/08-non-goals.md).
+UNAVAILABLE = (
+    "rate limit",
+    "rate-limit",
+    "usage limit",
+    "quota",
+    "needs_toolchain",
+    "no answer within",
+    "could not reach",
+    "connection",
+)
+
+
+def unavailable(said: str) -> bool:
+    """Was that the engine being unavailable, rather than an answer this program did not like?"""
+    lowered = said.lower()
+    return any(word in lowered for word in UNAVAILABLE)
+
+
+async def stream_answer(
+    prompt: str,
+    *,
+    add_dirs: Sequence[Path] = (),
+) -> AsyncIterator[str]:
+    """Yield the answer as it arrives, or raise `AnswerFailed`.
+
+    Where a second engine is configured — `AGENT_DESK_LOCAL_MODEL_BIN`, a model running on this
+    machine — it is tried when the first one turns out to be *unavailable* and has said nothing
+    yet. Both conditions matter. Unavailable is out of budget, not installed or unreachable, never
+    a refusal; and "said nothing yet" is what makes a retry safe, because an answer that has
+    already begun streaming cannot be started again without repeating itself.
+
+    With no second engine configured — which is every install until somebody sets one — this is
+    exactly what it was before.
+    """
+    engines = [""]
+    if settings.local_model_bin:
+        engines.append(settings.local_model_bin)
+
+    for index, binary in enumerate(engines):
+        last = index == len(engines) - 1
+        said_anything = False
+        try:
+            async for text in _run(prompt, add_dirs=add_dirs, binary=binary):
+                said_anything = True
+                yield text
+        except AnswerFailed as exc:
+            # A run that has begun answering cannot be retried without repeating itself, and a
+            # failure that is not the engine being unavailable is an answer about the question.
+            if last or said_anything or not unavailable(str(exc)):
+                raise
+            log.info("answer.falling_back", to=engines[index + 1], because=str(exc)[:120])
+            continue
+        return
 
 
 def build_prompt(

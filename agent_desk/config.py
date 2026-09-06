@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     # (docs/02-architecture.md, failure posture). There is no --max-turns in the CLI, so the
     # timeout is the only bound on a run.
     claude_bin: str = "claude"
+    # A second engine to fall back to when the first is *unavailable* — out of budget, not
+    # installed, unreachable. Empty by default, which is every install until somebody sets it: a
+    # local model is a thing you have to have running, and a default naming one that is not there
+    # would turn every rate limit into two failures instead of one.
+    #
+    # It is asked the same question with the same flags, so it has to speak the same
+    # `--output-format stream-json` the primary does. It is never reached for on a *refusal* —
+    # that is an answer, not a failure (docs/08-non-goals.md, agent_desk/answer/session.py).
+    local_model_bin: str = ""
     answer_timeout_seconds: float = 180.0
 
     @property

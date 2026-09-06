@@ -434,3 +434,131 @@ async def test_a_noisy_run_still_does_not_deadlock(
     assert answered is not None
     assert answered.state == "answered"
     assert answered.answer == "answered"
+
+
+# --- a second engine, for when the first one is not there (docs/08-non-goals.md) -----------------
+UNAVAILABLE_CLI = """#!/bin/sh
+cat > /dev/null
+echo "You have hit your usage limit" >&2
+exit 1
+"""
+
+LOCAL_CLI = """#!/bin/sh
+cat > /dev/null
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"the local one answered"}]}}\\n'
+"""
+
+REFUSING_CLI = """#!/bin/sh
+cat > /dev/null
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"I can not help with that."}]}}\\n'
+"""
+
+
+def _binary(where: pathlib.Path, name: str, script: str) -> pathlib.Path:
+    binary = where / name
+    binary.write_text(script)
+    binary.chmod(0o755)
+    return binary
+
+
+@pytest.mark.unit
+async def test_a_second_engine_answers_when_the_first_is_out_of_budget(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unavailable is out of budget, not installed, or unreachable — a different thing from an
+    answer somebody did not like."""
+    first = _binary(tmp_path, "claude", UNAVAILABLE_CLI)
+    second = _binary(tmp_path, "local-model", LOCAL_CLI)
+    monkeypatch.setattr(
+        session,
+        "settings",
+        Settings(claude_bin=str(first), local_model_bin=str(second), answer_timeout_seconds=10.0),
+    )
+
+    said = "".join([chunk async for chunk in session.stream_answer("a question")])
+
+    assert said == "the local one answered"
+
+
+@pytest.mark.unit
+async def test_a_refusal_is_an_answer_and_can_never_reach_the_second_engine(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The property this feature stands on, and it is structural rather than a rule to remember:
+    a refusal arrives as text, nothing raises, and there is no path from here to a fallback
+    (docs/08-non-goals.md)."""
+    first = _binary(tmp_path, "claude", REFUSING_CLI)
+    second = _binary(tmp_path, "local-model", LOCAL_CLI)
+    monkeypatch.setattr(
+        session,
+        "settings",
+        Settings(claude_bin=str(first), local_model_bin=str(second), answer_timeout_seconds=10.0),
+    )
+
+    said = "".join([chunk async for chunk in session.stream_answer("a question")])
+
+    assert said == "I can not help with that."
+    assert "local" not in said
+
+
+@pytest.mark.unit
+def test_only_the_engine_being_unavailable_is_worth_a_second_try() -> None:
+    for said in (
+        "You have hit your usage limit",
+        "needs_toolchain: claude is not on PATH",
+        "no answer within 180s",
+        "could not reach it",
+    ):
+        assert session.unavailable(said), said
+
+    for said in (
+        "I can not help with that",
+        "the run exited 3",
+        "the run reported an error",
+        "",
+    ):
+        assert not session.unavailable(said), said
+
+
+@pytest.mark.unit
+async def test_an_answer_that_has_begun_is_never_started_again(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retry after text has streamed would repeat itself, so it does not happen."""
+    # It streams, then reports an error — which raises even though it said something, because a
+    # `result` event saying `is_error` is the run telling you the answer is not one. A non-zero
+    # exit *after* text has streamed does not raise at all: it answered.
+    half = """#!/bin/sh
+cat > /dev/null
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"half an ans"}]}}\\n'
+printf '{"type":"result","is_error":true,"subtype":"usage limit reached"}\\n'
+"""
+    first = _binary(tmp_path, "claude", half)
+    second = _binary(tmp_path, "local-model", LOCAL_CLI)
+    monkeypatch.setattr(
+        session,
+        "settings",
+        Settings(claude_bin=str(first), local_model_bin=str(second), answer_timeout_seconds=10.0),
+    )
+
+    said = []
+    with pytest.raises(session.AnswerFailed):
+        async for chunk in session.stream_answer("a question"):
+            said.append(chunk)
+
+    assert said == ["half an ans"]
+
+
+@pytest.mark.unit
+async def test_with_no_second_engine_nothing_changes(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is every install until somebody sets one."""
+    first = _binary(tmp_path, "claude", UNAVAILABLE_CLI)
+    monkeypatch.setattr(
+        session, "settings", Settings(claude_bin=str(first), answer_timeout_seconds=10.0)
+    )
+
+    with pytest.raises(session.AnswerFailed, match="exited 1"):
+        async for _ in session.stream_answer("a question"):
+            pass

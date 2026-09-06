@@ -116,6 +116,14 @@ machinery for getting around the judgement rather than for getting an answer —
 become something else because it is built into a tool that mostly does other things. It is not
 built here and it will not be.
 
-Nothing about that limits the useful half. Availability routing — a rate limit, an outage, a model
-that is simply slower than the job needs — is a different trigger with a different reason, and it
-is welcome whenever somebody wants it enough to run a local model to test it against.
+Nothing about that limits the useful half, and **the useful half is built.** Set
+`AGENT_DESK_LOCAL_MODEL_BIN` to a command that speaks the same `--output-format stream-json`, and
+a question the first engine could not take — out of budget, not installed, unreachable — is asked
+of that one instead.
+
+The line between the two is not a rule anybody has to remember, which is the point: **a refusal is
+an answer.** It arrives as text, `stream_answer` yields it, nothing raises, and there is no path
+from a yielded answer to a fallback. The retry can only happen where a run *failed before saying
+anything*, and only where the failure names the engine rather than the question
+([`agent_desk/answer/session.py`](../agent_desk/answer/session.py), `unavailable`). Both halves
+have a test.
