@@ -32,7 +32,7 @@ from markupsafe import Markup, escape
 from agent_desk import connectors, dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, bench, chart, meeting
+from agent_desk.ideas import appraise, bench, chart, describe, meeting
 from agent_desk.observe import attach, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -422,7 +422,55 @@ def render_board(
     )
 
 
-def render_card(kind: str, card_id: str, groups: list[Group] | None = None) -> str:
+def _about(kind: str, rows: list[BoardRow]) -> str:
+    """What a card is described from — the facts, as lines, for `ideas/describe.py`.
+
+    Deliberately the same text the description is cached against: if this changes, the sentence is
+    written again, and if it does not, the cached one stands.
+    """
+    said: list[str] = []
+    for row in rows[:3]:
+        tail = row.tail
+        said += [
+            f"name: {row.session.name}",
+            f"project: {row.session.project}",
+            f"status: {row.session.status}",
+        ]
+        if tail and tail.title:
+            said.append(f"working on: {tail.title}")
+        if tail and tail.git_branch:
+            said.append(f"branch: {tail.git_branch}")
+        if tail and tail.last_entry and tail.last_entry.text:
+            said.append(f"last said: {tail.last_entry.text[:200]}")
+    return "\n".join(said)
+
+
+async def describe_card(kind: str, card_id: str) -> str:
+    """One sentence about this card, written once and kept (028-card-descriptions.sql)."""
+    if kind == "idea":
+        idea = await store.idea(card_id)
+        if idea is None:
+            return ""
+        return await describe.describe(
+            store, f"idea:{card_id}", "idea somebody wrote down", idea.text[:600]
+        )
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    stamped = [row for project in projects for one in project.instances for row in one.rows]
+    if kind in ("session", "agent"):
+        mine = [row for row in stamped if row.session.session_id == card_id]
+    elif kind == "instance":
+        mine = [row for row in stamped if row.session.cwd == card_id]
+    elif kind == "project":
+        mine = [row for row in stamped if row.project_key == card_id]
+    else:
+        return ""
+    if not mine:
+        return ""
+    return await describe.describe(store, f"{kind}:{card_id}", kind, _about(kind, mine))
+
+
+def render_card(kind: str, card_id: str, groups: list[Group] | None = None, said: str = "") -> str:
     """What a card actually contains, for when somebody opens one or drags it into the middle.
 
     This is where the detail the left column deliberately does not show lives: the branch, what a
@@ -443,7 +491,7 @@ def render_card(kind: str, card_id: str, groups: list[Group] | None = None) -> s
         chosen = [row for row in stamped if row.project_key == card_id]
     else:
         return ""
-    return env.get_template("_card.html").render(kind=kind, rows=chosen, card_id=card_id)
+    return env.get_template("_card.html").render(kind=kind, rows=chosen, card_id=card_id, said=said)
 
 
 def render_tail(session_id: str) -> str:
@@ -803,6 +851,29 @@ async def close_thread(thread_id: str, request: Request) -> Response:
     return RedirectResponse("/", status_code=303)
 
 
+@router.get("/cards/{kind}/full", response_class=HTMLResponse)
+async def card_in_full(kind: str, id: str = "") -> HTMLResponse:
+    """Everything about one card: the console, how long it has been up, what it is carrying.
+
+    A route of its own, and fetched only when somebody presses for it — "фул-дата открывается
+    только если пользователь намеренно нажмёт на кнопку". A transcript tail is tens of kilobytes
+    and a board of twenty cards must not carry twenty of them by default.
+    """
+    if kind not in ("session", "agent"):
+        return HTMLResponse("", status_code=404)
+    rows, _ = await asyncio.to_thread(board)
+    row = next((one for one in rows if one.session.session_id == id), None)
+    if row is None:
+        return HTMLResponse("", status_code=404)
+    return HTMLResponse(
+        env.get_template("_card_full.html").render(
+            row=row,
+            tail=await asyncio.to_thread(transcript.read_tail, id),
+            started=row.session.updated_at,
+        )
+    )
+
+
 @router.get("/cards/{kind}", response_class=HTMLResponse)
 async def card(kind: str, id: str = "") -> HTMLResponse:
     """What one card contains. The id is a query parameter because two of the kinds are identified
@@ -811,7 +882,9 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
         # An idea is not a session and has no board row: what it contains is what was written.
         idea = await store.idea(id)
         return HTMLResponse(
-            env.get_template("_card_idea.html").render(idea=idea),
+            env.get_template("_card_idea.html").render(
+                idea=idea, said=await describe_card("idea", id) if idea else ""
+            ),
             status_code=200 if idea else 404,
         )
     if kind == "connector":
@@ -839,7 +912,8 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             status_code=200 if stuck else 404,
         )
     groups = await store.groups()
-    markup = await asyncio.to_thread(render_card, kind, id, groups)
+    said = await describe_card(kind, id)
+    markup = await asyncio.to_thread(render_card, kind, id, groups, said)
     return HTMLResponse(markup, status_code=200 if markup else 404)
 
 

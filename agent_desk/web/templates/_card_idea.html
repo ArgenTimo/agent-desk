@@ -3,16 +3,26 @@
 {% if not idea %}
 <p class="empty small">that idea is not in the inbox any more</p>
 {% else %}
-<div class="card-detail">
+<div class="card-detail" data-detail="plain">
   <div class="card-line">
     <span class="card-title">{{ idea.summary }}</span>
     <span class="tiny">{{ idea.state }}</span>
   </div>
+
+  {# What it is, in a sentence, and the words it was written in kept for the view that shows
+     everything: "исходное сообщение/тикет можно посмотреть при детальном рассмотрении". #}
+  <div class="plain-only">
+    {% if said %}<p class="card-said">{{ said }}</p>{% endif %}
+    {% if not said %}<p class="card-said">{{ idea.summary }}</p>{% endif %}
+  </div>
+
+  <div class="technical-only" hidden>
   <dl class="card-facts">
-    <dt>thought</dt>
+    <dt>as it was written</dt>
     <dd>{{ idea.text }}</dd>
     <dt>from</dt>
     <dd>{{ idea.source_kind }}{% for key, value in idea.context.items() %} · {{ key }}: {{ value }}{% endfor %}</dd>
   </dl>
+</div>
 </div>
 {% endif %}

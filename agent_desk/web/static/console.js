@@ -546,10 +546,10 @@ async function pin(card, how) {
   // Not `draggable`: on the surface a card is moved by its head with the pointer, and the HTML5
   // drag would fight that. `×` is how a card leaves.
   holder.dataset.deep = 'no';
-  holder.dataset.view = 'metadata';
+  holder.dataset.view = 'hint';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
-    <button type="button" class="pin-view" title="what it is — press for everything, including the technical detail">what it is</button>
+    <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
     <div class="pin-body">reading…</div>`;
@@ -595,7 +595,25 @@ function setView(holder, view) {
           ? 'what it is — press for everything, including the technical detail'
           : 'everything, including the technical detail — press to fold it back to a line';
   }
-  // `full` also flips the card inside it, which is where the branch, the paths and the log are.
+  // `full` fetches the whole thing — the console, how long it has been up, the tokens — because
+  // a card does not carry that until somebody asks: "фул-дата открывается только если
+  // пользователь намеренно нажмёт на кнопку".
+  if (view === 'full' && !holder.dataset.gotFull) {
+    holder.dataset.gotFull = 'yes';
+    const [kind, ...rest] = (holder.dataset.name || '').split(':');
+    if (kind && kind !== 'note' && kind !== 'block') {
+      fetch(`/cards/${encodeURIComponent(kind)}/full?id=${encodeURIComponent(rest.join(':'))}`)
+        .then((response) => (response.ok ? response.text() : ''))
+        .then((html) => {
+          if (!html) return;
+          const where = holder.querySelector('.technical-only') || holder.querySelector('.pin-body');
+          where.insertAdjacentHTML('beforeend', html);
+          settleOverlaps();
+        })
+        .catch(() => {});
+    }
+  }
+
   const inner = holder.querySelector('[data-detail]');
   if (inner) {
     const technical = view === 'full';
@@ -1340,10 +1358,10 @@ function syncBlocks() {
       node.dataset.kind = 'block';
       node.dataset.id = id;
       node.dataset.name = `block:${id}`;
-      node.dataset.view = 'metadata';
+      node.dataset.view = 'hint';
       node.innerHTML = `<div class="pin-head"><span class="pin-kind">asked</span>
         <span class="pin-label"></span>
-        <button type="button" class="pin-view" title="what it is — press for everything">what it is</button>
+        <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
         <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
         <div class="pin-body"></div>`;
       if (!wentWith.has(id) && awaitingBlock.length) wentWith.set(id, awaitingBlock.shift());
@@ -1464,10 +1482,10 @@ function addOwnBlock(kind = 'note') {
   holder.dataset.id = `note-${++ownBlocks}`;
   holder.dataset.name = `note:${holder.dataset.id}`;
   holder.dataset.deep = 'no';
-  holder.dataset.view = 'metadata';
+  holder.dataset.view = 'hint';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${kind}</span>
     <span class="pin-label">${said.label}</span>
-    <button type="button" class="pin-view" title="what it is — press for everything">what it is</button>
+    <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
     <div class="pin-body"><textarea class="own-text" rows="4"
       placeholder="${said.placeholder}"></textarea></div>`;

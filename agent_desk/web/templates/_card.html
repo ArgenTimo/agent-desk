@@ -17,15 +17,13 @@
     <span class="card-title">{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</span>
     <span class="tiny">{{ row.session.updated_at | ago }}</span>
     <span class="spacer"></span>
-    {# The toggle. A button rather than a link: it changes what you are looking at, it does not
-       go anywhere, and it works with the keyboard for free. #}
-    <button type="button" class="chip detail-toggle" data-detail-toggle
-            aria-pressed="false" title="show the branch, the paths, the ids and the log">
-      technical details</button>
   </div>
 
   {# --- plain words ---------------------------------------------------------------------- #}
   <div class="plain-only">
+    {# What this is, in a sentence a model wrote about it (028-card-descriptions.sql). Absent
+       until one has been written, which reads as an ordinary card rather than as a hole. #}
+    {% if said %}<p class="card-said">{{ said }}</p>{% endif %}
     <p class="plain-what">
       {% if row.session.status == "busy" %}Working right now
       {% elif row.session.status == "idle" %}Not doing anything at the moment

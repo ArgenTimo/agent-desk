@@ -1682,3 +1682,37 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 /* The workbench is the middle, and on a wide window it is roughly as tall as it is wide rather
    than a letterbox strip under a log. */
 .bench-canvas { aspect-ratio: auto; }
+
+/* --- what a card says about itself ------------------------------------------------------------ */
+/* A sentence a model wrote about this element, which is the middle of the three views
+   (028-card-descriptions.sql). It reads as prose because that is what it is. */
+.card-said { margin: 0 0 6px; color: var(--fg); }
+.pin[data-view="hint"] .card-said { display: none; }
+
+/* Everything, fetched only when somebody presses for it. The numbers as a table with words next
+   to them; the console as the console, because a transcript read as anything else stops being
+   checkable. */
+.card-full h4 { margin: 12px 0 6px; font-size: var(--t-sm); }
+.console {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.console-line {
+  display: grid;
+  grid-template-columns: 3.6rem 4.5rem 1fr;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: var(--t-xs);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.console-line:last-child { border-bottom: 0; }
+.console-line .when { color: var(--fg-dim); font-family: var(--mono); }
+.console-line .who { color: var(--fg-dim); }
+.console-line.assistant .who { color: var(--busy); }
+.console-line .said { white-space: pre-wrap; word-break: break-word; }

@@ -1492,3 +1492,48 @@ async def test_a_meeting_pasted_into_the_pool_comes_back_immediately(
     status, panel = await _post("/ideas/meeting", {"transcript": "someone: we need a grid"})
     assert status == 200
     assert "idea" in panel or "Nothing recorded" in panel
+
+
+@pytest.mark.unit
+async def test_a_card_carries_the_sentence_written_about_it(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Метадата — созданное ЛЛМ описание элемента." The board can say what it reads; this is
+    what it cannot say without a model."""
+    from agent_desk.ideas import describe
+
+    async def fake(prompt: str):
+        yield "A session reading the parser in agent-desk."
+
+    monkeypatch.setattr(describe, "stream_answer", fake)
+    session_id = _a_session(home)
+
+    said = await routes.describe_card("session", session_id)
+    assert said == "A session reading the parser in agent-desk."
+
+    card = routes.render_card("session", session_id, [], said)
+    assert "A session reading the parser" in card
+
+    # And a card with nothing written about it renders as an ordinary card, not a hole.
+    plain = routes.render_card("session", session_id, [], "")
+    assert "card-said" not in plain
+
+
+@pytest.mark.unit
+async def test_everything_about_a_session_is_a_route_of_its_own(home: Home, desk: Store) -> None:
+    """A transcript tail is tens of kilobytes; a board of twenty cards must not carry twenty of
+    them until somebody presses for one."""
+    session_id = _a_session(home)
+
+    status, page = await _get(f"/cards/session/full?id={session_id}")
+
+    assert status == 200
+    assert "Everything it has said" in page
+    assert "running for" in page
+    assert "carrying" in page
+    # The console is rendered as the console: what was said, by whom, when.
+    assert "console-line" in page or "Nothing has been read" in page
+
+    # Only the kinds that have a console.
+    assert (await _get("/cards/project/full?id=whatever"))[0] == 404
+    assert (await _get("/cards/session/full?id=nobody"))[0] == 404

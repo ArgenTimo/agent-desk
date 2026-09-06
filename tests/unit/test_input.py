@@ -390,7 +390,13 @@ async def test_every_action_in_the_console_is_a_real_form(
     # on the card now rather than on the board — the left column carries names and states, and
     # everything you can *do* to a session is on the card it opens (docs/06-console.md).
     card = routes.env.get_template("_card.html").render(
-        kind="session", rows=[make_row("alpha", "main")], card_id="session-alpha"
+        kind="session",
+        rows=[make_row("alpha", "main")],
+        card_id="session-alpha",
+        # The sentence a model wrote about it, empty here: the template asks for it, and a name a
+        # template asks for and nobody passes must raise rather than render nothing (routes.env
+        # uses StrictUndefined, deliberately).
+        said="",
     )
     assert re.search(r'<a class="message-button[^"]*" href="/sessions/[^"]+/message"', card)
 

@@ -1,0 +1,49 @@
+{# Everything about one session, fetched only when somebody presses for it.
+
+   "Фул-инфо — буквально ВСЯ информация: полностью вся консоль и метаданные помимо описания —
+   время запуска и работы, токены и вообще всё что доступно; в идеале не в совсем сыром виде, а в
+   удобном для пользователя отображении."
+
+   So: the numbers as a small table with words next to them, and the console as the console —
+   because a transcript read as anything other than what it is stops being checkable. #}
+<div class="card-full">
+  <dl class="card-facts">
+    <dt>running for</dt>
+    <dd>{{ row.session.updated_at | ago }}</dd>
+    <dt>carrying</dt>
+    <dd>
+      {% if tail and tail.context_tokens %}{{ tail.context_tokens | tokens }} of context
+      {% else %}not known — no transcript was read{% endif %}
+    </dd>
+    <dt>where</dt>
+    <dd class="mono">{{ row.session.cwd }}</dd>
+    <dt>branch</dt>
+    <dd>{{ tail.git_branch if tail and tail.git_branch else "—" }}</dd>
+    <dt>session</dt>
+    <dd class="mono">{{ row.session.session_id }} · pid {{ row.session.pid }} · {{ row.session.kind }}</dd>
+    {% if tail and tail.agents %}
+    <dt>helpers</dt>
+    <dd>
+      {% for agent in tail.agents %}
+      <span class="agent-chip{% if agent.running %} working{% endif %}">{{ agent.kind }}: {{ agent.description or "—" }}</span>
+      {% endfor %}
+    </dd>
+    {% endif %}
+  </dl>
+
+  <h4>Everything it has said</h4>
+  {% if not tail or not tail.entries %}
+  <p class="empty small">Nothing has been read for this one — it shows registry facts only, and
+    what it is doing is not known here.</p>
+  {% else %}
+  <ol class="console">
+    {% for entry in tail.entries %}
+    <li class="console-line {{ entry.role }}">
+      <span class="when">{{ entry.at | clock }}</span>
+      <span class="who">{{ entry.role }}</span>
+      <span class="said">{{ entry.text or "—" }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</div>

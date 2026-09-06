@@ -1728,6 +1728,27 @@ class Store:
             rows = await conn.execute(text("SELECT short_id, name FROM canary"))
             return {str(row[0]): str(row[1]) for row in rows}
 
+    # --- what a card is, in a sentence (028-card-descriptions.sql) ----------------------------
+    async def card_said(self, name: str) -> tuple[str, str]:
+        """The sentence written about this card, and what it was written from."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT said, about FROM card_said WHERE name = :name"), {"name": name}
+            )
+            row = rows.first()
+            return ("", "") if row is None else (str(row[0]), str(row[1]))
+
+    async def say_card(self, name: str, said: str, about: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO card_said (name, said, about, written_at) "
+                    "VALUES (:name, :said, :about, :t) "
+                    "ON CONFLICT (name) DO UPDATE SET said = :said, about = :about, written_at = :t"
+                ),
+                {"name": name, "said": said[:400], "about": about[:400], "t": _now_ms()},
+            )
+
     # --- the names somebody uses for things (021-glossary.sql) --------------------------------
     async def add_term(self, *, repo_key: str, term: str, means: str) -> Term | None:
         """A word and what it means. Nothing without both halves — a term with no meaning in a
