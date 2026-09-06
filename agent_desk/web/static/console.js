@@ -335,6 +335,8 @@ stream.addEventListener('ideas', (event) => {
   if (document.activeElement.closest('#idea-list')) return;
   document.getElementById('idea-list').innerHTML = event.data;
   if (window.htmx) htmx.process(document.getElementById('idea-list'));
+  // The column was replaced, so whatever was being looked for has to be looked for again.
+  filterIdeas();
   checked();
 });
 stream.addEventListener('blockers', (event) => {
@@ -401,6 +403,71 @@ function swapped(isTabs) {
 
 document.body.addEventListener('htmx:afterSwap', (event) => {
   swapped(!!event.target?.classList?.contains('tabs'));
+  if (event.target?.id === 'idea-list' || event.target?.closest?.('#idea-list')) filterIdeas();
+});
+
+/* --- finding one thought among two hundred ------------------------------------------------------ */
+// The pool could be ordered and not searched, which is the right tool for twenty ideas and the
+// wrong one for two hundred.
+//
+// In the page rather than at the server, for two reasons that are not about speed. The column is
+// replaced wholesale by the stream every time anything changes, so a filter the server applied
+// would have to be a stored setting and every keystroke a round trip; and the text being searched
+// is already here, in the same words somebody is looking at.
+//
+// A card whose *child* matches stays open, because an idea that exists only as a group of
+// sub-ideas would otherwise vanish while the thing you searched for is inside it.
+const findField = document.getElementById('idea-find');
+const foundCount = document.getElementById('idea-found');
+
+function filterIdeas() {
+  const pool = document.getElementById('idea-list');
+  if (!pool) return;
+  const said = (findField?.value || '').trim().toLowerCase();
+  const cards = [...pool.querySelectorAll('.idea-card')];
+  if (!said) {
+    for (const card of cards) card.hidden = false;
+    if (foundCount) foundCount.textContent = '';
+    return;
+  }
+  const words = said.split(/\s+/).filter(Boolean);
+  const hits = new Set();
+  for (const card of cards) {
+    // Its own words only — `textContent` on a group would match every card under it, so a search
+    // for a child's words would light up its parent and read as a hit on the wrong thought.
+    const own = [
+      card.dataset.label || '',
+      card.querySelector(':scope > .card-head .card-name')?.title || '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (words.every((word) => own.includes(word))) hits.add(card);
+  }
+  for (const card of cards) {
+    // A hit, or an ancestor of one: the way to a match has to stay visible.
+    const keep = hits.has(card) || [...hits].some((hit) => card.contains(hit));
+    card.hidden = !keep;
+    if (keep && !hits.has(card)) card.open = true;
+  }
+  if (foundCount) {
+    foundCount.textContent = hits.size
+      ? `${hits.size} of ${cards.length}`
+      : 'nothing matches';
+  }
+}
+
+findField?.addEventListener('input', filterIdeas);
+findField?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  // Once to clear what was typed, again to let go of the field — the same two-step Esc does
+  // everywhere else on this page.
+  if (findField.value) {
+    findField.value = '';
+    filterIdeas();
+  } else {
+    findField.blur();
+  }
 });
 
 /* --- the order of the chats --------------------------------------------------------------------- */
@@ -870,7 +937,11 @@ document.addEventListener('drop', (event) => {
       body: new URLSearchParams({ parent }),
     })
       .then((response) => (response.ok ? response.text() : null))
-      .then((html) => { if (html) document.getElementById('idea-list').innerHTML = html; });
+      .then((html) => {
+        if (!html) return;
+        document.getElementById('idea-list').innerHTML = html;
+        filterIdeas();
+      });
     return;
   }
   if (grouping) return;
@@ -1242,6 +1313,14 @@ function redrawSoon() {
 // ring says these went out as one question, and that is a set with an edge.
 function alsoMoving(pin) {
   const name = cardName(pin);
+  // A chosen card moves everything chosen with it. That is the point of choosing them, and it
+  // takes precedence over the ring: somebody who has just drawn a band around six cards means
+  // those six.
+  if (pin.classList.contains('chosen')) {
+    return chosenCards()
+      .filter((other) => other !== pin && placed.get(cardName(other)))
+      .map((other) => ({ pin: other, from: { ...placed.get(cardName(other)) } }));
+  }
   const together = new Set();
   for (const ring of surface?.querySelectorAll('.ring') || []) {
     const holds = (ring.dataset.holds || '').split(',').filter(Boolean);
@@ -1317,6 +1396,21 @@ function nudge(pin, dx, dy) {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && surface?.querySelector('.pin')) {
+    event.preventDefault();
+    for (const pin of surface.querySelectorAll('.pin')) pin.classList.add('chosen');
+    showChosen();
+    return;
+  }
+  if (event.key === 'Escape' && chosenCards().length) {
+    event.preventDefault();
+    event.stopPropagation();
+    chooseNone();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
   const step = ARROWS[event.key];
   if (!step) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -1324,7 +1418,9 @@ document.addEventListener('keydown', (event) => {
   // used. An arrow key inside a field moves the caret and nothing else.
   if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
 
-  const pin = document.activeElement?.closest?.('.pin');
+  // Whatever is chosen, or failing that whatever has focus. A band somebody has just drawn is a
+  // clearer statement of "these" than which card the browser last put a ring on.
+  const pin = chosenCards()[0] || document.activeElement?.closest?.('.pin');
   const far = event.shiftKey ? NUDGE_FAR : NUDGE;
   event.preventDefault();
   if (pin) {
@@ -1337,6 +1433,133 @@ document.addEventListener('keydown', (event) => {
   view.y -= step.y * far;
   applyView();
   markOffEdge();
+});
+
+
+/* --- choosing several cards at once ------------------------------------------------------------- */
+// Shift and drag across the surface. Not a plain drag: that pans, which is the gesture somebody
+// already has in their hands and taking it away to add this would be a bad trade.
+//
+// What being chosen is *for* is that every one-card action becomes an all-of-them action. On a
+// bench of twelve cards the alternative is twelve presses, and twelve presses is how a bench ends
+// up with cards nobody switched off because it was not worth the effort.
+let band = null;
+
+function chosenCards() {
+  return [...(surface?.querySelectorAll('.pin.chosen') || [])];
+}
+
+function chooseNone() {
+  for (const pin of chosenCards()) pin.classList.remove('chosen');
+  showChosen();
+}
+
+function showChosen() {
+  const bar = document.getElementById('chosen-bar');
+  if (!bar) return;
+  const many = chosenCards();
+  bar.hidden = many.length < 2;
+  const says = bar.querySelector('.chosen-count');
+  if (says) says.textContent = `${many.length} chosen`;
+}
+
+canvas?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || !event.shiftKey) return;
+  if (event.target.closest('.pin')) return;
+  event.preventDefault();
+  const frame = surface.getBoundingClientRect();
+  band = {
+    from: { x: (event.clientX - frame.left) / view.scale, y: (event.clientY - frame.top) / view.scale },
+    box: document.createElement('div'),
+  };
+  band.box.className = 'band';
+  surface.appendChild(band.box);
+  canvas.setPointerCapture?.(event.pointerId);
+});
+
+canvas?.addEventListener('pointermove', (event) => {
+  if (!band) return;
+  const frame = surface.getBoundingClientRect();
+  const to = {
+    x: (event.clientX - frame.left) / view.scale,
+    y: (event.clientY - frame.top) / view.scale,
+  };
+  const left = Math.min(band.from.x, to.x);
+  const top = Math.min(band.from.y, to.y);
+  band.box.style.left = `${left}px`;
+  band.box.style.top = `${top}px`;
+  band.box.style.width = `${Math.abs(to.x - band.from.x)}px`;
+  band.box.style.height = `${Math.abs(to.y - band.from.y)}px`;
+  band.at = { left, top, right: left + Math.abs(to.x - band.from.x), bottom: top + Math.abs(to.y - band.from.y) };
+});
+
+function endBand() {
+  if (!band) return;
+  const at = band.at;
+  band.box.remove();
+  band = null;
+  if (!at) return;
+  for (const pin of surface.querySelectorAll('.pin')) {
+    const spot = placed.get(cardName(pin));
+    if (!spot) continue;
+    // Touching counts, not containing. A band you have to draw right around a card is a band you
+    // draw twice.
+    const over =
+      spot.x < at.right &&
+      spot.x + (pin.offsetWidth || CARD_WIDTH) > at.left &&
+      spot.y < at.bottom &&
+      spot.y + pin.offsetHeight > at.top;
+    if (over) pin.classList.add('chosen');
+  }
+  showChosen();
+}
+
+window.addEventListener('pointerup', endBand);
+window.addEventListener('pointercancel', endBand);
+
+// A press on bare surface that did not become a pan is somebody clearing the selection, which is
+// what clicking away means everywhere else.
+canvas?.addEventListener('click', (event) => {
+  if (event.target.closest('.pin, .ring, #bench-menu, #chosen-bar')) return;
+  if (event.shiftKey) return;
+  chooseNone();
+});
+
+// Shift-clicking a card adds or removes just that one, which is the other half of the gesture.
+canvas?.addEventListener('click', (event) => {
+  if (!event.shiftKey) return;
+  const pin = event.target.closest('.pin');
+  if (!pin) return;
+  event.preventDefault();
+  event.stopPropagation();
+  pin.classList.toggle('chosen');
+  showChosen();
+});
+
+// What can be done to all of them at once. Each is the one-card action, applied across — nothing
+// here can do anything a single card could not.
+document.getElementById('chosen-bar')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-many]');
+  if (!button) return;
+  const many = chosenCards();
+  if (button.dataset.many === 'off') {
+    for (const pin of many) pin.remove(), placed.delete(cardName(pin));
+  } else if (button.dataset.many === 'out') {
+    // If any of them is still in the message, the press switches them all off; otherwise it
+    // switches them all back on. One button whose meaning is the state of the group.
+    const anyLive = many.some((pin) => !pin.classList.contains('spent'));
+    for (const pin of many) pin.classList.toggle('spent', anyLive);
+  } else if (button.dataset.many === 'fold') {
+    const anyOpen = many.some((pin) => pin.dataset.view !== 'hint');
+    for (const pin of many) setView(pin, anyOpen ? 'hint' : 'metadata');
+  } else if (button.dataset.many === 'none') {
+    chooseNone();
+  }
+  if (button.dataset.many === 'off') chooseNone();
+  syncTargets();
+  drawTies();
+  drawRings();
+  settleOverlaps();
 });
 
 /* --- how big it is ---------------------------------------------------------------------------- */
@@ -2217,6 +2440,8 @@ const KEYS = `<div class="keys card"><div class="card-head"><span class="card-na
 <dt>1 · 2 · 3</dt><dd>hide the overview, the blockers, the right column — press again to bring it back</dd>
 <dt>n · w</dt><dd>a new chat, and close this one</dd>
 <dt>Esc</dt><dd>close this panel, then clear the workbench, then let go of the field</dd>
+<dt>Shift+drag</dt><dd>choose several cards at once — then one press acts on all of them</dd>
+<dt>Ctrl+A</dt><dd>choose every card on the workbench</dd>
 <dt>Ctrl+K</dt><dd>find any project, session, idea or blocker and put it on the workbench</dd>
 <dt>← ↑ → ↓</dt><dd>move the card you have chosen — with nothing chosen, move the bench itself</dd>
 <dt>?</dt><dd>this</dd>

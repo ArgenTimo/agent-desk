@@ -2012,3 +2012,75 @@ button.go:hover, button.yes:hover {
   font-size: var(--t-xs);
 }
 .collected-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* --- finding a thought in the pool ------------------------------------------------------------- */
+/* Outside the list it filters, because the list is replaced wholesale by the stream and a field
+   inside it would lose what somebody had typed mid-word. */
+.pool-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+.pool-find input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+.pool-find input:focus { outline: none; border-color: var(--focus); }
+.pool-found {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+/* --- several cards at once --------------------------------------------------------------------- */
+/* Shift and drag. Not a plain drag: that pans, and taking away a gesture somebody already has in
+   their hands to add this one would be a bad trade. */
+.band {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--focus);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--focus) 10%, transparent);
+  pointer-events: none;
+}
+.pin.chosen {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.chosen-bar {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--fg) 18%, transparent);
+  font-size: var(--t-sm);
+}
+.chosen-count { color: var(--fg-soft); white-space: nowrap; }
+.chosen-bar button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.chosen-bar button:hover { color: var(--fg); border-color: var(--focus); }

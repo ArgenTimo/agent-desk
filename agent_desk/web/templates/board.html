@@ -97,6 +97,17 @@
     {# What the right mouse button offers on the background. Only there: taking the browser's own
        menu away from a text field would take paste with it, and this is a window people paste
        into all day. #}
+    {# What can be done to several cards at once, shown only while several are chosen. Every
+       button here is a one-card action applied across — nothing in this bar can do anything a
+       single card could not, which is what keeps it from becoming a second way to work. #}
+    <div id="chosen-bar" class="chosen-bar" hidden>
+      <span class="chosen-count"></span>
+      <button type="button" data-many="out" title="switch them all in or out of the next message">in the message</button>
+      <button type="button" data-many="fold" title="fold them all, or open them all">fold</button>
+      <button type="button" data-many="off" title="take them all off the workbench">take off</button>
+      <button type="button" data-many="none" title="stop choosing them">done</button>
+    </div>
+
     <menu id="bench-menu" class="bench-menu" hidden>
       <li><button type="button" data-add="link">Add a link…</button></li>
       <li><button type="button" data-add="file">Add a file…</button></li>
@@ -168,6 +179,18 @@
       <button type="button" class="pane-hide" data-hide="pool" title="put the idea pool away"
               aria-label="hide the idea pool">–</button>
     </header>
+    {# Finding one thought among a hundred and eighty. The column could be *ordered* and not
+       searched, which is the right tool for twenty and the wrong one for two hundred.
+
+       Outside `#idea-list` on purpose: that element is replaced wholesale every time anything
+       changes, and a field rendered inside it would lose what somebody had typed. Filtering is
+       done here in the page rather than by asking the server, so it is instant and so a stream
+       update cannot arrive and undo it. #}
+    <div class="pool-find">
+      <input type="search" id="idea-find" placeholder="find a thought…" autocomplete="off"
+             spellcheck="false" aria-label="find an idea by what it says">
+      <span class="pool-found" id="idea-found" aria-live="polite"></span>
+    </div>
     <div id="idea-list" class="ideas-list">{{ ideas|safe }}</div>
   </aside>
 </div>

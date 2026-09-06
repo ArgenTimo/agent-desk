@@ -505,3 +505,82 @@ def test_a_copy_does_not_overwrite_the_position_of_the_card_it_copies() -> None:
     assert "dataset.name ||" in name, (
         "a card is keyed by kind:id, so a copy and its original share one entry in the layout"
     )
+
+
+@pytest.mark.unit
+def test_the_pool_can_be_searched_and_the_field_survives_the_stream() -> None:
+    """A column of a hundred and eighty can be ordered and not searched, which is the right tool
+    for twenty and the wrong one for two hundred.
+
+    The field is outside `#idea-list` because that element is replaced wholesale every time
+    anything changes — a field rendered inside it would lose what somebody had typed mid-word —
+    and the filter is re-applied after every one of those replacements, or the first stream tick
+    undoes the search.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'id="idea-find"' in board
+    before, after = board.split('<div id="idea-list"', 1)
+    assert 'id="idea-find"' in before, (
+        "the search field is inside the list it filters, so the stream replaces it as you type"
+    )
+    assert "function filterIdeas(" in console
+    assert console.count("filterIdeas()") >= 3, (
+        "the filter is not re-applied after the column is replaced"
+    )
+
+
+@pytest.mark.unit
+def test_a_search_matches_a_card_on_its_own_words_not_its_children_s() -> None:
+    """`textContent` on a group holds every card under it, so searching for a child's words would
+    light up the parent — a hit reported on the wrong thought."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    body = console[console.index("function filterIdeas(") :]
+    body = body[: body.index("\n}\n")]
+    assert "dataset.label" in body
+    assert ":scope >" in body, "a card is matched on the text of everything inside it"
+    assert "card.contains(hit)" in body, (
+        "a group whose child matches is hidden, so the way to the match disappears with it"
+    )
+
+
+@pytest.mark.unit
+def test_several_cards_can_be_chosen_and_acted_on_together() -> None:
+    """On a bench of twelve the alternative is twelve presses, which is how a bench ends up with
+    cards nobody switched off because it was not worth the effort.
+
+    Shift and drag, deliberately: a plain drag pans, and taking away a gesture somebody already
+    has in their hands to add this one would be a bad trade.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert "function chosenCards(" in console
+    assert 'id="chosen-bar"' in board
+    for many in ("out", "fold", "off", "none"):
+        assert f'data-many="{many}"' in board, f"the bar cannot {many}"
+
+    band = console[
+        console.index(
+            "canvas?.addEventListener('pointerdown', (event) => {\n  if (event.button !== 0 || !event.shiftKey) return;"
+        ) :
+    ]
+    band = band[: band.index("\n});")]
+    assert "event.shiftKey" in band, "the band is on a plain drag, which is the pan gesture"
+
+
+@pytest.mark.unit
+def test_a_chosen_card_carries_the_rest_of_the_choice_when_it_moves() -> None:
+    """Choosing six cards and dragging one of them apart from the other five is not what choosing
+    them meant."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    together = console[console.index("function alsoMoving(") :]
+    together = together[: together.index("\n}\n")]
+    assert "chosen" in together
+    assert together.index("chosen") < together.index("'.ring'"), (
+        "the ring wins over the selection, so a band drawn around a ringed card moves the ring "
+        "rather than the band"
+    )
