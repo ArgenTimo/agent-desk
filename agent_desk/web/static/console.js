@@ -678,6 +678,7 @@ async function pin(card, how) {
   holder.dataset.deep = 'no';
   holder.dataset.view = 'hint';
   holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
+    <button type="button" class="pin-role" title="what this is in the process"></button>
     <span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
@@ -686,6 +687,7 @@ async function pin(card, how) {
     <div class="pin-body">reading…</div>`;
   holder.querySelector('.pin-label').textContent = card.label || card.id;
   pins.appendChild(holder);
+  showRole(holder);
   place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null);
   if (how?.under) ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
   syncTargets();
@@ -1197,7 +1199,7 @@ let moving = null;
 
 // What may be grabbed, and what is somebody trying to press or read instead.
 const NOT_A_GRIP =
-  'button, a, input, textarea, select, summary, details, option, label, .pin-live';
+  'button, a, input, textarea, select, summary, details, option, label, .pin-live, .pin-role';
 
 function gripOf(target) {
   if (target.closest(NOT_A_GRIP)) return null;
@@ -1777,6 +1779,129 @@ function say(words) {
   setTimeout(syncTargets, 4000);
 }
 
+
+/* --- what a card is in a process --------------------------------------------------------------- */
+// Object, Action, Decision, Event, Result. The vocabulary the first user's feedback asked for, and
+// the one everything after it rests on: without a role, a line between two cards says only "these
+// are related"; with one, "Decision → Action" reads as a branch and "Event → Action" as a trigger.
+//
+// A role is not a kind. A card's kind says where it is read from and cannot change — an idea does
+// not become a session. Its role is what it is doing in the process being described, and it
+// changes as the description does: "карточка может менять тип по ходу процесса".
+//
+// Fetched rather than copied here. The five live in agent_desk/roles.py, and a list of them
+// written into this file would be a second place for them to be wrong.
+let roleSays = {};
+let roleNaturally = {};
+let roleChosen = {};
+
+async function readRoles() {
+  try {
+    const answer = await fetch('/cards/roles');
+    if (!answer.ok) return;
+    const said = await answer.json();
+    roleSays = said.says || {};
+    roleNaturally = said.naturally || {};
+    roleChosen = said.roles || {};
+    for (const pin of surface?.querySelectorAll('.pin') || []) showRole(pin);
+  } catch {
+    // A console that cannot reach itself still shows the cards; they simply have no shapes.
+  }
+}
+
+function roleOf(pin) {
+  const name = cardName(pin);
+  const chosen = roleChosen[name];
+  if (chosen && roleSays[chosen]) return chosen;
+  return roleNaturally[pin.dataset.kind] || 'object';
+}
+
+function showRole(pin) {
+  const role = roleOf(pin);
+  pin.dataset.role = role;
+  pin.dataset.shape = roleSays[role]?.shape || 'box';
+  const chip = pin.querySelector('.pin-role');
+  if (chip) {
+    chip.textContent = roleSays[role]?.says || role;
+    chip.title = `${roleSays[role]?.means || ''} — press to change what this is`;
+  }
+}
+
+async function chooseRole(pin, role) {
+  const name = cardName(pin);
+  // On the page first: the shape changes under the hand that pressed it, and a round trip before
+  // anything moves is how a control starts feeling broken.
+  if (role) roleChosen[name] = role;
+  else delete roleChosen[name];
+  showRole(pin);
+  drawTies();
+  try {
+    await fetch('/cards/role', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ name, role }),
+    });
+  } catch {
+    // It is still right on this page for this session; the next load reads what was stored.
+  }
+}
+
+// The five, offered where the card is. Not a select: five options with a shape each is a thing
+// somebody points at, and a dropdown would hide exactly the information that makes them worth
+// having.
+function showRoleMenu(pin, x, y) {
+  document.getElementById('role-menu')?.remove();
+  const menu = document.createElement('menu');
+  menu.id = 'role-menu';
+  menu.className = 'role-menu';
+  const now = roleOf(pin);
+  for (const [name, one] of Object.entries(roleSays)) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `role-pick${name === now ? ' at' : ''}`;
+    button.dataset.shape = one.shape;
+    button.innerHTML = '<span class="role-mark" aria-hidden="true"></span>' +
+      '<span class="role-says"></span><span class="role-means"></span>';
+    button.querySelector('.role-says').textContent = one.says;
+    button.querySelector('.role-means').textContent = one.means;
+    button.addEventListener('click', () => {
+      menu.remove();
+      chooseRole(pin, name);
+    });
+    row.appendChild(button);
+    menu.appendChild(row);
+  }
+  const back = document.createElement('li');
+  const plain = document.createElement('button');
+  plain.type = 'button';
+  plain.className = 'role-pick plain';
+  plain.textContent = 'whatever it naturally is';
+  plain.addEventListener('click', () => {
+    menu.remove();
+    chooseRole(pin, '');
+  });
+  back.appendChild(plain);
+  menu.appendChild(back);
+  document.body.appendChild(menu);
+  menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 8)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`;
+}
+
+document.addEventListener('click', (event) => {
+  const chip = event.target.closest('.pin-role');
+  if (!chip) {
+    if (!event.target.closest('#role-menu')) document.getElementById('role-menu')?.remove();
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const box = chip.getBoundingClientRect();
+  showRoleMenu(chip.closest('.pin'), box.left, box.bottom + 4);
+});
+
+readRoles();
+
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
 const FULL_SIZE = ZOOMS.indexOf(1);
@@ -2240,6 +2365,7 @@ function syncBlocks() {
       node.dataset.name = `block:${id}`;
       node.dataset.view = 'hint';
       node.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
+        <button type="button" class="pin-role" title="what this is in the process"></button>
         <span class="pin-kind">asked</span>
         <span class="pin-label"></span>
         <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
@@ -2270,6 +2396,7 @@ function syncBlocks() {
     node.querySelector('.pin-label').textContent =
       (said?.textContent || 'a question').trim().slice(0, 60);
     node.classList.toggle('settled', article.hasAttribute('data-settled'));
+    showRole(node);
     // A block's hint is what came back, not the question again — the question is already its title.
     writeHint(node);
 
@@ -2378,7 +2505,8 @@ function addOwnBlock(kind = 'note') {
   holder.dataset.name = `note:${holder.dataset.id}`;
   holder.dataset.deep = 'no';
   holder.dataset.view = 'hint';
-  holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${kind}</span>
+  holder.innerHTML = `<div class="pin-head"><button type="button" class="pin-role" title="what this is in the process"></button>
+    <span class="pin-kind">${kind}</span>
     <span class="pin-label">${said.label}</span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
@@ -2805,7 +2933,8 @@ function collect(ring) {
   // how a conversation starts talking about itself.
   card.classList.add('ringed');
   card.tabIndex = 0;
-  card.innerHTML = `<div class="pin-head"><span class="pin-kind">asked with</span>
+  card.innerHTML = `<div class="pin-head"><button type="button" class="pin-role" title="what this is in the process"></button>
+    <span class="pin-kind">asked with</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
@@ -2830,6 +2959,7 @@ function collect(ring) {
   }
 
   pins.appendChild(card);
+  showRole(card);
   place(card, at, { avoid: false });
 
   // Its own relations. To each card it was asked with, where that card is still on the bench —

@@ -25,11 +25,17 @@ from urllib.parse import parse_qs
 
 import structlog
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import connectors, dispatch, land, peer, tracker
+from agent_desk import connectors, dispatch, land, peer, roles, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
@@ -949,6 +955,44 @@ async def say_cleared(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(""))
+
+
+@router.post("/cards/role", response_class=HTMLResponse)
+async def set_card_role(request: Request) -> Response:
+    """Say what a card is in the process being described (033-card-roles.sql).
+
+    Five names and nothing else is accepted. The point of five is that a diagram can be read
+    without reading it, and a sixth name typed into a form is how that becomes a free-text label
+    with a shape attached to it.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    role = form.get("role", "").strip()
+    # Empty is allowed and means "back to whatever this kind naturally is". Anything else that is
+    # not one of the five is refused rather than stored and quietly ignored at render time.
+    if name and (not role or roles.is_a_role(role)):
+        await store.set_card_role(name, role)
+    return HTMLResponse("", status_code=204)
+
+
+@router.get("/cards/roles", response_class=JSONResponse)
+async def card_roles() -> JSONResponse:
+    """Every role anybody has chosen, and the five they can choose from.
+
+    The page asks for both together because it needs both together, and because the five are
+    defined in `agent_desk/roles.py` — a list of them copied into the stylesheet or the script
+    would be a second place for them to be wrong.
+    """
+    return JSONResponse(
+        {
+            "roles": await store.card_roles(),
+            "naturally": roles.NATURALLY,
+            "says": {
+                name: {"says": one.says, "means": one.means, "shape": one.shape}
+                for name, one in roles.ROLES.items()
+            },
+        }
+    )
 
 
 @router.get("/cards/folder", response_class=HTMLResponse)

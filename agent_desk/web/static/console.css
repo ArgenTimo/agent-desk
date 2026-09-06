@@ -2167,3 +2167,85 @@ button.go:hover, button.yes:hover {
 }
 .saved-drop:hover { color: var(--flag); }
 .saved-none { padding: 3px 10px 6px; color: var(--fg-dim); font-size: var(--t-xs); }
+
+/* --- what a card is in a process --------------------------------------------------------------- */
+/* Object, Action, Decision, Event, Result (agent_desk/roles.py).
+   
+   Drawn as *shape*, not colour. On this page colour means status and nothing else — that rule is
+   older than this feature and worth more than it — and shape is what the request was actually
+   about: "ромб читается как решение до того, как прочитан текст внутри". Five silhouettes read
+   across a bench at a glance; five colours would have collided with green-is-working. */
+.pin-role {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  background: var(--surface);
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--t-xs);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.pin-role:hover { color: var(--fg); border-color: var(--focus); }
+
+/* The silhouette of the card itself. A left edge you read before anything on it. */
+.pin[data-shape] { position: absolute; }
+.pin[data-shape="bar"] { border-left: 4px solid var(--fg-dim); }
+.pin[data-shape="round"] { border-radius: 16px; }
+.pin[data-shape="double"] { box-shadow: inset 0 0 0 1px var(--line); border-width: 2px; }
+/* A decision has its corner cut off, which is as close as a rectangle gets to a diamond without
+   giving up the room a card needs for words. */
+.pin[data-shape="corner"] {
+  clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%, 0 14px);
+  border-radius: 0;
+}
+.pin[data-shape="box"] { /* the plain one: an Object is a card, which is what a card looks like */ }
+
+/* The five, offered where the card is. Not a select: five options with a shape each is a thing
+   somebody points at, and a dropdown would hide the information that makes them worth having. */
+.role-menu {
+  position: fixed;
+  z-index: 70;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  min-width: 15rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.role-menu li { display: block; }
+.role-pick {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.role-pick:hover, .role-pick.at { background: var(--raised); }
+.role-pick.at { font-weight: 600; }
+.role-pick.plain { color: var(--fg-dim); font-size: var(--t-xs); }
+.role-says { flex: 0 0 5rem; }
+.role-means { flex: 1; color: var(--fg-dim); font-size: var(--t-xs); }
+/* The same five silhouettes, small, so the menu teaches the shapes rather than only naming them. */
+.role-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 12px;
+  border: 1px solid var(--fg-dim);
+  background: var(--bg);
+}
+.role-pick[data-shape="bar"] .role-mark { border-left-width: 4px; }
+.role-pick[data-shape="round"] .role-mark { border-radius: 999px; }
+.role-pick[data-shape="double"] .role-mark { box-shadow: inset 0 0 0 2px var(--bg), inset 0 0 0 3px var(--fg-dim); }
+.role-pick[data-shape="corner"] .role-mark { clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); }

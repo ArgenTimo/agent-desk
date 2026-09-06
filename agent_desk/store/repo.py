@@ -1946,6 +1946,33 @@ class Store:
             )
             return {str(row[0]): str(row[1]) for row in rows}
 
+    # --- what a card is in a process (033-card-roles.sql) -------------------------------------
+    async def set_card_role(self, name: str, role: str) -> None:
+        """Give one card a role, or take it back to the one its kind already is.
+
+        An empty role deletes the row rather than storing a blank: absent is the ordinary state
+        and it means "whatever this kind naturally is", which is a different thing from a role
+        somebody chose and then emptied.
+        """
+        async with self.engine.begin() as conn:
+            if not role:
+                await conn.execute(text("DELETE FROM card_role WHERE name = :name"), {"name": name})
+                return
+            await conn.execute(
+                text(
+                    "INSERT INTO card_role (name, role, set_at) VALUES (:name, :role, :t) "
+                    "ON CONFLICT (name) DO UPDATE SET role = :role, set_at = :t"
+                ),
+                {"name": name, "role": role, "t": _now_ms()},
+            )
+
+    async def card_roles(self) -> dict[str, str]:
+        """Every role anybody has chosen, by card name. One query: the bench asks for all of them
+        at once, and there are as many rows here as cards somebody has typed by hand."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT name, role FROM card_role"))
+            return {str(row[0]): str(row[1]) for row in rows}
+
     async def card_said(self, name: str) -> tuple[str, str]:
         """The sentence written about this card, and what it was written from."""
         async with self.engine.connect() as conn:
