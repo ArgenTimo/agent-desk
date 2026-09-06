@@ -1,0 +1,35 @@
+{# A folder from somebody's machine on the workbench. "Каждый файл и подпапка внутри становится
+   мини-карточкой, и рядом с названием ЛЛМ пишет, что этот файл или папка делает."
+
+   A link, not a copy: nothing is uploaded and no file is opened. The names, the kinds and the
+   sizes are what this program reads, and the difference between listing a filename and opening
+   it is the whole of why this is safe to offer for a directory that may hold anything. #}
+{% if not folder.ok %}
+<p class="empty small">{{ folder.detail }}</p>
+{% else %}
+<div class="card-detail" data-detail="plain">
+  <div class="plain-only">
+    {% if said %}<p class="card-said">{{ said }}</p>{% endif %}
+    <p class="plain-doing mono">{{ folder.path }}</p>
+    {% if not folder.entries %}
+    <p class="empty small">Nothing in it, or nothing this can see.</p>
+    {% endif %}
+    <ul class="folder-list">
+      {% for one in folder.entries %}
+      <li class="folder-entry{{ ' is-folder' if one.is_folder else '' }}">
+        <span class="folder-name">{{ one.name }}{{ "/" if one.is_folder }}</span>
+        <span class="folder-kind">{{ one.kind }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="fineprint">A link to what is on this machine. Nothing here was uploaded and no file
+      was opened — the names and kinds are all this reads.</p>
+  </div>
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>where</dt><dd class="mono">{{ folder.path }}</dd>
+      <dt>things in it</dt><dd>{{ folder.entries | length }}{% if folder.entries | length >= 40 %} (the first 40){% endif %}</dd>
+    </dl>
+  </div>
+</div>
+{% endif %}

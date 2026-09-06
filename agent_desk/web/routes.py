@@ -33,7 +33,7 @@ from agent_desk import connectors, dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting
-from agent_desk.observe import attach, registry, transcript
+from agent_desk.observe import attach, folder, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -897,6 +897,25 @@ async def say_cleared(request: Request) -> Response:
     return HTMLResponse(await render_page(""))
 
 
+@router.get("/cards/folder", response_class=HTMLResponse)
+async def folder_card(id: str = "") -> HTMLResponse:
+    """A folder on this machine, as a card: what is in it, and what each thing is for.
+
+    A link, not a copy — nothing is uploaded and no file is opened. What travels with a message is
+    the list, which is why this is safe to offer for a directory that may hold anything.
+    """
+    found = folder.read(id)
+    said = ""
+    if found.ok:
+        said = await describe.describe(
+            store, f"folder:{found.path}", "folder on somebody's machine", folder.about(found)
+        )
+    return HTMLResponse(
+        env.get_template("_card_folder.html").render(folder=found, said=said),
+        status_code=200 if found.ok else 404,
+    )
+
+
 @router.get("/cards/{kind}/full", response_class=HTMLResponse)
 async def card_in_full(kind: str, id: str = "") -> HTMLResponse:
     """Everything about one card: the console, how long it has been up, what it is carrying.
@@ -1461,6 +1480,52 @@ async def read_meeting(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(""))
+
+
+@router.get("/ideas/{idea_id}/kin", response_class=HTMLResponse)
+async def idea_kin(idea_id: str) -> HTMLResponse:
+    """What an idea is made of and what it belongs to, for the workbench to bring along.
+
+    "При записи идеи сперва отображается карточка идеи, а далее появляются под-идеи (отдельные
+    карточки)… если дочерние идеи тоже декомпозированы — ситуация повторяется со сдвигом", and
+    "при помещении идеи на верстак рядом с ней появляется связанный проект-карточка".
+
+    A tree, bounded: an idea with forty descendants is a workbench nobody can use.
+    """
+    ideas = {one.id: one for one in await store.ideas(limit=500)}
+    if idea_id not in ideas:
+        return HTMLResponse("{}", media_type="application/json", status_code=404)
+
+    children: dict[str, list[str]] = {}
+    for one in ideas.values():
+        if one.parent_id:
+            children.setdefault(one.parent_id, []).append(one.id)
+
+    def tree(of: str, depth: int) -> list[dict[str, object]]:
+        if depth > 3:
+            return []
+        return [
+            {
+                "id": child,
+                "parent": of,
+                "summary": ideas[child].summary,
+                "children": tree(child, depth + 1),
+            }
+            for child in children.get(of, [])[:8]
+            if child in ideas
+        ]
+
+    project = None
+    key = ideas[idea_id].project_key
+    if key:
+        rows, _ = await asyncio.to_thread(board)
+        named = next((one for one in shape(rows, await store.groups()) if one.key == key), None)
+        project = {"key": key, "name": named.name if named else key.split(":")[-1]}
+
+    return HTMLResponse(
+        json.dumps({"project": project, "children": tree(idea_id, 1)}),
+        media_type="application/json",
+    )
 
 
 @router.get("/ideas/map", response_class=HTMLResponse)

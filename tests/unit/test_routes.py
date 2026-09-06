@@ -1568,3 +1568,61 @@ async def test_everything_about_a_session_is_a_route_of_its_own(home: Home, desk
     # Only the kinds that have a console.
     assert (await _get("/cards/project/full?id=whatever"))[0] == 404
     assert (await _get("/cards/session/full?id=nobody"))[0] == 404
+
+
+@pytest.mark.unit
+async def test_an_idea_brings_what_it_is_made_of_and_what_it_belongs_to(
+    home: Home, desk: Store
+) -> None:
+    """ "При записи идеи сперва карточка идеи, далее под-идеи… если дочерние тоже декомпозированы,
+    ситуация повторяется со сдвигом" and "рядом появляется связанный проект-карточка"."""
+    key = await _the_project(home)
+    whole = await desk.create_idea(text_="the console", summary="the console", source_kind="typed")
+    await desk.set_idea_project(whole.id, key)
+    part = await desk.create_idea(text_="a grid", summary="a grid", source_kind="typed")
+    await desk.set_idea_parent(part.id, whole.id)
+    deeper = await desk.create_idea(text_="and dots", summary="and dots", source_kind="typed")
+    await desk.set_idea_parent(deeper.id, part.id)
+
+    status, body = await _get(f"/ideas/{whole.id}/kin")
+
+    assert status == 200
+    kin = json.loads(body)
+    assert kin["project"]["key"] == key
+    (child,) = kin["children"]
+    assert child["summary"] == "a grid"
+    # And the generation below it, which is what "со сдвигом" is about.
+    assert child["children"][0]["summary"] == "and dots"
+
+    # An idea that is not there is not a stack trace.
+    assert (await _get("/ideas/nope/kin"))[0] == 404
+
+
+@pytest.mark.unit
+async def test_a_folder_is_a_card_of_what_is_in_it(
+    home: Home, desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link, not a copy: nothing is uploaded and no file is opened."""
+    from agent_desk.ideas import describe
+
+    async def fake(prompt: str):
+        assert "hunter2" not in prompt, "a model must never be shown what is inside a file"
+        yield "The parser and its notes."
+
+    monkeypatch.setattr(describe, "stream_answer", fake)
+    (tmp_path / "parser.py").write_text("TOKEN=hunter2\n")
+    (tmp_path / "docs").mkdir()
+
+    status, card = await _get(f"/cards/folder?id={tmp_path}")
+
+    assert status == 200
+    assert "parser.py" in card and "python" in card
+    assert "docs/" in card
+    assert "The parser and its notes." in card
+    assert "hunter2" not in card
+    assert "no file" in card and "uploaded" in card
+
+    # A path that is not a folder is a 404 with a reason rather than an empty card.
+    status, said = await _get("/cards/folder?id=/nowhere/at/all")
+    assert status == 404
+    assert "not a folder" in said

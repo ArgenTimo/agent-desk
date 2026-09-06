@@ -1721,3 +1721,28 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
    looked like a delete would be a fold nobody trusts. */
 .pin.block-card.put-away { opacity: 0.45; }
 .pin.block-card.put-away .pin-kind::before { content: "folded · "; color: var(--fg-dim); }
+
+/* A catalogue is read as a tree, and a tree is drawn with right angles, so the joins are square
+   rather than rounded — a rounded elbow reads as a flow chart, which is a different thing. */
+.bench-ties .tie { stroke-linejoin: miter; stroke-linecap: butt; }
+.bench-ties .tie-label { text-anchor: start; }
+
+/* --- a folder on the workbench ---------------------------------------------------------------- */
+/* Each thing in it as a line with what it is beside the name — the mini-cards the idea asked for,
+   at the size a list of forty can actually be read at. */
+.folder-list { list-style: none; margin: 6px 0; padding: 0; max-height: 30vh; overflow: auto; }
+.folder-entry {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: var(--t-xs);
+}
+.folder-entry:nth-child(odd) { background: color-mix(in srgb, var(--line) 30%, transparent); }
+.folder-entry.is-folder .folder-name { color: var(--focus); }
+.folder-name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-kind { margin-left: auto; color: var(--fg-dim); flex: 0 0 auto; }
+
+/* The card you are joining from, while you pick the one to join it to. */
+.pin.joining { outline: 2px dashed var(--focus); outline-offset: 2px; }

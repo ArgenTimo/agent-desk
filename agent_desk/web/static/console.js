@@ -539,6 +539,57 @@ document.getElementById('get-started').addEventListener('click', () => {
   document.getElementById('ask').requestSubmit();
 });
 
+// What comes with a card when it lands. "При помещении идеи на верстак рядом с ней появляется
+// связанный проект-карточка либо карточки связанных элементов", and "при записи идеи сперва
+// карточка идеи, далее под-идеи (отдельные карточки)… если дочерние тоже декомпозированы,
+// ситуация повторяется со сдвигом".
+//
+// A tree, in other words: the thing, then what it is made of, then what those are made of, each
+// generation a step to the right. Bounded, because an idea with forty descendants is a workbench
+// nobody can use.
+const MOST_KIN = 12;
+
+async function bringItsKin(card, at) {
+  if (card.kind !== 'idea') return;
+  let brought = 0;
+  try {
+    const response = await fetch(`/ideas/${encodeURIComponent(card.id)}/kin`);
+    if (!response.ok) return;
+    const kin = await response.json();
+
+    // The project it belongs to, beside it.
+    if (kin.project) {
+      await pin(
+        { kind: 'project', id: kin.project.key, label: kin.project.name },
+        { at: { x: at.x - CARD_WIDTH - GAP * 3, y: at.y }, quiet: true }
+      );
+      ownTies.push({
+        from: `project:${kin.project.key}`,
+        to: `idea:${card.id}`,
+        says: 'is about',
+      });
+    }
+
+    // What it is made of, one generation at a time, each a step to the right.
+    const walk = async (parents, depth) => {
+      for (const child of parents) {
+        if (brought >= MOST_KIN || depth > 3) return;
+        brought += 1;
+        await pin(
+          { kind: 'idea', id: child.id, label: child.summary },
+          { at: { x: at.x + depth * (CARD_WIDTH + GAP * 2), y: at.y + brought * 40 }, quiet: true }
+        );
+        ownTies.push({ from: `idea:${child.parent}`, to: `idea:${child.id}`, says: 'part of' });
+        await walk(child.children || [], depth + 1);
+      }
+    };
+    await walk(kin.children || [], 1);
+  } catch {
+    // A card that arrived alone is still a card.
+  }
+  drawTies();
+}
+
 async function pin(card, how) {
   if (pins.querySelector(`[data-id="${CSS.escape(card.id)}"][data-kind="${card.kind}"]`)) return;
   const holder = document.createElement('div');
@@ -562,6 +613,9 @@ async function pin(card, how) {
   place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null);
   if (how?.under) ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
   syncTargets();
+  // What it is made of, and what it belongs to. Not for a card brought *by* one of these, or a
+  // tree would fetch itself for ever.
+  if (!how?.quiet) bringItsKin(card, placed.get(cardName(holder)) || { x: 20, y: 20 });
 
   try {
     const url = `/cards/${encodeURIComponent(card.kind)}?id=${encodeURIComponent(card.id)}`;
@@ -1122,21 +1176,20 @@ function drawTies() {
     const b = placed.get(tie.to);
     if (!one || !other || !a || !b) continue;
 
-    // Edge to edge: out of the right of one and into the left of the other, or the other way
-    // round when they are the other way round.
+    // "Связи выглядят как прямые с углом линии, чтобы визуально это напоминало некий каталог из
+    // карточек." An elbow rather than a curve: a catalogue is read as a tree, and a tree is drawn
+    // with right angles. Out of the right of one, along, down, and into the left of the other.
     const rightward = a.x <= b.x;
-    const from = {
-      x: a.x + (rightward ? one.offsetWidth : 0),
-      y: a.y + one.offsetHeight / 2,
-    };
+    const from = { x: a.x + (rightward ? one.offsetWidth : 0), y: a.y + one.offsetHeight / 2 };
     const to = { x: b.x + (rightward ? 0 : other.offsetWidth), y: b.y + other.offsetHeight / 2 };
-    const bend = Math.max(30, Math.abs(to.x - from.x) / 2);
+    // The corner sits in the gap between the two, so the vertical run is in clear space rather
+    // than across a card.
+    const bend = from.x + (to.x - from.x) / 2;
 
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute(
       'd',
-      `M ${from.x} ${from.y} C ${from.x + (rightward ? bend : -bend)} ${from.y}, ` +
-        `${to.x - (rightward ? bend : -bend)} ${to.y}, ${to.x} ${to.y}`
+      `M ${from.x} ${from.y} H ${bend} V ${to.y} H ${to.x}`
     );
     path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
     path.setAttribute('fill', 'none');
@@ -1144,8 +1197,8 @@ function drawTies() {
     ties.appendChild(path);
 
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String((from.x + to.x) / 2));
-    label.setAttribute('y', String((from.y + to.y) / 2 - 5));
+    label.setAttribute('x', String(bend + 5));
+    label.setAttribute('y', String((from.y + to.y) / 2 - 4));
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('class', 'tie-label');
     label.textContent = tie.says;
@@ -1235,10 +1288,40 @@ function hideMenu() {
   if (benchMenu) benchMenu.hidden = true;
 }
 
+const BACKGROUND_MENU = [
+  { what: 'Add a link…', add: 'link' },
+  { what: 'Add a file…', add: 'file' },
+  { what: 'Add a folder…', add: 'folder' },
+  { what: 'Add a note', add: 'note' },
+  { what: 'Lay it out again', add: 'tidy', apart: true },
+  { what: 'Fit everything on screen', add: 'fit' },
+  { what: 'Take everything off', add: 'clear' },
+];
+
+function showBackgroundMenu(x, y) {
+  if (!benchMenu) return;
+  benchMenu.replaceChildren();
+  for (const item of BACKGROUND_MENU) {
+    const row = document.createElement('li');
+    if (item.apart) row.className = 'sep';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.add = item.add;
+    button.textContent = item.what;
+    row.appendChild(button);
+    benchMenu.appendChild(row);
+  }
+  showMenu(x, y);
+}
+
 document.getElementById('bench-canvas')?.addEventListener('contextmenu', (event) => {
-  if (event.target.closest('.pin, button, a, input, textarea, select')) return;
+  // A card gets its own menu; a field or a button keeps the browser's, because taking paste away
+  // from somebody reaching for it is worse than any menu is good.
+  if (event.target.closest('button, a, input, textarea, select')) return;
+  const pin = event.target.closest('.pin');
   event.preventDefault();
-  showMenu(event.clientX, event.clientY);
+  if (pin) showCardMenu(pin, event.clientX, event.clientY);
+  else showBackgroundMenu(event.clientX, event.clientY);
 });
 
 document.addEventListener('click', (event) => {
@@ -1258,6 +1341,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'file') addOwnBlock('file');
   else if (what === 'tidy') tidyUp();
   else if (what === 'fit') fitEverything();
+  else if (what === 'folder') addFolder();
   else if (what === 'clear') clearBench();
 });
 
@@ -1278,6 +1362,84 @@ function foldConversation() {
     }
   }
   settleOverlaps();
+}
+
+/* --- the menu on a card ------------------------------------------------------------------------ */
+// "ПКМ на карточке на верстаке открывает меню управления, которое помимо прочего может установить
+// связи с элементами."
+//
+// Joining two cards is the thing that needed a gesture and did not have one: the lines the console
+// draws are the ones it knows about, and there was no way to say "these two belong together"
+// about anything else. Pick one card, then the other.
+let joiningFrom = null;
+
+function cardMenuFor(pin) {
+  const name = pin.dataset.name;
+  const joining = joiningFrom && joiningFrom !== name;
+  return [
+    joining
+      ? { what: `join to “${labelOf(joiningFrom)}”`, act: () => finishJoin(name) }
+      : { what: 'join this to another card…', act: () => startJoin(name) },
+    { what: 'a line', act: () => setView(pin, 'hint') },
+    { what: 'what it is', act: () => setView(pin, 'metadata') },
+    { what: 'everything', act: () => setView(pin, 'full') },
+    {
+      what: pin.classList.contains('spent') ? 'put it back in the message' : 'leave it out of the message',
+      act: () => {
+        pin.classList.toggle('spent');
+        syncTargets();
+      },
+    },
+    { what: 'take it off the workbench', act: () => { pin.remove(); syncTargets(); drawTies(); } },
+  ];
+}
+
+function labelOf(name) {
+  return (
+    surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"] .pin-label`)?.textContent || name
+  );
+}
+
+function startJoin(name) {
+  joiningFrom = name;
+  surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)?.classList.add('joining');
+}
+
+function finishJoin(name) {
+  if (!joiningFrom || joiningFrom === name) return;
+  // The page's own line, like the ones a question draws to what it went out with. The console
+  // does not decide these mean anything — somebody said they belong together, and that is what is
+  // drawn.
+  ownTies.push({ from: joiningFrom, to: name, says: 'goes with' });
+  surface?.querySelector('.pin.joining')?.classList.remove('joining');
+  joiningFrom = null;
+  drawTies();
+}
+
+function showCardMenu(pin, x, y) {
+  if (!benchMenu) return;
+  benchMenu.replaceChildren();
+  for (const item of cardMenuFor(pin)) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = item.what;
+    button.addEventListener('click', () => {
+      hideMenu();
+      item.act();
+    });
+    row.appendChild(button);
+    benchMenu.appendChild(row);
+  }
+  showMenu(x, y);
+}
+
+// A folder from this machine, as a card. It is a path somebody types, and it stays a path: what
+// travels with a message is what is in the folder, not what the files say.
+function addFolder() {
+  const said = window.prompt('Which folder? A full path, starting at /');
+  if (!said) return;
+  pin({ kind: 'folder', id: said.trim(), label: said.trim().split('/').filter(Boolean).pop() || said });
 }
 
 function clearBench() {
