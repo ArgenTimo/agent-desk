@@ -65,6 +65,13 @@ def _tail_window(path: Path, max_bytes: int) -> list[str]:
     the tail of a line whose beginning was not read. Decoding is lenient for the same reason — the
     window boundary can fall inside a multi-byte character, and that character is in the fragment
     being discarded.
+
+    The split is on the newline and nothing else. `str.splitlines()` also breaks on U+0085, U+2028
+    and U+2029, and a TypeScript `JSON.stringify` writes all three into a string *unescaped* — so
+    a line separator pasted into a session tore one record into two halves that parse as nothing,
+    and the entry disappeared. Silently, and in the direction that matters: with the human's last
+    reply gone, the entry before it is the assistant's and the board infers "may be waiting for
+    you" about a session that is not (docs/03-session-observation.md, "What cannot be known").
     """
     with path.open("rb") as handle:
         handle.seek(0, os.SEEK_END)
@@ -73,7 +80,10 @@ def _tail_window(path: Path, max_bytes: int) -> list[str]:
         handle.seek(start)
         window = handle.read(size - start)
 
-    lines = window.decode("utf-8", errors="replace").splitlines()
+    lines = window.decode("utf-8", errors="replace").split("\n")
+    if lines and not lines[-1]:
+        # The newline that ended the last record, not a record of its own.
+        lines.pop()
     return lines[1:] if start > 0 and lines else lines
 
 

@@ -2,8 +2,9 @@
 
 Everything this module refuses to do is as much of its specification as what it does. It does not
 read Jira, poll it, mirror a status back, update an issue or transition one. It does not retry. It
-holds no credential: the token comes from an environment variable a human named on the project,
-and this process only ever passes it straight into one request.
+holds no credential: the link names the variable, the value is read at the moment of the request
+from wherever the console keeps it, and this process only ever passes it straight into that one
+request.
 
 The transport is `urllib` from the standard library, in a thread. `httpx` is deliberately absent
 from this project's dependencies, and a dependency added to reach one endpoint is a dependency in
@@ -14,12 +15,13 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+
+from agent_desk import secrets as kept
 
 # The link somebody typed is the URL they would paste from their browser, because that is the one
 # they have: `https://acme.atlassian.net/browse/API`. The project key is the last segment, and it
@@ -140,9 +142,17 @@ def file_issue(destination: Destination, summary: str, description: str) -> File
     render something either way, and an exception crossing that boundary would be a stack trace
     where an explanation belongs.
     """
-    secret = os.environ.get(destination.token_env, "")
+    # Through `secrets`, not `os.environ`: a token typed on the project's link is kept on this
+    # machine rather than exported, and the panel that says "set here" is reading the same two
+    # places this does. Reading only the shell made the console report a credential it then could
+    # not use (docs/07-security.md).
+    secret = kept.get(destination.token_env)
     if not secret:
-        return Filed(False, detail=f"{destination.token_env} is not set in this shell")
+        return Filed(
+            False,
+            detail=f"{destination.token_env} is not set — export it, or type the token on the "
+            "project's link",
+        )
 
     try:
         status, raw = _post(
@@ -319,9 +329,17 @@ def read_board(destination: Destination) -> Read:
 
     Never raises, for the same reason `file_issue` does not.
     """
-    secret = os.environ.get(destination.token_env, "")
+    # The same two places `file_issue` reads, for the same reason: a token typed on the project's
+    # link is kept on this machine rather than exported, and a reader that looked only at the
+    # shell would report a credential the console had just been given as missing
+    # (docs/07-security.md, and the exploration that found it in `file_issue`).
+    secret = kept.get(destination.token_env)
     if not secret:
-        return Read(False, detail=f"{destination.token_env} is not set in this shell")
+        return Read(
+            False,
+            detail=f"{destination.token_env} is not set — export it, or type the token on the "
+            "project's link",
+        )
 
     query = urllib.parse.urlencode(
         {

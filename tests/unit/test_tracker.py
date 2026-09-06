@@ -13,11 +13,23 @@ import urllib.error
 from collections.abc import AsyncIterator
 
 import pytest
+from agent_desk import secrets as kept
+from agent_desk.config import Settings
 from agent_desk.store.repo import Store
 from agent_desk.tracker import jira
 from agent_desk.web import routes
 
 SITE = "https://acme.atlassian.net"
+
+
+@pytest.fixture
+def nowhere(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A machine with no secret of its own, so a test never reads the developer's.
+
+    `file_issue` looks in the shell and in this machine's secret file, and the second is a real
+    path under the home directory of whoever runs the suite (agent_desk/secrets.py).
+    """
+    monkeypatch.setattr(kept, "settings", Settings(data_dir=tmp_path / "data"))
 
 
 @pytest.fixture
@@ -61,6 +73,7 @@ def test_the_shape_of_the_value_decides_the_scheme() -> None:
 
 @pytest.mark.unit
 def test_an_unset_variable_is_a_refusal_and_not_a_request(
+    nowhere: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Nothing is sent, and the reason names the variable rather than guessing at the cause."""
@@ -108,6 +121,53 @@ def test_the_request_carries_the_draft_and_the_credential_and_nothing_else(
     paragraphs = body["fields"]["description"]["content"]
     assert len(paragraphs) == 2
     assert paragraphs[0]["content"][0]["text"].startswith("It re-runs")
+
+
+@pytest.mark.unit
+def test_a_token_typed_into_the_console_is_the_one_the_request_carries(
+    nowhere: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docs/07-security.md: a token may be typed into the console, and it stays on this machine.
+
+    The project card reads `secrets.has`, so it says *set here* for a token that was never
+    exported. Filing read `os.environ` alone and refused it — the console reporting a credential
+    that the one path it exists for could not see.
+    """
+    monkeypatch.delenv("ACME_JIRA", raising=False)
+    kept.keep("ACME_JIRA", "typed-into-the-console")
+
+    seen: dict[str, object] = {}
+
+    def fake_post(url: str, body: bytes, authorization: str) -> tuple[int, bytes]:
+        seen["authorization"] = authorization
+        return 201, b'{"key": "API-7"}'
+
+    monkeypatch.setattr(jira, "_post", fake_post)
+
+    result = jira.file_issue(jira.Destination(SITE, "API", "ACME_JIRA"), "one", "two")
+
+    assert result.filed
+    assert seen["authorization"] == "Bearer typed-into-the-console"
+
+
+@pytest.mark.unit
+def test_the_shell_still_wins_over_what_was_typed_months_ago(
+    nowhere: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator with a secret manager is not quietly shadowed by a browser."""
+    kept.keep("ACME_JIRA", "typed-into-the-console")
+    monkeypatch.setenv("ACME_JIRA", "exported-in-the-shell")
+
+    seen: dict[str, object] = {}
+
+    def fake_post(url: str, body: bytes, authorization: str) -> tuple[int, bytes]:
+        seen["authorization"] = authorization
+        return 201, b'{"key": "API-8"}'
+
+    monkeypatch.setattr(jira, "_post", fake_post)
+
+    assert jira.file_issue(jira.Destination(SITE, "API", "ACME_JIRA"), "one", "two").filed
+    assert seen["authorization"] == "Bearer exported-in-the-shell"
 
 
 @pytest.mark.unit
@@ -360,6 +420,8 @@ def test_an_unset_variable_is_a_refusal_here_too(monkeypatch: pytest.MonkeyPatch
 
     assert not read.ok
     assert "DUCK_TOKEN is not set" in read.detail
+    # And it names the other place a token can come from, which is the one the console offers.
+    assert "type the token on the" in read.detail
     assert read.tickets == ()
 
 

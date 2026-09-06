@@ -170,3 +170,38 @@ def test_an_empty_transcript_file_is_unread_too(tmp_path: Path) -> None:
     directory.mkdir(parents=True)
     (directory / f"{SESSION_ID}.jsonl").write_text("")
     assert transcript.read_tail(SESSION_ID, root=root) is None
+
+
+@pytest.mark.unit
+def test_a_line_separator_inside_an_entry_does_not_tear_the_record(tmp_path: Path) -> None:
+    """A record is one newline-terminated line, and nothing else ends one.
+
+    `JSON.stringify` leaves U+0085, U+2028 and U+2029 raw inside a string, so any of them pasted
+    into a session reaches the transcript unescaped — and `str.splitlines()` breaks on all three.
+    The record became two halves that parse as nothing and the entry vanished, which is worse than
+    it sounds: with the human's reply gone the last entry is the assistant's, and the board then
+    infers "may be waiting for you" about a session that has already been answered.
+    """
+    root = tmp_path / "projects"
+    directory = root / "-pasted-from-a-pdf"
+    directory.mkdir(parents=True)
+
+    # Written as an escape, so that it survives an editor, a formatter and a reviewer.
+    said = "no\u2028they still fail"
+    written = [
+        {"type": "assistant", "isSidechain": False, "message": {"content": "ran the tests"}},
+        {"type": "user", "isSidechain": False, "message": {"content": said}},
+    ]
+    path = directory / f"{SESSION_ID}.jsonl"
+    path.write_text(
+        "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in written), encoding="utf-8"
+    )
+    # What is on disk really is two records: the separator is inside a JSON string rather than
+    # between two of them.
+    assert path.read_bytes().count(b"\n") == 2
+
+    tail = transcript.read_tail(SESSION_ID, root=root)
+    assert tail is not None
+    assert [entry.role for entry in tail.entries] == ["assistant", "user"]
+    assert tail.last_entry is not None
+    assert tail.last_entry.text == said

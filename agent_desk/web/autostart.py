@@ -12,7 +12,6 @@ what the loop starts is what a human queued.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from pathlib import Path
 
@@ -372,6 +371,11 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
         await store.disarm(
             arming.repo_key, why=f"two starts in a row failed: {result.detail}"[:300]
         )
+        # And the switch that started *this*. Arming and exploring are two decisions
+        # (docs/adr/0008), so disarming the queue leaves exploring exactly where it was — which
+        # meant a project whose starts kept failing went looking again on the next tick, and the
+        # one after, for as long as the console stayed open. The rule is that it stops.
+        await store.explore(arming.repo_key, per_day=arming.per_day, on=False)
     return task
 
 
@@ -414,13 +418,16 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
 async def run(store: Store) -> None:
     """The loop, held open for the life of the process by the same TaskGroup the blocks use.
 
-    It never raises out: a bad tick logs and waits for the next one. A loop that took the console
-    down with it would be a worse failure than anything it was started to do.
+    A bad tick logs and waits for the next one: a loop that took the console down with it would be
+    a worse failure than anything it was started to do. Cancellation is the one thing it lets
+    through, and it has to be — `app.lifespan` cancels this task on the way out and the group then
+    *waits* for it, so a swallowed cancel is a console that will not close. And the cancel lands
+    inside a tick rather than in the sleep more often than it looks: a tick sits in a thread for
+    as long as `land.land` takes, which is `make install` and the repository's own gate.
     """
     while True:
-        with contextlib.suppress(asyncio.CancelledError):
-            try:
-                await tick(store)
-            except Exception:
-                log.exception("autostart.tick_failed")
+        try:
+            await tick(store)
+        except Exception:
+            log.exception("autostart.tick_failed")
         await asyncio.sleep(TICK_SECONDS)

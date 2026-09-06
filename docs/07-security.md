@@ -109,11 +109,11 @@ shell wins over the file, so an operator with a secret manager is not quietly sh
 
 The credential is **not in the database** and not in this program's memory beyond the request that
 uses it. `project_link.token_env` records the *name* of
-an environment variable, the value is read from the environment at the moment of the request and
-passed straight into it, and nothing logs it: a network failure reports the exception type and the
-host, never the call. There is no field anywhere in this console to type a token into, because a
-token in a SQLite file with no encryption, in the process that also serves a page to other people,
-is exactly the thing this page exists to refuse.
+the variable; the value is read at the moment of the request from the two places named above — the
+shell first, then this machine's own file — and passed straight into it, and nothing logs it: a
+network failure reports the exception type and the host, never the call. What the database never
+holds is the token itself, because a token in a SQLite file with no encryption, in the process that
+also serves a page to other people, is exactly the thing this page exists to refuse.
 
 ## Phase 4, where the model changed
 

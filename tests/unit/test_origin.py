@@ -298,3 +298,51 @@ def test_the_entry_point_survives_a_ctrl_c(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(entry, "serve", lambda: None)
 
     entry.main()  # no exception leaves this
+
+
+@pytest.mark.unit
+def test_the_request_log_is_still_off_once_the_servers_are_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Silencing it and *then* building the servers silences nothing.
+
+    `uvicorn.Config.__init__` runs the library's own logging configuration, which re-enables the
+    process-wide `uvicorn.access` logger. So a `silence_access_logging()` that runs before the
+    configs are constructed is undone by them, and the only thing still keeping a viewer's token
+    out of the request log is `access_log=False` on each config — the per-server flag that
+    docs/07-security.md says must not be what this rests on.
+
+    The servers are built and never started: a test that binds a port is a test that fails on
+    somebody else's machine.
+    """
+    import asyncio
+    import logging
+
+    from agent_desk import __main__ as entry
+    from agent_desk.config import Settings
+
+    access = logging.getLogger("uvicorn.access")
+    before = (list(access.handlers), access.propagate, access.disabled)
+    monkeypatch.setattr(
+        entry, "settings", Settings(share_host="127.0.0.1", share_port=8788, port=8787)
+    )
+
+    seen: list[bool] = []
+
+    class Recording:
+        """A server that records what the request log looked like when it started serving."""
+
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        async def serve(self) -> None:
+            seen.append(logging.getLogger("uvicorn.access").disabled)
+
+    monkeypatch.setattr(entry.uvicorn, "Server", Recording)
+    try:
+        access.addHandler(logging.NullHandler())
+        asyncio.run(entry.serve())
+    finally:
+        access.handlers, access.propagate, access.disabled = before
+
+    assert seen == [True, True]

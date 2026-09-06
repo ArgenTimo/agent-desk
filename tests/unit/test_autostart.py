@@ -455,12 +455,20 @@ async def test_a_project_with_no_checkout_here_is_not_explored(
 async def test_two_failed_explorations_switch_the_project_off(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same rule as the queue: a rule that keeps firing into a broken condition stops."""
-    monkeypatch.setattr(
-        dispatch,
-        "start",
-        lambda instruction, *, cwd, name, env=None: dispatch.Started(False, detail="no disk space"),
-    )
+    """The same rule as the queue: a rule that keeps firing into a broken condition stops.
+
+    `armed is False` is not the assertion that matters here and never was: this project was never
+    armed, so that line held on the day exploring kept running anyway. The switch that has to go
+    off is the one that started this — otherwise a project whose worktrees will not create asks
+    for another every thirty seconds, all night, which is the failure the rule exists to end.
+    """
+    tried: list[str] = []
+
+    def refuses(instruction: str, *, cwd: str, name: str, env: object = None) -> dispatch.Started:
+        tried.append(instruction)
+        return dispatch.Started(False, detail="no disk space")
+
+    monkeypatch.setattr(dispatch, "start", refuses)
     await desk.explore(KEY, per_day=9, on=True)
     seed = await desk.queue_task(
         repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
@@ -474,7 +482,11 @@ async def test_two_failed_explorations_switch_the_project_off(
 
     arming = await desk.autostart(KEY)
     assert arming.armed is False
+    assert arming.exploring is False
     assert arming.disarmed_why is not None and "no disk space" in arming.disarmed_why
+
+    await autostart.tick(desk, live=set())
+    assert len(tried) == 2, "it went looking again after switching itself off"
 
 
 @pytest.mark.unit
@@ -809,3 +821,36 @@ async def test_a_tracker_that_cannot_be_read_queues_nothing_and_says_nothing_fal
     # And nothing was recorded as unblocked either, which a naive "replace with what we found"
     # would have done.
     assert await desk.tracker_blockers() == []
+
+
+@pytest.mark.unit
+async def test_the_loop_stops_when_the_cancel_lands_inside_a_tick(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`app.lifespan` cancels this task and then waits for it, so it has to end.
+
+    The cancel arriving while the loop is parked between passes was always fine. The one that
+    matters is the other one: a tick sits in a thread for as long as `land.land` takes — `make
+    install` and then the repository's own gate — and a cancellation swallowed there leaves the
+    loop running and the TaskGroup holding it waiting for a task that never finishes.
+    """
+    in_a_tick = asyncio.Event()
+
+    async def slow(store: Store, live: set[str] | None = None) -> None:
+        in_a_tick.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(autostart, "tick", slow)
+
+    running = asyncio.create_task(autostart.run(desk))
+    await in_a_tick.wait()
+    running.cancel()
+    _, pending = await asyncio.wait({running}, timeout=1)
+
+    for task in pending:
+        # It went round again and is now in the sleep, where a cancel does land. Ending it here
+        # rather than leaving it for the loop to be torn down with.
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert not pending, "the loop swallowed the cancellation and went on running"
