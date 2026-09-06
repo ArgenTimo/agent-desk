@@ -75,6 +75,9 @@ class Thread(BaseModel):
     subject: str
     created_at: int
     closed_at: int | None = None
+    # When this program last named it, or null: a name a person typed is never rewritten
+    # (030-thread-renamed.sql).
+    renamed_at: int | None = None
 
 
 class Block(BaseModel):
@@ -614,7 +617,7 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, subject, created_at, closed_at FROM thread "
+                    "SELECT id, subject, created_at, closed_at, renamed_at FROM thread "
                     "WHERE closed_at IS NULL ORDER BY created_at DESC LIMIT :limit"
                 ),
                 {"limit": limit},
@@ -632,19 +635,35 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, subject, created_at, closed_at FROM thread "
+                    "SELECT id, subject, created_at, closed_at, renamed_at FROM thread "
                     "WHERE id IN :ids ORDER BY created_at DESC"
                 ).bindparams(bindparam("ids", expanding=True)),
                 {"ids": sorted(thread_ids)},
             )
             return [Thread(**row._mapping) for row in rows]
 
-    async def rename_thread(self, thread_id: str, subject: str) -> None:
+    async def rename_thread(self, thread_id: str, subject: str, *, automatic: bool = False) -> None:
+        """Name a chat. `automatic` marks it as this program's doing rather than a person's."""
         async with self.engine.begin() as conn:
             await conn.execute(
-                text("UPDATE thread SET subject = :subject WHERE id = :id"),
-                {"id": thread_id, "subject": subject},
+                text(
+                    "UPDATE thread SET subject = :subject, "
+                    "renamed_at = CASE WHEN :automatic THEN :t ELSE renamed_at END WHERE id = :id"
+                ),
+                {"id": thread_id, "subject": subject, "automatic": automatic, "t": _now_ms()},
             )
+
+    async def thread(self, thread_id: str) -> Thread | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, subject, created_at, closed_at, renamed_at FROM thread "
+                    "WHERE id = :id"
+                ),
+                {"id": thread_id},
+            )
+            row = rows.first()
+            return None if row is None else Thread(**row._mapping)
 
     async def close_thread(self, thread_id: str) -> None:
         async with self.engine.begin() as conn:

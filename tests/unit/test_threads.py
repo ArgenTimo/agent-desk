@@ -375,3 +375,80 @@ def test_what_is_on_the_workbench_is_part_of_what_was_said() -> None:
 @pytest.mark.unit
 def test_one_card_is_said_in_the_singular() -> None:
     assert "1 card on the workbench" in classifier.kind_prompt("делай", pointed_at=1)
+
+
+@pytest.mark.unit
+async def test_a_chat_that_moved_on_gets_a_name_that_followed_it(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Автоматическое название, зависимое от контекста" — and the part that was missing is that
+    it never changed. A chat that opened with a greeting and became a week of work on the parser
+    was still called after the greeting."""
+    from agent_desk.answer import session
+    from agent_desk.web import blocks
+
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    try:
+        thread = await store.create_thread("привет")
+        for said in (
+            "привет",
+            "the parser drops a line",
+            "and the tests do not catch it",
+            "fix it",
+        ):
+            await store.create_block(
+                thread_id=thread.id, kind="question", input=said, thread_set_by="human"
+            )
+
+        async def names(prompt: str):
+            assert "Name the subject, not the first message" in prompt
+            yield "the parser dropping lines"
+
+        monkeypatch.setattr(session, "stream_answer", names)
+        await blocks.rename_if_it_has_moved_on(store, thread)
+
+        renamed = await store.thread(thread.id)
+        assert renamed is not None
+        assert renamed.subject == "the parser dropping lines"
+        assert renamed.renamed_at is not None
+
+        # And only once: a tab bar that moved under somebody's hand while they read it would be
+        # worse than a stale name.
+        async def never(prompt: str):  # pragma: no cover - reaching it is the failure
+            raise AssertionError("it renamed a second time")
+            yield ""
+
+        monkeypatch.setattr(session, "stream_answer", never)
+        await blocks.rename_if_it_has_moved_on(store, renamed)
+        assert (await store.thread(thread.id)).subject == "the parser dropping lines"  # type: ignore[union-attr]
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+async def test_a_chat_with_barely_anything_in_it_keeps_its_first_name(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first line names it well enough most of the time; two messages is not a subject."""
+    from agent_desk.answer import session
+    from agent_desk.web import blocks
+
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    try:
+        thread = await store.create_thread("the parser")
+        await store.create_block(
+            thread_id=thread.id, kind="question", input="the parser", thread_set_by="human"
+        )
+
+        async def never(prompt: str):  # pragma: no cover - reaching it is the failure
+            raise AssertionError("it renamed a chat that is not about anything yet")
+            yield ""
+
+        monkeypatch.setattr(session, "stream_answer", never)
+        await blocks.rename_if_it_has_moved_on(store, thread)
+
+        assert (await store.thread(thread.id)).subject == "the parser"  # type: ignore[union-attr]
+    finally:
+        await store.close()

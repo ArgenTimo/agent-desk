@@ -172,3 +172,25 @@ PROMPTS: dict[DraftKind, Callable[[Idea], str]] = {
     "proposal": proposal_prompt,
     "ticket": ticket_prompt,
 }
+
+
+def name_prompt(said: list[str]) -> str:
+    """A name for a chat, from what it has actually been about.
+
+    Short because it goes in a tab, and about the *subject* rather than about the first message:
+    the whole reason this exists is that a chat which opened with a greeting and became a week of
+    work on the parser was still named after the greeting.
+    """
+    return "\n".join(
+        [
+            "Below are the messages in one chat, oldest first.",
+            "",
+            "Give the chat a name: at most four words, naming what it is about. Reply with the",
+            "name and nothing else — no quotes, no preamble, no full stop.",
+            "",
+            "Name the subject, not the first message. A chat that opened with a greeting and",
+            "became a conversation about a parser is about the parser.",
+            "",
+            *[f"- {one[:200]}" for one in said],
+        ]
+    )

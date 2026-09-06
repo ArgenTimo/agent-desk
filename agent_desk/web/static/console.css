@@ -1716,3 +1716,8 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 .console-line .who { color: var(--fg-dim); }
 .console-line.assistant .who { color: var(--busy); }
 .console-line .said { white-space: pre-wrap; word-break: break-word; }
+
+/* The conversation folded away with Ctrl+L, and back with it. Quiet rather than gone: a fold that
+   looked like a delete would be a fold nobody trusts. */
+.pin.block-card.put-away { opacity: 0.45; }
+.pin.block-card.put-away .pin-kind::before { content: "folded · "; color: var(--fg-dim); }

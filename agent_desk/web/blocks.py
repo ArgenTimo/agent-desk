@@ -606,6 +606,45 @@ async def _thread_for(store: Store, thread_id: str, text: str) -> Thread:
     return await store.create_thread(text[:60] or "untitled")
 
 
+# How many messages a chat is allowed to have before its name is worth rewriting. The first line
+# names it well enough most of the time; it is the conversation that started with "привет" and is
+# now about the parser that needs a second look.
+RENAME_AFTER = 4
+
+
+async def rename_if_it_has_moved_on(store: Store, thread: Thread) -> None:
+    """Give a chat a name that follows the conversation (docs/11-the-plan.md).
+
+    "Автоматическое название, зависимое от контекста, для названий вкладок чатов" — and the part
+    that was missing is that it never changed. A chat took the first thing said in it and kept
+    that name for ever, so one that opened with a greeting and turned into a week of work on the
+    parser was still called after the greeting.
+
+    Rewritten from what the chat has actually been about, and only:
+
+    - once it has enough in it to be about something (`RENAME_AFTER`),
+    - and once, so a long conversation is not renamed on every message — that would make the tab
+      bar move under somebody's hand while they were reading it.
+
+    There is no third condition today because there is no way to rename a chat by hand: every name
+    here was chosen by this program. When a rename field appears, `renamed_at` is the flag to
+    check — a name a person typed is somebody saying what this is, and a model does not get to
+    disagree with it.
+    """
+    said = await store.blocks_in_thread(thread.id)
+    if len(said) < RENAME_AFTER or thread.renamed_at:
+        return
+    lines = [block.input.strip() for block in said if block.input.strip()][:12]
+    try:
+        reply = "".join([chunk async for chunk in session.stream_answer(inbox.name_prompt(lines))])
+    except (session.AnswerFailed, OSError):
+        return
+    name = next((one.strip() for one in reply.splitlines() if one.strip()), "")[:60]
+    if name and name.lower() != thread.subject.lower():
+        await store.rename_thread(thread.id, name, automatic=True)
+        log.info("threads.renamed", thread=thread.id, name=name)
+
+
 # A chat named by the `+` button rather than by anything said in it.
 _UNNAMED = re.compile(r"\Achat( [0-9]+)?\Z", re.IGNORECASE)
 
@@ -633,6 +672,13 @@ async def _work(
     is write into a running session (docs/adr/0002).
     """
     try:
+        # The chat may have moved on from whatever it was first called (docs/11-the-plan.md).
+        # Before the work rather than after it: a failed run should not cost the rename.
+        with contextlib.suppress(Exception):
+            thread = await store.thread(block.thread_id)
+            if thread is not None:
+                await rename_if_it_has_moved_on(store, thread)
+
         kind = await classifier.kind(block.input, pointed_at=pointed_at)
         if kind == "idea":
             await record_idea(store, block, rows)

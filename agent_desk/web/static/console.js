@@ -378,7 +378,9 @@ document.addEventListener('click', (event) => {
   const tab = event.target.closest('.tab');
   if (!tab) return;
   for (const other of document.querySelectorAll('.tab')) other.classList.toggle('on', other === tab);
-  clearPins();
+  // The workbench belongs to the chat: switching to another one starts with its own surface,
+  // and `showActiveThread` puts that chat's conversation back on it.
+  clearBench();
   showActiveThread();
   document.getElementById('ask-text').focus();
 });
@@ -392,7 +394,7 @@ function swapped(isTabs) {
     // The chat somebody just created is the one they are looking at, and it is the last one.
     const tabs = [...document.querySelectorAll('.tab')];
     for (const tab of tabs) tab.classList.toggle('on', tab === tabs[tabs.length - 1]);
-    clearPins();
+    clearBench();
   }
   showActiveThread();
 }
@@ -516,8 +518,10 @@ function syncTargets() {
   showActiveThread();
 }
 
-function clearPins() {
-  pins.innerHTML = '';
+// The attached earlier answers, let go of. Taking the *cards* off is `clearBench`, which also
+// forgets where they were — emptying the list on its own left the remembered layout behind, so a
+// card dropped afterwards reappeared in the place the old one had been.
+function letGoOfAttached() {
   for (const button of document.querySelectorAll('#blocks .attach.on')) {
     button.classList.remove('on');
     button.textContent = 'use as context';
@@ -525,7 +529,7 @@ function clearPins() {
   syncTargets();
 }
 
-document.getElementById('clear-context').addEventListener('click', clearPins);
+document.getElementById('clear-context').addEventListener('click', clearBench);
 
 // It types the words and sends them. The message then reads as what it is — somebody saying to
 // take it on — and there is one path through the console rather than two.
@@ -1257,6 +1261,25 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'clear') clearBench();
 });
 
+// The conversation folded away, and back. What folds is every card holding a block — the cards
+// somebody dropped stay, because those are what the next question is about, and folding them
+// would be answering a different question.
+function foldConversation() {
+  const cards = [...(surface?.querySelectorAll('.pin.block-card') || [])];
+  if (!cards.length) return;
+  const folding = !cards[0].classList.contains('put-away');
+  for (const card of cards) {
+    card.classList.toggle('put-away', folding);
+    if (folding) {
+      card.dataset.viewBefore = card.dataset.view || 'hint';
+      setView(card, 'hint');
+    } else if (card.dataset.viewBefore) {
+      setView(card, card.dataset.viewBefore);
+    }
+  }
+  settleOverlaps();
+}
+
 function clearBench() {
   // Everything comes off, including the rings. What was asked is still in the store and comes
   // back with the thread — this clears the surface, not the conversation.
@@ -1264,6 +1287,7 @@ function clearBench() {
   placed = new Map();
   ownTies.length = 0;
   wentWith.clear();
+  letGoOfAttached();
   rememberLayout();
   syncTargets();
   drawTies();
@@ -1562,15 +1586,22 @@ document.addEventListener('keydown', (event) => {
   // field where it was. Pressing it again brings the conversation back.
   if (event.key === 'l' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
-    const folded = out.classList.toggle('folded');
+    // Ctrl+L in a terminal clears the scrollback. Here it folds the conversation away and back:
+    // "весь чат сворачивается вверх, как в консоли, но с возможностью развернуть обратно" —
+    // folding rather than clearing, because a fold loses nothing.
+    //
+    // Clearing the workbench is a different act and keeps a place of its own: Shift does it, and
+    // the right mouse button offers it by name.
+    if (event.shiftKey) clearBench();
+    else foldConversation();
     document.getElementById('ask-text').focus();
-    if (!folded)     return;
+    return;
   }
 
   if (event.key === 'Escape') {
     const panel = document.getElementById('message');
     if (panel.innerHTML.trim()) panel.innerHTML = '';
-    else if (pins.children.length) clearPins();
+    else if (pins.children.length) clearBench();
     else document.activeElement.blur();
   }
 
