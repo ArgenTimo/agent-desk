@@ -116,8 +116,22 @@ def _body(destination: Destination, summary: str, description: str) -> bytes:
     ).encode()
 
 
+def _https_only(url: str) -> None:
+    """Refuse anything that is not https, here rather than three functions away.
+
+    The site always comes from `destination_of`, whose patterns require `https://`, so this cannot
+    fire today. It is written anyway because what it protects against is somebody later building a
+    URL from a different source and this file quietly following a `file://` into the filesystem
+    with an Authorization header attached. A guarantee that lives next to the call is one that
+    survives the call being edited.
+    """
+    if not url.startswith("https://"):
+        raise ValueError(f"refusing a request that is not https: {url.split(':', 1)[0]}:…")
+
+
 def _post(url: str, body: bytes, authorization: str) -> tuple[int, bytes]:
-    """One request, and the only place in this program that opens a socket to the network."""
+    """One request, and one of the two places in this program that open a socket to the network."""
+    _https_only(url)
     request = urllib.request.Request(  # noqa: S310 — the scheme is checked by `_BROWSE`
         url,
         data=body,
@@ -129,7 +143,9 @@ def _post(url: str, body: bytes, authorization: str) -> tuple[int, bytes]:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310 — `_https_only` above
+            request, timeout=TIMEOUT_SECONDS
+        ) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
@@ -309,13 +325,16 @@ def read_tickets(raw: bytes) -> tuple[Ticket, ...]:
 
 def _get(url: str, authorization: str) -> tuple[int, bytes]:
     """One read. The second and last place in this program that opens a socket to the network."""
+    _https_only(url)
     request = urllib.request.Request(  # noqa: S310 — the scheme is checked by `destination_of`
         url,
         method="GET",
         headers={"Authorization": authorization, "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310 — `_https_only` above
+            request, timeout=TIMEOUT_SECONDS
+        ) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()

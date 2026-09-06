@@ -26,7 +26,6 @@ only `web/` may open (docs/adr/0006).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from collections.abc import Sequence
 
@@ -222,14 +221,19 @@ async def tick(store: Store) -> str:
 async def run(store: Store) -> None:
     """The loop, held open for the life of the process by the TaskGroup the others use.
 
-    It never raises out: a bad tick logs and waits for the next one.
+    A bad tick logs and waits for the next one. Cancellation is the one thing it lets through, and
+    it has to be: `app.lifespan` cancels this task on the way out and the group then *waits* for
+    it, so a swallowed cancel is a console that will not close.
+
+    That is not theoretical, and it is not rare. A tick here can sit in a thread for as long as
+    `dispatch.kick` takes to start a session — the same shape of bug an exploration found in
+    `autostart.run`, which had the identical `suppress(CancelledError)` around the whole body.
     """
     while True:
-        with contextlib.suppress(asyncio.CancelledError):
-            try:
-                await tick(store)
-            except Exception:
-                log.exception("kicking.tick_failed")
+        try:
+            await tick(store)
+        except Exception:
+            log.exception("kicking.tick_failed")
         await asyncio.sleep(TICK_SECONDS)
 
 
@@ -241,11 +245,15 @@ APPRAISE_SECONDS = 900.0
 
 
 async def appraising(store: Store) -> None:
-    """Read the ideas nobody has read yet, for as long as the console runs."""
+    """Read the ideas nobody has read yet, for as long as the console runs.
+
+    Same shape and same reason as `run`: a failed sweep waits for the next one, and a cancel goes
+    through rather than being swallowed — a sweep is several model calls and the cancel lands
+    inside one of them far more often than it lands in the sleep.
+    """
     while True:
-        with contextlib.suppress(asyncio.CancelledError):
-            try:
-                await appraise.sweep(store)
-            except Exception:
-                log.exception("ideas.sweep_failed")
+        try:
+            await appraise.sweep(store)
+        except Exception:
+            log.exception("ideas.sweep_failed")
         await asyncio.sleep(APPRAISE_SECONDS)

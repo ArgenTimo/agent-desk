@@ -474,10 +474,9 @@ document.addEventListener('dragend', () => {
 // the card actually contains, and it says that what you type next is about that. Dragging it back
 // out undoes both.
 function showBenchToggle() {
-  // The "+ a block" button is always there — an empty bench is exactly when somebody wants one.
-  // The diagram toggle is not: there is nothing to draw until something is on it.
-  const toggle = document.querySelector('[data-bench-toggle]');
-  if (toggle) toggle.hidden = pins.querySelectorAll('.pin').length === 0;
+  // Nothing to toggle any more: the relations are drawn between the cards themselves. Kept as the
+  // one place that reacts to the bench filling and emptying.
+  loadTies();
 }
 
 function pinnedTargets() {
@@ -499,7 +498,6 @@ function attachedBlocks() {
 
 function syncTargets() {
   showBenchToggle();
-  drawBench();
   markOffEdge();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
@@ -761,8 +759,16 @@ document.addEventListener('mouseleave', () => lightUp(''), true);
 // not do is let six cards be six cards you can see at once, and it does not tell you that a card
 // is down there at all — which matters more here than in most places, because a card you cannot
 // see still goes into the next message.
-const ZOOMS = [0.5, 0.6, 0.75, 0.9, 1];
-let zoomAt = ZOOMS.length - 1;
+// The floor is 80%, not 50%. The first version of this went down to half size, and half size on a
+// 13px body is 6px — text nobody can read, reached by two clicks, remembered afterwards, and with
+// nothing on the screen to explain why everything had gone small. That is a control that breaks
+// the page and then hides the reason.
+//
+// It goes *up* as well now, which is what somebody on a large screen actually wants, and the
+// storage key is new so a browser still holding the old half-size value starts at 100% again.
+const ZOOMS = [0.8, 0.9, 1, 1.15, 1.3];
+const FULL_SIZE = ZOOMS.indexOf(1);
+let zoomAt = FULL_SIZE;
 
 function applyZoom() {
   const scale = ZOOMS[zoomAt];
@@ -771,18 +777,19 @@ function applyZoom() {
   const label = document.querySelector('[data-zoom="0"]');
   if (label) label.textContent = `${Math.round(scale * 100)}%`;
   try {
-    localStorage.setItem('agent-desk:bench-zoom', String(zoomAt));
+    localStorage.setItem('agent-desk:bench-size', String(zoomAt));
   } catch {
     // A window that will not remember the zoom still zooms.
   }
   markOffEdge();
+  drawTies();
 }
 
 document.addEventListener('click', (event) => {
   const button = event.target.closest('[data-zoom]');
   if (!button) return;
   const step = Number(button.dataset.zoom);
-  zoomAt = step === 0 ? ZOOMS.length - 1 : Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + step));
+  zoomAt = step === 0 ? FULL_SIZE : Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + step));
   applyZoom();
 });
 
@@ -827,12 +834,13 @@ pins.addEventListener('scroll', markOffEdge, { passive: true });
 window.addEventListener('resize', markOffEdge);
 
 try {
-  const remembered = Number(localStorage.getItem('agent-desk:bench-zoom'));
+  const remembered = Number(localStorage.getItem('agent-desk:bench-size'));
   if (Number.isInteger(remembered) && remembered >= 0 && remembered < ZOOMS.length) {
     zoomAt = remembered;
   }
 } catch {
   // No storage: full size, which is the default anybody would expect.
+  zoomAt = FULL_SIZE;
 }
 applyZoom();
 
@@ -902,40 +910,91 @@ function ownBlockText() {
     .join('\n\n---\n\n');
 }
 
-/* --- the workbench as a diagram --------------------------------------------------------------- */
-// A stack of cards says what each one is. It cannot say that this session is in that project, or
-// that this idea needs that one — and when four things were dragged here to ask one question, the
-// relation between them is usually the question (agent_desk/ideas/bench.py).
-const benchHead = document.querySelector('.bench-head');
-const benchView = document.getElementById('bench');
+/* --- the cards on the bench, and the lines between them --------------------------------------- */
+// "Я хочу видеть блоки, помещённые на верстак, как связанные карточки."
+//
+// The first attempt at this drew its own diagram: a second set of boxes with the same words
+// truncated into them, next to the cards they were about. That answered the wrong half — what is
+// wanted is *these* cards, readable, with the relations drawn between them. So the lines are an
+// SVG behind the pins, and the pins are exactly what they were.
+const ties = document.getElementById('bench-ties');
+let tieList = [];
 
-function benchShowing() {
-  return benchView && !benchView.hidden;
-}
-
-async function drawBench() {
-  if (!benchShowing()) return;
-  const cards = pinnedTargets();
-  try {
-    const response = await fetch(`/workbench?cards=${encodeURIComponent(cards)}`);
-    benchView.innerHTML = response.ok
-      ? await response.text()
-      : '<p class="empty small">could not draw this</p>';
-  } catch {
-    benchView.innerHTML = '<p class="empty small">could not draw this</p>';
+async function loadTies() {
+  if (!ties) return;
+  const cards = [...pins.querySelectorAll('.pin[data-kind]:not(.own)')]
+    .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}`)
+    .join(',');
+  if (!cards) {
+    tieList = [];
+    drawTies();
+    return;
   }
+  try {
+    const response = await fetch(`/workbench/ties?cards=${encodeURIComponent(cards)}`);
+    tieList = response.ok ? await response.json() : [];
+  } catch {
+    tieList = [];
+  }
+  drawTies();
 }
 
-document.addEventListener('click', async (event) => {
-  const button = event.target.closest('[data-bench-toggle]');
-  if (!button) return;
-  const showing = benchView.hidden;
-  benchView.hidden = !showing;
-  pins.hidden = showing;
-  button.setAttribute('aria-pressed', String(showing));
-  button.textContent = showing ? 'as cards' : 'as a diagram';
-  await drawBench();
-});
+// Redrawn on every scroll and resize because the cards move: a line that stays where the card was
+// is worse than no line.
+function drawTies() {
+  if (!ties) return;
+  const frame = pins.getBoundingClientRect();
+  ties.setAttribute('viewBox', `0 0 ${frame.width} ${frame.height}`);
+  ties.style.width = `${frame.width}px`;
+  ties.style.height = `${frame.height}px`;
+  ties.textContent = '';
+  if (!tieList.length) {
+    ties.hidden = true;
+    return;
+  }
+
+  const where = (name) => {
+    const [kind, ...rest] = name.split(':');
+    const pin = pins.querySelector(
+      `.pin[data-kind="${CSS.escape(kind)}"][data-id="${CSS.escape(rest.join(':'))}"]`
+    );
+    if (!pin) return null;
+    const box = pin.getBoundingClientRect();
+    return { top: box.top - frame.top, bottom: box.bottom - frame.top, left: box.left - frame.left };
+  };
+
+  let drew = 0;
+  for (const tie of tieList) {
+    const one = where(tie.from);
+    const other = where(tie.to);
+    if (!one || !other) continue;
+    // Down the left-hand margin of the cards, which is the only space a stacked list has. A
+    // bracket rather than a straight line, so two ties between the same pair are still two.
+    const x = 9 + (drew % 3) * 7;
+    const y1 = one.bottom - 10;
+    const y2 = other.top + 10;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute(
+      'd',
+      `M ${one.left - frame.left + 2} ${y1} H ${x} V ${y2} H ${other.left - frame.left + 2}`
+    );
+    path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
+    path.setAttribute('fill', 'none');
+    ties.appendChild(path);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String(x + 4));
+    label.setAttribute('y', String((y1 + y2) / 2));
+    label.setAttribute('class', 'tie-label');
+    label.textContent = tie.says;
+    ties.appendChild(label);
+    drew += 1;
+  }
+  ties.hidden = drew === 0;
+}
+
+pins.addEventListener('scroll', drawTies, { passive: true });
+window.addEventListener('resize', drawTies);
 
 /* --- plain words, and the technical half behind a toggle ---------------------------------------- */
 // A card dropped on the workbench opens in plain words: a card that leads with paths and pids is a

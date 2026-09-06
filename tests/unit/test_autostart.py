@@ -496,21 +496,33 @@ async def test_the_loop_survives_a_tick_that_raises(
     """A loop that took the console down with it would be a worse failure than anything it was
     started to do."""
     calls: list[int] = []
+    # An event rather than a poll: the loop tells the test it has gone round twice, instead of the
+    # test guessing how long that takes.
+    went_round_twice = asyncio.Event()
 
     async def explodes(store: Store, live: set[str] | None = None) -> None:
         calls.append(1)
+        if len(calls) >= 2:
+            went_round_twice.set()
         raise RuntimeError("something went wrong in a pass")
 
     monkeypatch.setattr(autostart, "tick", explodes)
     monkeypatch.setattr(autostart, "TICK_SECONDS", 0.01)
 
     running = asyncio.create_task(autostart.run(desk))
-    await asyncio.sleep(0.05)
-    running.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await running
+    # Waited for rather than slept past. The first version gave it 50ms and asserted two passes
+    # had happened, which is a race against however long it takes to *render* the traceback the
+    # failure logs — and that got slower under a new pytest, so the test failed while the loop it
+    # was testing carried on working perfectly.
+    try:
+        async with asyncio.timeout(5):
+            await went_round_twice.wait()
+    finally:
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
 
-    assert len(calls) > 1, "it stopped after the first failure"
+    assert len(calls) >= 2, "it stopped after the first failure"
 
 
 @pytest.mark.unit

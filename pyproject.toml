@@ -15,7 +15,11 @@ python = "^3.12"
 
 # The console. design/01-module-layout.md `web/`. Server-rendered: HTMX and SSE come over the
 # wire, so there is no JavaScript build step (docs/adr/0003).
-fastapi = "^0.115"
+fastapi = "^0.141"
+# Named directly, though fastapi is what pulls it in. Eight advisories were open against the
+# version that came along for the ride (`pip-audit`, 2026-09), and a floor you inherit is a floor
+# that moves when somebody else's constraint moves. This one is ours.
+starlette = ">=1.3.1"
 uvicorn = { version = "^0.34", extras = ["standard"] }
 jinja2 = "^3.1"
 
@@ -42,9 +46,13 @@ structlog = "^25.1"
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.9"
 mypy = "^1.14"
-pytest = "^8.3"
-pytest-asyncio = "^0.25"
+pytest = "^9.1"
+pytest-asyncio = "^1.3"
 pytest-cov = "^6.0"
+# What `make audit` runs. Dev-group, and not in `verify`: both want the network, and a gate that
+# fails on a train is a gate people learn to skip.
+pip-audit = "^2.7"
+bandit = "^1.8"
 types-pyyaml = "^6.0"
 
 [build-system]
@@ -98,6 +106,24 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[tool.bandit]
+# Two checks are switched off here rather than annotated at forty call sites, and each has a
+# reason and a test.
+#
+# B404 — "you imported subprocess". Starting a process is what `dispatch.py` and `land.py` are
+#        for. The finding is the import, not a use of it.
+# B603 — "subprocess call: check for untrusted input". Every call in this program passes a *list*
+#        with no shell, and the binary is resolved from settings or `shutil.which`. What that
+#        check is really about is `shell=True`, and
+#        `tests/unit/test_security_surface.py::test_nothing_is_ever_handed_to_a_shell` asserts
+#        against the syntax tree of every module that it is never passed anywhere.
+#
+# Everything else stays on. B310 (url schemes) and B704 (Markup) are annotated where they occur,
+# next to the guard that makes them safe — a report short enough to read is a report somebody
+# reads, and one with a dozen known-good findings in it is one nobody does.
+skips = ["B404", "B603"]
+exclude_dirs = ["tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

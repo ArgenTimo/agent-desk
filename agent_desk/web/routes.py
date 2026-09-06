@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -142,7 +143,10 @@ def _prose(text: str) -> Markup:
     out = str(escape(text))
     out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out, flags=re.S)
     out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
-    return Markup(out)
+    # The escape is the first line of this function and the substitutions come after it, so what
+    # is wrapped here is already text. `tests/unit/test_security_surface.py` asserts that no tag
+    # but these two can appear in the output, for any input.
+    return Markup(out)  # nosec B704
 
 
 # The registry's three words, said the way somebody who does not use a terminal would say them.
@@ -875,7 +879,12 @@ async def project_page(key: str = "") -> HTMLResponse:
     second screen while you fix something.
     """
     return HTMLResponse(
-        env.get_template("project.html").render(panel=Markup(await render_project(key)), key=key)
+        env.get_template("project.html").render(
+            # HTML this program just rendered from its own template with autoescape on, being
+            # placed inside another of its own templates.
+            panel=Markup(await render_project(key)),  # nosec B704
+            key=key,
+        )
     )
 
 
@@ -1245,6 +1254,24 @@ async def block_column() -> HTMLResponse:
     return HTMLResponse(await render_blocks())
 
 
+@router.get("/workbench/ties", response_class=HTMLResponse)
+async def workbench_ties(cards: str = "") -> HTMLResponse:
+    """Which cards on the workbench are related, and how — as data, not as a picture.
+
+    The diagram this replaces drew its own boxes, which meant the cards you had put on the bench
+    were shown twice: once as themselves and once as two truncated words in a rectangle. What
+    somebody asked for is the cards *they can read*, with the relations drawn between them — so
+    this returns the pairs and the page draws the lines behind the real cards.
+    """
+    picked = [one for one in cards.split(",") if one]
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    stamped = [row for project in projects for one in project.instances for row in one.rows]
+    drawn = bench.lay_out(picked, stamped, await store.ideas(limit=400), await store.idea_links())
+    ties = [{"from": tie.from_id, "to": tie.to_id, "says": tie.says} for tie in drawn.ties]
+    return HTMLResponse(json.dumps(ties), media_type="application/json")
+
+
 @router.get("/workbench", response_class=HTMLResponse)
 async def workbench_diagram(cards: str = "") -> HTMLResponse:
     """The cards on the workbench as a diagram, with the relations between them drawn.
@@ -1297,7 +1324,13 @@ async def read_meeting(request: Request) -> Response:
     async def read() -> None:
         await meeting.read_meeting(store, said, project_key=where)
 
-    block_runs.runs.start(f"meeting:{now_ms()}", read)
+    if block_runs.runs.running:
+        block_runs.runs.start(f"meeting:{now_ms()}", read)
+    else:
+        # No group to run it in, which is not a state the console is ever in — but a route that
+        # raises rather than answers is a 500 where a page belongs, and this is the second call
+        # site to need the same guard the drafts use.
+        log.warning("a meeting was pasted with no task group to read it in")
     panel = await render_ideas()
     if _wants_fragment(request):
         return HTMLResponse(panel)

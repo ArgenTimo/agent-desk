@@ -263,3 +263,78 @@ def test_an_install_that_fails_stops_before_the_gate(tmp_path: pathlib.Path) -> 
 
     assert not result.landed
     assert "`make install` failed" in result.detail
+
+
+@pytest.mark.unit
+def test_a_git_that_is_not_there_is_a_refusal_rather_than_a_crash(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`land` is called from a loop. A loop that dies on a missing binary takes the console."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    monkeypatch.setattr(
+        land.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("no git here")),
+    )
+
+    result = land.land(str(root), "found-project", push=False)
+
+    assert not result.landed
+    assert result.detail
+
+
+@pytest.mark.unit
+def test_a_gate_that_cannot_be_run_at_all_is_not_a_pass(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Could not run it" and "it passed" must never be the same outcome."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    where = land.worktree_for(str(root), "found-project")
+
+    real = land.subprocess.run
+
+    def make_explodes(command, **kwargs):  # type: ignore[no-untyped-def]
+        if command and command[0] == land.MAKE:
+            raise OSError("make is not installed")
+        return real(command, **kwargs)
+
+    monkeypatch.setattr(land.subprocess, "run", make_explodes)
+
+    passed, said = land._gate(where)
+
+    assert not passed
+    assert "could not run" in said or "install" in said
+
+
+@pytest.mark.unit
+def test_a_worktree_that_stopped_being_a_checkout_is_not_gated(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Somebody removed it between the agent finishing and this running."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    where = land.worktree_for(str(root), "found-project")
+    monkeypatch.setattr(land, "_git", lambda *args, **kwargs: (1, "not a git repository"))
+
+    passed, said = land._gate(where)
+
+    assert not passed
+    assert "not a checkout" in said
+
+
+@pytest.mark.unit
+def test_a_repository_whose_gate_says_nothing_at_all_still_fails_clearly(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A gate that exits non-zero and prints nothing is the least helpful failure there is, so the
+    message says which target it was rather than nothing."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    (land.worktree_for(str(root), "found-project") / "Makefile").write_text("verify:\n\t@exit 1\n")
+
+    result = land.land(str(root), "found-project", push=False)
+
+    assert not result.landed
+    assert "`make verify` failed" in result.detail

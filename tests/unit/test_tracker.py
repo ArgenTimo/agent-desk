@@ -7,6 +7,7 @@ the request this program would make, and the ways it declines to make one at all
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import pathlib
 import urllib.error
@@ -627,3 +628,114 @@ async def test_a_connector_that_has_gone_is_not_a_stack_trace(desk: Store) -> No
 
     assert status == 404
     assert "not on this project any more" in card
+
+
+# --- what comes back when a tracker says no -----------------------------------------------------
+@pytest.mark.unit
+def test_a_refusal_carries_jiras_own_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 401 and a 400 are the two things that actually happen with a tracker, and "it failed" is
+    not enough to fix either of them."""
+    said = json.dumps(
+        {"errorMessages": ["Issue type is required"], "errors": {"project": "is not valid"}}
+    ).encode()
+
+    assert "Issue type is required" in jira._why(400, said)
+    assert "project: is not valid" in jira._why(400, said)
+    assert "400" in jira._why(400, said)
+    # A body that is not JSON at all still says what happened.
+    assert "401" in jira._why(401, b"<html>go away</html>")
+
+
+@pytest.mark.unit
+def test_an_http_error_is_a_status_and_a_body_rather_than_an_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both requests turn a refusal into a value, because both are reached from something that has
+    to render either way."""
+    import urllib.error
+    import urllib.request
+
+    def refuse(request: object, timeout: float = 0) -> object:
+        raise urllib.error.HTTPError(
+            "https://x.atlassian.net", 403, "Forbidden", {}, io.BytesIO(b'{"errorMessages":["no"]}')
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+
+    status, raw = jira._get("https://x.atlassian.net/rest/api/3/search", "Basic x")
+    assert status == 403
+    assert b"no" in raw
+
+    status, raw = jira._post("https://x.atlassian.net/rest/api/3/issue", b"{}", "Basic x")
+    assert status == 403
+
+
+@pytest.mark.unit
+def test_a_successful_request_returns_what_the_server_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import urllib.request
+
+    class Answer:
+        status = 200
+
+        def read(self) -> bytes:
+            return b'{"key":"DUCK-3"}'
+
+        def __enter__(self) -> Answer:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=0: Answer())
+
+    assert jira._get("https://x.atlassian.net/a", "Basic x") == (200, b'{"key":"DUCK-3"}')
+    assert jira._post("https://x.atlassian.net/a", b"{}", "Basic x") == (200, b'{"key":"DUCK-3"}')
+
+
+@pytest.mark.unit
+def test_a_body_that_is_not_what_was_expected_is_said_plainly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filing that answered 200 with an unreadable body must not report an issue key it does not
+    have — an idea marked filed with no ticket behind it is the worst outcome available."""
+    monkeypatch.setattr(jira, "_post", lambda url, body, auth: (200, b"not json"))
+    monkeypatch.setenv("DUCK_TOKEN", "a-token")
+    destination = jira.destination_of("https://x.atlassian.net/browse/DUCK", "DUCK_TOKEN")
+    assert destination is not None
+
+    filed = jira.file_issue(destination, "a summary", "a description")
+
+    assert not filed.filed
+    assert filed.key == ""
+    assert "does not understand" in filed.detail
+
+
+@pytest.mark.unit
+def test_a_search_that_answers_with_something_else_is_not_an_empty_board(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable board must never look like a board with nothing on it."""
+    monkeypatch.setattr(jira, "_get", lambda url, auth: (200, b"<html>login</html>"))
+    monkeypatch.setenv("DUCK_TOKEN", "a-token")
+    destination = jira.destination_of("https://x.atlassian.net/browse/DUCK", "DUCK_TOKEN")
+    assert destination is not None
+
+    read = jira.read_board(destination)
+
+    assert not read.ok
+    assert read.tickets == ()
+    assert "does not understand" in read.detail
+
+    # An genuinely empty board is a different answer, and it is ok.
+    monkeypatch.setattr(jira, "_get", lambda url, auth: (200, b'{"issues": []}'))
+    empty = jira.read_board(destination)
+    assert empty.ok and empty.tickets == ()
+
+
+@pytest.mark.unit
+def test_the_browse_url_is_where_a_person_would_go() -> None:
+    destination = jira.destination_of(BOARD_URL, "DUCK_TOKEN")
+    assert destination is not None
+    assert destination.browse == "https://batmslec.atlassian.net/browse/DUCK"

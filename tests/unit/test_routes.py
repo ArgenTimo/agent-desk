@@ -11,6 +11,7 @@ agent on this machine, which is the sort of thing a test suite must never do by 
 from __future__ import annotations
 
 import asyncio
+import json
 import pathlib
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
@@ -1449,3 +1450,45 @@ async def test_a_card_says_which_project_it_is_about(
     column = await routes.render_ideas()
     assert f'data-id="{loose.id}"' in column
     assert column.count("data-about") == 1
+
+
+@pytest.mark.unit
+async def test_the_bench_reports_which_cards_are_related(home: Home, desk: Store) -> None:
+    """The lines are drawn behind the real cards, so the page needs the pairs rather than a
+    picture: "я хочу видеть блоки на верстаке как связанные карточки"."""
+    session_id = _a_session(home)
+    rows, _ = routes.board()
+    key = routes.shape(rows, [])[0].key
+    first = await desk.create_idea(text_="the parser", summary="the parser", source_kind="typed")
+    second = await desk.create_idea(text_="the cache", summary="the cache", source_kind="typed")
+    await desk.link_ideas(from_id=second.id, to_id=first.id, kind="needs")
+
+    status, body = await _get(
+        f"/workbench/ties?cards=project:{key},session:{session_id},idea:{first.id},idea:{second.id}"
+    )
+
+    assert status == 200
+    ties = json.loads(body)
+    said = {(tie["from"], tie["to"], tie["says"]) for tie in ties}
+    assert (f"project:{key}", f"session:{session_id}", "runs in") in said
+    assert (f"idea:{first.id}", f"idea:{second.id}", "needs") in said
+
+    # Nothing on the bench is no lines rather than an error.
+    status, body = await _get("/workbench/ties?cards=")
+    assert status == 200 and json.loads(body) == []
+
+
+@pytest.mark.unit
+async def test_a_meeting_pasted_into_the_pool_comes_back_immediately(
+    home: Home, desk: Store
+) -> None:
+    """It is read in passes and each one is a model call, so the field must not wait for it."""
+    status, panel = await _post("/ideas/meeting", {"transcript": "   "})
+    assert status == 200
+    assert await desk.ideas() == []
+
+    # With something in it, the column comes straight back and the reading happens behind it —
+    # and where there is nothing to run it in, it answers a page rather than raising a 500.
+    status, panel = await _post("/ideas/meeting", {"transcript": "someone: we need a grid"})
+    assert status == 200
+    assert "idea" in panel or "Nothing recorded" in panel

@@ -206,3 +206,62 @@ def test_the_subagents_a_session_started_are_visible(tmp_path: pathlib.Path) -> 
 def test_a_session_that_farmed_out_nothing_says_nothing(tmp_path: pathlib.Path) -> None:
     tail = TranscriptTail(session_id="s")
     assert tail.agents == []
+
+
+@pytest.mark.unit
+def test_a_worktree_is_the_repository_it_was_made_from(tmp_path: pathlib.Path) -> None:
+    """A `.git` *file* rather than a directory is what a worktree has, and it points back at the
+    checkout. Getting this wrong would file every dispatched agent under its own project —
+    which is every agent this console starts (docs/adr/0006)."""
+    from agent_desk.observe.shape import repository_of
+
+    checkout = tmp_path / "project"
+    (checkout / ".git" / "worktrees" / "a-name").mkdir(parents=True)
+    (checkout / ".git" / "config").write_text(
+        '[remote "origin"]\n\turl = git@github.com:owner/name.git\n'
+    )
+    tree = checkout / ".claude" / "worktrees" / "a-name"
+    tree.mkdir(parents=True)
+    (tree / ".git").write_text(f"gitdir: {checkout / '.git' / 'worktrees' / 'a-name'}\n")
+
+    assert repository_of(str(tree)).key == "origin:owner/name"
+    assert repository_of(str(checkout)).key == "origin:owner/name"
+
+
+@pytest.mark.unit
+def test_a_git_file_that_says_something_else_is_not_followed(tmp_path: pathlib.Path) -> None:
+    """It is a file this program did not write, in a repository it only watches."""
+    from agent_desk.observe.shape import repository_of
+
+    where = tmp_path / "odd"
+    where.mkdir()
+    (where / ".git").write_text("this is not a gitdir pointer\n")
+
+    # Not a checkout as far as this is concerned, and its own directory instead.
+    assert repository_of(str(where)).key == f"dir:{where}"
+
+
+@pytest.mark.unit
+def test_a_checkout_with_no_origin_is_filed_under_where_it_is(tmp_path: pathlib.Path) -> None:
+    """Which is right: two clones of nothing are two different projects."""
+    from agent_desk.observe.shape import repository_of
+
+    where = tmp_path / "local-only"
+    (where / ".git").mkdir(parents=True)
+    (where / ".git" / "config").write_text("[core]\n\tbare = false\n")
+
+    found = repository_of(str(where))
+    assert found.key.startswith("git:") or found.key.startswith("dir:")
+    assert found.origin in (None, "")
+
+
+@pytest.mark.unit
+def test_a_config_that_cannot_be_parsed_is_not_a_crash(tmp_path: pathlib.Path) -> None:
+    """A file this program did not write and does not control."""
+    from agent_desk.observe.shape import repository_of
+
+    where = tmp_path / "broken"
+    (where / ".git").mkdir(parents=True)
+    (where / ".git" / "config").write_text("[[[not ini at all\n")
+
+    assert repository_of(str(where)).key  # it answers something rather than raising

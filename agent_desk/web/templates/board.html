@@ -82,11 +82,14 @@
         <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
       </span>
       <span class="spacer"></span>
-      <button type="button" class="chip bench-toggle" data-bench-toggle aria-pressed="false"
-              title="draw what is on the workbench and how it is related">as a diagram</button>
     </div>
-    <div id="pins" class="pins" aria-label="what the next message is about"></div>
-    <div id="bench" class="bench" hidden></div>
+    {# The cards, with the relations drawn between them. The lines are an SVG behind the pins
+       rather than a diagram beside them: what is wanted is *these* cards, readable, joined —
+       not a second set of boxes with the same words truncated into them. #}
+    <div class="pins-frame">
+      <svg id="bench-ties" class="bench-ties" aria-hidden="true" hidden></svg>
+      <div id="pins" class="pins" aria-label="what the next message is about"></div>
+    </div>
 
     <div class="context-strip">
       <span id="context-count"></span>

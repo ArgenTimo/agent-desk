@@ -44,7 +44,7 @@ test: ## pytest -m unit
 # to the network or fork a real session — `tracker/jira.py`'s one request, `dispatch`'s subprocess
 # — and each of those is one function with everything around it tested.
 coverage: ## pytest with a coverage floor
-	$(POETRY) run pytest -m unit -q --cov=agent_desk --cov-report=term-missing --cov-fail-under=93
+	$(POETRY) run pytest -m unit -q --cov=agent_desk --cov-report=term-missing --cov-fail-under=94
 
 gate: lint typecheck test ## What stop-verify.sh runs at every turn end
 
@@ -52,6 +52,15 @@ verify: gate check-links check-patterns coverage ## Everything green before a hu
 
 check-links: ## Prove every relative link in docs/ and design/ resolves
 	@scripts/check-doc-links.sh
+
+.PHONY: audit
+audit: ## Known advisories against what is installed, and a static look for the usual holes
+	@# Not part of `verify`, and that is deliberate: both of these want the network, and a gate
+	@# that fails on a train is a gate people learn to skip. Run it before a release and when
+	@# something in the lock file moves.
+	unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT; poetry run pip-audit --progress-spinner off || true
+	unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT; poetry run bandit -q -c pyproject.toml -r agent_desk \
+		-f custom --msg-template "{severity}/{confidence} {relpath}:{line} {test_id} {msg}" || true
 
 .PHONY: check-patterns
 check-patterns: ## The packaged secret shapes must match the ones the commit hook reads

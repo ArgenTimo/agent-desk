@@ -107,3 +107,48 @@ def test_the_same_card_twice_is_one_card() -> None:
     drawn = bench.lay_out(["session:s-1", "session:s-1"], [ROW], [], [])
 
     assert len(drawn.pieces) == 1
+
+
+@pytest.mark.unit
+def test_a_card_this_console_cannot_name_still_gets_a_label() -> None:
+    """A blank box on a diagram is worse than a rough one: it says the console lost the card."""
+    drawn = bench.lay_out(
+        ["instance:/home/someone/a-project", "project:origin:acme/api", "blocker:task:xyz"],
+        [],
+        [],
+        [],
+    )
+
+    assert all(piece.label for piece in drawn.pieces)
+    labels = {piece.kind: piece.label for piece in drawn.pieces}
+    assert labels["project"] == "acme/api"
+    assert labels["instance"] == "a-project"
+
+
+@pytest.mark.unit
+def test_a_card_shape_this_does_not_know_is_placed_rather_than_dropped() -> None:
+    """A kind added to the board later must not vanish from the bench in the meantime."""
+    drawn = bench.lay_out(["something-new:x1"], [], [], [])
+
+    (piece,) = drawn.pieces
+    assert piece.kind == "something-new"
+    assert piece.x >= 0 and piece.y >= 0
+
+
+@pytest.mark.unit
+def test_nonsense_on_the_bench_is_skipped_without_taking_the_rest_with_it() -> None:
+    """The list comes from the page, and a half-written entry must not empty the diagram."""
+    drawn = bench.lay_out(["", ":", "idea:", ":x", "session:s-1"], [ROW], [], [])
+
+    assert [piece.id for piece in drawn.pieces] == ["s-1"]
+
+
+@pytest.mark.unit
+def test_an_idea_on_the_bench_carries_what_has_happened_to_it() -> None:
+    """It is drawn differently when it is built, which is the whole of why the state is here."""
+    ideas = [_idea("i1", "the parser", state="done")]
+
+    drawn = bench.lay_out(["idea:i1"], [], ideas, [])
+
+    (piece,) = drawn.pieces
+    assert piece.state == "done"

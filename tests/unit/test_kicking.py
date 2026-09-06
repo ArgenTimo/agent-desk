@@ -7,6 +7,8 @@ and the reasons are what somebody has to trust at three in the morning.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import pathlib
 from collections.abc import AsyncIterator
@@ -226,3 +228,72 @@ async def test_only_one_session_is_continued_in_a_tick(
     await kicking.tick(desk)
 
     assert len(sent) == 1
+
+
+@pytest.mark.unit
+async def test_both_loops_stop_when_the_cancel_lands_inside_a_pass(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`app.lifespan` cancels these and then waits for them, so they have to end.
+
+    The cancel arriving while a loop is parked between passes was always fine. The one that
+    matters is the other one: a pass sits in a thread for as long as `dispatch.kick` takes to
+    start a session, or for as long as several model calls take to read the pool — and a
+    cancellation swallowed there leaves the TaskGroup waiting for a task that never finishes.
+
+    An exploration found exactly this in `autostart.run`. These two had the same shape.
+    """
+
+    async def one_loop(loop: object, patch: object) -> None:
+        inside = asyncio.Event()
+
+        async def slow(*args: object, **kwargs: object) -> None:
+            inside.set()
+            await asyncio.sleep(30)
+
+        patch(slow)  # type: ignore[operator]
+        running = asyncio.create_task(loop(desk))  # type: ignore[operator]
+        await inside.wait()
+        running.cancel()
+
+        _, pending = await asyncio.wait({running}, timeout=1)
+        for task in pending:  # pragma: no cover — reaching this is the failure
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        assert not pending, "a loop swallowed the cancellation and went on running"
+
+    await one_loop(kicking.run, lambda fake: monkeypatch.setattr(kicking, "tick", fake))
+    await one_loop(
+        kicking.appraising, lambda fake: monkeypatch.setattr(kicking.appraise, "sweep", fake)
+    )
+
+
+@pytest.mark.unit
+async def test_a_pass_that_raises_does_not_end_the_loop(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A loop that took the console down with it would be a worse failure than anything it was
+    started to do."""
+    twice = asyncio.Event()
+    calls: list[int] = []
+
+    async def explodes(store: Store) -> None:
+        calls.append(1)
+        if len(calls) >= 2:
+            twice.set()
+        raise RuntimeError("something went wrong in a pass")
+
+    monkeypatch.setattr(kicking, "tick", explodes)
+    monkeypatch.setattr(kicking, "TICK_SECONDS", 0.01)
+
+    running = asyncio.create_task(kicking.run(desk))
+    try:
+        async with asyncio.timeout(5):
+            await twice.wait()
+    finally:
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
+
+    assert len(calls) >= 2

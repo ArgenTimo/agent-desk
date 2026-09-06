@@ -42,9 +42,17 @@ class Piece:
 
 @dataclass(frozen=True)
 class Tie:
-    """One relation between two cards, and the word for it."""
+    """One relation between two cards, and the word for it.
+
+    It carries the two card names as well as the coordinates, because there are two things that
+    want this: a diagram, which needs where to draw the line, and the page's own bench, which
+    needs to know *which cards* to draw it between — the cards somebody can read, rather than a
+    second set of boxes with the same words truncated into them.
+    """
 
     says: str
+    from_id: str
+    to_id: str
     x1: int
     y1: int
     x2: int
@@ -127,6 +135,8 @@ def lay_out(
         ties.append(
             Tie(
                 says=says,
+                from_id=f"{one.kind}:{one.id}",
+                to_id=f"{other.kind}:{other.id}",
                 x1=one.x + BOX_WIDTH,
                 y1=one.y + BOX_HEIGHT // 2,
                 x2=other.x,
