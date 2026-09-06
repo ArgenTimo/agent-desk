@@ -408,7 +408,7 @@ async def test_what_it_found_is_offered_to_the_project_when_its_agent_goes(
     await loop.settle(desk, set())
 
     # Offered under the same name its worktree was made with.
-    assert offered == [(str(tmp_path), loop._worktree_of(task))]
+    assert offered == [(str(tmp_path), loop.worktree_of(task))]
     settled = next(one for one in await desk.tasks() if one.id == task.id)
     assert settled.finished_at is not None
     assert settled.detail is not None and "merged and pushed" in settled.detail
@@ -619,12 +619,12 @@ def test_the_branch_the_cli_actually_made_is_preferred_over_a_second_guess() -> 
         source_kind="found",
         queued_at=0,
     )
-    assert autostart._worktree_of(task, JobEnd(state="done", worktreeBranch="worktree-a-name")) == (
+    assert autostart.worktree_of(task, JobEnd(state="done", worktreeBranch="worktree-a-name")) == (
         "a-name"
     )
     # No job file, or one from a CLI that stopped recording it: the derivation is the fallback.
-    assert autostart._worktree_of(task, None) == dispatch._worktree_name(task.title)
-    assert autostart._worktree_of(task, JobEnd(state="done")) == dispatch._worktree_name(task.title)
+    assert autostart.worktree_of(task, None) == dispatch._worktree_name(task.title)
+    assert autostart.worktree_of(task, JobEnd(state="done")) == dispatch._worktree_name(task.title)
 
 
 @pytest.mark.unit

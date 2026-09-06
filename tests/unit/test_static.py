@@ -349,3 +349,39 @@ def test_nothing_sits_between_the_bench_and_the_columns_but_the_handle() -> None
     grid = css[css.index(".desk-grid {") :]
     grid = grid[: grid.index("}")]
     assert "gap: 0" in grid, "there is dead space between the columns again"
+
+
+@pytest.mark.unit
+def test_one_field_finds_anything_on_the_board() -> None:
+    """Ctrl+K. Three columns, six kinds of card and a dozen buttons is a discovery problem that
+    more buttons do not solve.
+
+    The one thing worth pinning about it: it searches what the page is *already showing*. A
+    palette that searched a different set from the one on screen would be a palette that disagrees
+    with the page it sits on — so no fetch, and the kinds it looks in are named here.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function openPalette(" in console and "const PALETTE_ROWS" in console
+    assert "event.key.toLowerCase() === 'k'" in console, "nothing opens it"
+
+    finder = console[console.index("function everythingOnThePage(") :]
+    finder = finder[: finder.index("\n}\n")]
+    assert "fetch(" not in finder, "the palette asks the server instead of reading the page"
+
+    rows = console[console.index("const PALETTE_ROWS") :]
+    rows = rows[: rows.index("];")]
+    for kind in ("idea", "blocker", "session", "project"):
+        assert f"'{kind}'" in rows, f"the palette cannot find a {kind}"
+
+
+@pytest.mark.unit
+def test_the_keyboard_panel_lists_the_keys_that_exist() -> None:
+    """A shortcut nobody can discover is a shortcut nobody uses, and a panel that has fallen
+    behind the file it documents is worse than none — it is a list of things that do not work."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    keys = console[console.index("const KEYS = `") :]
+    keys = keys[: keys.index("`;")]
+
+    assert "Ctrl+K" in keys, "the palette is not discoverable"
+    assert "↓" in keys, "moving a card by keyboard is not written down anywhere"

@@ -2061,6 +2061,132 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+/* --- everything on this page, from one field --------------------------------------------------- */
+// A console with three columns, six kinds of card and a dozen buttons has a discovery problem that
+// more buttons do not solve. Ctrl+K is the answer every tool of this shape converged on: type a
+// few letters, get the thing, press Enter.
+//
+// It searches what is already rendered rather than asking the server. That is not a shortcut — it
+// is the correct source: the page holds every project, session, idea and blocker the board is
+// currently showing, with the same words on them that somebody just read. A palette that searched
+// a different set from the one on screen would be a palette that disagrees with the page.
+const PALETTE_ROWS = [
+  ['.idea-card', 'idea'],
+  ['.card.blocker.node', 'blocker'],
+  ['[data-kind="session"]', 'session'],
+  ['[data-kind="project"]', 'project'],
+  ['[data-kind="instance"]', 'checkout'],
+];
+
+let palette = null;
+let paletteAt = 0;
+
+function everythingOnThePage() {
+  const found = [];
+  const seen = new Set();
+  for (const [where, kind] of PALETTE_ROWS) {
+    for (const node of document.querySelectorAll(where)) {
+      const id = node.dataset.id || node.dataset.label || '';
+      const name = (node.dataset.label || node.querySelector('.card-name')?.textContent || '').trim();
+      if (!name || seen.has(`${kind}:${id}`)) continue;
+      seen.add(`${kind}:${id}`);
+      found.push({ kind, id, name, node });
+    }
+  }
+  return found;
+}
+
+function openPalette() {
+  if (palette) return closePalette();
+  palette = document.createElement('div');
+  palette.className = 'palette';
+  palette.innerHTML = `<div class="palette-box">
+    <input type="text" class="palette-field" placeholder="a project, a session, an idea, something stuck…"
+           autocomplete="off" spellcheck="false" aria-label="find anything on this board">
+    <ul class="palette-list"></ul>
+    <p class="palette-foot">Enter puts it on the workbench · Esc closes</p>
+  </div>`;
+  document.body.appendChild(palette);
+  const field = palette.querySelector('.palette-field');
+  field.addEventListener('input', () => drawPalette(field.value));
+  field.addEventListener('keydown', paletteKeys);
+  palette.addEventListener('pointerdown', (event) => {
+    if (event.target === palette) closePalette();
+  });
+  drawPalette('');
+  field.focus();
+}
+
+function closePalette() {
+  palette?.remove();
+  palette = null;
+  paletteAt = 0;
+}
+
+// Every word has to appear somewhere in the name, in any order. Not a fuzzy match: on a list this
+// short a fuzzy match mostly produces confident wrong answers, and "api sess" finding the session
+// in api is the whole of what somebody wants from it.
+function paletteMatches(said) {
+  const words = said.toLowerCase().split(/\s+/).filter(Boolean);
+  return everythingOnThePage()
+    .filter((one) => words.every((word) => `${one.kind} ${one.name}`.toLowerCase().includes(word)))
+    .slice(0, 12);
+}
+
+function drawPalette(said) {
+  const list = palette?.querySelector('.palette-list');
+  if (!list) return;
+  const rows = paletteMatches(said);
+  paletteAt = Math.min(paletteAt, Math.max(0, rows.length - 1));
+  list.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('li');
+    empty.className = 'palette-empty';
+    empty.textContent = 'nothing on the board matches that';
+    list.appendChild(empty);
+    return;
+  }
+  rows.forEach((one, index) => {
+    const row = document.createElement('li');
+    row.className = `palette-row${index === paletteAt ? ' at' : ''}`;
+    row.innerHTML = '<span class="palette-kind"></span><span class="palette-name"></span>';
+    row.querySelector('.palette-kind').textContent = one.kind;
+    row.querySelector('.palette-name').textContent = one.name;
+    row.addEventListener('pointerdown', () => takePalette(one));
+    list.appendChild(row);
+  });
+}
+
+function paletteKeys(event) {
+  const rows = paletteMatches(event.target.value);
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePalette();
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    paletteAt = Math.max(0, Math.min(rows.length - 1, paletteAt + (event.key === 'ArrowDown' ? 1 : -1)));
+    drawPalette(event.target.value);
+  } else if (event.key === 'Enter' && rows[paletteAt]) {
+    event.preventDefault();
+    takePalette(rows[paletteAt]);
+  }
+}
+
+// What choosing one does: it lands on the workbench, which is where everything on this page goes
+// to be looked at and asked about. Not "scroll the column to it" — that is a different tool's
+// answer, and this one has a surface.
+function takePalette(one) {
+  closePalette();
+  pin({ kind: one.kind === 'checkout' ? 'instance' : one.kind, id: one.id, label: one.name });
+}
+
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    openPalette();
+  }
+});
+
 // Written here rather than in a template: it is a list of what this file does, and a copy in a
 // template is a copy that stops being true.
 const KEYS = `<div class="keys card"><div class="card-head"><span class="card-name">the keyboard</span></div>
@@ -2071,6 +2197,8 @@ const KEYS = `<div class="keys card"><div class="card-head"><span class="card-na
 <dt>1 · 2 · 3</dt><dd>hide the overview, the blockers, the right column — press again to bring it back</dd>
 <dt>n · w</dt><dd>a new chat, and close this one</dd>
 <dt>Esc</dt><dd>close this panel, then clear the workbench, then let go of the field</dd>
+<dt>Ctrl+K</dt><dd>find any project, session, idea or blocker and put it on the workbench</dd>
+<dt>← ↑ → ↓</dt><dd>move the card you have chosen — with nothing chosen, move the bench itself</dd>
 <dt>?</dt><dd>this</dd>
 </dl></div></div>`;
 

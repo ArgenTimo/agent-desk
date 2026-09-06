@@ -1618,6 +1618,20 @@ class Store:
             )
             return [self._idea(row._mapping) for row in rows]
 
+    async def set_idea_shape(self, idea_id: str, shape: str) -> None:
+        """Correct what a background pass made of an idea's shape (022-idea-appraisal.sql).
+
+        The pass reads "this sounds like it already exists" out of the words and says so as a
+        question. This is the answer to that question, and it is a person's — which is why it
+        writes `shape` and never `state`: saying "no, it is not built" is not the same act as
+        saying what to do about it.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE idea SET shape = :shape WHERE id = :id"),
+                {"shape": shape, "id": idea_id},
+            )
+
     # --- putting a thing off, with a moment on it (031-deferred.sql) --------------------------
     async def defer_idea(self, idea_id: str, *, at: int | None, when: str | None) -> None:
         """Give an idea a moment to come back at.

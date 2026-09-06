@@ -1855,3 +1855,89 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 }
 .held a { color: var(--fg-soft); }
 .held a:hover { color: var(--fg); }
+
+/* --- the palette ------------------------------------------------------------------------------ */
+/* Ctrl+K. A console with three columns, six kinds of card and a dozen buttons has a discovery
+   problem that more buttons do not solve; this is the answer every tool of this shape converged
+   on. It searches what the page is already showing, which is the same set somebody just read. */
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.palette-box {
+  width: min(560px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--fg) 24%, transparent);
+  overflow: hidden;
+}
+.palette-field {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-md);
+}
+.palette-field:focus { outline: none; }
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+.palette-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.palette-row.at, .palette-row:hover { background: var(--raised); }
+.palette-kind {
+  flex: 0 0 4.5rem;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.palette-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-empty, .palette-foot {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}
+.palette-foot { border-top: 1px solid var(--line); }
+
+/* --- a button that is a decision --------------------------------------------------------------- */
+/* The ones that change what happens next, rather than what is recorded about it: build this,
+   switch it back on, run the gate again. One weight up from the rest so a card full of controls
+   still has an obvious answer in it. */
+button.go, button.yes {
+  border-color: var(--focus);
+  color: var(--focus);
+}
+button.go:hover, button.yes:hover {
+  background: color-mix(in srgb, var(--focus) 12%, transparent);
+  color: var(--focus);
+}
+.idea-buttons.answer { margin: 2px 0 6px; }
+.idea-later {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+.idea-later select { font: inherit; font-size: var(--t-xs); max-width: 100%; }
+.idea-later.on { color: var(--fg-soft); font-size: var(--t-sm); }

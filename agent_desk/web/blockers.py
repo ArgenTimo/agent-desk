@@ -107,6 +107,12 @@ class Blocker:
     # still worth showing; a blocker whose fix is one click and does not offer it is not.
     action: str = ""
     action_says: str = ""
+    # What the form has to carry for that route to mean this blocker. A blocker whose fix is one
+    # press and does not offer it is a blocker that sends somebody looking for the switch —
+    # through the project page, past four other controls, to press the thing the card already
+    # named. The fields are here rather than in the template because which route wants what is a
+    # fact about the route.
+    action_fields: tuple[tuple[str, str], ...] = ()
     # The ideas and tasks this one is genuinely stopping, by name. See the table in the module
     # docstring for what "genuinely" is allowed to mean here.
     holding_up: tuple[Held, ...] = field(default=())
@@ -213,6 +219,7 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     when=task.failed_at,
                     action=f"/tasks/{task.id}/retry",
                     action_says="try it again",
+                    action_fields=(("key", task.repo_key),),
                     holding_up=tuple(_ideas_of(task, ideas)),
                 )
             )
@@ -227,6 +234,12 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     why=task.detail or "the gate would not take it",
                     when=task.finished_at,
                     holding_up=tuple(_ideas_of(task, ideas)),
+                    # The branch is committed and sitting in a worktree. Offering the gate again
+                    # is the whole of what somebody does about it once they have pushed a fix, and
+                    # it was two pages away.
+                    action=f"/tasks/{task.id}/land",
+                    action_says="run the gate on it again",
+                    action_fields=(("key", task.repo_key),),
                 )
             )
 
@@ -242,6 +255,13 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     when=arming.armed_at or 0,
                     card=f"project:{arming.repo_key}",
                     holding_up=tuple(queued.get(arming.repo_key, ())),
+                    action="/autostart",
+                    action_says="switch it back on",
+                    action_fields=(
+                        ("key", arming.repo_key),
+                        ("armed", "yes"),
+                        ("per_hour", str(arming.per_hour)),
+                    ),
                 )
             )
 
@@ -262,6 +282,11 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                 why=f"it stopped being kept going: {kicked.disarmed_why}",
                 when=kicked.kicked_at or 0,
                 card=f"session:{kicked.session_id}" if kicked.session_id else "",
+                # Only where the full id is on the row: the route addresses a session by it, and
+                # a button that cannot say which session it means is a button that does nothing.
+                action=(f"/sessions/{kicked.session_id}/kicking" if kicked.session_id else ""),
+                action_says="start keeping it going again",
+                action_fields=(("kicking", "yes"),),
             )
         )
 
@@ -274,6 +299,8 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     what=block.input.splitlines()[0][:60] if block.input else "a question",
                     why=block.error or "the run failed and said nothing",
                     when=block.finished_at,
+                    action=f"/blocks/{block.id}/retry",
+                    action_says="ask it again",
                 )
             )
 

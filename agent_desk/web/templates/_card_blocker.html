@@ -75,7 +75,10 @@
 
     {% if one.action %}
     <form method="post" action="{{ one.action }}" hx-post="{{ one.action }}" hx-target="#message">
-      <button type="submit">{{ one.action_says }}</button>
+      {% for name, value in one.action_fields %}
+      <input type="hidden" name="{{ name }}" value="{{ value }}">
+      {% endfor %}
+      <button type="submit" class="go">{{ one.action_says }}</button>
     </form>
     {% else %}
     <p class="dim small">There is nothing here to press: this one is cleared by fixing what it

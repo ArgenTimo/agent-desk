@@ -44,7 +44,24 @@
     {% if evidence.startswith("already built") %}
     <p class="small">✓ {{ evidence }}</p>
     {% else %}
+    {# A question with buttons under it. It used to be a question with nothing under it: the card
+       raised a doubt and left somebody to resolve it somewhere else, which mostly meant not at
+       all — and a pool where a third of the cards carry an unanswered doubt is a pool nobody
+       trusts. Both answers are one press, and neither is this program's to make. #}
     <p class="small attention-line">🤔 This reads like something that already exists — is it?</p>
+    <div class="idea-buttons answer">
+      <form method="post" action="/ideas/{{ idea.id }}/done"
+            hx-post="/ideas/{{ idea.id }}/done" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit" class="yes">yes, it exists</button>
+      </form>
+      <form method="post" action="/ideas/{{ idea.id }}/shape"
+            hx-post="/ideas/{{ idea.id }}/shape" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <input type="hidden" name="shape" value="none">
+        <button type="submit">no, it does not</button>
+      </form>
+    </div>
     {% endif %}
     {% endif %}
     <div class="idea-buttons">
@@ -62,6 +79,17 @@
             hx-post="/ideas/{{ idea.id }}/done" hx-target="#idea-list">
         <input type="hidden" name="from" value="column">
         <button type="submit" title="this is built — take it off the list">built</button>
+      </form>
+      {% endif %}
+      {# The decision this column did not have: turn it into work. Everything else here recorded
+         what somebody thought about an idea; the only door to actually doing one went through a
+         message and the classifier. It queues against the project the card already names, and
+         the arming switch decides whether an agent starts on it now (docs/adr/0006, 0007). #}
+      {% if idea.state != "dropped" and idea.project_key %}
+      <form method="post" action="/ideas/{{ idea.id }}/build"
+            hx-post="/ideas/{{ idea.id }}/build" hx-target="#idea-list">
+        <input type="hidden" name="from" value="column">
+        <button type="submit" class="go" title="queue it as work in {{ named_projects.get(idea.project_key, 'its project') }}">build it</button>
       </form>
       {% endif %}
       {% if idea.state != "dropped" %}
@@ -90,6 +118,36 @@
          title="read it once more, then file it">file it…</a>
       {% endif %}
     </div>
+
+    {# Not now, and a moment to be asked again at — rather than the two answers a pool usually
+       offers, which are "do it" and "discard it". A thing put off with no moment on it is
+       indistinguishable from a thing abandoned, which is what this replaces (031-deferred.sql). #}
+    {% if idea.state != "dropped" %}
+    {% if idea.deferred %}
+    <form class="idea-later on" method="post" action="/ideas/{{ idea.id }}/later"
+          hx-post="/ideas/{{ idea.id }}/later" hx-target="#idea-list">
+      <input type="hidden" name="from" value="column">
+      <input type="hidden" name="when" value="never">
+      <span class="small">⏱ comes back {{ idea | comes_back }}</span>
+      <button type="submit" title="stop waiting and put it back in the pool">bring it back now</button>
+    </form>
+    {% else %}
+    <form class="idea-later" method="post" action="/ideas/{{ idea.id }}/later"
+          hx-post="/ideas/{{ idea.id }}/later" hx-target="#idea-list">
+      <input type="hidden" name="from" value="column">
+      <label class="visually-hidden" for="later-{{ idea.id }}">when to come back to it</label>
+      <select id="later-{{ idea.id }}" name="when" onchange="this.form.requestSubmit()">
+        <option value="">not now, ask me…</option>
+        <option value="tomorrow">tomorrow morning</option>
+        <option value="next week">next week</option>
+        <option value="in 2 hours">in two hours</option>
+        <option value="когда освободится">when nothing is running</option>
+        <option value="once the gate is green">once the gate is green</option>
+      </select>
+      <button type="submit" class="visually-hidden">put it off</button>
+    </form>
+    {% endif %}
+    {% endif %}
 
     {# What it needs, and what needs it. Not the same thing as a sub-idea: both of these are
        whole ideas, and either could be built by somebody who never heard of the other

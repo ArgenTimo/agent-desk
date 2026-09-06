@@ -19,7 +19,7 @@ import io
 import json
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import connectors, dispatch, peer, tracker
+from agent_desk import connectors, dispatch, land, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
@@ -724,6 +724,9 @@ async def render_ideas() -> str:
         grouped=len([idea for idea in ideas if children.get(idea.id)]),
         drafted=await store.drafted("ticket"),
         filings={filing.idea_id: filing for filing in await store.filings()},
+        # What each project is called, so "build it" can say where it would land rather than
+        # asking somebody to recognise a repository key.
+        named_projects=dict(await _project_choices()),
     )
 
 
@@ -1827,6 +1830,15 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
                     await store.task_failed(claimed.id, result.detail)
     elif action == "drop":
         await store.drop_task(task_id)
+    elif action == "land":
+        # Offer the branch to the project again, once somebody has pushed a fix to it. The same
+        # call the settling pass makes, with the same rule behind it: nothing lands that the
+        # project's own gate will not take (docs/adr/0008). A gate that says no again leaves the
+        # branch exactly where it is and says why, which is what it did the first time.
+        task = next((t for t in await store.tasks() if t.id == task_id), None)
+        if task is not None and task.finished_at is not None:
+            offered = await asyncio.to_thread(land.land, task.cwd, autostart.worktree_of(task))
+            await store.task_landed(task.id, offered.detail, landed=offered.landed)
     elif action == "retry":
         task = next((t for t in await store.tasks() if t.id == task_id), None)
         if task is not None and task.failed_at is not None:
@@ -2475,6 +2487,32 @@ async def file_idea(idea_id: str, request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+async def _build_it(idea: Idea) -> None:
+    """Put one idea in its project's queue, as approved work (docs/adr/0006, 0007).
+
+    Where it runs is resolved now rather than remembered: a queue holding a path that has since
+    moved starts an agent in the wrong directory. An idea pointed at no project, or at one with no
+    checkout on this machine, queues nothing — there is nowhere to do it, and inventing a
+    destination would be worse than the button doing nothing visible.
+    """
+    if not idea.project_key:
+        return
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    named = next((one for one in projects if one.key == idea.project_key), None)
+    if named is None or not named.instances:
+        return
+    await store.queue_task(
+        repo_key=named.key,
+        cwd=named.instances[0].path,
+        title=idea.summary[:60],
+        instruction=idea.text,
+        source_kind="idea",
+        # What gets marked built when its agent finishes (agent_desk/web/autostart.py).
+        source_ref=idea.id,
+    )
+
+
 @router.post("/ideas/{idea_id}/{action}", response_class=HTMLResponse)
 async def idea_action(idea_id: str, action: str, request: Request) -> Response:
     """Keep, discard, edit the summary, or produce one of the three drafts (docs/05-ideas.md).
@@ -2487,7 +2525,7 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
         return HTMLResponse(await render_inbox(), status_code=404)
 
     form = await _form(request)
-    if action not in ("keep", "drop", "done", "summary", *DRAFT_KINDS):
+    if action not in ("keep", "drop", "done", "summary", "build", "later", "shape", *DRAFT_KINDS):
         # An action this program does not have is a mistake somewhere, not something to redirect
         # away from quietly — that is how a typo becomes a mystery.
         # The segment is not echoed back: reflecting an unvalidated path into a response is a
@@ -2496,10 +2534,17 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
 
     # The templates hide a button that does not apply; the route has to mean it. Keeping an idea
     # that was already promoted quietly walked it backwards through its own four states.
+    #
+    # `build`, `later` and `shape` are decisions rather than states, which is why they sit beside
+    # the four rather than among them: "build it" says when the work happens, "later" says when to
+    # be asked again, and "shape" answers a question a background pass asked about the text. None
+    # of them is a step along `new → kept → promoted`, and a person may take any of them at any
+    # point before the idea is out of the pool.
+    decisions = {"build", "later", "shape"}
     allowed = {
-        "new": {"keep", "drop", "done", "summary"},
-        "kept": {"drop", "done", "summary", *DRAFT_KINDS},
-        "promoted": {"done", "summary", *DRAFT_KINDS},
+        "new": {"keep", "drop", "done", "summary"} | decisions,
+        "kept": {"drop", "done", "summary", *DRAFT_KINDS} | decisions,
+        "promoted": {"done", "summary", *DRAFT_KINDS} | decisions,
         "dropped": {"keep", "summary"},
         # Built is not final: a human who finds it was not, after all, says so with Keep.
         "done": {"keep", "summary"},
@@ -2523,6 +2568,30 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
             # opens. The draft that would be filed is ready by the time they reach for it.
             if block_runs.runs.running:
                 await block_runs.draft(store, idea, "proposal")
+    elif action == "build":
+        # The decision the column was missing. Everything else here recorded what somebody thought
+        # about an idea; nothing turned one into work, and the only door that did went through a
+        # message ("бери в работу") and the classifier. Approval and dispatch in one press is what
+        # docs/adr/0006 permits a human to do, and the queue is what docs/adr/0007 says it lands
+        # in: this puts it there, and the arming switch decides whether an agent starts on it now.
+        await _build_it(idea)
+    elif action == "later":
+        # "Отложенная задача должна иметь момент срабатывания." The machinery is
+        # agent_desk/web/later.py; this is the button that reaches it, and the phrase is read by
+        # the same function that reads one out of a typed message, so the two cannot drift.
+        wake = waking.read(form.get("when", "").strip(), now=datetime.now(UTC))
+        if wake is not None:
+            await store.defer_idea(idea_id, at=wake.at, when=wake.when)
+        elif form.get("when", "").strip() == "never":
+            # Taking a deferral off is the same button with nothing in it.
+            await store.defer_idea(idea_id, at=None, when=None)
+    elif action == "shape":
+        # The answer to a question the appraisal pass asked. "This reads like something that
+        # already exists — is it?" had no buttons under it: the card raised the doubt and left
+        # somebody to resolve it somewhere else, which mostly meant not at all.
+        said = form.get("shape", "").strip()
+        if said in ("build", "decide", "built", "none"):
+            await store.set_idea_shape(idea_id, "" if said == "none" else said)
     elif action == "summary":
         summary = form.get("summary", "").strip()
         if summary:
