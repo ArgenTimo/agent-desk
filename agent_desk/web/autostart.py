@@ -21,7 +21,7 @@ from agent_desk import dispatch, land
 from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd
 from agent_desk.store.repo import Autostart, Store, Task
-from agent_desk.tracker import jira
+from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
 
 log = structlog.get_logger()
@@ -296,6 +296,34 @@ async def pull_tickets(store: Store, arming: Autostart) -> int:
     return queued
 
 
+async def pull_requests(store: Store, arming: Autostart) -> int:
+    """Record the pull requests waiting on somebody as blockers. Returns how many.
+
+    "В качестве блокеров также могут висеть PR с github, которые ожидают ревью/апрува/мержа — для
+    тех проектов, которые подключили гитхаб как коннектор."
+
+    A pull request open for three days waiting on a review is a thing that has stopped, stopped on
+    a *person*, and invisible from a board that only watches sessions. Read-only, and only where
+    somebody named a credential on the project's GitHub link (`connectors.py`).
+    """
+    for link in await store.links(arming.repo_key):
+        if not link.token_env:
+            continue
+        repo = github.repo_of(link.url)
+        if not repo:
+            continue
+        read = await asyncio.to_thread(github.open_pulls, repo, link.token_env)
+        if not read.ok:
+            log.info("autostart.pulls_unread", repo=arming.repo_key, detail=read.detail)
+            return 0
+        await store.replace_pull_blockers(
+            arming.repo_key,
+            [(one.key, one.title, one.waiting_for, one.url) for one in read.pulls],
+        )
+        return len(read.pulls)
+    return 0
+
+
 async def check_claims(store: Store) -> int:
     """Look at the blockers somebody said were cleared, and say what is actually true.
 
@@ -441,6 +469,10 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
         # Nothing queued here, but there may be something on the project's own board. A ticket
         # somebody wrote comes before anything an agent would find for itself (docs/adr/0010),
         # which is why this sits above the exploration and below the queue.
+        # And what is waiting on a person over on GitHub, which never becomes queued work —
+        # a review is not something an agent can give (docs/adr/0010).
+        await pull_requests(store, arming)
+
         if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
             if await pull_tickets(store, arming):
                 return None

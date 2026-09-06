@@ -165,13 +165,16 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
     # this program does not decide that a ticket is blocked, it repeats that the ticket says so
     # (docs/adr/0010, CLAUDE.md rule five).
     for ticket in await store.tracker_blockers():
+        # A pull request and a ticket are the same thing to somebody reading this column — work
+        # stopped on a person — and the `#` is what tells them apart on the card.
+        a_pull = ticket.key.startswith("#")
         found.append(
             Blocker(
                 kind="ticket",
                 ref=ticket.key,
                 repo_key=ticket.repo_key,
                 what=f"{ticket.key} · {ticket.summary}",
-                why=f"the ticket says: {ticket.said}",
+                why=(ticket.said if a_pull else f"the ticket says: {ticket.said}"),
                 when=ticket.seen_at,
             )
         )

@@ -866,3 +866,109 @@ async def test_the_loop_stops_when_the_cancel_lands_inside_a_tick(
         with contextlib.suppress(asyncio.CancelledError):
             await task
     assert not pending, "the loop swallowed the cancellation and went on running"
+
+
+@pytest.mark.unit
+async def test_open_pull_requests_become_blockers_and_never_queued_work(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "В качестве блокеров также могут висеть PR с github, которые ожидают ревью/апрува/мержа —
+    для тех проектов, которые подключили гитхаб как коннектор."
+
+    Never queued: a review is not something an agent can give."""
+    from agent_desk.tracker import github
+
+    await desk.set_link(
+        repo_key=KEY,
+        name="github",
+        url="https://github.com/owner/name",
+        token_env="GH_TOKEN",
+        kind="github",
+    )
+    monkeypatch.setattr(
+        github,
+        "open_pulls",
+        lambda repo, token_env: github.Read(
+            True,
+            pulls=(
+                github.Pull(
+                    number=12,
+                    title="rewrite the parser",
+                    url="https://github.com/owner/name/pull/12",
+                    waiting_for="waiting for a review from biba",
+                ),
+            ),
+        ),
+    )
+
+    assert await autostart.pull_requests(desk, await desk.autostart(KEY)) == 1
+
+    (stuck,) = await desk.tracker_blockers()
+    assert stuck.key == "#12"
+    assert "review from biba" in stuck.said
+    assert "pull/12" in stuck.said
+    # Nothing was queued: a review is not work an agent can take on.
+    assert await desk.tasks(repo_key=KEY) == []
+
+
+@pytest.mark.unit
+async def test_a_github_link_with_no_credential_reads_nothing(desk: Store) -> None:
+    """A link with no token variable is a link, not a destination — the same rule everywhere."""
+    await desk.set_link(
+        repo_key=KEY, name="github", url="https://github.com/owner/name", kind="github"
+    )
+
+    assert await autostart.pull_requests(desk, await desk.autostart(KEY)) == 0
+    assert await desk.tracker_blockers() == []
+
+
+@pytest.mark.unit
+async def test_a_pull_that_was_merged_stops_being_a_blocker(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replaced on every read, so somebody merging a pull request is all it takes."""
+    from agent_desk.tracker import github
+
+    await desk.set_link(
+        repo_key=KEY, name="github", url="https://github.com/owner/name", token_env="GH_TOKEN"
+    )
+    monkeypatch.setattr(
+        github,
+        "open_pulls",
+        lambda repo, token_env: github.Read(
+            True, pulls=(github.Pull(number=12, title="x", url="u", waiting_for="waiting"),)
+        ),
+    )
+    await autostart.pull_requests(desk, await desk.autostart(KEY))
+    assert len(await desk.tracker_blockers()) == 1
+
+    monkeypatch.setattr(github, "open_pulls", lambda repo, token_env: github.Read(True, pulls=()))
+    await autostart.pull_requests(desk, await desk.autostart(KEY))
+
+    assert await desk.tracker_blockers() == []
+
+
+@pytest.mark.unit
+async def test_a_ticket_and_a_pull_request_do_not_erase_each_other(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """They live in the same table because they are the same thing to somebody reading the column,
+    and each read must only replace its own kind."""
+    from agent_desk.tracker import github
+
+    await desk.replace_tracker_blockers(KEY, [("DUCK-3", "the import", "Blocked on a vendor.")])
+    await desk.set_link(
+        repo_key=KEY, name="github", url="https://github.com/owner/name", token_env="GH_TOKEN"
+    )
+    monkeypatch.setattr(
+        github,
+        "open_pulls",
+        lambda repo, token_env: github.Read(
+            True, pulls=(github.Pull(number=12, title="x", url="u", waiting_for="waiting"),)
+        ),
+    )
+
+    await autostart.pull_requests(desk, await desk.autostart(KEY))
+
+    keys = {one.key for one in await desk.tracker_blockers()}
+    assert keys == {"DUCK-3", "#12"}

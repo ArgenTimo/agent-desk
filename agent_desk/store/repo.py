@@ -1654,6 +1654,35 @@ class Store:
                     },
                 )
 
+    async def replace_pull_blockers(
+        self, repo_key: str, found: Sequence[tuple[str, str, str, str]]
+    ) -> None:
+        """What this project's pull requests are waiting on, as of now.
+
+        Kept in the same table as the tickets that say they are blocked, because they are the same
+        thing to somebody reading the column: work stopped on a person. The key carries the `#` a
+        pull request is named by, which is what tells the two apart on a card.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM tracker_blocker WHERE repo_key = :repo_key AND key LIKE '#%'"),
+                {"repo_key": repo_key},
+            )
+            for key, summary, said, url in found:
+                await conn.execute(
+                    text(
+                        "INSERT INTO tracker_blocker (key, repo_key, summary, said, seen_at) "
+                        "VALUES (:key, :repo_key, :summary, :said, :t)"
+                    ),
+                    {
+                        "key": key,
+                        "repo_key": repo_key,
+                        "summary": summary[:200],
+                        "said": f"{said} · {url}"[:300],
+                        "t": _now_ms(),
+                    },
+                )
+
     async def tracker_blockers(self) -> list[TrackerBlocker]:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
