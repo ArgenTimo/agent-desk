@@ -35,7 +35,8 @@
 
 {% for task in tasks %}
 <div class="node card ticket-card{% if task.started_at and not task.finished_at %} working{% endif %}"
-     data-kind="task" data-id="{{ task.id }}" data-label="{{ task.title }}" draggable="true">
+     data-kind="task" data-id="{{ task.id }}" data-label="{{ task.title }}"
+     {% if task.repo_key %}data-about="{{ task.repo_key }}"{% endif %} draggable="true">
   <div class="card-head">
     <span class="dot {{ 'busy' if task.started_at and not task.finished_at else ('done' if task.finished_at else 'idle') }}"
           aria-hidden="true"></span>

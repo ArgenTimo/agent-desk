@@ -17,7 +17,8 @@
 {# Every blocker drags onto the workbench and opens like any other card: a card somebody can
    only look at from the corner of their eye is a card they cannot act on. #}
 <div class="card blocker node" data-kind="blocker" data-id="{{ one.id }}"
-     data-label="{{ one.what }}" draggable="true">
+     data-label="{{ one.what }}"
+     {% if one.repo_key %}data-about="{{ one.repo_key }}"{% endif %} draggable="true">
   <div class="card-head">
     <span class="dot flag" aria-hidden="true"></span>
     <span class="card-name" title="{{ one.why }}">{{ one.what }}</span>

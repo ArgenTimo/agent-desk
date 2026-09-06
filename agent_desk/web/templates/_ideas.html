@@ -10,6 +10,9 @@
 {% macro card(idea, children) %}
 <details class="node card idea-card {{ idea.state }}{% if idea.id in working %} working{% endif %}{% if idea.shape %} needs-{{ idea.shape }}{% endif %}" open
          data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}"
+         {# Which project it is about, so hovering it lights that project up on the left. A pool
+            of sixty says nothing about where any of them would land. #}
+         {% if idea.project_key %}data-about="{{ idea.project_key }}"{% endif %}
          data-drop="idea" draggable="true">
   <summary class="card-head">
     <span class="twist{% if not children[idea.id] %} leaf{% endif %}" aria-hidden="true"></span>

@@ -500,6 +500,7 @@ function attachedBlocks() {
 function syncTargets() {
   showBenchToggle();
   drawBench();
+  markOffEdge();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
@@ -729,6 +730,111 @@ document.addEventListener(
   },
   true
 );
+
+/* --- what this one is about ------------------------------------------------------------------- */
+// "При наведении на идею/блокер прочее — подсвечивается проект к которому он относится."
+//
+// A pool of sixty thoughts says nothing about where any of them would land, and neither does a
+// column of blockers. The relation exists in the data already — an idea carries a project key and
+// so does a blocker — and pointing at one is the cheapest possible way to ask for it.
+//
+// Hover only, and nothing is clicked or changed: this is a question somebody asks with the mouse
+// and takes back by moving it.
+function lightUp(key) {
+  for (const card of document.querySelectorAll('[data-kind="project"]')) {
+    card.classList.toggle('lit', Boolean(key) && card.dataset.id === key);
+  }
+}
+
+document.addEventListener('mouseover', (event) => {
+  const about = event.target.closest('[data-about]');
+  lightUp(about ? about.dataset.about : '');
+});
+
+document.addEventListener('mouseleave', () => lightUp(''), true);
+
+/* --- scaling the bench, and the cards that are off the screen --------------------------------- */
+// "Верстак масштабируем и можно двигаться по нему в лучших практиках; на блоки которые есть на
+// верстаке но находятся за пределами экрана указывают подвижные точки по краям."
+//
+// Scrolling is how you move around a column, and the browser already does it well. What it does
+// not do is let six cards be six cards you can see at once, and it does not tell you that a card
+// is down there at all — which matters more here than in most places, because a card you cannot
+// see still goes into the next message.
+const ZOOMS = [0.5, 0.6, 0.75, 0.9, 1];
+let zoomAt = ZOOMS.length - 1;
+
+function applyZoom() {
+  const scale = ZOOMS[zoomAt];
+  pins.style.setProperty('--bench-scale', String(scale));
+  pins.classList.toggle('scaled', scale !== 1);
+  const label = document.querySelector('[data-zoom="0"]');
+  if (label) label.textContent = `${Math.round(scale * 100)}%`;
+  try {
+    localStorage.setItem('agent-desk:bench-zoom', String(zoomAt));
+  } catch {
+    // A window that will not remember the zoom still zooms.
+  }
+  markOffEdge();
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-zoom]');
+  if (!button) return;
+  const step = Number(button.dataset.zoom);
+  zoomAt = step === 0 ? ZOOMS.length - 1 : Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + step));
+  applyZoom();
+});
+
+// Ctrl and the wheel, which is what this gesture means everywhere else. Without the modifier the
+// wheel still scrolls, because taking that away from a list would be worse than never zooming.
+pins.addEventListener(
+  'wheel',
+  (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    zoomAt = Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + (event.deltaY < 0 ? 1 : -1)));
+    applyZoom();
+  },
+  { passive: false }
+);
+
+// A dot per card that is on the bench and off the screen, on the edge it went off. Clicking one
+// brings that card back into view — the point is to be able to reach it, not only to know.
+function markOffEdge() {
+  const edge = document.getElementById('off-edge');
+  if (!edge) return;
+  const frame = pins.getBoundingClientRect();
+  const away = [...pins.querySelectorAll('.pin')].filter((pin) => {
+    const box = pin.getBoundingClientRect();
+    return box.bottom < frame.top + 2 || box.top > frame.bottom - 2;
+  });
+  edge.textContent = '';
+  edge.hidden = away.length === 0;
+  for (const pin of away) {
+    const box = pin.getBoundingClientRect();
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = `edge-dot ${box.top > frame.bottom - 2 ? 'below' : 'above'}`;
+    dot.title = pin.querySelector('.pin-label')?.textContent || 'a card up there';
+    dot.setAttribute('aria-label', `go to ${dot.title}`);
+    dot.addEventListener('click', () => pin.scrollIntoView({ block: 'nearest' }));
+    edge.appendChild(dot);
+  }
+}
+
+pins.addEventListener('scroll', markOffEdge, { passive: true });
+window.addEventListener('resize', markOffEdge);
+
+try {
+  const remembered = Number(localStorage.getItem('agent-desk:bench-zoom'));
+  if (Number.isInteger(remembered) && remembered >= 0 && remembered < ZOOMS.length) {
+    zoomAt = remembered;
+  }
+} catch {
+  // No storage: full size, which is the default anybody would expect.
+}
+applyZoom();
 
 /* --- what is charged, and what is only sitting there ------------------------------------------- */
 // "При перемещении на верстак объект сразу заряжается (значит будет участвовать в контексте),

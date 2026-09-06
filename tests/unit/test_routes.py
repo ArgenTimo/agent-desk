@@ -1421,3 +1421,31 @@ async def test_pointing_at_nothing_says_what_is_wrong(home: Home, desk: Store) -
     assert status == 200
     assert "is not a folder on this machine" in panel
     assert await desk.groups() == []
+
+
+@pytest.mark.unit
+async def test_a_card_says_which_project_it_is_about(
+    home: Home, desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """ "При наведении на идею/блокер подсвечивается проект к которому он относится." The relation
+    is in the data already; the page needs it on the card to be able to point at it."""
+    key = await _the_project(home)
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.set_idea_project(idea.id, key)
+    task = await desk.queue_task(
+        repo_key=key,
+        cwd=str(tmp_path),
+        title="a task",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(task.id, "it fell over")
+
+    assert f'data-about="{key}"' in await routes.render_ideas()
+    assert f'data-about="{key}"' in await routes.render_blockers()
+
+    # An idea about nothing in particular claims nothing.
+    loose = await desk.create_idea(text_="about nothing", summary="loose", source_kind="typed")
+    column = await routes.render_ideas()
+    assert f'data-id="{loose.id}"' in column
+    assert column.count("data-about") == 1

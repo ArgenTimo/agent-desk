@@ -1399,3 +1399,65 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 @media (prefers-reduced-motion: reduce) {
   .ring.working .ring-gear { animation: none; }
 }
+
+/* --- scaling the bench, and the cards off the screen ------------------------------------------ */
+/* `zoom` rather than `transform: scale`: a transformed element keeps its untransformed size in
+   the layout, so a scaled column would leave the gap it used to fill and scroll wrong. `zoom`
+   changes the box, which is what is wanted here. */
+.pins.scaled { zoom: var(--bench-scale, 1); }
+.bench-head .zoom { display: inline-flex; gap: 2px; align-items: center; }
+.bench-head .zoom .chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.02rem 0.4rem;
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  cursor: pointer;
+  min-width: 1.5rem;
+}
+.bench-head .zoom .chip:hover { color: var(--fg); border-color: var(--focus); }
+.bench-head .zoom .zoom-at { min-width: 2.6rem; font-variant-numeric: tabular-nums; }
+
+/* One dot per card that is on the bench and off the screen, on the edge it went off. A card you
+   cannot see and do not know is there is a card that goes into the next message by surprise. */
+.off-edge {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  justify-content: center;
+  align-items: center;
+  min-height: 8px;
+  padding: 1px 0;
+}
+.edge-dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.edge-dot:hover { opacity: 1; background: var(--focus); }
+/* Which way it is: above the view, or below it. */
+.edge-dot.above { align-self: flex-start; }
+.edge-dot.below { align-self: flex-end; box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 18%, transparent); }
+
+/* The empty line in the output moves with the field rather than sitting where it was drawn:
+   `margin: auto` in a flex column keeps it in the middle of whatever the pane has become after
+   somebody drags a gutter. */
+.out.is-empty { display: flex; flex-direction: column; }
+.out-empty { margin: auto; max-width: 34rem; }
+
+/* The project an idea or a blocker is about, while somebody is pointing at it. A ring rather than
+   a colour: the card's own colour already means something (docs/06-console.md), and this must not
+   compete with it. */
+.card.lit {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  transition: outline-color 0.12s ease;
+}

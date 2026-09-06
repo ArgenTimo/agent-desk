@@ -55,6 +55,11 @@
         thought without interrupting anything.</p>
     </div>
 
+    {# Dots at the edges of the bench, pointing at cards that are on it but off the screen. A
+       card you cannot see and do not know is there is a card that goes into the next message by
+       surprise, and scaling the bench down makes that more likely rather than less. #}
+    <div id="off-edge" class="off-edge" aria-hidden="true"></div>
+
     {# What the next message will carry, said out loud. Every call to the model is built from
        exactly this and nothing else — the question, the cards in the output, and whichever
        earlier exchanges were attached. #}
@@ -67,6 +72,15 @@
          window people paste into all day. #}
       <button type="button" class="chip add-note" data-add-note
               title="a block of your own: a link, a paragraph, a snippet of code">+ a block</button>
+      {# Scaling the bench. Six cards on a laptop is six cards you scroll past one at a time;
+         at sixty per cent it is six cards you can see at once, which is the whole point of
+         having put them side by side. Ctrl and the wheel does the same thing. #}
+      <span class="zoom" role="group" aria-label="how big the workbench is">
+        <button type="button" class="chip zoom-out" data-zoom="-1" aria-label="smaller">−</button>
+        <button type="button" class="chip zoom-at" data-zoom="0"
+                title="back to full size">100%</button>
+        <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
+      </span>
       <span class="spacer"></span>
       <button type="button" class="chip bench-toggle" data-bench-toggle aria-pressed="false"
               title="draw what is on the workbench and how it is related">as a diagram</button>
