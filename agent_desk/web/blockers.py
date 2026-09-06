@@ -23,7 +23,7 @@ it comes back on its own, and it renders as a break rather than a blocker.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agent_desk.store.repo import Store
 
@@ -53,10 +53,30 @@ class Blocker:
     # still worth showing; a blocker whose fix is one click and does not offer it is not.
     action: str = ""
     action_says: str = ""
+    # How many pieces of queued work are waiting on this, and roughly how long clearing it takes
+    # if it is a person who has to do it. Both are counted rather than guessed — see `blockers`.
+    holding_up: int = 0
+    roughly: str = ""
+    # Somebody has said this is cleared and nothing has checked yet (029-blocker-checking.sql).
+    claimed: bool = False
+    checked: str = ""
 
     @property
     def id(self) -> str:
         return f"{self.kind}:{self.ref}"
+
+
+# What clearing one usually costs a person, by kind. Stated as a range and named as a guess on the
+# card, because the honest alternative — saying nothing — leaves somebody unable to decide whether
+# to do it now or after lunch, and that is the decision the number is for.
+ROUGHLY = {
+    "ticket": "usually a few hours — it is waiting on a person",
+    "project": "minutes — press the switch again once whatever broke is fixed",
+    "session": "minutes — press the switch again",
+    "branch": "as long as the gate takes, once the branch is fixed",
+    "task": "as long as the task takes, once whatever stopped it is fixed",
+    "answer": "moments — ask it again",
+}
 
 
 async def blockers(store: Store, only: str = "") -> list[Blocker]:
@@ -67,6 +87,14 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
     never part of would lose it entirely.
     """
     found: list[Blocker] = []
+    # How much queued work is waiting on each project, so a blocker can say what it is holding up.
+    # "Сколько задач он блокирует" — counted from the queue, which is work this console can
+    # account for, rather than estimated.
+    waiting_on: dict[str, int] = {}
+    for task in await store.tasks(limit=500):
+        if task.waiting:
+            waiting_on[task.repo_key] = waiting_on.get(task.repo_key, 0) + 1
+    claims = await store.claims()
 
     for task in await store.tasks(limit=200):
         if task.failed_at:
@@ -147,6 +175,19 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                 when=ticket.seen_at,
             )
         )
+
+    # What each one is holding up, how long it usually takes, and whether somebody has already
+    # said it is cleared.
+    found = [
+        replace(
+            one,
+            holding_up=waiting_on.get(one.repo_key, 0),
+            roughly=ROUGHLY.get(one.kind, ""),
+            claimed=one.id in claims and claims[one.id].waiting,
+            checked=(claims[one.id].found or "") if one.id in claims else "",
+        )
+        for one in found
+    ]
 
     if only:
         found = [one for one in found if one.repo_key in ("", only)]

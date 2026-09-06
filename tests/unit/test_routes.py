@@ -702,11 +702,42 @@ async def test_a_project_card_counts_what_this_console_started(home: Home, desk:
 
     counted = await routes.board_work()
 
-    assert counted[key] == {"waiting": 0, "running": 1, "done": 1}
+    assert counted[key] == {"waiting": 0, "running": 1, "done": 1, "stuck": 0}
     board = await asyncio.to_thread(
         routes.render_board, await desk.groups(), await routes.board_links(), counted
     )
     assert "1/0/1" in board
+
+    # And the same work counted against the agent that did it, which is what a session card shows:
+    # "показывать к-во закрытых и заблокированных задач у каждой сессии/агента".
+    assert counted["agent1"] == {"waiting": 0, "running": 1, "done": 0, "stuck": 0}
+    assert counted["agent2"] == {"waiting": 0, "running": 0, "done": 1, "stuck": 0}
+
+
+@pytest.mark.unit
+async def test_what_is_stuck_is_counted_apart_from_what_is_running(home: Home, desk: Store) -> None:
+    """ "Закрытых и заблокированных" — a failed task and a running one are not the same news, and a
+    card that added them together would say a project is busy when it is stuck."""
+    key = await _the_project(home)
+    fell_over = await desk.queue_task(
+        repo_key=key, cwd=str(home.root), title="one", instruction="one", source_kind="typed"
+    )
+    await desk.take_next_task(key)
+    await desk.task_started(fell_over.id, "agent9")
+    await desk.task_failed(fell_over.id, "it fell over")
+    await desk.replace_tracker_blockers(key, [("DUCK-3", "the import", "Blocked on a vendor.")])
+
+    counted = await routes.board_work()
+
+    # One failed task and one ticket that says it is blocked.
+    assert counted[key]["stuck"] == 2
+    assert counted[key]["running"] == 0
+    assert counted["agent9"]["stuck"] == 1
+
+    board = await asyncio.to_thread(
+        routes.render_board, await desk.groups(), await routes.board_links(), counted
+    )
+    assert "stuck" in board
 
 
 @pytest.mark.unit

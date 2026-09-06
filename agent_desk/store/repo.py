@@ -318,6 +318,26 @@ class IdeaLink(BaseModel):
     created_at: int
 
 
+class BlockerClaim(BaseModel):
+    """Somebody says a blocker is cleared, and it is waiting to be checked (029-blocker-checking).
+
+    The claim is not the clearing. A blocker that vanished because a button was pressed is one
+    that comes back as a surprise when the agent waiting on it fails for the same reason.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    said: str = ""
+    claimed_at: int
+    checked_at: int | None = None
+    found: str | None = None
+
+    @property
+    def waiting(self) -> bool:
+        return self.checked_at is None
+
+
 class TrackerBlocker(BaseModel):
     """A ticket on somebody's board that says it is stuck (026-tracker-blockers.sql)."""
 
@@ -1553,6 +1573,38 @@ class Store:
                 ),
                 {"size": size, "shape": shape, "t": _now_ms(), "id": idea_id},
             )
+
+    # --- a blocker somebody says is cleared (029-blocker-checking.sql) ------------------------
+    async def claim_cleared(self, name: str, said: str = "") -> None:
+        """Record that somebody says this is unblocked. It does not clear anything."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO blocker_claim (name, said, claimed_at) "
+                    "VALUES (:name, :said, :t) "
+                    "ON CONFLICT (name) DO UPDATE SET said = :said, claimed_at = :t, "
+                    "checked_at = NULL, found = NULL"
+                ),
+                {"name": name, "said": said[:300], "t": _now_ms()},
+            )
+
+    async def claims(self) -> dict[str, BlockerClaim]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT name, said, claimed_at, checked_at, found FROM blocker_claim")
+            )
+            return {str(row[0]): BlockerClaim(**row._mapping) for row in rows}
+
+    async def claim_checked(self, name: str, found: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE blocker_claim SET checked_at = :t, found = :found WHERE name = :name"),
+                {"t": _now_ms(), "found": found[:300], "name": name},
+            )
+
+    async def forget_claim(self, name: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM blocker_claim WHERE name = :name"), {"name": name})
 
     # --- tickets that say they are stuck (026-tracker-blockers.sql) ---------------------------
     async def replace_tracker_blockers(

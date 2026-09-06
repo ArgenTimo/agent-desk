@@ -22,6 +22,7 @@ from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd
 from agent_desk.store.repo import Autostart, Store, Task
 from agent_desk.tracker import jira
+from agent_desk.web import blockers
 
 log = structlog.get_logger()
 
@@ -295,6 +296,40 @@ async def pull_tickets(store: Store, arming: Autostart) -> int:
     return queued
 
 
+async def check_claims(store: Store) -> int:
+    """Look at the blockers somebody said were cleared, and say what is actually true.
+
+    "Агенты запускают проверку в ближайший момент когда освободятся, проверяют блокер, и только
+    если разблокировано — блок уходит."
+
+    No agent is started for this and none is needed: every kind of blocker this console shows was
+    computed from something it can look at again. A claim is checked by recomputing — if the thing
+    is no longer stuck, the claim was right and both it and the blocker go; if it still is, the
+    claim is answered with the reason it is still there, in the blocker's own words.
+
+    That is a stronger check than an agent's opinion would be, and it costs nothing.
+    """
+    claims = await store.claims()
+    waiting = [name for name, claim in claims.items() if claim.waiting]
+    if not waiting:
+        return 0
+
+    still = {one.id: one for one in await blockers.blockers(store)}
+    checked = 0
+    for name in waiting:
+        stuck = still.get(name)
+        if stuck is None:
+            # Not a blocker any more: whoever pressed the button was right, and there is nothing
+            # left to show or to remember.
+            await store.forget_claim(name)
+            log.info("blockers.cleared", blocker=name)
+        else:
+            await store.claim_checked(name, f"still blocked — {stuck.why}")
+            log.info("blockers.still_stuck", blocker=name)
+        checked += 1
+    return checked
+
+
 async def _may_explore(store: Store, arming: Autostart, live: set[str]) -> str:
     """Why this project may not go looking right now, or an empty string (docs/adr/0008).
 
@@ -390,6 +425,9 @@ async def tick(store: Store, live: set[str] | None = None) -> Task | None:
         live = await asyncio.to_thread(live_agents)
 
     await settle(store, live)
+    # Anything somebody said was cleared, checked against what is actually true now. Before
+    # starting work, because a blocker that has gone may be the reason something can start.
+    await check_claims(store)
 
     for arming in armed:
         if not await why_not(store, arming.repo_key, live):

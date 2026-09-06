@@ -36,8 +36,8 @@
     {% if tally %}
     {# What this console started here and what it got through. Counted from its own queue, which
        is the only work it can honestly account for (docs/adr/0007). #}
-    <span class="pill quiet" title="{{ tally.running }} running · {{ tally.waiting }} waiting · {{ tally.done }} finished">
-      {{ tally.running }}/{{ tally.waiting }}/{{ tally.done }}</span>
+    <span class="pill quiet" title="{{ tally.running }} running · {{ tally.waiting }} waiting · {{ tally.done }} finished · {{ tally.stuck }} stuck">
+      {{ tally.running }}/{{ tally.waiting }}/{{ tally.done }}{% if tally.stuck %} · {{ tally.stuck }} stuck{% endif %}</span>
     {% endif %}
     <a class="more" href="/projects/page?key={{ project.key | urlencode }}"
        data-menu="menu-{{ loop.index }}" title="what can be done with this project"
@@ -111,6 +111,14 @@
               <span class="pill attention"
                     title="it was told to begin every reply with “{{ canary }}” and has stopped — its context has rolled far enough to lose the first message">
                 🐤 lost the thread</span>
+              {% endif %}
+              {# What this session has actually got through. "Показывать к-во закрытых и
+                 заблокированных задач у каждой сессии/агента в карточке." Counted from this
+                 console's own queue, which is the only work it can honestly account for. #}
+              {% set mine = work.get(row.session.session_id.split("-")[0]) %}
+              {% if mine %}
+              <span class="pill quiet" title="{{ mine.done }} finished · {{ mine.running }} running · {{ mine.stuck }} stuck — counted from this console's queue">
+                {{ mine.done }} done{% if mine.stuck %} · {{ mine.stuck }} stuck{% endif %}</span>
               {% endif %}
               {% if not row.tail %}<span class="pill quiet" title="no transcript was read">registry only</span>{% endif %}
             </div>

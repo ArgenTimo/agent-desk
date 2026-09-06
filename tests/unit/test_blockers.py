@@ -187,3 +187,115 @@ async def test_a_blocker_that_cleared_is_gone_rather_than_an_error(
     await desk.drop_task(task.id)
 
     assert await blockers.one(desk, stuck) is None
+
+
+@pytest.mark.unit
+async def test_a_blocker_says_what_it_is_holding_up_and_roughly_what_it_costs(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """The two things that decide whether somebody clears it now or after lunch."""
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+    for number in range(3):
+        await desk.queue_task(
+            repo_key=KEY,
+            cwd=str(tmp_path),
+            title=f"waiting {number}",
+            instruction="x",
+            source_kind="instruction",
+        )
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.holding_up == 3
+    assert found.roughly, "an estimate that is named as a rule of thumb beats saying nothing"
+
+
+@pytest.mark.unit
+async def test_saying_a_blocker_is_cleared_does_not_clear_it(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """The whole design: a blocker that vanished because a button was pressed is one that comes
+    back as a surprise when the agent waiting on it fails for the same reason."""
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+    (found,) = await blockers.blockers(desk)
+
+    await desk.claim_cleared(found.id)
+
+    (still,) = await blockers.blockers(desk)
+    assert still.claimed, "it has to say a claim was made"
+    assert still.checked == "", "and that nothing has checked yet"
+
+
+@pytest.mark.unit
+async def test_a_claim_that_was_right_takes_the_blocker_with_it(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """Checked by recomputing rather than by asking anybody: every blocker here was computed from
+    something the console can look at again."""
+    from agent_desk.web import autostart
+
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+    (found,) = await blockers.blockers(desk)
+    await desk.claim_cleared(found.id)
+
+    # Somebody retried it, so it is not stuck any more.
+    await desk.drop_task(stuck.id)
+
+    assert await autostart.check_claims(desk) == 1
+    assert await blockers.blockers(desk) == []
+    assert await desk.claims() == {}, "nothing left to remember"
+
+
+@pytest.mark.unit
+async def test_a_claim_that_was_wrong_is_answered_with_the_reason(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """ "Только если разблокировано — блок уходит." Otherwise it says why it is still there."""
+    from agent_desk.web import autostart
+
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(stuck.id, "the worktree name was not one the CLI would take")
+    (found,) = await blockers.blockers(desk)
+    await desk.claim_cleared(found.id)
+
+    assert await autostart.check_claims(desk) == 1
+
+    (still,) = await blockers.blockers(desk)
+    assert not still.claimed
+    assert "still blocked" in still.checked
+    assert "worktree name" in still.checked
+
+
+@pytest.mark.unit
+async def test_checking_nothing_costs_nothing(desk: Store) -> None:
+    """The ordinary case on every tick."""
+    from agent_desk.web import autostart
+
+    assert await autostart.check_claims(desk) == 0

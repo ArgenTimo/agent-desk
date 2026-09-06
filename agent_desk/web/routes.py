@@ -325,21 +325,43 @@ def board() -> tuple[list[BoardRow], list[str]]:
 
 
 async def board_work() -> dict[str, dict[str, int]]:
-    """How much work each project has waiting, running and finished.
+    """How much work is waiting, running, finished and stuck — per project *and* per session.
+
+    "Показывать к-во закрытых и заблокированных задач у каждого проекта/инстанса/сессии/агента в
+    карточке, чтобы можно было оценить что и сколько сделано." A project's total answers "is
+    anything happening here"; the per-session count answers "who has actually done anything",
+    which is the question somebody looking at four sessions is really asking.
+
+    Keyed by repository for a project and by the agent's short id for a session, so one table
+    serves both and a card looks itself up by the name it already has.
 
     Counted from the queue rather than from a tracker: this is what the console started and can
     account for. A number taken from somewhere it cannot see would be a number nobody can check
     (docs/adr/0005, which refuses to read a tracker back).
     """
     counted: dict[str, dict[str, int]] = {}
+
+    def tally_for(key: str) -> dict[str, int]:
+        return counted.setdefault(key, {"waiting": 0, "running": 0, "done": 0, "stuck": 0})
+
     for task in await store.tasks(limit=500):
-        tally = counted.setdefault(task.repo_key, {"waiting": 0, "running": 0, "done": 0})
-        if task.waiting:
-            tally["waiting"] += 1
-        elif task.finished_at or task.failed_at:
-            tally["done"] += 1
-        else:
-            tally["running"] += 1
+        # Everything a task counts towards: its project always, and the agent that ran it when
+        # one did. A task nobody started belongs to the project alone.
+        keys = [task.repo_key] + ([task.agent_id] if task.agent_id else [])
+        for key in keys:
+            tally = tally_for(key)
+            if task.failed_at:
+                tally["stuck"] += 1
+            elif task.waiting:
+                tally["waiting"] += 1
+            elif task.finished_at:
+                tally["done"] += 1
+            else:
+                tally["running"] += 1
+
+    # And what somebody else's board says is stuck, against the project it is on.
+    for stuck in await store.tracker_blockers():
+        tally_for(stuck.repo_key)["stuck"] += 1
     return counted
 
 
@@ -849,6 +871,30 @@ async def close_thread(thread_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(env.get_template("_tabs.html").render(threads=await open_chats()))
     return RedirectResponse("/", status_code=303)
+
+
+@router.post("/blockers/cleared", response_class=HTMLResponse)
+async def say_cleared(request: Request) -> Response:
+    """Somebody says a blocker is cleared. It stays, and waits to be checked.
+
+    "Человек может нажать кнопку «разблокировано» — блокер остаётся, но переходит в статус
+    уточнения; агенты проверяют, и только если разблокировано — блок уходит."
+
+    The button not clearing anything is the whole design. A blocker that vanished because a button
+    was pressed is one that comes back as a surprise two hours later, when the agent that was
+    waiting on it fails for exactly the same reason.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    if name:
+        if form.get("undo") == "yes":
+            await store.forget_claim(name)
+        else:
+            await store.claim_cleared(name, form.get("said", "").strip())
+    panel = await render_blockers()
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
 
 
 @router.get("/cards/{kind}/full", response_class=HTMLResponse)

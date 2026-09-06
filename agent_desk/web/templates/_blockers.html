@@ -26,6 +26,35 @@
   </div>
   <div class="card-body">
     <p class="small">{{ one.why }}</p>
+    {# What it is holding up and roughly what clearing it costs — the two things that decide
+       whether somebody does it now or after lunch. The count is from this console's own queue;
+       the estimate is named as a rule of thumb rather than dressed up as a measurement. #}
+    <p class="small dim">
+      {% if one.holding_up %}holding up {{ one.holding_up }} queued
+        thing{{ "" if one.holding_up == 1 else "s" }}{% else %}nothing is queued behind it{% endif %}
+      {% if one.roughly %}· {{ one.roughly }}{% endif %}
+    </p>
+
+    {% if one.checked %}
+    <p class="small attention-line">checked: {{ one.checked }}</p>
+    {% elif one.claimed %}
+    {# Claimed, not cleared. It stays here until something looks. #}
+    <p class="small attention-line">⏳ somebody says this is cleared — waiting for it to be
+      checked, and it stays here until it is.</p>
+    <form method="post" action="/blockers/cleared"
+          hx-post="/blockers/cleared" hx-target="#blocker-list">
+      <input type="hidden" name="name" value="{{ one.id }}">
+      <input type="hidden" name="undo" value="yes">
+      <button type="submit">no, it is still blocked</button>
+    </form>
+    {% else %}
+    <form method="post" action="/blockers/cleared"
+          hx-post="/blockers/cleared" hx-target="#blocker-list">
+      <input type="hidden" name="name" value="{{ one.id }}">
+      <button type="submit" title="it does not disappear: it waits for something to check">
+        this is unblocked</button>
+    </form>
+    {% endif %}
     <a class="node-open" href="/cards/blocker?id={{ one.id | urlencode }}"
        data-card="blocker:{{ one.id }}">everything about it…</a>
     {% if one.action %}
