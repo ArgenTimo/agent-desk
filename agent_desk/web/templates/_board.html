@@ -286,3 +286,14 @@
   <input id="project-name" name="name" placeholder="new project…" autocomplete="off">
   <button type="submit" title="a project you declare, to drag cards into">+</button>
 </form>
+
+{# Pointing at one, rather than naming it. Running `claude` in a directory still needs no form —
+   that is the answer in the README — but this is for the moment somebody thinks of a project
+   while they have its address in their hand (agent_desk/observe/attach.py). #}
+<form method="post" action="/projects/attach" class="new-project"
+      hx-post="/projects/attach" hx-target="#message">
+  <label class="visually-hidden" for="project-where">a folder or a repository URL</label>
+  <input id="project-where" name="where" autocomplete="off"
+         placeholder="/a/folder or git@github.com:owner/name.git">
+  <button type="submit" title="add a project by pointing at it — nothing is cloned">↳</button>
+</form>

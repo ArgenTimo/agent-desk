@@ -125,6 +125,14 @@ def _gate(where: Path) -> tuple[bool, str]:
     Python project keyed by path has no environment there, and its gate fails on a missing runner
     rather than on the work. So `make install` runs first where the repository has one — its own
     command again, and a repository that does not have one simply does not get it.
+
+    **One interaction worth knowing about before it wastes somebody's morning.** That install
+    reaches for the same package cache the person's own shell uses, and package managers take a
+    lock on it. So a `make verify` run by hand *while an exploration is landing* can sit at zero
+    per cent CPU for as long as the install takes, looking exactly like a hung test suite — which
+    is what it looked like three times before anybody worked out it was this. It is contention,
+    not a deadlock: it clears on its own. If it is happening often, the answer is to switch
+    exploring off while working rather than to make this cleverer.
     """
     if not (where / "Makefile").exists():
         return False, "no Makefile, so there is no gate to check this against"

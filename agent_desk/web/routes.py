@@ -32,7 +32,7 @@ from agent_desk import dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, meeting
-from agent_desk.observe import registry, transcript
+from agent_desk.observe import attach, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -1374,6 +1374,41 @@ async def set_column(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(""))
+
+
+@router.post("/projects/attach", response_class=HTMLResponse)
+async def attach_project(request: Request) -> Response:
+    """Add a project by pointing at it: a folder on this machine, or a repository URL.
+
+    Running `claude` in a directory still needs no form at all, and that stays the answer in the
+    README. This is for the moment somebody thinks of a project while they have its address in
+    their hand and does not want to go and start a session first.
+
+    Nothing is cloned and nothing is created. This program records where a repository lives; it
+    does not fetch it (CLAUDE.md, rule two). A URL with no checkout here becomes a project with a
+    link and no instance, which is exactly what it is.
+    """
+    form = await _form(request)
+    pointed = attach.read(form.get("where", ""))
+    if not pointed.ok:
+        panel = env.get_template("_dispatch.html").render(started=False, detail=pointed.detail)
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+    group = await store.create_group(pointed.name)
+    await store.add_to_group(group.id, pointed.repo_key)
+    if pointed.url:
+        await store.set_link(repo_key=pointed.repo_key, name="repository", url=pointed.url)
+    if pointed.path:
+        # Where it is, so the queue and an exploration have a directory to work in without
+        # waiting for a session to appear there first (docs/adr/0008).
+        arming = await store.autostart(pointed.repo_key)
+        await store.explore(
+            pointed.repo_key, per_day=arming.per_day, on=arming.exploring, cwd=pointed.path
+        )
+    log.info("project attached", project=pointed.name, key=pointed.repo_key)
+
+    panel = await render_project(pointed.repo_key)
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
 
 @router.post("/projects/focus", response_class=HTMLResponse)

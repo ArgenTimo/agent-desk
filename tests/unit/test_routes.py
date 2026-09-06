@@ -1380,3 +1380,44 @@ async def test_the_board_column_narrows_with_the_project_filter_too(
 
     assert "DUCK-1" in column
     assert "OTHER-1" not in column
+
+
+@pytest.mark.unit
+async def test_a_project_can_be_added_by_pointing_at_a_folder(
+    home: Home, desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """ "При добавлении проекта можно просто указать папку на устройстве." Running `claude` in one
+    still needs no form; this is for the moment somebody has the address in their hand."""
+    where = tmp_path / "a-project"
+    where.mkdir()
+
+    status, panel = await _post("/projects/attach", {"where": str(where)})
+
+    assert status == 200
+    assert "a-project" in panel
+    assert [group.name for group in await desk.groups()] == ["a-project"]
+    # The directory is recorded, so the queue and an exploration have somewhere to work before a
+    # session has ever run there.
+    arming = await desk.autostart(routes.repository_of(str(where)).key)
+    assert arming.cwd == str(where)
+
+
+@pytest.mark.unit
+async def test_a_project_can_be_added_by_its_repository_url(home: Home, desk: Store) -> None:
+    status, panel = await _post("/projects/attach", {"where": "git@github.com:someone/a-thing.git"})
+
+    assert status == 200
+    (group,) = await desk.groups()
+    assert group.name == "a-thing"
+    # The URL is kept as a link, and nothing was cloned.
+    (link,) = await desk.links("origin:someone/a-thing")
+    assert link.url == "https://github.com/someone/a-thing"
+
+
+@pytest.mark.unit
+async def test_pointing_at_nothing_says_what_is_wrong(home: Home, desk: Store) -> None:
+    status, panel = await _post("/projects/attach", {"where": "/nowhere/at/all"})
+
+    assert status == 200
+    assert "is not a folder on this machine" in panel
+    assert await desk.groups() == []
