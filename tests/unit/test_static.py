@@ -130,3 +130,79 @@ def test_nothing_on_the_page_is_smaller_than_twelve_pixels() -> None:
     scale = dict(re.findall(r"--t-(x?s|m?d|lg|xl):\s*([0-9]+)px", css))
     for name, size in scale.items():
         assert int(size) >= 12, f"--t-{name} is {size}px"
+
+
+@pytest.mark.unit
+def test_a_folded_card_says_what_it_is_and_not_only_which_one_it_is() -> None:
+    """ "Сейчас плохо отображаются хинты, практически не видно что из себя представляют."
+
+    A folded card used to show its title clamped to two lines, and a title is a name — it says
+    *which* card this is, never what it holds. The sentence written about the card is the thing
+    that answers that, and it lives in the body, which is exactly what folding hides.
+
+    So it is lifted into the head as `.pin-hint`, and this asserts the two halves that make that
+    true: the console writes one, and the stylesheet shows it only while the card is folded.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    assert "function writeHint(" in console, "nothing lifts a description out of a folded body"
+    assert "'.card-said'" in console, (
+        "the hint does not prefer the sentence a model wrote about the card, which is the one "
+        "line on it written to answer 'what is this'"
+    )
+    assert ".pin-hint" in css, "the lifted hint has no style, so it renders as unclassed text"
+    assert '.pin[data-view="hint"] .pin-hint' in css, (
+        "the hint is not scoped to the folded view; an open card would then say the same sentence "
+        "twice, once in the hint and once in the body it came from"
+    )
+
+
+@pytest.mark.unit
+def test_a_hint_is_two_lines_and_the_title_above_it_is_one() -> None:
+    """ "Делаем так — хинт 2 строки максимум." Two lines of meaning, over one line of name.
+
+    The clamp used to be on `.pin-label`, which spent both lines repeating the title. Asserting
+    where the clamp *is* is the only way that mistake stays fixed, because both versions look
+    tidy in a screenshot.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    hint = css[css.index('.pin[data-view="hint"] .pin-hint') :]
+    hint = hint[: hint.index("}")]
+    assert "line-clamp: 2" in hint, "the hint is not held to two lines"
+
+    label = css[css.index(".pin-label {") :]
+    label = label[: label.index("}")]
+    assert "line-clamp" not in label, (
+        "the title is clamped to several lines again, which is what left a folded card with no "
+        "room for anything but its own name"
+    )
+    assert "text-overflow: ellipsis" in label, "the one-line title has no ellipsis to cut it"
+
+
+@pytest.mark.unit
+def test_what_went_out_as_one_question_moves_as_one_group() -> None:
+    """ "При запуске в обработку несколько выделенных карточек как контекст — они перемещаются
+    вместе, рамка работы образуется только вокруг этой группы."
+
+    The frame was already drawn around that set and nothing else. The half that was missing is
+    that the set behaved like one: dragging any card out of a ring left the frame stretching to
+    follow it, which is a frame around a shape nobody arranged.
+
+    Being joined by a line is deliberately *not* enough — see `alsoMoving`. A line is a relation,
+    and pulling the two ends of a relation apart is a thing somebody does on purpose.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function alsoMoving(" in console, "a card has no notion of what moves with it"
+    assert "with: alsoMoving(pin)" in console, (
+        "the group is never gathered when the drag starts, so there is nothing to move with it"
+    )
+    together = console[console.index("function alsoMoving(") :]
+    together = together[: together.index("\n}\n")]
+    assert "'.ring'" in together, "the group is not read from the rings"
+    assert "ownTies" not in together and "everyTie" not in together, (
+        "a line is being treated as a group; dragging one end of a relation away from the other "
+        "is a thing somebody does on purpose"
+    )

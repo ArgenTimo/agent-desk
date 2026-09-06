@@ -628,11 +628,51 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    writeHint(holder);
     settleOverlaps();
   } catch {
     holder.querySelector('.pin-body').innerHTML = '<p class="empty small">could not read this one</p>';
   }
   syncTargets();
+}
+
+// What a folded card says about itself.
+//
+// "Сейчас плохо отображаются хинты, практически не видно что из себя представляют" — because a
+// folded card showed its title and nothing else, and a title is a name rather than a description.
+// The sentence written *about* the card (028-card-descriptions.sql) is the thing that says what it
+// is, and every card kind renders one somewhere in its body.
+//
+// So the hint is lifted out of the body into the head, where it survives the body being folded
+// away. Two lines, which is the size that was asked for; the fallbacks below are in the order of
+// how much they say, and the last of them is better than an empty line under a title.
+const HINT_ORDER = ['.card-said', '.plain-what', '.plain-doing', '.last-line', '.card-body p', 'p'];
+
+function writeHint(holder) {
+  const body = holder.querySelector('.pin-body');
+  if (!body) return;
+  let said = '';
+  for (const where of HINT_ORDER) {
+    const found = [...body.querySelectorAll(where)]
+      .map((node) => (node.textContent || '').trim())
+      .find((text) => text.length > 2);
+    if (found) {
+      said = found;
+      break;
+    }
+  }
+  let line = holder.querySelector('.pin-hint');
+  if (!said) {
+    line?.remove();
+    return;
+  }
+  if (!line) {
+    line = document.createElement('p');
+    line.className = 'pin-hint';
+    holder.querySelector('.pin-head')?.after(line);
+  }
+  line.textContent = said;
+  line.title = said;
 }
 
 // The three a card has, and they are the three the pool named: "1 — хинт, то что видно в
@@ -1056,12 +1096,17 @@ canvas?.addEventListener('pointerdown', (event) => {
     moving = {
       pin,
       from: { ...at },
+      // What went out together moves together: "при запуске в обработку несколько выделенных
+      // карточек как контекст — они перемещаются вместе". A ring is a group, and a group that
+      // comes apart the moment somebody nudges one of its cards is a frame around nothing.
+      with: alsoMoving(pin),
       startX: event.clientX,
       startY: event.clientY,
       moved: false,
     };
     pin.setPointerCapture?.(event.pointerId);
     pin.classList.add('moving');
+    for (const other of moving.with) other.pin.classList.add('moving');
     return;
   }
 
@@ -1100,13 +1145,49 @@ canvas?.addEventListener('pointermove', (event) => {
     { avoid: false }
   );
   moving.pin.dataset.moved = 'yes';
+  // The rest of the group, by the same offset — the shape of the group is what makes it one.
+  for (const other of moving.with || []) {
+    place(
+      other.pin,
+      {
+        x: Math.round(other.from.x + dx / view.scale),
+        y: Math.round(other.from.y + dy / view.scale),
+      },
+      { avoid: false }
+    );
+    other.pin.dataset.moved = 'yes';
+  }
   drawTies();
   drawRings();
 });
 
+// The other cards that move when this one does: the rest of whatever rings hold it.
+//
+// Only rings. Being joined by a line is not being in a group — a line says two things are related,
+// and dragging one end of a relation apart from the other is a thing somebody does on purpose. A
+// ring says these went out as one question, and that is a set with an edge.
+function alsoMoving(pin) {
+  const name = cardName(pin);
+  const together = new Set();
+  for (const ring of surface?.querySelectorAll('.ring') || []) {
+    const holds = (ring.dataset.holds || '').split(',').filter(Boolean);
+    if (!holds.includes(name)) continue;
+    for (const held of holds) together.add(held);
+  }
+  together.delete(name);
+  return [...together]
+    .map((held) => ({
+      pin: surface.querySelector(`.pin[data-name="${CSS.escape(held)}"]`),
+      from: placed.get(held),
+    }))
+    .filter((one) => one.pin && one.from)
+    .map((one) => ({ pin: one.pin, from: { ...one.from } }));
+}
+
 function endMove() {
   if (!moving) return;
   moving.pin?.classList.remove('moving');
+  for (const other of moving.with || []) other.pin.classList.remove('moving');
   canvas?.classList.remove('panning');
   const wasAMove = moving.moved;
   moving = null;
@@ -1601,6 +1682,8 @@ function syncBlocks() {
     node.querySelector('.pin-label').textContent =
       (said?.textContent || 'a question').trim().slice(0, 60);
     node.classList.toggle('settled', article.hasAttribute('data-settled'));
+    // A block's hint is what came back, not the question again — the question is already its title.
+    writeHint(node);
 
     // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
     // верстаке появляется её карточка, и далее карточки под-идей."

@@ -913,6 +913,18 @@ button.menu-item {
   cursor: grab;
 }
 .pin-head { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }
+/* What kind of thing this is, readable without reading. A badge rather than dim grey type, so a
+   bench of twelve cards can be sorted by eye — but the same badge for every kind, because on this
+   page colour means status and nothing else (the palette, above). */
+.pin-kind {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  background: var(--raised);
+  color: var(--fg-soft);
+  letter-spacing: 0.02em;
+}
 .pin-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--prose); }
 .pin-off { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
 .pin-body { margin-top: 4px; }
@@ -1761,9 +1773,22 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   text-align: center;
 }
 
-/* Two lines at most for a hint, whatever the label says: "все элементы отображают свой
-   информативный хинт (2 строки текста максимум)". */
-.pin-label {
+/* The hint is the sentence written about the card, not its title clamped to two lines: "сейчас
+   плохо отображаются хинты, практически не видно что из себя представляют". A title says which
+   card this is; the line under it says what it is, which is the thing a folded card was missing.
+
+   Two lines, which is the size that was asked for. The title above it keeps its one line and its
+   ellipsis (.pin-label, above), so a folded card is three lines of which two are meaning. */
+.pin-hint {
+  display: none;
+  margin: 4px 0 0;
+  color: var(--fg-soft);
+  font-size: var(--t-sm);
+  line-height: 1.35;
+}
+/* Only when folded. Any other view shows the body, and the body already says this in full — the
+   same sentence twice is noise. */
+.pin[data-view="hint"] .pin-hint {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
