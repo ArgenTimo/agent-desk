@@ -591,7 +591,12 @@ async function bringItsKin(card, at) {
 }
 
 async function pin(card, how) {
-  if (pins.querySelector(`[data-id="${CSS.escape(card.id)}"][data-kind="${card.kind}"]`)) return;
+  // Against the *cards* on the surface, by their own name. Looking for `[data-kind][data-id]`
+  // matched the idea lines *inside* a block card — the conversation is on the workbench now, so
+  // the markup it renders is inside `#pins` too — and `pin` therefore returned early every time,
+  // which is why an idea never became a card of its own.
+  const name = `${card.kind}:${card.id}`;
+  if (surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) return;
   const holder = document.createElement('div');
   holder.className = 'pin';
   holder.dataset.kind = card.kind;
