@@ -1,0 +1,347 @@
+/*
+  One stylesheet, no build step, no framework.
+
+  The type scale and the colour palette do most of the work here, and both are chosen for the
+  subject rather than for fashion: an insurance page is read by somebody deciding whether to trust
+  a promise about money, and the things that earn that are legibility, space, and never using
+  emphasis to hide the half of the page they most need.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --ink: #16202b;
+  --ink-soft: #46566a;
+  --ink-dim: #6c7d90;
+  --page: #f7f8fa;
+  --card: #ffffff;
+  --line: #dde3ea;
+  --line-strong: #c3ccd8;
+
+  /* One accent, used for actions and nothing else. A page where five things are blue is a page
+     where nothing is. */
+  --accent: #1d5fbf;
+  --accent-dark: #174a95;
+  /* Covered and not covered. Never red for "not covered" — an exclusion is not a warning, it is
+     information, and colouring it as danger is how a page teaches people to skip it. */
+  --yes: #1f7a4d;
+  --no: #8a6a1f;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(22 32 43 / 6%), 0 8px 24px rgb(22 32 43 / 6%);
+  --measure: 62ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8edf3;
+    --ink-soft: #b3c0ce;
+    --ink-dim: #8697a8;
+    --page: #11171e;
+    --card: #18202a;
+    --line: #26313d;
+    --line-strong: #35424f;
+    --accent: #6ba6f5;
+    --accent-dark: #8dbcf8;
+    --yes: #6bc492;
+    --no: #d9b666;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 25%);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { width: min(1120px, 100% - 2.5rem); margin-inline: auto; }
+.wrap.narrow { width: min(760px, 100% - 2.5rem); }
+
+h1, h2, h3, h4 { line-height: 1.2; margin: 0 0 0.5em; letter-spacing: -0.011em; }
+h1 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3rem); }
+h2 { font-size: clamp(1.4rem, 1.1rem + 1.2vw, 2rem); }
+h3 { font-size: 1.15rem; }
+h4 { font-size: 0.95rem; }
+p { margin: 0 0 1rem; max-width: var(--measure); }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-dark); }
+
+/* Focus is visible everywhere. A form that decides somebody's premium has to be usable from a
+   keyboard, and the default outline being ugly is not a reason to remove it. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  background: var(--card);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+}
+.skip:focus { left: 1rem; top: 1rem; z-index: 10; }
+
+/* --- the bar at the top ---------------------------------------------------------------------- */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  min-height: 64px;
+  flex-wrap: wrap;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 650;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+.brand-mark { color: var(--accent); font-size: 1.2em; }
+.brand-thin { font-weight: 400; color: var(--ink-soft); }
+.top nav { display: flex; gap: 1.15rem; flex-wrap: wrap; margin-right: auto; }
+.top nav a { color: var(--ink-soft); text-decoration: none; font-size: 0.94rem; }
+.top nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* The claims number is in the header on every screen. It is what somebody is looking for on the
+   worst day they will have with this company. */
+.call { text-align: right; text-decoration: none; color: var(--ink); }
+.call-label { display: block; font-size: 0.72rem; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.call strong { font-size: 1.02rem; }
+
+/* --- the top of the page --------------------------------------------------------------------- */
+.hero { padding: clamp(2rem, 5vw, 4.5rem) 0; }
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr; }
+}
+.lede { font-size: 1.1rem; color: var(--ink-soft); }
+.plain-list { margin: 1.25rem 0 0; padding: 0; list-style: none; max-width: var(--measure); }
+.plain-list li {
+  position: relative;
+  padding-left: 1.6rem;
+  margin-bottom: 0.55rem;
+  color: var(--ink-soft);
+}
+.plain-list li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--yes);
+  font-weight: 700;
+}
+
+/* --- cards --------------------------------------------------------------------------------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: clamp(1.1rem, 2.5vw, 1.6rem);
+}
+
+/* --- the estimator --------------------------------------------------------------------------- */
+.quote { position: sticky; top: 84px; }
+@media (max-width: 900px) { .quote { position: static; } }
+.quote h2 { margin-bottom: 0.15rem; }
+.quote-sub { color: var(--ink-dim); font-size: 0.88rem; margin-bottom: 1.2rem; }
+
+.field { margin-bottom: 1.05rem; }
+.field label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.95rem; }
+/* Every field says why it is needed. A date of birth on an insurance form is not obvious, and one
+   line of explanation is cheaper than the abandonment. */
+.why { font-size: 0.8rem; color: var(--ink-dim); margin: 0.3rem 0 0; }
+
+input, select {
+  width: 100%;
+  font: inherit;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+input:focus, select:focus { border-color: var(--accent); }
+.with-unit { position: relative; }
+.with-unit .unit {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-dim);
+}
+.with-unit input { padding-left: 1.7rem; }
+
+/* The number, and the sentence that stops it being read as a price. They are one block on purpose:
+   a figure that can be screenshotted without its caveat is a complaint waiting to happen. */
+.estimate {
+  display: block;
+  margin: 1.3rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.estimate-figure {
+  display: block;
+  font-size: clamp(2rem, 1.4rem + 2vw, 2.7rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.estimate-unit { display: block; color: var(--ink-soft); font-size: 0.92rem; }
+.estimate-note { display: block; margin-top: 0.5rem; font-size: 0.82rem; color: var(--ink-dim); }
+
+button { font: inherit; cursor: pointer; border-radius: 8px; }
+.primary {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+.ghost {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+}
+.ghost:hover { border-color: var(--ink-dim); }
+.linky {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  text-decoration: underline;
+  font-size: 0.86rem;
+}
+
+.fineprint { font-size: 0.8rem; color: var(--ink-dim); }
+
+/* --- bands ----------------------------------------------------------------------------------- */
+.band { padding: clamp(2.2rem, 5vw, 4rem) 0; border-top: 1px solid var(--line); }
+.band.alt { background: color-mix(in srgb, var(--card) 60%, var(--page)); }
+.section-lede { color: var(--ink-soft); max-width: var(--measure); }
+
+/* --- covered and not covered ----------------------------------------------------------------- */
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 1.1rem;
+  margin-top: 1.6rem;
+}
+.excess-line { color: var(--ink-soft); font-size: 0.9rem; margin-bottom: 1rem; }
+.excess-line strong { color: var(--ink); }
+/* Both columns the same width and the same type size. This is the rule the whole section exists
+   for: exclusions shrunk into a footnote is the pattern the regulators write about. */
+.cover .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+@media (max-width: 560px) { .cover .two { grid-template-columns: 1fr; } }
+.cover h4 { margin-bottom: 0.4rem; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.cover h4.yes { color: var(--yes); }
+.cover h4.no { color: var(--no); }
+.cover ul { margin: 0; padding-left: 1.1rem; }
+.cover li { margin-bottom: 0.35rem; color: var(--ink-soft); font-size: 0.92rem; }
+
+/* --- claiming -------------------------------------------------------------------------------- */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 1.1rem;
+  margin: 1.6rem 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps li {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.2rem;
+  counter-increment: step;
+}
+.steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  margin-bottom: 0.7rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+.steps p { margin: 0; color: var(--ink-soft); font-size: 0.94rem; }
+.note-card { border-left: 3px solid var(--accent); }
+
+/* --- questions ------------------------------------------------------------------------------- */
+details {
+  border-bottom: 1px solid var(--line);
+  padding: 0.9rem 0;
+}
+summary { cursor: pointer; font-weight: 600; }
+summary::marker { color: var(--accent); }
+details p { margin: 0.7rem 0 0; color: var(--ink-soft); }
+
+/* --- the bottom ------------------------------------------------------------------------------ */
+.foot { border-top: 1px solid var(--line); padding: 2.2rem 0 3rem; background: var(--card); }
+.foot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 1.6rem;
+}
+.foot nav { display: flex; flex-direction: column; gap: 0.4rem; }
+.foot nav a { color: var(--ink-soft); font-size: 0.9rem; }
+
+/* --- consent --------------------------------------------------------------------------------- */
+.consent {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  background: var(--card);
+  border-top: 1px solid var(--line-strong);
+  box-shadow: 0 -8px 30px rgb(22 32 43 / 10%);
+  padding: 1rem 0;
+}
+.consent-row {
+  display: flex;
+  gap: 1.2rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.consent p { margin: 0; flex: 1 1 22rem; font-size: 0.9rem; color: var(--ink-soft); }
+/* Both buttons the same size. A "no" that is a grey link under a big blue "yes" is not a choice,
+   and in several places it is not a lawful one either. */
+.consent-buttons { display: flex; gap: 0.6rem; flex: 0 0 auto; }
+.consent-buttons .primary, .consent-buttons .ghost { width: auto; padding: 0.6rem 1.1rem; }
+
+@media print {
+  .top, .consent, .primary, .ghost { display: none; }
+  body { background: #fff; }
+}
