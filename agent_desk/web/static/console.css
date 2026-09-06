@@ -1350,3 +1350,52 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   cursor: pointer;
 }
 .ideas-head .chip:hover { color: var(--fg); border-color: var(--focus); }
+
+/* --- what is charged, and what went with the last question ------------------------------------ */
+/* A card that landed on the bench is in the message: that is what dropping it meant. Taking it
+   out without dragging it away is a click on its head, and it says so by going quiet rather than
+   by disappearing — you want to see a card and not send it. */
+.pin.spent { opacity: 0.45; border-left-color: var(--line-strong); }
+.pin.spent .pin-label::after { content: " · not in the message"; color: var(--fg-dim); font-size: 10px; }
+.pin-head { cursor: pointer; }
+
+/* The ring: what went with a question, still on the bench while it is being worked on. Hatched
+   and turning until the answer lands; afterwards the hatching goes and the ring stays, because
+   what the last question was about is worth seeing while you read the answer to it. */
+.ring {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-radius: calc(var(--radius) * 2);
+  padding: 14px 6px 6px;
+  margin-bottom: 6px;
+  flex: 0 0 auto;
+}
+.ring.working {
+  border-style: dashed;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    color-mix(in srgb, var(--focus) 7%, transparent) 6px,
+    color-mix(in srgb, var(--focus) 7%, transparent) 12px
+  );
+}
+.ring-gear {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg);
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+.ring.working .ring-gear { animation: ring-turn 2.4s linear infinite; }
+.ring:not(.working) .ring-gear { display: none; }
+@keyframes ring-turn {
+  from { transform: translateX(-50%) rotate(0deg); }
+  to { transform: translateX(-50%) rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring.working .ring-gear { animation: none; }
+}

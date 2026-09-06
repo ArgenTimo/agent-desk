@@ -7,7 +7,10 @@
 {% for block in blocks | reverse %}
 {# `data-thread` is what makes the tabs work without the server knowing which tab this browser is
    looking at: every block is rendered, and the page shows one subject's worth. #}
+{# `data-settled` is counted by the page: it is how a ring on the workbench knows one more
+   question has been answered, without this template knowing that rings exist. #}
 <article class="block {{ block.state }} {{ block.kind }}" data-block="{{ block.id }}"
+         {% if block.state in ("answered", "failed", "cancelled") %}data-settled{% endif %}
          data-thread="{{ block.thread_id }}">
   <div class="said">{{ block.input }}</div>
 

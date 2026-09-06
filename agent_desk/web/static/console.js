@@ -311,7 +311,16 @@ stream.addEventListener('board', (event) => {
   const waiting = document.querySelectorAll('.node.session.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 });
+let answeredSoFar = 0;
+
 stream.addEventListener('blocks', (event) => {
+  // A ring stops turning when one more block has finished. Counted from the markup rather than
+  // tracked per block: this page does not know which answer belongs to which ring, and the
+  // answers arrive in the order the questions were asked.
+  const settled = (event.data.match(/data-settled/g) || []).length;
+  for (let i = answeredSoFar; i < settled; i += 1) ringDone();
+  answeredSoFar = settled;
+
   // Never while somebody is reading or typing inside it: replacing the column under a selection
   // loses it, and an answer is the one thing here anybody copies out.
   if (!document.getSelection().isCollapsed) return;
@@ -468,13 +477,13 @@ function showBenchToggle() {
   // The "+ a block" button is always there — an empty bench is exactly when somebody wants one.
   // The diagram toggle is not: there is nothing to draw until something is on it.
   const toggle = document.querySelector('[data-bench-toggle]');
-  if (toggle) toggle.hidden = pins.children.length === 0;
+  if (toggle) toggle.hidden = pins.querySelectorAll('.pin').length === 0;
 }
 
 function pinnedTargets() {
   // A note is not a card the server can look up — it is text that exists only here — so it is
   // carried in its own field rather than named as a target that would 404.
-  return [...pins.querySelectorAll('[data-kind]:not(.own)')]
+  return [...pins.querySelectorAll('[data-kind]:not(.own):not(.spent):not(.ringed)')]
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -494,17 +503,18 @@ function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
-  const carried = pins.children.length + attached;
+  const live = pins.querySelectorAll('.pin:not(.spent):not(.ringed)').length;
+  const carried = live + attached;
   const deep = pins.querySelectorAll('.pin.deep').length;
   document.getElementById('context-count').textContent = carried
-    ? `carrying ${pins.children.length} card${pins.children.length === 1 ? '' : 's'}` +
+    ? `carrying ${live} card${live === 1 ? '' : 's'}` +
       `${deep ? ` (${deep} in full)` : ''}` +
       `${attached ? ` and ${attached} earlier answer${attached === 1 ? '' : 's'}` : ''}`
     : '';
   document.querySelector('.context-strip').classList.toggle('on', carried > 0);
   // One idea on the workbench means one obvious next move, so the console offers it rather than
   // waiting to be told in words it already knows.
-  const ideas = pins.querySelectorAll('[data-kind="idea"]').length;
+  const ideas = pins.querySelectorAll('[data-kind="idea"]:not(.spent):not(.ringed)').length;
   const go = document.getElementById('get-started');
   go.hidden = ideas === 0;
   go.textContent = ideas > 1 ? `Get started on these ${ideas}` : 'Get started on it';
@@ -720,6 +730,25 @@ document.addEventListener(
   true
 );
 
+/* --- what is charged, and what is only sitting there ------------------------------------------- */
+// "При перемещении на верстак объект сразу заряжается (значит будет участвовать в контексте),
+// одиночное нажатие снимает подсветку и отменяет участие в текущем контексте, повторное нажатие
+// активирует обратно."
+//
+// A card that landed here is in the message: that is what dropping it meant, and making somebody
+// then confirm it would be asking twice. What was missing is the way *out* without dragging it
+// away — you want to see a card and not send it, which is a different thing from not wanting it
+// on the bench at all.
+document.addEventListener('click', (event) => {
+  const holder = event.target.closest('.pin');
+  if (!holder) return;
+  // The controls on the head do their own thing; the head itself is the switch.
+  if (event.target.closest('button, a, textarea, input, select')) return;
+  if (!event.target.closest('.pin-head')) return;
+  holder.classList.toggle('spent');
+  syncTargets();
+});
+
 /* --- a block of your own on the workbench ----------------------------------------------------- */
 // "ПКМ в рабочем пространстве — можно добавить временный блок; блок может содержать
 // ссылки/документы/просто текст или кусок кода."
@@ -761,7 +790,7 @@ document.addEventListener('click', (event) => {
 
 // What is typed into one travels with the message, in the same field the pinned cards use.
 function ownBlockText() {
-  return [...pins.querySelectorAll('.pin.own .own-text')]
+  return [...pins.querySelectorAll('.pin.own:not(.spent):not(.ringed) .own-text')]
     .map((field) => field.value.trim())
     .filter(Boolean)
     .join('\n\n---\n\n');
@@ -933,8 +962,40 @@ document.getElementById('ask').addEventListener('submit', () => {
   document.getElementById('say-notes').value = ownBlockText();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
-  setTimeout(clearPins, 0);
+  // What went with the question stays on the bench, ringed, while it is being worked on: "после
+  // отправки помещаются в скруглённую рамку которая заштрихована и по центру вращается
+  // шестерёнка; когда обработано — шестерёнка и штриховка исчезают, но рамка остаётся".
+  //
+  // The ring is the useful half. A bench that emptied itself on Send lost the record of what the
+  // last question was about, which is exactly what somebody wants to see while they read the
+  // answer to it.
+  ringWhatWentWithIt();
 });
+
+function ringWhatWentWithIt() {
+  const went = [...pins.querySelectorAll('.pin:not(.spent)')];
+  if (!went.length) return;
+  const ring = document.createElement('div');
+  ring.className = 'ring working';
+  ring.innerHTML = '<span class="ring-gear" aria-hidden="true">⚙</span>';
+  pins.insertBefore(ring, went[0]);
+  went.forEach((pin) => {
+    pin.classList.add('ringed');
+    ring.appendChild(pin);
+  });
+  // Everything after it starts a fresh context, which is what "the last blocks" always meant.
+  ringsWaiting.push(ring);
+}
+
+// The rings still turning. When a block finishes, the oldest of them stops: the answers arrive in
+// the order the questions were asked, and this page has no better handle on which is which than
+// that.
+const ringsWaiting = [];
+
+function ringDone() {
+  const ring = ringsWaiting.shift();
+  if (ring) ring.classList.remove('working');
+}
 
 applyFolded();
 applyTabOrder();
