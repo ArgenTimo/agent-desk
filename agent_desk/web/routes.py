@@ -453,8 +453,14 @@ def render_tail(session_id: str) -> str:
 
 
 async def render_blocks() -> str:
-    """The column under the input field: newest first, each showing its state and its thread."""
-    rows = await store.blocks()
+    """Every recent block, for the workbench to place the open chat's on the surface.
+
+    The bound is generous rather than tight because the page filters by chat afterwards: with the
+    old fifty, a console with several chats open rendered fifty blocks that could all belong to
+    *other* chats, and the chat you were looking at came out empty. That is a surface that says
+    "nothing here" about a conversation you can see in the tab bar.
+    """
+    rows = await store.blocks(limit=250)
     open_threads = await store.open_threads()
     known = {thread.id for thread in open_threads}
     # A block's own thread is always an option, even when it has fallen outside the bound. Without

@@ -433,7 +433,10 @@ async def test_an_empty_console_says_what_to_do_next(home: Home, wired: Store) -
 
     assert "No live sessions" in body
     assert "claude" in body
-    assert "Nothing asked yet" in body
+    # The workbench is the middle now, so the line that used to sit in an empty output column
+    # sits in the middle of the empty surface — the words moved, the promise did not.
+    assert "Nothing here yet" in body
+    assert "lands here as a" in body
     assert "/idea" in body
 
 

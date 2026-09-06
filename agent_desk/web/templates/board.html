@@ -46,56 +46,40 @@
   <main class="col-mid" data-pane="workbench" aria-label="workbench">
     {% include "_tabs.html" %}
 
-    {# The output. Empty by default; every message hangs here and its answer appears under it.
-       Drop a card in to see it and to point what you ask next at it; drag it out to stop. #}
-    <div id="out" class="out" data-drop="out">
-      <div id="blocks">{{ blocks|safe }}</div>
-      <p class="out-empty">Nothing asked yet. Ask a question, drop a card in here to talk
-        about that one thing, or start with <span class="hint-key">/idea</span> to record a
-        thought without interrupting anything.</p>
-    </div>
+    {# One surface, and the input field under it. There is no output column any more: a question
+       and its answer are cards on the workbench like everything else, joined to whatever the
+       question was about. That is what the pool asked for — "выбранные в контекст объекты после
+       отправки помещаются в рамку... под рамкой появляется связанный блок с результатами" — and
+       it is the only arrangement in which that sentence can be true.
 
-    {# Dots at the edges of the bench, pointing at cards that are on it but off the screen. A
-       card you cannot see and do not know is there is a card that goes into the next message by
-       surprise, and scaling the bench down makes that more likely rather than less. #}
-    <div id="off-edge" class="off-edge" aria-hidden="true"></div>
+       The server still renders the conversation; `#blocks` is where it lands and the page moves
+       each one onto the surface. Keeping the rendering server-side means the answer, its state
+       and its buttons are the same markup they always were (docs/06-console.md). #}
+    <div id="blocks" hidden>{{ blocks|safe }}</div>
 
-    {# What the next message will carry, said out loud. Every call to the model is built from
-       exactly this and nothing else — the question, the cards in the output, and whichever
-       earlier exchanges were attached. #}
-    {# Two ways to look at the same bench: the cards themselves, and the relations between them.
-       A stack says what each one is; the diagram says how they stand to each other, which is
-       usually the question when four things were dragged here at once. #}
     <div class="bench-head">
-      {# A button rather than the right mouse button: overriding the browser's context menu takes
-         paste and open-in-new-tab away from somebody who was reaching for them, and this is a
-         window people paste into all day. #}
-      <button type="button" class="chip add-note" data-add-note
-              title="a block of your own: a link, a paragraph, a snippet of code">+ a block</button>
-      {# Scaling the bench. Six cards on a laptop is six cards you scroll past one at a time;
-         at sixty per cent it is six cards you can see at once, which is the whole point of
-         having put them side by side. Ctrl and the wheel does the same thing. #}
       <span class="zoom" role="group" aria-label="how big the workbench is">
         <button type="button" class="chip zoom-out" data-zoom="-1" aria-label="smaller">−</button>
         <button type="button" class="chip zoom-at" data-zoom="0"
-                title="back to full size">100%</button>
+                title="back to full size and centred">100%</button>
         <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
       </span>
       {# A surface you can move things about on is a surface you can lose things on. #}
       <button type="button" class="chip" data-tidy
-              title="put every card back where a fresh one lands, and centre the view">tidy up</button>
+              title="lay everything out again and centre the view">tidy up</button>
       <span class="spacer"></span>
+      {# Cards on the workbench that are off the screen. One you cannot see and do not know is
+         there is one that goes into the next message by surprise. #}
+      <div id="off-edge" class="off-edge" aria-hidden="true"></div>
     </div>
-    {# The workbench proper: a surface you move cards about on, joined by lines, panned by
-       dragging the background and zoomed with the buttons above or Ctrl and the wheel.
 
-       Two coordinate systems, kept apart: a card's position is in *surface* space and does not
-       change when you pan or zoom, and the surface carries one transform. So a line between two
-       cards is drawn from where they are and is right at any size. #}
+    {# The workbench: everything is here. Cards are placed where you put them and joined by
+       lines; the background pans by dragging and zooms with the buttons or Ctrl and the wheel;
+       the right mouse button on the background offers what can be added. #}
     <div id="bench-canvas" class="bench-canvas" data-drop="pins"
          aria-label="the workbench: what the next message is about">
       <div id="bench-surface" class="bench-surface">
-        <svg id="bench-ties" class="bench-ties" aria-hidden="true" hidden>
+        <svg id="bench-ties" class="bench-ties" aria-hidden="true">
           <defs>
             <marker id="tie-end" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7"
                     markerHeight="7" orient="auto-start-reverse">
@@ -103,9 +87,24 @@
             </marker>
           </defs>
         </svg>
-        <div id="pins" class="pins" aria-label="what the next message is about"></div>
+        <div id="pins" class="pins" aria-label="what is on the workbench"></div>
       </div>
+      <p class="out-empty">Nothing here yet. Ask something, drop a card in, or start with
+        <span class="hint-key">/idea</span> to write a thought down — everything lands here as a
+        card you can move, open and join up.</p>
     </div>
+
+    {# What the right mouse button offers on the background. Only there: taking the browser's own
+       menu away from a text field would take paste with it, and this is a window people paste
+       into all day. #}
+    <menu id="bench-menu" class="bench-menu" hidden>
+      <li><button type="button" data-add="link">Add a link…</button></li>
+      <li><button type="button" data-add="file">Add a file…</button></li>
+      <li><button type="button" data-add="note">Add a note</button></li>
+      <li class="sep"><button type="button" data-add="tidy">Lay it out again</button></li>
+      <li><button type="button" data-add="fit">Fit everything on screen</button></li>
+      <li><button type="button" data-add="clear">Take everything off</button></li>
+    </menu>
 
     <div class="context-strip">
       <span id="context-count"></span>

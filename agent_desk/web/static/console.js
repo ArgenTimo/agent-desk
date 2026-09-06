@@ -9,7 +9,6 @@
 const poll = window.POLL_SECONDS || 2;
 const asof = document.getElementById('asof');
 const state = document.getElementById('stream-state');
-const out = document.getElementById('out');
 const pins = document.getElementById('pins');
 let lastChecked = 0;
 
@@ -324,14 +323,12 @@ stream.addEventListener('blocks', (event) => {
   // Never while somebody is reading or typing inside it: replacing the column under a selection
   // loses it, and an answer is the one thing here anybody copies out.
   if (!document.getSelection().isCollapsed) return;
-  if (document.activeElement.closest('#out')) return;
-  const wasAtBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
   document.getElementById('blocks').innerHTML = event.data;
   if (window.htmx) htmx.process(document.getElementById('blocks'));
+  syncBlocks();
   showActiveThread();
   // Only if they were already there. Yanking somebody back to the newest answer while they are
   // reading an older one is the same mistake as replacing the text under their cursor.
-  if (wasAtBottom) out.scrollTop = out.scrollHeight;
   checked();
 });
 stream.addEventListener('ideas', (event) => {
@@ -368,9 +365,10 @@ function showActiveThread() {
     block.hidden = block.dataset.thread !== current;
   }
   const said = [...document.querySelectorAll('#blocks [data-thread]')].some((b) => !b.hidden);
-  out.classList.toggle('is-empty', !said);
+
   const field = document.getElementById('say-thread');
   if (field) field.value = current;
+  syncBlocks();
 }
 
 document.addEventListener('click', (event) => {
@@ -382,7 +380,6 @@ document.addEventListener('click', (event) => {
   for (const other of document.querySelectorAll('.tab')) other.classList.toggle('on', other === tab);
   clearPins();
   showActiveThread();
-  out.scrollTop = out.scrollHeight;
   document.getElementById('ask-text').focus();
 });
 
@@ -398,7 +395,6 @@ function swapped(isTabs) {
     clearPins();
   }
   showActiveThread();
-  out.scrollTop = out.scrollHeight;
 }
 
 document.body.addEventListener('htmx:afterSwap', (event) => {
@@ -539,7 +535,7 @@ document.getElementById('get-started').addEventListener('click', () => {
   document.getElementById('ask').requestSubmit();
 });
 
-async function pin(card) {
+async function pin(card, how) {
   if (pins.querySelector(`[data-id="${CSS.escape(card.id)}"][data-kind="${card.kind}"]`)) return;
   const holder = document.createElement('div');
   holder.className = 'pin';
@@ -550,15 +546,17 @@ async function pin(card) {
   // Not `draggable`: on the surface a card is moved by its head with the pointer, and the HTML5
   // drag would fight that. `×` is how a card leaves.
   holder.dataset.deep = 'no';
+  holder.dataset.view = 'metadata';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
-    <button type="button" class="pin-fold" title="fold this away">–</button>
+    <button type="button" class="pin-view" title="what it is — press for everything, including the technical detail">what it is</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
     <div class="pin-body">reading…</div>`;
   holder.querySelector('.pin-label').textContent = card.label || card.id;
   pins.appendChild(holder);
-  place(holder);
+  place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null);
+  if (how?.under) ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
   syncTargets();
 
   try {
@@ -567,20 +565,54 @@ async function pin(card) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    settleOverlaps();
   } catch {
     holder.querySelector('.pin-body').innerHTML = '<p class="empty small">could not read this one</p>';
   }
   syncTargets();
 }
 
+// The three a card has, and they are the three the pool named: "1 — хинт, то что видно в
+// максимально свёрнутом виде; 2 — метадата, то что идёт в контекст по умолчанию и отображается
+// при добавлении в рабочее пространство; 3 — фул-инфо, буквально вся информация, по умолчанию
+// свёрнута".
+//
+// One control cycling three states rather than two controls, because they are one question —
+// how much of this do I want to see — and answering it in two places is how somebody ends up
+// with a card that is folded *and* technical.
+const VIEWS = ['hint', 'metadata', 'full'];
+const VIEW_SAYS = { hint: 'a line', metadata: 'what it is', full: 'everything' };
+
+function setView(holder, view) {
+  holder.dataset.view = view;
+  const button = holder.querySelector('.pin-view');
+  if (button) {
+    button.textContent = VIEW_SAYS[view];
+    button.title =
+      view === 'hint'
+        ? 'just the line — press for what it is'
+        : view === 'metadata'
+          ? 'what it is — press for everything, including the technical detail'
+          : 'everything, including the technical detail — press to fold it back to a line';
+  }
+  // `full` also flips the card inside it, which is where the branch, the paths and the log are.
+  const inner = holder.querySelector('[data-detail]');
+  if (inner) {
+    const technical = view === 'full';
+    inner.dataset.detail = technical ? 'technical' : 'plain';
+    const plain = inner.querySelector('.plain-only');
+    const detail = inner.querySelector('.technical-only');
+    if (plain) plain.hidden = technical;
+    if (detail) detail.hidden = !technical;
+  }
+  settleOverlaps();
+}
+
 document.addEventListener('click', (event) => {
-  // Everything a card knows is shown when it lands on the workbench, and folded away by this
-  // when it is more than somebody wants to look at right now.
-  if (event.target.classList.contains('pin-fold')) {
+  if (event.target.classList.contains('pin-view')) {
     const holder = event.target.closest('.pin');
-    const folded = holder.classList.toggle('folded');
-    event.target.textContent = folded ? '+' : '–';
-    event.target.title = folded ? 'open it again' : 'fold this away';
+    const at = VIEWS.indexOf(holder.dataset.view || 'metadata');
+    setView(holder, VIEWS[(at + 1) % VIEWS.length]);
     return;
   }
 
@@ -652,7 +684,7 @@ function zoneOf(event) {
   // The output and the staging area under it are one target: dropping a card anywhere in the
   // middle means "this is what the next message is about".
   return event.target.closest(
-    '#out, #bench-canvas, [data-drop="project"], [data-drop="idea"], [data-drop="ungroup"]'
+    '#bench-canvas, [data-drop="project"], [data-drop="idea"], [data-drop="ungroup"]'
   );
 }
 
@@ -672,7 +704,7 @@ document.addEventListener('drop', (event) => {
   zone.classList.remove('drop-target');
   dragged.handled = true;
 
-  if (zone.id === 'out' || zone.id === 'bench-canvas') {
+  if (zone.id === 'bench-canvas') {
     if (!dragged.fromPins) pin(dragged);
     document.getElementById('ask-text').focus();
     return;
@@ -813,8 +845,76 @@ function applyView() {
   markOffEdge();
 }
 
-function place(pin, at) {
-  const where = at || placed.get(cardName(pin)) || nextFreeSpot();
+// The gap cards keep from each other. Not decoration: the lines between them run through it, and
+// two cards touching leave nowhere for a line to be seen (docs/06-console.md).
+const GAP = 26;
+
+function boxOf(pin, at) {
+  return {
+    left: at.x,
+    top: at.y,
+    right: at.x + (pin.offsetWidth || CARD_WIDTH),
+    bottom: at.y + (pin.offsetHeight || 120),
+  };
+}
+
+function hits(one, other) {
+  return !(
+    one.right + GAP <= other.left ||
+    one.left >= other.right + GAP ||
+    one.bottom + GAP <= other.top ||
+    one.top >= other.bottom + GAP
+  );
+}
+
+// "Карточки на верстаке имеют коллизию и не перекрывают друг друга + всегда оставляют
+// пространство между друг другом, чтобы видеть связи."
+//
+// Somewhere near where it was asked to go, but not on top of anything. Sweeps downwards and then
+// across, which keeps a card near its intended column — a card that belongs under a question
+// should stay under that question, not fly off to the right.
+function freeSpot(pin, wanted) {
+  const others = [...surface.querySelectorAll('.pin')]
+    .filter((one) => one !== pin && placed.has(cardName(one)))
+    .map((one) => boxOf(one, placed.get(cardName(one))));
+  if (!others.length) return wanted;
+
+  for (let column = 0; column < 8; column += 1) {
+    const x = wanted.x + column * (CARD_WIDTH + GAP);
+    for (let step = 0; step < 40; step += 1) {
+      const at = { x, y: wanted.y + step * 40 };
+      if (!others.some((box) => hits(boxOf(pin, at), box))) return at;
+    }
+  }
+  return wanted;
+}
+
+// A card is placed before its content arrives — the body is fetched, or filled from the stream —
+// and then it grows. So the layout is settled again once things have their real height, and only
+// cards this program placed are moved: one somebody dragged somewhere stays where they put it.
+let settling = 0;
+
+function settleOverlaps() {
+  clearTimeout(settling);
+  settling = setTimeout(() => {
+    for (const pin of surface?.querySelectorAll('.pin:not([data-moved])') || []) {
+      const at = placed.get(cardName(pin));
+      if (!at) continue;
+      const free = freeSpot(pin, at);
+      if (free.x !== at.x || free.y !== at.y) place(pin, free, { avoid: false });
+    }
+    drawTies();
+    drawRings();
+    markOffEdge();
+  }, 60);
+}
+
+function place(pin, at, { avoid = true } = {}) {
+  const known = placed.get(cardName(pin));
+  const wanted = at || known || nextFreeSpot();
+  // A card somebody put somewhere stays where they put it. Collision avoidance is for cards this
+  // program is placing itself.
+  const where = at === undefined && known ? known : avoid ? freeSpot(pin, wanted) : wanted;
   placed.set(cardName(pin), where);
   pin.style.left = `${where.x}px`;
   pin.style.top = `${where.y}px`;
@@ -887,11 +987,17 @@ canvas?.addEventListener('pointermove', (event) => {
     applyView();
     return;
   }
-  place(moving.pin, {
-    x: Math.round(moving.from.x + dx / view.scale),
-    y: Math.round(moving.from.y + dy / view.scale),
-  });
+  place(
+    moving.pin,
+    {
+      x: Math.round(moving.from.x + dx / view.scale),
+      y: Math.round(moving.from.y + dy / view.scale),
+    },
+    { avoid: false }
+  );
+  moving.pin.dataset.moved = 'yes';
   drawTies();
+  drawRings();
 });
 
 function endMove() {
@@ -977,11 +1083,17 @@ async function loadTies() {
   drawTies();
 }
 
+// The server knows how ideas relate to each other; the page knows what a question went out with.
+// Both are lines on the same surface.
+function everyTie() {
+  return [...tieList, ...ownTies];
+}
+
 function drawTies() {
   if (!ties) return;
   ties.textContent = '';
   let drew = 0;
-  for (const tie of tieList) {
+  for (const tie of everyTie()) {
     const one = surface.querySelector(`.pin[data-name="${CSS.escape(tie.from)}"]`);
     const other = surface.querySelector(`.pin[data-name="${CSS.escape(tie.to)}"]`);
     const a = placed.get(tie.from);
@@ -1054,17 +1166,8 @@ function markOffEdge() {
   edge.hidden = away === 0;
 }
 
-document.querySelector('[data-tidy]')?.addEventListener('click', () => {
-  // One button, because a surface you can move things about on is a surface you can lose things
-  // on. It does not lay anything out cleverly; it puts everything back where a fresh card lands.
-  placed = new Map();
-  [...surface.querySelectorAll('.pin')].forEach((pin, index) => {
-    place(pin, { x: 20 + (index % 4) * (CARD_WIDTH + 24), y: 20 + index * STEP });
-  });
-  view = { x: 0, y: 0, scale: view.scale };
-  applyView();
-  drawTies();
-});
+// One button, because a surface you can move things about on is a surface you can lose things on.
+document.querySelector('[data-tidy]')?.addEventListener('click', tidyUp);
 
 window.addEventListener('resize', () => {
   markOffEdge();
@@ -1084,6 +1187,225 @@ try {
   view.scale = 1;
 }
 applyView();
+
+/* --- what the right mouse button offers -------------------------------------------------------- */
+// "ПКМ в поле верстака открывает варианты действий, первые из которых — добавить карточку-ссылку
+// или файл и прочее."
+//
+// On the *background* only. Taking the browser's own menu away from a text field would take paste
+// with it, and this is a window people paste into all day — so a right-click on a card, a field
+// or a button is left entirely alone.
+const benchMenu = document.getElementById('bench-menu');
+
+function showMenu(x, y) {
+  if (!benchMenu) return;
+  benchMenu.hidden = false;
+  const frame = document.getElementById('bench-canvas').getBoundingClientRect();
+  // Kept inside the window: a menu opened near the bottom edge that runs off it is a menu with
+  // half its items unreachable.
+  const width = benchMenu.offsetWidth;
+  const height = benchMenu.offsetHeight;
+  benchMenu.style.left = `${Math.min(x, frame.right - width - 8)}px`;
+  benchMenu.style.top = `${Math.min(y, window.innerHeight - height - 8)}px`;
+}
+
+function hideMenu() {
+  if (benchMenu) benchMenu.hidden = true;
+}
+
+document.getElementById('bench-canvas')?.addEventListener('contextmenu', (event) => {
+  if (event.target.closest('.pin, button, a, input, textarea, select')) return;
+  event.preventDefault();
+  showMenu(event.clientX, event.clientY);
+});
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('#bench-menu')) hideMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideMenu();
+});
+
+benchMenu?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-add]');
+  if (!button) return;
+  hideMenu();
+  const what = button.dataset.add;
+  if (what === 'note') addOwnBlock();
+  else if (what === 'link') addOwnBlock('link');
+  else if (what === 'file') addOwnBlock('file');
+  else if (what === 'tidy') tidyUp();
+  else if (what === 'fit') fitEverything();
+  else if (what === 'clear') clearBench();
+});
+
+function clearBench() {
+  // Everything comes off, including the rings. What was asked is still in the store and comes
+  // back with the thread — this clears the surface, not the conversation.
+  for (const node of surface?.querySelectorAll('.pin, .ring') || []) node.remove();
+  placed = new Map();
+  ownTies.length = 0;
+  wentWith.clear();
+  rememberLayout();
+  syncTargets();
+  drawTies();
+  emptyOrNot();
+}
+
+function tidyUp() {
+  placed = new Map();
+  // Down one column, then the next: with collision avoidance doing the vertical spacing, a column
+  // of tall cards and a column of short ones both come out right.
+  [...surface.querySelectorAll('.pin')].forEach((pin, index) => {
+    place(pin, { x: 20 + (index % 3) * (CARD_WIDTH + GAP * 2), y: 20 });
+  });
+  view.x = 0;
+  view.y = 0;
+  applyView();
+  drawTies();
+  drawRings();
+}
+
+// Everything on screen at once, whatever size that takes. The counterpart to tidying: it moves
+// the view rather than the cards, so a layout somebody arranged on purpose survives it.
+function fitEverything() {
+  const cards = [...(surface?.querySelectorAll('.pin') || [])];
+  if (!cards.length) return;
+  const spots = cards.map((pin) => ({ at: placed.get(cardName(pin)), el: pin })).filter((one) => one.at);
+  if (!spots.length) return;
+  const left = Math.min(...spots.map((one) => one.at.x));
+  const top = Math.min(...spots.map((one) => one.at.y));
+  const right = Math.max(...spots.map((one) => one.at.x + one.el.offsetWidth));
+  const bottom = Math.max(...spots.map((one) => one.at.y + one.el.offsetHeight));
+  const frame = document.getElementById('bench-canvas').getBoundingClientRect();
+  const pad = 40;
+  const scale = Math.min(
+    1,
+    (frame.width - pad) / Math.max(1, right - left),
+    (frame.height - pad) / Math.max(1, bottom - top)
+  );
+  view.scale = ZOOMS.reduce((best, one) => (one <= scale && one > best ? one : best), ZOOMS[0]);
+  view.x = frame.width / 2 - ((left + right) / 2) * view.scale;
+  view.y = frame.height / 2 - ((top + bottom) / 2) * view.scale;
+  applyView();
+  drawTies();
+  drawRings();
+}
+
+/* --- the conversation, as cards on the surface ------------------------------------------------- */
+// "Есть только верстак и поле ввода." A question and its answer are cards like everything else,
+// joined to whatever the question was about — which is the only arrangement in which the pool's
+// older sentence can be true: "выбранные в контекст объекты после отправки помещаются в рамку…
+// под рамкой появляется связанный блок с результатами".
+//
+// The server still renders the conversation into `#blocks`, hidden. This moves each one onto the
+// surface, so the answer, its state and its buttons stay exactly the markup they always were.
+const blocksSource = document.getElementById('blocks');
+
+// Which cards each question went out with, so its answer can be joined back to them. Client-side
+// because it is a fact about this window's last few actions, not about the store.
+const wentWith = new Map();
+let lastSent = [];
+// The rings still turning, oldest first: the answers arrive in the order the questions were
+// asked, and this page has no better handle on which is which than that. Declared here rather
+// than beside the function that fills them, because the stream can deliver a finished block
+// before the rest of this file has finished running.
+const ringsWaiting = [];
+// And what each of those questions went out with, waiting for the block that answers it.
+const awaitingBlock = [];
+
+function syncBlocks() {
+  if (!blocksSource || !surface) return;
+  const current = activeThread();
+  // One chat's worth. Every block ever asked is rendered into `#blocks`; putting all of them on
+  // the surface at once turns it into fifty cards nobody can read, which is the thing this
+  // arrangement exists to avoid.
+  const mine = [...blocksSource.querySelectorAll('article.block')].filter(
+    (article) => !current || article.dataset.thread === current
+  );
+  const wanted = new Set(mine.map((article) => `block:${article.dataset.block}`));
+  for (const node of surface.querySelectorAll('.pin.block-card')) {
+    if (!wanted.has(node.dataset.name)) {
+      placed.delete(node.dataset.name);
+      node.remove();
+    }
+  }
+
+  for (const article of mine) {
+    const id = article.dataset.block;
+    let node = surface.querySelector(`.pin[data-name="block:${CSS.escape(id)}"]`);
+    if (!node) {
+      node = document.createElement('div');
+      node.className = 'pin block-card';
+      node.dataset.kind = 'block';
+      node.dataset.id = id;
+      node.dataset.name = `block:${id}`;
+      node.dataset.view = 'metadata';
+      node.innerHTML = `<div class="pin-head"><span class="pin-kind">asked</span>
+        <span class="pin-label"></span>
+        <button type="button" class="pin-view" title="what it is — press for everything">what it is</button>
+        <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
+        <div class="pin-body"></div>`;
+      if (!wentWith.has(id) && awaitingBlock.length) wentWith.set(id, awaitingBlock.shift());
+      pins.appendChild(node);
+      // Under whatever it was about, so the answer reads as belonging to it.
+      place(node, spotUnder(wentWith.get(id) || []));
+      if (wentWith.has(id)) joinTo(id, wentWith.get(id));
+    }
+    // A *copy*, not the article itself. Moving it would empty `#blocks`, and `#blocks` is the
+    // source this reads on every update — the surface would clear itself on the next pass.
+    const body = node.querySelector('.pin-body');
+    const shown = body.firstElementChild;
+    if (!shown || shown.dataset.rev !== article.outerHTML.length.toString()) {
+      const copy = article.cloneNode(true);
+      copy.hidden = false;
+      copy.dataset.rev = article.outerHTML.length.toString();
+      body.replaceChildren(copy);
+      if (window.htmx) htmx.process(body);
+      settleOverlaps();
+    }
+    const said = article.querySelector('.block-input, .said, h3, p');
+    node.querySelector('.pin-label').textContent =
+      (said?.textContent || 'a question').trim().slice(0, 60);
+    node.classList.toggle('settled', article.hasAttribute('data-settled'));
+
+    // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
+    // верстаке появляется её карточка, и далее карточки под-идей."
+    for (const line of node.querySelectorAll('[data-kind="idea"][data-id]')) {
+      const name = `idea:${line.dataset.id}`;
+      if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
+        pin({ kind: 'idea', id: line.dataset.id, label: line.dataset.label }, { under: id });
+      }
+    }
+  }
+  emptyOrNot();
+  loadTies();
+}
+
+// Where a new card goes when it belongs under others: below the lowest of them, roughly centred.
+function spotUnder(names) {
+  const spots = names.map((name) => placed.get(name)).filter(Boolean);
+  if (!spots.length) return null;
+  const left = Math.round(spots.reduce((sum, at) => sum + at.x, 0) / spots.length);
+  const lowest = Math.max(...spots.map((at) => at.y));
+  return { x: left, y: lowest + 260 };
+}
+
+// Lines from a block to the cards it went out with. Held on the page rather than asked of the
+// server: the server has no idea what was on somebody's workbench when they pressed send.
+const ownTies = [];
+
+function joinTo(blockId, names) {
+  for (const name of names) {
+    ownTies.push({ from: name, to: `block:${blockId}`, says: 'asked about' });
+  }
+  drawTies();
+}
+
+function emptyOrNot() {
+  const anything = surface?.querySelectorAll('.pin').length;
+  document.getElementById('bench-canvas')?.classList.toggle('is-empty', !anything);
+}
 
 /* --- what is charged, and what is only sitting there ------------------------------------------- */
 // "При перемещении на верстак объект сразу заряжается (значит будет участвовать в контексте),
@@ -1118,19 +1440,37 @@ document.addEventListener('click', (event) => {
 // nobody asked for (docs/05-ideas.md).
 let ownBlocks = 0;
 
-function addOwnBlock() {
+function addOwnBlock(kind = 'note') {
+  const said = {
+    note: {
+      label: 'a note',
+      placeholder:
+        'Anything: a paragraph, a decision, a snippet of code. It goes with the next message and is gone when this tab is.',
+    },
+    link: {
+      label: 'a link',
+      placeholder: 'https://… — paste the address, and anything about it worth saying.',
+    },
+    file: {
+      label: 'a file',
+      placeholder:
+        'The path to a file on this machine, and what matters about it. Nothing is uploaded — the path is what travels, and whoever reads it has to be able to open it.',
+    },
+  }[kind];
+
   const holder = document.createElement('div');
   holder.className = 'pin own';
   holder.dataset.kind = 'note';
   holder.dataset.id = `note-${++ownBlocks}`;
   holder.dataset.name = `note:${holder.dataset.id}`;
   holder.dataset.deep = 'no';
-  holder.innerHTML = `<div class="pin-head"><span class="pin-kind">note</span>
-    <span class="pin-label">a block of your own</span>
-    <button type="button" class="pin-fold" title="fold this away">–</button>
-    <button type="button" class="pin-off" title="throw it away">×</button></div>
+  holder.dataset.view = 'metadata';
+  holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${kind}</span>
+    <span class="pin-label">${said.label}</span>
+    <button type="button" class="pin-view" title="what it is — press for everything">what it is</button>
+    <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
     <div class="pin-body"><textarea class="own-text" rows="4"
-      placeholder="Anything: a link, a paragraph of a document, a snippet of code. It goes with the next message and is gone when this tab is."></textarea></div>`;
+      placeholder="${said.placeholder}"></textarea></div>`;
   pins.appendChild(holder);
   place(holder);
   syncTargets();
@@ -1206,8 +1546,7 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     const folded = out.classList.toggle('folded');
     document.getElementById('ask-text').focus();
-    if (!folded) out.scrollTop = out.scrollHeight;
-    return;
+    if (!folded)     return;
   }
 
   if (event.key === 'Escape') {
@@ -1290,28 +1629,53 @@ document.getElementById('ask').addEventListener('submit', () => {
   // The ring is the useful half. A bench that emptied itself on Send lost the record of what the
   // last question was about, which is exactly what somebody wants to see while they read the
   // answer to it.
+  lastSent = [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')].map(cardName);
   ringWhatWentWithIt();
 });
 
 function ringWhatWentWithIt() {
-  const went = [...pins.querySelectorAll('.pin:not(.spent)')];
+  const went = [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')];
   if (!went.length) return;
+
+  // A frame *around* them, not a box they are moved into: on a surface, re-parenting a card would
+  // take its position with it. The frame is drawn from where the cards are and redrawn when they
+  // move, which is the same rule the lines follow.
   const ring = document.createElement('div');
   ring.className = 'ring working';
   ring.innerHTML = '<span class="ring-gear" aria-hidden="true">⚙</span>';
-  pins.insertBefore(ring, went[0]);
-  went.forEach((pin) => {
-    pin.classList.add('ringed');
-    ring.appendChild(pin);
-  });
-  // Everything after it starts a fresh context, which is what "the last blocks" always meant.
+  ring.dataset.holds = went.map(cardName).join(',');
+  surface.appendChild(ring);
+  went.forEach((pin) => pin.classList.add('ringed'));
   ringsWaiting.push(ring);
+  // What this question went out with, waiting for the block that answers it.
+  awaitingBlock.push(went.map(cardName));
+  drawRings();
 }
 
-// The rings still turning. When a block finishes, the oldest of them stops: the answers arrive in
-// the order the questions were asked, and this page has no better handle on which is which than
-// that.
-const ringsWaiting = [];
+// Every ring, sized to what it holds. Called whenever anything moves, for the same reason the
+// lines are: a frame that stays where the cards used to be is worse than no frame.
+function drawRings() {
+  for (const ring of surface?.querySelectorAll('.ring') || []) {
+    const held = (ring.dataset.holds || '')
+      .split(',')
+      .map((name) => ({ at: placed.get(name), el: surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`) }))
+      .filter((one) => one.at && one.el);
+    if (!held.length) {
+      ring.hidden = true;
+      continue;
+    }
+    ring.hidden = false;
+    const pad = 14;
+    const left = Math.min(...held.map((one) => one.at.x)) - pad;
+    const top = Math.min(...held.map((one) => one.at.y)) - pad;
+    const right = Math.max(...held.map((one) => one.at.x + one.el.offsetWidth)) + pad;
+    const bottom = Math.max(...held.map((one) => one.at.y + one.el.offsetHeight)) + pad;
+    ring.style.left = `${left}px`;
+    ring.style.top = `${top}px`;
+    ring.style.width = `${right - left}px`;
+    ring.style.height = `${bottom - top}px`;
+  }
+}
 
 function ringDone() {
   const ring = ringsWaiting.shift();
@@ -1321,4 +1685,9 @@ function ringDone() {
 applyFolded();
 applyTabOrder();
 showActiveThread();
-out.scrollTop = out.scrollHeight;
+
+/* --- and the first paint ----------------------------------------------------------------------- */
+// Everything above defines how the surface behaves; this is what puts the conversation on it when
+// the page opens, rather than only when the next event arrives.
+syncBlocks();
+emptyOrNot();

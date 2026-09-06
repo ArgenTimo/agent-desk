@@ -1506,8 +1506,10 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 /* --- the workbench as a surface --------------------------------------------------------------- */
 .bench-canvas {
   position: relative;
-  height: 40vh;
-  min-height: 180px;
+  /* The whole middle, not a strip under an output column. There is no output column any more:
+     a question and its answer are cards on this surface like everything else. */
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: 8px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1557,3 +1559,126 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   pointer-events: none;
   z-index: 1;
 }
+
+/* --- one surface, and the field under it ------------------------------------------------------ */
+/* The middle column is a header, the workbench, and the input. Nothing else, and the workbench
+   takes whatever is left. */
+.col-mid { display: flex; flex-direction: column; min-height: 0; }
+
+/* The line that used to sit in an empty output column now sits in the middle of the surface, and
+   moves with it — which is what the pool asked for. */
+.bench-canvas .out-empty {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-content: center;
+  text-align: center;
+  padding: 2rem;
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+.bench-canvas.is-empty .out-empty { display: grid; }
+
+/* A question and its answer, as a card. Wider than a dropped card because it holds prose, and it
+   scrolls inside itself rather than growing without limit. */
+.pins > .pin.block-card { width: 420px; }
+.pin.block-card .pin-body { max-height: 48vh; overflow: auto; }
+.pin.block-card .block { border: 0; padding: 0; margin: 0; background: none; }
+.pin.block-card.settled .pin-kind::after { content: " · answered"; color: var(--busy); }
+
+/* The frame around what a question went out with: drawn around the cards rather than wrapped
+   around them, so their positions survive it (docs/06-console.md). */
+.ring {
+  position: absolute;
+  z-index: 0;
+  border: 1px dashed var(--line-strong);
+  border-radius: calc(var(--radius) * 3);
+  pointer-events: none;
+}
+.ring.working {
+  border-color: var(--focus);
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 7px,
+    color-mix(in srgb, var(--focus) 8%, transparent) 7px,
+    color-mix(in srgb, var(--focus) 8%, transparent) 14px
+  );
+}
+.ring .ring-gear {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: var(--t-xl);
+  color: var(--focus);
+  opacity: 0.75;
+}
+.ring.working .ring-gear { animation: ring-turn 2.4s linear infinite; }
+.ring:not(.working) .ring-gear { display: none; }
+
+/* What the right mouse button offers. Only on the background. */
+.bench-menu {
+  position: fixed;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 13rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 28%);
+}
+.bench-menu li { margin: 0; }
+.bench-menu li.sep { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+.bench-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.bench-menu button:hover { background: color-mix(in srgb, var(--focus) 14%, transparent); }
+
+/* Lit by default, dim when you have taken it out of the message but left it on the surface.
+   "По умолчанию всё что попадает на верстак имеет подсветку и участвует в контексте; при нажатии
+   элемент потухает и не участвует, но остаётся до удаления." */
+.pins > .pin { border-left: 3px solid var(--focus); }
+.pins > .pin.spent {
+  opacity: 0.5;
+  border-left-color: var(--line-strong);
+  filter: saturate(0.4);
+}
+.off-edge { position: static; min-height: 0; }
+
+/* --- the three views a card has ---------------------------------------------------------------- */
+/* "1 — хинт, максимально свёрнутый; 2 — метадата, что идёт в контекст по умолчанию; 3 — фул-инфо,
+   вся информация, по умолчанию свёрнута." One control cycles them, because they are one question:
+   how much of this do I want to see. */
+.pin[data-view="hint"] .pin-body { display: none; }
+.pin[data-view="hint"] { width: 260px; }
+.pin[data-view="full"] { width: 460px; }
+.pin[data-view="full"] .pin-body { max-height: 60vh; overflow: auto; }
+.pin-view {
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pin-view:hover { color: var(--fg); border-color: var(--focus); }
+
+/* The workbench is the middle, and on a wide window it is roughly as tall as it is wide rather
+   than a letterbox strip under a log. */
+.bench-canvas { aspect-ratio: auto; }
