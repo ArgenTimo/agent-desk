@@ -30,10 +30,15 @@ PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 #
 # All three are paths, not categories. A fourth module that starts parsing JSON still fails this
 # test, which is the point of it.
+# Modules that parse JSON which is *not* one of the formats under ~/.claude/. The rule those
+# formats live behind is docs/adr/0004's, and it is about a format nobody promised is stable
+# changing quietly underneath five call sites. A tracker's HTTP response is somebody else's API
+# with its own versioning, and this program's own database rows are its own.
 _NOT_AN_ON_DISK_FORMAT = {
     "store/repo.py",
     "answer/session.py",
     "tracker/jira.py",
+    "tracker/github.py",
     "secrets.py",
 }
 

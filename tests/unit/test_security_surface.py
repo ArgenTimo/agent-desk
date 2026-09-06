@@ -109,8 +109,13 @@ def test_neither_request_can_be_made_over_anything_but_https() -> None:
 
 
 @pytest.mark.unit
-def test_only_two_functions_in_this_program_open_a_socket() -> None:
-    """Said in both of their docstrings. Asserted here so it stays true."""
+def test_only_the_tracker_readers_open_a_socket() -> None:
+    """Two modules, and both are a tracker this console was given a credential for.
+
+    The point is not the number — it is that the list is short enough to read and that adding to
+    it is a decision somebody makes on purpose. A console that reads transcripts and starts agents
+    has no other business on the network, and every one of these carries an Authorization header.
+    """
     opens: list[str] = []
     for module in SOURCE.rglob("*.py"):
         tree = ast.parse(module.read_text())
@@ -118,7 +123,18 @@ def test_only_two_functions_in_this_program_open_a_socket() -> None:
             if isinstance(node, ast.Attribute) and node.attr == "urlopen":
                 opens.append(module.relative_to(SOURCE).as_posix())
 
-    assert sorted(set(opens)) == ["tracker/jira.py"], opens
+    assert sorted(set(opens)) == ["tracker/github.py", "tracker/jira.py"], opens
+
+
+@pytest.mark.unit
+def test_every_request_this_program_makes_is_https() -> None:
+    """Each carries a credential, and each checks the scheme next to the call rather than trusting
+    a pattern three functions away."""
+    from agent_desk.tracker import github as gh
+
+    for bad in ("http://api.github.com/x", "file:///etc/passwd"):
+        with pytest.raises(ValueError, match="not https"):
+            gh._get(bad, "Bearer x")
 
 
 # --- subprocesses ---------------------------------------------------------------------------
