@@ -124,8 +124,18 @@ def test_nothing_on_the_page_is_smaller_than_twelve_pixels() -> None:
     and 10px text on it, which is legible on the machine it was written on and nowhere else."""
     css = (STATIC / "console.css").read_text()
 
+    # Text comes off the scale, so a literal size in a `font-size` is how the 9px crept in. The
+    # exception is deliberately narrow and it is a *floor*, not a style rule: something set
+    # unambiguously large is not what this guards against, and refusing it once blocked making
+    # the one glyph that says work is happening big enough to notice. Anything under 2rem must
+    # still come from a token.
     raw = re.findall(r"font-size:\s*([0-9.]+)(px|rem)", css)
-    assert raw == [], f"a size that is not on the scale: {raw}"
+    small = [
+        (size, unit)
+        for size, unit in raw
+        if not (unit == "rem" and float(size) >= 2) and not (unit == "px" and float(size) >= 32)
+    ]
+    assert small == [], f"a size that is not on the scale: {small}"
 
     scale = dict(re.findall(r"--t-(x?s|m?d|lg|xl):\s*([0-9]+)px", css))
     for name, size in scale.items():
@@ -385,3 +395,113 @@ def test_the_keyboard_panel_lists_the_keys_that_exist() -> None:
 
     assert "Ctrl+K" in keys, "the palette is not discoverable"
     assert "↓" in keys, "moving a card by keyboard is not written down anywhere"
+
+
+@pytest.mark.unit
+def test_a_card_stays_in_the_next_message_until_somebody_switches_it_off() -> None:
+    """ "Если активна — следующий запрос собирает в одну группу все активные карточки."
+
+    Sending used to spend every card that went: the bench was cleared of context by the act of
+    asking, so a follow-up about the same four cards meant dragging them all back. Active is a
+    standing state of the card now, and the only thing that changes it is a person.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function activeCards(" in console
+
+    submit = console[console.index("document.getElementById('ask').addEventListener('submit'") :]
+    submit = submit[: submit.index("\n});")]
+    assert "classList.add('spent')" not in submit, (
+        "sending still switches the cards off, so the bench empties itself of context"
+    )
+    assert "activeCards()" in submit
+
+
+@pytest.mark.unit
+def test_what_goes_out_with_a_question_is_a_copy_of_the_bench_not_the_bench() -> None:
+    """ "Это должны быть копии карточек на верстаке."
+
+    A record made of the live cards is a record that changes when somebody moves one. The copies
+    are the snapshot, and they get names of their own — two nodes answering to `session:abc` would
+    have the layout, the ties and the message targets all picking whichever came back first.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    ring = console[console.index("function ringWhatWentWithIt(") :]
+    ring = ring[: ring.index("\n}\n")]
+    assert "cloneNode(true)" in ring, "the originals are put in the ring rather than copied"
+    assert "held${groups}-${index}" in ring, "a copy answers to the same name as its original"
+    assert "'copy', 'ringed'" in ring, (
+        "a copy is not marked as a record, so it would be carried into the next question too"
+    )
+
+
+@pytest.mark.unit
+def test_a_finished_group_becomes_one_card_with_its_own_lines() -> None:
+    """ "Та общая обводка после исполнения должна становиться отдельной цельной собирательной
+    карточкой на верстаке со своими взаимосвязями и блоками вывода."
+
+    A hatched outline around four copies is the right picture of work in progress and the wrong
+    picture of work that is finished — four cards' worth of bench to say one thing happened.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function collect(" in console
+    done = console[console.index("function ringDone(") :]
+    done = done[: done.index("\n}\n")]
+    assert "collect(ring)" in done, "the ring is left on the bench as a ring"
+
+    made = console[console.index("function collect(") :]
+    made = made[: made.index("\n}\n")]
+    assert "'pin collection'" in made
+    assert "copy.remove()" in made, "the copies are left behind under the new card"
+    assert "'asked about'" in made, "the collection has no line to what it was asked with"
+    assert "classList.add('ringed')" in made, (
+        "a collection would be carried into the next question, which is a conversation reading "
+        "its own transcript back to itself"
+    )
+
+
+@pytest.mark.unit
+def test_the_answer_finds_the_collection_once_the_copies_are_gone() -> None:
+    """The line from an answer pointed at four nodes that no longer existed, so it was not drawn.
+
+    This is the one piece of bookkeeping the collapse creates, and it is invisible when it is
+    wrong: the answer simply floats unconnected.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function nowCollected(" in console
+    assert "wentWith.set(id, (wentWith.get(id) || []).map(nowCollected))" in console
+
+
+@pytest.mark.unit
+def test_the_gear_is_big_enough_to_notice_and_stops_for_anybody_who_asked() -> None:
+    """ "Кстати давай сделаем её больше." It is the one thing on the bench that says work is
+    happening right now, and at text size it was a character you had to look for."""
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    gear = css[css.index(".ring .ring-gear {") :]
+    gear = gear[: gear.index("}")]
+    found = re.search(r"font-size:\s*([0-9.]+)rem", gear)
+    assert found and float(found.group(1)) >= 2, "the gear is still text-sized"
+    assert "animation:" in gear, "it does not turn, so a finished ring looks like a working one"
+    assert "prefers-reduced-motion" in css, "it turns for somebody who asked it not to"
+
+
+@pytest.mark.unit
+def test_a_copy_does_not_overwrite_the_position_of_the_card_it_copies() -> None:
+    """A copy carries the same kind and id as its original, so anything keying a card by those
+    two has the copy's position land on the original's row — which moves a card somebody put
+    somewhere, silently, the moment they ask a question about it.
+
+    The layout, the lines and the frames all go through `cardName`, so it is the one place this
+    can be got right.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    name = console[console.index("function cardName(") :]
+    name = name[: name.index("\n}\n")]
+    assert "dataset.name ||" in name, (
+        "a card is keyed by kind:id, so a copy and its original share one entry in the layout"
+    )

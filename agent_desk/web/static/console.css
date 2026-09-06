@@ -1653,15 +1653,29 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
     color-mix(in srgb, var(--focus) 8%, transparent) 14px
   );
 }
+/* "Кстати давай сделаем её больше." It is the one thing on the bench that says work is happening
+   right now, and at text size it was a character somebody had to look for. */
 .ring .ring-gear {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: var(--t-xl);
+  font-size: 3rem;
+  line-height: 1;
   color: var(--focus);
-  opacity: 0.75;
+  opacity: 0.55;
+  transform-origin: 50% 50%;
+  animation: ring-turn 3.6s linear infinite;
 }
+@keyframes ring-turn {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring .ring-gear { animation: none; transform: translate(-50%, -50%); }
+}
+/* A group being worked on is dimmed as well as hatched: the cards inside it are a record of what
+   went, not something to read now. */
+.ring.working ~ .pin.copy { opacity: 0.62; }
 .ring.working .ring-gear { animation: ring-turn 2.4s linear infinite; }
 .ring:not(.working) .ring-gear { display: none; }
 
@@ -1941,3 +1955,60 @@ button.go:hover, button.yes:hover {
 }
 .idea-later select { font: inherit; font-size: var(--t-xs); max-width: 100%; }
 .idea-later.on { color: var(--fg-soft); font-size: var(--t-sm); }
+
+
+/* --- active, and the collection a question leaves behind --------------------------------------- */
+/* Whether a card is in the next message, said on the card rather than inferred from how bright it
+   is. Dimming alone made "I have not read this one yet" and "this one is switched off" look the
+   same at a glance, which is a bad way to find out what a question was asked with. */
+.pin-live {
+  flex: 0 0 auto;
+  color: var(--busy);
+  cursor: pointer;
+  font-size: 0.7em;
+  line-height: 1;
+}
+.pin-live:hover { color: var(--fg); }
+.pin.spent .pin-live { color: var(--line-strong); }
+.pin.spent .pin-live::after { content: ""; }
+/* A copy inside a ring is a record: it is not in the next message and does not offer to be. */
+.pin.copy .pin-live, .pin.collection .pin-live { display: none; }
+
+/* A snapshot of what one question was asked with. Folded, and slightly lifted off the bench so a
+   row of them reads as a history rather than as more cards to deal with. */
+.pin.copy {
+  opacity: 0.78;
+  border-style: dashed;
+}
+
+/* And what that ring becomes once the answer is in: one card holding the lot. */
+.pin.collection {
+  border-color: var(--focus);
+  border-radius: calc(var(--radius) * 2);
+  background: var(--raised);
+}
+.pin.collection .pin-kind {
+  border-color: var(--focus);
+  color: var(--focus);
+}
+.collected {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.collected li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.collected li:last-child { border-bottom: none; }
+.collected-kind {
+  flex: 0 0 4.5rem;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.collected-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }

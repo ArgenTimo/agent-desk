@@ -610,7 +610,8 @@ async function pin(card, how) {
   // drag would fight that. `×` is how a card leaves.
   holder.dataset.deep = 'no';
   holder.dataset.view = 'hint';
-  holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
+  holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
+    <span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
@@ -957,8 +958,14 @@ let view = { x: 0, y: 0, scale: 1 };
 let placed = new Map();
 let tieList = [];
 
+// What the layout, the lines and the frames all key a card by.
+//
+// `data-name` first, and that is not belt and braces: a copy taken for a group carries the same
+// `kind` and `id` as the card it was copied from, and a name derived from those would have the
+// copy's position overwrite the original's the moment it was placed. Every card that has ever
+// been created here sets `data-name`; the fallback is for a node that somehow has not.
 function cardName(pin) {
-  return `${pin.dataset.kind}:${pin.dataset.id}`;
+  return pin.dataset.name || `${pin.dataset.kind}:${pin.dataset.id}`;
 }
 
 function rememberLayout() {
@@ -1116,7 +1123,8 @@ function nextFreeSpot() {
 let moving = null;
 
 // What may be grabbed, and what is somebody trying to press or read instead.
-const NOT_A_GRIP = 'button, a, input, textarea, select, summary, details, option, label';
+const NOT_A_GRIP =
+  'button, a, input, textarea, select, summary, details, option, label, .pin-live';
 
 function gripOf(target) {
   if (target.closest(NOT_A_GRIP)) return null;
@@ -1789,12 +1797,16 @@ function syncBlocks() {
       node.dataset.id = id;
       node.dataset.name = `block:${id}`;
       node.dataset.view = 'hint';
-      node.innerHTML = `<div class="pin-head"><span class="pin-kind">asked</span>
+      node.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
+        <span class="pin-kind">asked</span>
         <span class="pin-label"></span>
         <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
         <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
         <div class="pin-body"></div>`;
       if (!wentWith.has(id) && awaitingBlock.length) wentWith.set(id, awaitingBlock.shift());
+      // Once those copies have been collected the names no longer resolve, and the line has to
+      // go to the collection instead — which is the thing on the bench that stands for them.
+      wentWith.set(id, (wentWith.get(id) || []).map(nowCollected));
       pins.appendChild(node);
       // Under whatever it was about, so the answer reads as belonging to it.
       place(node, spotUnder(wentWith.get(id) || []));
@@ -1830,6 +1842,14 @@ function syncBlocks() {
   }
   emptyOrNot();
   loadTies();
+}
+
+// A copy that has since been collected answers to its collection's name. Before this the line
+// from an answer pointed at four nodes that no longer existed, and simply was not drawn.
+function nowCollected(name) {
+  if (surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) return name;
+  const group = name.match(/^held(\d+)-/);
+  return group ? `group:g${group[1]}` : name;
 }
 
 // Where a new card goes when it belongs under others: below the lowest of them, roughly centred.
@@ -2202,26 +2222,63 @@ const KEYS = `<div class="keys card"><div class="card-head"><span class="card-na
 <dt>?</dt><dd>this</dd>
 </dl></div></div>`;
 
-// A question carries its pins with it, and once it has been asked they are spent: the next message
-// is about whatever is dropped in after this answer, which is what "the last blocks" means.
+// What a question is asked with, and what is left behind once it has been answered.
+//
+// The model somebody asked for, and it is not the one this had: **a card stays active until you
+// switch it off.** Sending used to spend every card that went — the bench was cleared of context
+// by the act of asking, so a follow-up question about the same four cards meant dragging them
+// back. Active is now a standing state of the card, and clicking it is the only thing that
+// changes it: "если активна — следующий запрос собирает в одну группу все активные карточки".
+//
+// So the group that goes out is made of **copies**. The originals stay where they are, still
+// active, ready for the next question; the copies are a snapshot of what this one was asked with,
+// and nothing that happens to the bench afterwards can rewrite it. That is the whole reason for
+// copying rather than framing in place — a record made of the live cards is a record that changes
+// when somebody moves one.
 document.getElementById('ask').addEventListener('submit', () => {
   document.getElementById('say-notes').value = ownBlockText();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
-  // What went with the question stays on the bench, ringed, while it is being worked on: "после
-  // отправки помещаются в скруглённую рамку которая заштрихована и по центру вращается
-  // шестерёнка; когда обработано — шестерёнка и штриховка исчезают, но рамка остаётся".
-  //
-  // The ring is the useful half. A bench that emptied itself on Send lost the record of what the
-  // last question was about, which is exactly what somebody wants to see while they read the
-  // answer to it.
-  lastSent = [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')].map(cardName);
+  lastSent = activeCards().map(cardName);
   ringWhatWentWithIt();
 });
 
+function activeCards() {
+  // Not a copy of an earlier question, and not something already inside a ring: those are the
+  // record, and a record that took part in the next question would grow by reading itself.
+  return [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')];
+}
+
+// Where a snapshot goes: clear of everything already on the bench, so it does not land on top of
+// the cards it is a copy of.
+function belowEverything() {
+  const all = [...placed.values()];
+  if (!all.length) return { x: 20, y: 20 };
+  return { x: 20, y: Math.max(...all.map((at) => at.y)) + 260 };
+}
+
+let groups = 0;
+
 function ringWhatWentWithIt() {
-  const went = [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')];
+  const went = activeCards();
   if (!went.length) return;
+
+  const at = belowEverything();
+  const held = [];
+  went.forEach((original, index) => {
+    const copy = original.cloneNode(true);
+    // A name of its own. Two nodes answering to `session:abc` would have the layout, the ties and
+    // the targets all picking whichever the browser returned first.
+    copy.dataset.name = `held${groups}-${index}:${cardName(original)}`;
+    copy.dataset.of = cardName(original);
+    copy.classList.add('copy', 'ringed');
+    copy.classList.remove('moving');
+    setView(copy, 'hint');
+    pins.appendChild(copy);
+    // Along a row, which is what a group of four folded cards wants to be.
+    place(copy, { x: at.x + index * (CARD_WIDTH + GAP), y: at.y }, { avoid: false });
+    held.push(copy.dataset.name);
+  });
 
   // A frame *around* them, not a box they are moved into: on a surface, re-parenting a card would
   // take its position with it. The frame is drawn from where the cards are and redrawn when they
@@ -2229,12 +2286,15 @@ function ringWhatWentWithIt() {
   const ring = document.createElement('div');
   ring.className = 'ring working';
   ring.innerHTML = '<span class="ring-gear" aria-hidden="true">⚙</span>';
-  ring.dataset.holds = went.map(cardName).join(',');
+  ring.dataset.holds = held.join(',');
+  ring.dataset.of = went.map(cardName).join(',');
+  ring.dataset.group = String(groups);
+  groups += 1;
   surface.appendChild(ring);
-  went.forEach((pin) => pin.classList.add('ringed'));
   ringsWaiting.push(ring);
   // What this question went out with, waiting for the block that answers it.
-  awaitingBlock.push(went.map(cardName));
+  awaitingBlock.push(held);
+  syncTargets();
   drawRings();
 }
 
@@ -2263,9 +2323,82 @@ function drawRings() {
   }
 }
 
+// The answer landed, so the frame stops being a frame and becomes a thing.
+//
+// "Та общая обводка после исполнения должна становиться отдельной цельной собирательной карточкой
+// на верстаке со своими взаимосвязями и блоками вывода." A hatched outline around four copies is
+// the right picture of work in progress and the wrong picture of work that is finished: it takes
+// four cards' worth of bench to say one thing that happened. So it collapses into one card that
+// holds what went in, and keeps its lines to the originals and to the answer.
 function ringDone() {
   const ring = ringsWaiting.shift();
-  if (ring) ring.classList.remove('working');
+  if (!ring) return;
+  ring.classList.remove('working');
+  collect(ring);
+}
+
+function collect(ring) {
+  const held = (ring.dataset.holds || '').split(',').filter(Boolean);
+  const copies = held
+    .map((name) => surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`))
+    .filter(Boolean);
+  if (!copies.length) {
+    ring.remove();
+    return;
+  }
+
+  const at = placed.get(held[0]) || belowEverything();
+  const id = `g${ring.dataset.group}`;
+  const card = document.createElement('div');
+  card.className = 'pin collection';
+  card.dataset.kind = 'group';
+  card.dataset.id = id;
+  card.dataset.name = `group:${id}`;
+  card.dataset.view = 'hint';
+  // A collection is a record, not context. It is not carried into the next question — the cards
+  // it holds are still on the bench for that, and sending a question its own transcript back is
+  // how a conversation starts talking about itself.
+  card.classList.add('ringed');
+  card.tabIndex = 0;
+  card.innerHTML = `<div class="pin-head"><span class="pin-kind">asked with</span>
+    <span class="pin-label"></span>
+    <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
+    <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
+    <p class="pin-hint"></p>
+    <div class="pin-body"><ul class="collected"></ul></div>`;
+  card.querySelector('.pin-label').textContent =
+    `${copies.length} card${copies.length === 1 ? '' : 's'}`;
+  card.querySelector('.pin-hint').textContent = copies
+    .map((copy) => copy.querySelector('.pin-label')?.textContent?.trim() || 'a card')
+    .join(' · ');
+
+  const list = card.querySelector('.collected');
+  for (const copy of copies) {
+    const row = document.createElement('li');
+    row.innerHTML = '<span class="collected-kind"></span><span class="collected-name"></span>';
+    row.querySelector('.collected-kind').textContent = copy.dataset.kind || '';
+    row.querySelector('.collected-name').textContent =
+      copy.querySelector('.pin-label')?.textContent?.trim() || copy.dataset.id || '';
+    list.appendChild(row);
+    placed.delete(copy.dataset.name);
+    copy.remove();
+  }
+
+  pins.appendChild(card);
+  place(card, at, { avoid: false });
+
+  // Its own relations. To each card it was asked with, where that card is still on the bench —
+  // which is the line that says "this is what happened to those" — and the answer joins itself
+  // when its block arrives, through the same `wentWith` the block cards already use.
+  for (const name of (ring.dataset.of || '').split(',').filter(Boolean)) {
+    if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
+      ownTies.push({ from: name, to: `group:${id}`, says: 'asked about' });
+    }
+  }
+  ring.remove();
+  syncTargets();
+  drawTies();
+  drawRings();
 }
 
 applyFolded();
