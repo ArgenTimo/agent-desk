@@ -584,3 +584,56 @@ def test_a_chosen_card_carries_the_rest_of_the_choice_when_it_moves() -> None:
         "the ring wins over the selection, so a band drawn around a ringed card moves the ring "
         "rather than the band"
     )
+
+
+@pytest.mark.unit
+def test_the_bench_has_a_map_drawn_from_the_same_coordinates_as_the_cards() -> None:
+    """Past a dozen cards the bench is bigger than its window, and zooming out until nothing can
+    be read is not a way of finding anything.
+
+    Drawn from `placed` rather than by measuring the page: those are the coordinates the cards are
+    laid out from, so the map cannot disagree with the bench — and a card that is off the edge has
+    no box on screen to measure in the first place.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'id="bench-map"' in board and "data-map" in board
+    drawn = console[console.index("function drawMap(") :]
+    drawn = drawn[: drawn.index("\n}\n")]
+    assert "placed.get(" in drawn, "the map measures the page instead of reading the layout"
+    assert "getBoundingClientRect" in drawn, "the map does not show where the window is"
+    assert "map-here" in drawn
+
+
+@pytest.mark.unit
+def test_a_workbench_can_be_saved_and_come_back() -> None:
+    """A set of cards gathered for one piece of work was gathered by hand every time. In this
+    browser, beside the column widths and the tab order, and for the same reason: a layout says
+    nothing about the ideas themselves — it is where *this person* likes them."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'data-add="keep"' in board and 'id="bench-saved"' in board
+    for named in ("function keepBench(", "async function openBench(", "function forgetBench("):
+        assert named in console, f"{named} is missing"
+
+    what = console[console.index("function benchNow(") :]
+    what = what[: what.index("\n}\n")]
+    assert "spent" in what and "view" in what, (
+        "a saved workbench forgets which cards were switched off or how far they were open, so "
+        "coming back to it is not coming back to it"
+    )
+    assert ":not(.copy):not(.collection)" in what, (
+        "the record of an earlier question is saved as part of the working set"
+    )
+
+
+@pytest.mark.unit
+def test_the_saved_list_is_rebuilt_whenever_the_menu_opens() -> None:
+    """A list kept in step by hand is a list that offers a workbench somebody deleted."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    show = console[console.index("function showMenu(") :]
+    show = show[: show.index("\n}\n")]
+    assert "showBenches()" in show

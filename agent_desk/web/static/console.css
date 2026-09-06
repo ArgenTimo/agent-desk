@@ -2084,3 +2084,86 @@ button.go:hover, button.yes:hover {
   cursor: pointer;
 }
 .chosen-bar button:hover { color: var(--fg); border-color: var(--focus); }
+
+/* --- the way back from a press ----------------------------------------------------------------- */
+/* Discard takes an idea out of the column, and the only way back was the inbox: a different page
+   and a different frame of mind, which in practice means nobody goes and the press quietly becomes
+   permanent. This shows where the card was, while somebody is still looking at the hole. */
+.undid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--attention);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  background: var(--raised);
+  font-size: var(--t-sm);
+}
+.undid span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.undid strong { font-weight: 600; }
+
+/* --- the little map ---------------------------------------------------------------------------- */
+.bench-map {
+  position: absolute;
+  z-index: 30;
+  right: 10px;
+  bottom: 10px;
+  width: 168px;
+  height: 118px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  overflow: hidden;
+  cursor: crosshair;
+}
+.map-dot {
+  position: absolute;
+  border-radius: 1px;
+  background: var(--fg-dim);
+}
+.map-dot.spent { background: var(--line-strong); }
+.map-dot.chosen { background: var(--focus); }
+.map-here {
+  position: absolute;
+  border: 1px solid var(--focus);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+  pointer-events: none;
+}
+
+/* --- workbenches you can come back to ---------------------------------------------------------- */
+.saved-head {
+  padding: 4px 10px 2px;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}
+.bench-saved { list-style: none; margin: 0; padding: 0; max-height: 30vh; overflow-y: auto; }
+.bench-saved li { display: flex; align-items: center; }
+.saved-open {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 3px 4px 3px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.saved-open:hover { background: var(--raised); }
+.saved-drop {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  padding: 3px 10px 3px 4px;
+  cursor: pointer;
+}
+.saved-drop:hover { color: var(--flag); }
+.saved-none { padding: 3px 10px 6px; color: var(--fg-dim); font-size: var(--t-xs); }

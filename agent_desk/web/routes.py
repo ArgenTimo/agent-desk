@@ -678,6 +678,22 @@ async def render_blockers() -> str:
     )
 
 
+UNDO_SAYS = {"drop": "discarded", "done": "marked built", "keep": "kept"}
+
+
+async def _undone() -> dict[str, str]:
+    """What the last action was, in words, or nothing when there is nothing to put back."""
+    idea_id, was, did = await _undo_says()
+    if not idea_id or did not in UNDO_SAYS:
+        return {}
+    idea = await store.idea(idea_id)
+    return (
+        {"id": idea_id, "says": UNDO_SAYS[did], "summary": idea.summary, "was": was}
+        if idea is not None and idea.state != was
+        else {}
+    )
+
+
 def _said_about(said: dict[str, str]) -> dict[str, str]:
     """The sentences, keyed by idea id rather than by card name, which is what the column wants."""
     return {name.split(":", 1)[1]: what for name, what in said.items()}
@@ -733,6 +749,10 @@ async def render_ideas() -> str:
         # What each project is called, so "build it" can say where it would land rather than
         # asking somebody to recognise a repository key.
         named_projects=dict(await _project_choices()),
+        # The last thing that was done, so the column can offer to put it back. Named here rather
+        # than worked out in the template: which of the three words to show is a fact about what
+        # happened, not about how it is drawn.
+        undo=await _undone(),
     )
 
 
@@ -2529,6 +2549,47 @@ async def _start_it(task: Task) -> None:
         await store.task_failed(task.id, result.detail)
 
 
+# One slot, holding the last state an idea was moved out of. Not a history: undoing the last
+# thing is the whole of what somebody reaches for, and a stack of them is a second way to change
+# state that nobody asked for. A setting rather than a column, because it is one row that is
+# rewritten constantly and means nothing an hour later (CLAUDE.md, "simplicity first").
+UNDO_KEY = "idea_undo"
+
+
+# Three fields with no nesting in them, so `id|state|action` rather than JSON. Not only because
+# it is smaller: `json.load` anywhere outside `observe/` is what `test_structure` refuses, on the
+# grounds that parsing JSON in this program almost always means parsing a format Claude Code owns
+# (docs/adr/0004). Reaching for a whitelist to store three words would have widened a real guard
+# for no reason.
+async def _remember_undo(idea: Idea, action: str) -> None:
+    await store.set_setting(UNDO_KEY, f"{idea.id}|{idea.state}|{action}")
+
+
+async def _undo_says() -> tuple[str, str, str]:
+    """What the last state change was, as (idea id, the state to put back, the word for it)."""
+    said = (await store.setting(UNDO_KEY)).split("|")
+    return tuple(said) if len(said) == 3 else ("", "", "")  # type: ignore[return-value]
+
+
+@router.post("/ideas/undo", response_class=HTMLResponse)
+async def undo_idea(request: Request) -> Response:
+    """Put back the state the last action moved an idea out of.
+
+    Discard is one press and the idea leaves the column; before this the only way back was to go
+    and find it in the inbox, which is a different page and a different frame of mind. The state
+    it is put back into is the one this program recorded, not one the browser sends — a form field
+    naming a state would be a way to set any state from anywhere.
+    """
+    idea_id, was, _ = await _undo_says()
+    idea = await store.idea(idea_id) if idea_id else None
+    if idea is not None and was in ("new", "kept", "promoted", "dropped", "done"):
+        await store.set_idea_state(idea.id, was)  # type: ignore[arg-type]
+    await store.set_setting(UNDO_KEY, "")
+    if _wants_fragment(request):
+        return HTMLResponse(await render_ideas())
+    return RedirectResponse("/", status_code=303)
+
+
 async def _build_it(idea: Idea) -> None:
     """Put one idea in its project's queue, as approved work (docs/adr/0006, 0007).
 
@@ -2612,6 +2673,8 @@ async def idea_action(idea_id: str, action: str, request: Request) -> Response:
         return PlainTextResponse(f"an idea that is {idea.state} cannot do that", status_code=409)
 
     if action in ("keep", "drop", "done"):
+        # Before it moves, so there is somewhere to put it back to.
+        await _remember_undo(idea, action)
         reached: IdeaState = (
             "kept" if action == "keep" else "dropped" if action == "drop" else "done"
         )

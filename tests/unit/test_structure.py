@@ -178,6 +178,51 @@ def test_only_web_imports_the_door_that_merges() -> None:
     )
 
 
+def _calls_json_load(path: Path) -> bool:
+    """Whether this module actually calls `json.load` or `json.loads`.
+
+    Both spellings that reach it: `json.loads(...)` as an attribute, and a `loads` pulled in by
+    `from json import loads` and then called by bare name.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    bare = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "json"
+        for alias in node.names
+        if alias.name in ("load", "loads")
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func
+        if isinstance(called, ast.Attribute) and called.attr in ("load", "loads"):
+            if isinstance(called.value, ast.Name) and called.value.id == "json":
+                return True
+        if isinstance(called, ast.Name) and called.id in bare:
+            return True
+    return False
+
+
+@pytest.mark.unit
+def test_the_json_check_reads_calls_and_not_the_word() -> None:
+    """The check above is only as good as what it counts, and it used to count the word.
+
+    Written as a test rather than trusted, because the failure mode is silent in the direction
+    that matters: a check that stops recognising a real call passes for ever.
+    """
+    written = Path(__file__).parent / "_json_check.py"
+    try:
+        written.write_text("# json.loads is refused here\nx = 1\n", encoding="utf-8")
+        assert not _calls_json_load(written), "a comment about json.loads is read as a call"
+        written.write_text("import json\nx = json.loads('{}')\n", encoding="utf-8")
+        assert _calls_json_load(written), "an ordinary json.loads call is not seen"
+        written.write_text("from json import loads\nx = loads('{}')\n", encoding="utf-8")
+        assert _calls_json_load(written), "an imported loads is not seen"
+    finally:
+        written.unlink(missing_ok=True)
+
+
 @pytest.mark.unit
 def test_only_observe_parses_the_on_disk_formats() -> None:
     """docs/adr/0004: the formats under ~/.claude/ live behind one parser.
@@ -191,9 +236,12 @@ def test_only_observe_parses_the_on_disk_formats() -> None:
         rel = path.relative_to(PKG)
         if rel.parts[0] == "observe":
             continue
-        source = path.read_text()
-        # `json.load` is a prefix of `json.loads`, so one check covers both.
-        uses_json = "json.load" in source and rel.as_posix() not in _NOT_AN_ON_DISK_FORMAT
+        # Read from the syntax tree, not from the text. A substring search over the source also
+        # matches the *word* in a comment explaining why a module does not do it — which is how
+        # this last failed: a note saying "json.load anywhere outside observe/ is refused" was
+        # itself read as a call. Prose about a rule is not a breach of it, and the same
+        # correction has been made here before, for the same reason.
+        uses_json = _calls_json_load(path) and rel.as_posix() not in _NOT_AN_ON_DISK_FORMAT
         # Literals only, docstrings excluded — the same line the credential test draws, and for
         # the same reason: naming a path in order to explain why this module never opens it is
         # the documentation the rule wants, not a violation of it. A path named in *code* is an

@@ -1058,6 +1058,7 @@ function recallLayout() {
 
 function applyView() {
   if (!surface) return;
+  drawMap();
   surface.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   // The grid moves with it. Without this, panning an empty patch of surface looks like nothing
   // happened at all, which is the one thing a canvas has to get right.
@@ -1135,6 +1136,7 @@ function settleOverlaps() {
     drawTies();
     drawRings();
     markOffEdge();
+    drawMap();
   }, 60);
 }
 
@@ -1397,6 +1399,10 @@ function nudge(pin, dx, dy) {
 
 document.addEventListener('keydown', (event) => {
   if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (event.key === 'm' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    document.querySelector('[data-map]')?.click();
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && surface?.querySelector('.pin')) {
     event.preventDefault();
     for (const pin of surface.querySelectorAll('.pin')) pin.classList.add('chosen');
@@ -1561,6 +1567,215 @@ document.getElementById('chosen-bar')?.addEventListener('click', (event) => {
   drawRings();
   settleOverlaps();
 });
+
+
+/* --- the little map ---------------------------------------------------------------------------- */
+// Past a dozen cards the bench is bigger than the window, and the only way to find out what is off
+// the edge was to zoom out until nothing could be read. The map is the other answer: everything at
+// once, too small to read and big enough to point at.
+//
+// Drawn from `placed` rather than from the DOM. Those are the same coordinates the cards are laid
+// out from, so the map cannot disagree with the bench — and a card that is off the edge has no
+// box on screen to measure.
+const mapBox = document.getElementById('bench-map');
+
+function drawMap() {
+  if (!mapBox || mapBox.hidden) return;
+  const spots = [...surface.querySelectorAll('.pin')]
+    .map((pin) => ({ at: placed.get(cardName(pin)), w: pin.offsetWidth || CARD_WIDTH, h: pin.offsetHeight || 120, pin }))
+    .filter((one) => one.at);
+  const frame = canvas.getBoundingClientRect();
+  if (!spots.length) {
+    mapBox.replaceChildren();
+    return;
+  }
+  // What the map has to cover: every card, and wherever the window currently is — otherwise
+  // panning off into empty space leaves the viewport rectangle outside the map that should be
+  // showing it.
+  const seen = {
+    left: -view.x / view.scale,
+    top: -view.y / view.scale,
+    right: (-view.x + frame.width) / view.scale,
+    bottom: (-view.y + frame.height) / view.scale,
+  };
+  const left = Math.min(seen.left, ...spots.map((one) => one.at.x));
+  const top = Math.min(seen.top, ...spots.map((one) => one.at.y));
+  const right = Math.max(seen.right, ...spots.map((one) => one.at.x + one.w));
+  const bottom = Math.max(seen.bottom, ...spots.map((one) => one.at.y + one.h));
+  const scale = Math.min(mapBox.clientWidth / (right - left || 1), mapBox.clientHeight / (bottom - top || 1));
+  mapBox.dataset.left = String(left);
+  mapBox.dataset.top = String(top);
+  mapBox.dataset.scale = String(scale);
+
+  const made = [];
+  for (const one of spots) {
+    const dot = document.createElement('span');
+    dot.className = `map-dot${one.pin.classList.contains('spent') ? ' spent' : ''}` +
+      `${one.pin.classList.contains('chosen') ? ' chosen' : ''}`;
+    dot.style.left = `${(one.at.x - left) * scale}px`;
+    dot.style.top = `${(one.at.y - top) * scale}px`;
+    dot.style.width = `${Math.max(2, one.w * scale)}px`;
+    dot.style.height = `${Math.max(2, one.h * scale)}px`;
+    made.push(dot);
+  }
+  const here = document.createElement('span');
+  here.className = 'map-here';
+  here.style.left = `${(seen.left - left) * scale}px`;
+  here.style.top = `${(seen.top - top) * scale}px`;
+  here.style.width = `${(seen.right - seen.left) * scale}px`;
+  here.style.height = `${(seen.bottom - seen.top) * scale}px`;
+  made.push(here);
+  mapBox.replaceChildren(...made);
+}
+
+// Press the map to go there. The window centres on the point pressed, which is the one thing a
+// map like this is for.
+mapBox?.addEventListener('pointerdown', (event) => {
+  const scale = Number(mapBox.dataset.scale) || 1;
+  const box = mapBox.getBoundingClientRect();
+  const frame = canvas.getBoundingClientRect();
+  const at = {
+    x: Number(mapBox.dataset.left) + (event.clientX - box.left) / scale,
+    y: Number(mapBox.dataset.top) + (event.clientY - box.top) / scale,
+  };
+  view.x = frame.width / 2 - at.x * view.scale;
+  view.y = frame.height / 2 - at.y * view.scale;
+  applyView();
+  drawMap();
+});
+
+document.querySelector('[data-map]')?.addEventListener('click', () => {
+  if (!mapBox) return;
+  mapBox.hidden = !mapBox.hidden;
+  try {
+    localStorage.setItem('agent-desk:bench-map', mapBox.hidden ? 'no' : 'yes');
+  } catch {
+    // A window that will not remember still shows it.
+  }
+  drawMap();
+});
+
+try {
+  if (mapBox && localStorage.getItem('agent-desk:bench-map') === 'yes') mapBox.hidden = false;
+} catch {
+  // Nothing remembered is the same as never having asked for it.
+}
+
+/* --- benches you can come back to -------------------------------------------------------------- */
+// A set of cards gathered for one piece of work is gathered by hand every time. Saving it under a
+// name is the difference between a surface and a desk you can leave things on.
+//
+// In this browser, beside the column widths and the tab order, and for the same reason: a layout
+// says nothing about the ideas or the sessions themselves — it is where *this person* likes them.
+const BENCHES = 'agent-desk:benches';
+
+function savedBenches() {
+  try {
+    return JSON.parse(localStorage.getItem(BENCHES) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function benchNow() {
+  return [...surface.querySelectorAll('.pin[data-kind]:not(.copy):not(.collection)')]
+    .map((pin) => ({
+      kind: pin.dataset.kind,
+      id: pin.dataset.id,
+      label: pin.querySelector('.pin-label')?.textContent?.trim() || '',
+      at: placed.get(cardName(pin)) || null,
+      spent: pin.classList.contains('spent'),
+      view: pin.dataset.view || 'hint',
+    }))
+    .filter((one) => one.at && one.kind !== 'block' && one.kind !== 'note');
+}
+
+function keepBench() {
+  const cards = benchNow();
+  if (!cards.length) return say('There is nothing on the workbench to save.');
+  const name = prompt('Save this workbench as:', '')?.trim();
+  if (!name) return;
+  const all = savedBenches();
+  all[name] = cards;
+  try {
+    localStorage.setItem(BENCHES, JSON.stringify(all));
+  } catch {
+    return say('This browser would not keep it.');
+  }
+  say(`Saved “${name}” — ${cards.length} card${cards.length === 1 ? '' : 's'}.`);
+}
+
+async function openBench(name) {
+  const cards = savedBenches()[name];
+  if (!cards) return;
+  clearBench();
+  for (const one of cards) {
+    await pin({ kind: one.kind, id: one.id, label: one.label }, { at: one.at, quiet: true });
+    const node = surface.querySelector(`.pin[data-name="${CSS.escape(`${one.kind}:${one.id}`)}"]`);
+    if (!node) continue;
+    node.classList.toggle('spent', !!one.spent);
+    setView(node, one.view);
+  }
+  syncTargets();
+  drawTies();
+  drawMap();
+}
+
+function forgetBench(name) {
+  const all = savedBenches();
+  delete all[name];
+  try {
+    localStorage.setItem(BENCHES, JSON.stringify(all));
+  } catch {
+    // Nothing to do about a browser that will not write.
+  }
+  showBenches();
+}
+
+// The list, rebuilt from what is saved. A menu that has to be kept in step by hand is a menu that
+// offers a bench somebody deleted.
+function showBenches() {
+  const into = document.getElementById('bench-saved');
+  if (!into) return;
+  const names = Object.keys(savedBenches()).sort();
+  into.replaceChildren();
+  if (!names.length) {
+    const none = document.createElement('li');
+    none.className = 'saved-none';
+    none.textContent = 'nothing saved yet';
+    into.appendChild(none);
+    return;
+  }
+  for (const name of names) {
+    const row = document.createElement('li');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'saved-open';
+    open.textContent = name;
+    open.addEventListener('click', () => {
+      hideMenu();
+      openBench(name);
+    });
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'saved-drop';
+    drop.textContent = '×';
+    drop.title = `forget ${name}`;
+    drop.addEventListener('click', (event) => {
+      event.stopPropagation();
+      forgetBench(name);
+    });
+    row.append(open, drop);
+    into.appendChild(row);
+  }
+}
+
+function say(words) {
+  const where = document.getElementById('context-count');
+  if (!where) return;
+  where.textContent = words;
+  setTimeout(syncTargets, 4000);
+}
 
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
@@ -1748,6 +1963,9 @@ const benchMenu = document.getElementById('bench-menu');
 
 function showMenu(x, y) {
   if (!benchMenu) return;
+  // Rebuilt every time it opens: a list kept in step by hand is a list that offers a workbench
+  // somebody deleted.
+  showBenches();
   benchMenu.hidden = false;
   const frame = document.getElementById('bench-canvas').getBoundingClientRect();
   // Kept inside the window: a menu opened near the bottom edge that runs off it is a menu with
@@ -1817,6 +2035,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'fit') fitEverything();
   else if (what === 'folder') addFolder();
   else if (what === 'clear') clearBench();
+  else if (what === 'keep') keepBench();
 });
 
 // The conversation folded away, and back. What folds is every card holding a block — the cards
@@ -2440,6 +2659,7 @@ const KEYS = `<div class="keys card"><div class="card-head"><span class="card-na
 <dt>1 · 2 · 3</dt><dd>hide the overview, the blockers, the right column — press again to bring it back</dd>
 <dt>n · w</dt><dd>a new chat, and close this one</dd>
 <dt>Esc</dt><dd>close this panel, then clear the workbench, then let go of the field</dd>
+<dt>m</dt><dd>the map of the whole workbench</dd>
 <dt>Shift+drag</dt><dd>choose several cards at once — then one press acts on all of them</dd>
 <dt>Ctrl+A</dt><dd>choose every card on the workbench</dd>
 <dt>Ctrl+K</dt><dd>find any project, session, idea or blocker and put it on the workbench</dd>

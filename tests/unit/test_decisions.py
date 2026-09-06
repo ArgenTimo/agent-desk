@@ -394,3 +394,65 @@ async def test_a_start_that_fails_is_recorded_on_the_task_rather_than_lost(
     (task,) = await desk.tasks()
     assert task.failed_at is not None
     assert task.detail == "no such directory"
+
+
+@pytest.mark.unit
+async def test_the_last_thing_done_to_an_idea_can_be_put_back(desk: Store, a_project: None) -> None:
+    """Discard is one press and the idea leaves the column. Before this the only way back was to
+    go and find it in the inbox — a different page and a different frame of mind, which in
+    practice means nobody goes and the press quietly becomes permanent."""
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    await desk.set_idea_state(idea.id, "kept")
+
+    await _post(f"/ideas/{idea.id}/drop", {"from": "column"})
+    assert (await desk.idea(idea.id)).state == "dropped"  # type: ignore[union-attr]
+
+    html = await routes.render_ideas()
+    assert "discarded" in html and "undo" in html
+
+    await _post("/ideas/undo", {})
+
+    assert (await desk.idea(idea.id)).state == "kept", (
+        "it came back as something other than what it was"
+    )
+
+
+@pytest.mark.unit
+async def test_undo_puts_back_the_state_this_program_recorded_not_one_it_is_sent(
+    desk: Store, a_project: None
+) -> None:
+    """A form field naming a state would be a way to set any state on any idea from anywhere."""
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    await _post(f"/ideas/{idea.id}/drop", {"from": "column"})
+
+    await _post("/ideas/undo", {"was": "done", "id": idea.id})
+
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_there_is_nothing_to_undo_before_anything_has_been_done(
+    desk: Store, a_project: None
+) -> None:
+    await inbox.capture(desk, "cache the probe results", project_key=KEY)
+
+    html = await routes.render_ideas()
+
+    assert "undo" not in html
+    # And pressing it anyway is not a crash.
+    status, _ = await _post("/ideas/undo", {})
+    assert status == 200
+
+
+@pytest.mark.unit
+async def test_undoing_twice_does_not_walk_an_idea_backwards(desk: Store, a_project: None) -> None:
+    """The slot holds the last thing done, not a history. Once it has been used it is empty, so a
+    second press cannot move the idea again."""
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    await _post(f"/ideas/{idea.id}/keep", {"from": "column"})
+    await _post(f"/ideas/{idea.id}/drop", {"from": "column"})
+
+    await _post("/ideas/undo", {})
+    await _post("/ideas/undo", {})
+
+    assert (await desk.idea(idea.id)).state == "kept"  # type: ignore[union-attr]

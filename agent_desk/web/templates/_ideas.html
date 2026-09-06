@@ -212,6 +212,16 @@
   <button type="submit">show everything</button>
 </form>
 {% endif %}
+{# The way back from a press. Discard takes an idea out of the column, and before this the only
+   way back was to go and find it in the inbox — a different page and a different frame of mind,
+   which in practice means nobody does it and the press quietly becomes permanent. It shows where
+   the card was, while somebody is still looking at the hole it left. #}
+{% if undo %}
+<form class="undid" method="post" action="/ideas/undo" hx-post="/ideas/undo" hx-target="#idea-list">
+  <span><strong>{{ undo.summary }}</strong> — {{ undo.says }}</span>
+  <button type="submit">undo</button>
+</form>
+{% endif %}
 <div class="ideas-head">
   <span class="tree-count">{{ counted }} idea{{ "" if counted == 1 else "s" }}</span>
   {% if grouped %}

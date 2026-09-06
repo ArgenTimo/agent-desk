@@ -67,6 +67,8 @@
       {# A surface you can move things about on is a surface you can lose things on. #}
       <button type="button" class="chip" data-tidy
               title="lay everything out again and centre the view">tidy up</button>
+      <button type="button" class="chip" data-map
+              title="a small map of the whole workbench">map</button>
       <span class="spacer"></span>
       {# Cards on the workbench that are off the screen. One you cannot see and do not know is
          there is one that goes into the next message by surprise. #}
@@ -78,6 +80,10 @@
        the right mouse button on the background offers what can be added. #}
     <div id="bench-canvas" class="bench-canvas" data-drop="pins"
          aria-label="the workbench: what the next message is about">
+      {# Everything at once, too small to read and big enough to point at — which is the other
+         answer to a bench bigger than its window, the first being zooming out until nothing can
+         be read at all. Off until somebody asks for it. #}
+      <div id="bench-map" class="bench-map" hidden aria-label="a map of the whole workbench"></div>
       <div id="bench-surface" class="bench-surface">
         <svg id="bench-ties" class="bench-ties" aria-hidden="true">
           <defs>
@@ -115,6 +121,11 @@
       <li class="sep"><button type="button" data-add="tidy">Lay it out again</button></li>
       <li><button type="button" data-add="fit">Fit everything on screen</button></li>
       <li><button type="button" data-add="clear">Take everything off</button></li>
+      {# A set of cards gathered for one piece of work is gathered by hand every time. Saving it
+         under a name is the difference between a surface and a desk you can leave things on. #}
+      <li class="sep"><button type="button" data-add="keep">Save this workbench…</button></li>
+      <li class="saved-head">saved workbenches</li>
+      <li><ul id="bench-saved" class="bench-saved"></ul></li>
     </menu>
 
     <div class="context-strip">
