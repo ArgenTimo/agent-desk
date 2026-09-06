@@ -72,7 +72,7 @@ async def board_events() -> AsyncIterator[str]:
                 ),
             ),
             ("blocks", await routes.render_blocks()),
-            ("ideas", await routes.render_ideas()),
+            ("ideas", await routes.render_column()),
             # What has stopped. Pushed with the rest: a blocker somebody has just cleared should
             # leave the column without a reload (agent_desk/web/blockers.py).
             ("blockers", await routes.render_blockers()),

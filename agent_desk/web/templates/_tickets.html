@@ -1,0 +1,79 @@
+{# The right-hand column showing the projects' own boards instead of the pool (docs/adr/0010).
+
+   Two things one column can be about, kept apart rather than merged: an idea is a thought
+   somebody had *here*, and a ticket is work somebody decided *elsewhere*. A list holding both
+   would make the pool read as a backlog, which is the failure docs/adr/0005 is built around.
+
+   Every card drags onto the workbench and every one can be started, because that is what a
+   ticket is for. #}
+{% if only %}
+<form class="focus-banner" method="post" action="/projects/focus"
+      hx-post="/projects/focus" hx-target="#idea-list">
+  <input type="hidden" name="key" value="">
+  <span>showing <strong>{{ only_named }}</strong> only</span>
+  <button type="submit">show everything</button>
+</form>
+{% endif %}
+
+<div class="ideas-head">
+  <span class="tree-count">{{ tasks | length }} ticket{{ "" if tasks | length == 1 else "s" }}</span>
+  {% if stuck %}
+  <span class="tree-count">{{ stuck | length }} stuck</span>
+  {% endif %}
+  <span class="spacer"></span>
+  <form method="post" action="/column" hx-post="/column" hx-target="#idea-list">
+    <input type="hidden" name="shows" value="ideas">
+    <button type="submit" class="chip">the pool</button>
+  </form>
+</div>
+
+{% if not tasks and not stuck %}
+<p class="empty small">Nothing read from a board yet. A project with a Jira link and the name of a
+  token variable on its settings page has its unfinished tickets pulled here — and a ticket that
+  says it is stuck goes to the blockers instead of the queue.</p>
+{% endif %}
+
+{% for task in tasks %}
+<div class="node card ticket-card{% if task.started_at and not task.finished_at %} working{% endif %}"
+     data-kind="task" data-id="{{ task.id }}" data-label="{{ task.title }}" draggable="true">
+  <div class="card-head">
+    <span class="dot {{ 'busy' if task.started_at and not task.finished_at else ('done' if task.finished_at else 'idle') }}"
+          aria-hidden="true"></span>
+    <span class="card-name" title="{{ task.instruction }}">{{ task.title }}</span>
+    {% if task.source_ref %}<span class="pill quiet">{{ task.source_ref }}</span>{% endif %}
+  </div>
+  <div class="card-body">
+    <div class="idea-buttons">
+      {% if task.waiting %}
+      <form method="post" action="/tasks/{{ task.id }}/start"
+            hx-post="/tasks/{{ task.id }}/start" hx-target="#message">
+        <input type="hidden" name="key" value="{{ task.repo_key }}">
+        <button type="submit" title="start an agent on this ticket now">take it on</button>
+      </form>
+      {% elif task.finished_at %}
+      <span class="pill quiet">done here</span>
+      {% else %}
+      <span class="pill working">an agent has it</span>
+      {% endif %}
+      <form method="post" action="/tasks/{{ task.id }}/drop"
+            hx-post="/tasks/{{ task.id }}/drop" hx-target="#message">
+        <input type="hidden" name="key" value="{{ task.repo_key }}">
+        <button type="submit" title="take it out of the queue here; the ticket is untouched">not here</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% if stuck %}
+<p class="small dim one">Waiting on a person, so not queued:</p>
+{% for one in stuck %}
+<div class="card ticket-card stuck">
+  <div class="card-head">
+    <span class="dot flag" aria-hidden="true"></span>
+    <span class="card-name">{{ one.key }} · {{ one.summary }}</span>
+  </div>
+  <div class="card-body"><p class="small">the ticket says: {{ one.said }}</p></div>
+</div>
+{% endfor %}
+{% endif %}

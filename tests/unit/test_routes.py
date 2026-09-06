@@ -1315,3 +1315,68 @@ async def test_the_blockers_narrow_with_the_ideas_and_the_loose_ones_stay(
     assert "this project" in column
     assert "another project" not in column
     assert "for this project only" in column
+
+
+@pytest.mark.unit
+async def test_the_right_hand_column_switches_between_the_pool_and_the_board(
+    home: Home, desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """ "В столбце с идеями можно переключить режим на jira таски." Two things one column can be
+    about, kept apart rather than merged: an idea is a thought somebody had here and a ticket is
+    work somebody decided elsewhere."""
+    key = await _the_project(home)
+    await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    await desk.queue_task(
+        repo_key=key,
+        cwd=str(tmp_path),
+        title="DUCK-7 · the export is wrong",
+        instruction="fix the export",
+        source_kind="tracker",
+        source_ref="DUCK-7",
+    )
+    await desk.replace_tracker_blockers(key, [("DUCK-9", "the import", "Blocked on the vendor.")])
+
+    # The pool by default, and a ticket never appears in it.
+    pool = await routes.render_column()
+    assert "a thought" in pool
+    assert "DUCK-7" not in pool
+
+    status, column = await _post("/column", {"shows": "tickets"})
+
+    assert status == 200
+    assert "DUCK-7" in column
+    assert "take it on" in column
+    # And a thought never appears among the tickets.
+    assert "a thought" not in column
+    # A ticket that says it is stuck is shown as waiting on a person, not offered as work.
+    assert "DUCK-9" in column
+    assert "Blocked on the vendor" in column
+
+    # The choice survives a push, like every other choice about this column.
+    assert "DUCK-7" in await routes.render_column()
+
+    status, column = await _post("/column", {"shows": "ideas"})
+    assert "a thought" in column and "DUCK-7" not in column
+
+
+@pytest.mark.unit
+async def test_the_board_column_narrows_with_the_project_filter_too(
+    home: Home, desk: Store, tmp_path: pathlib.Path
+) -> None:
+    key = await _the_project(home)
+    for repo, ref in ((key, "DUCK-1"), ("origin:someone/else", "OTHER-1")):
+        await desk.queue_task(
+            repo_key=repo,
+            cwd=str(tmp_path),
+            title=f"{ref} · something",
+            instruction="x",
+            source_kind="tracker",
+            source_ref=ref,
+        )
+    await _post("/column", {"shows": "tickets"})
+
+    await _post("/projects/focus", {"key": key})
+    column = await routes.render_column()
+
+    assert "DUCK-1" in column
+    assert "OTHER-1" not in column

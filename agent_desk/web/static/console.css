@@ -1333,3 +1333,20 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   color: var(--fg);
 }
 .pin.own .own-text:focus { border-color: var(--focus); outline: none; }
+
+/* Tickets read from somebody else's board. They look like the idea cards beside them because they
+   are the same kind of thing to somebody scanning — work that is not started — but the pill
+   carries the key, which is the difference that matters (docs/adr/0010). */
+.ticket-card { flex: 0 0 auto; border-left: 2px solid var(--focus); }
+.ticket-card.stuck { border-left-color: var(--flag); }
+.ideas-head .chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.ideas-head .chip:hover { color: var(--fg); border-color: var(--focus); }

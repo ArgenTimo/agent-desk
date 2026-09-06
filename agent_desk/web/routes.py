@@ -533,6 +533,11 @@ IDEA_SORT_KEY = "ideas.sort"
 # the same reason the sort is: a server-sent event replaces those columns every couple of seconds,
 # and a filter that resets two seconds after it is set is a filter that looks broken.
 FOCUS_KEY = "board.project"
+# Whether the right-hand column shows the pool or the tickets read from the projects' own boards.
+# One column, two things it can be about: an idea is a thought somebody had here, and a ticket is
+# work somebody decided elsewhere (docs/adr/0010). Showing them mixed would make the pool look
+# like a backlog, which is the failure docs/adr/0005 is built around.
+COLUMN_KEY = "column.shows"
 
 # Where an idea with no project sorts: last, and named rather than blank — "no project" is a fact
 # about it, and a group of them at the top would push the answered ones down.
@@ -734,7 +739,7 @@ async def render_page(message: str = "") -> str:
     projects = shape(rows, groups)
     return env.get_template("board.html").render(
         threads=await open_chats(),
-        ideas=await render_ideas(),
+        ideas=await render_column(),
         blockers=await render_blockers(),
         board=env.get_template("_board.html").render(
             rows=rows,
@@ -1325,6 +1330,52 @@ async def _project_name(key: str) -> str:
     return named.name if named else key.split(":")[-1]
 
 
+async def render_tickets() -> str:
+    """The right-hand column showing the tickets read from the projects' own boards.
+
+    Read from the queue rather than from the tracker: the loop already pulled them and marked them
+    `tracker`, and a column that made its own network call every two seconds would be a column
+    that hangs when somebody's Jira is slow (docs/adr/0010).
+    """
+    only = await store.setting(FOCUS_KEY)
+    tasks = [
+        task
+        for task in await store.tasks(limit=200)
+        if task.source_kind == "tracker" and (not only or task.repo_key == only)
+    ]
+    return env.get_template("_tickets.html").render(
+        tasks=tasks,
+        only=only,
+        only_named=await _project_name(only),
+        stuck=[one for one in await store.tracker_blockers() if not only or one.repo_key == only],
+    )
+
+
+async def render_column() -> str:
+    """Whichever of the two the right-hand column is set to show."""
+    if await store.setting(COLUMN_KEY) == "tickets":
+        return await render_tickets()
+    return await render_ideas()
+
+
+@router.post("/column", response_class=HTMLResponse)
+async def set_column(request: Request) -> Response:
+    """Switch the right-hand column between the pool and the board.
+
+    "В столбце с идеями/блокерами можно переключить режим на jira таски." Two things one column
+    can be about, and they are kept apart rather than merged: an idea is a thought somebody had
+    here and a ticket is work somebody decided elsewhere, and a list holding both would make the
+    pool read as a backlog — which is the failure docs/adr/0005 is built around.
+    """
+    form = await _form(request)
+    shows = form.get("shows", "ideas").strip()
+    await store.set_setting(COLUMN_KEY, "tickets" if shows == "tickets" else "ideas")
+    panel = await render_column()
+    if _wants_fragment(request):
+        return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
+
+
 @router.post("/projects/focus", response_class=HTMLResponse)
 async def focus_project(request: Request) -> Response:
     """Narrow the blockers and the ideas to one project, or open them up again.
@@ -1341,7 +1392,7 @@ async def focus_project(request: Request) -> Response:
     await store.set_setting(FOCUS_KEY, form.get("key", "").strip())
     if _wants_fragment(request):
         # Both columns move together, because they are one decision.
-        return HTMLResponse(await render_ideas())
+        return HTMLResponse(await render_column())
     return HTMLResponse(await render_page(""))
 
 
