@@ -53,6 +53,7 @@ from agent_desk.store.repo import (
     Kicking,
     ProjectLink,
     Store,
+    Task,
     Thread,
 )
 from agent_desk.web import autostart, blockers, plans
@@ -1814,20 +1815,7 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
         if waiting is not None:
             claimed = await store.take_next_task(waiting.repo_key)
             if claimed is not None and claimed.id == task_id:
-                result = await asyncio.to_thread(
-                    dispatch.start,
-                    dispatch.build_task(
-                        claimed.instruction,
-                        project=claimed.title,
-                        **await autostart.about(store, claimed.repo_key),  # type: ignore[arg-type]
-                    ),
-                    cwd=claimed.cwd,
-                    name=claimed.title,
-                )
-                if result.started:
-                    await store.task_started(claimed.id, result.agent_id)
-                else:
-                    await store.task_failed(claimed.id, result.detail)
+                await _start_it(claimed)
     elif action == "drop":
         await store.drop_task(task_id)
     elif action == "land":
@@ -2487,6 +2475,32 @@ async def file_idea(idea_id: str, request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+async def _start_it(task: Task) -> None:
+    """Start an agent on one claimed task, exactly the way the loop would.
+
+    One function, because there are now two doors to it — the start button on a project's queue
+    and "build it" on an idea — and two copies of "how a task becomes an agent" is two places for
+    the briefing to fall out of step with what `autostart` sends.
+
+    The task must already be claimed: `take_next_task` is the claim, and calling this on an
+    unclaimed one would start a second agent on work another tick is holding.
+    """
+    result = await asyncio.to_thread(
+        dispatch.start,
+        dispatch.build_task(
+            task.instruction,
+            project=task.title,
+            **await autostart.about(store, task.repo_key),  # type: ignore[arg-type]
+        ),
+        cwd=task.cwd,
+        name=task.title,
+    )
+    if result.started:
+        await store.task_started(task.id, result.agent_id)
+    else:
+        await store.task_failed(task.id, result.detail)
+
+
 async def _build_it(idea: Idea) -> None:
     """Put one idea in its project's queue, as approved work (docs/adr/0006, 0007).
 
@@ -2511,6 +2525,23 @@ async def _build_it(idea: Idea) -> None:
         # What gets marked built when its agent finishes (agent_desk/web/autostart.py).
         source_ref=idea.id,
     )
+
+    # And if the project is switched on, it starts here rather than up to a minute later when the
+    # loop next comes round. Pressing a button and watching nothing happen is the wrong answer to
+    # "build it", and the switch is where somebody already said this project may start work by
+    # itself (docs/adr/0007).
+    #
+    # `why_not` rather than a second opinion about it: it is the same function the loop asks, so
+    # the seat rule, the hour's budget and the arming state are answered once. A project that may
+    # not start right now keeps the task queued, which is what the queue is for.
+    if await autostart.why_not(store, named.key):
+        return
+    # The oldest waiting task, which may not be this one. That is the queue's own contract and
+    # breaking it here would be the surprise in the other direction — a button that jumps the
+    # line. Either way an agent is now working in this project, which is what was asked for.
+    claimed = await store.take_next_task(named.key)
+    if claimed is not None:
+        await _start_it(claimed)
 
 
 @router.post("/ideas/{idea_id}/{action}", response_class=HTMLResponse)

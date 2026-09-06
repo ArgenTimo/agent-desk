@@ -301,3 +301,96 @@ async def test_a_task_that_never_finished_is_not_offered_to_the_gate(
     status, _ = await _post(f"/tasks/{task.id}/land", {"key": KEY})
 
     assert status == 200
+
+
+@pytest.mark.unit
+async def test_build_it_starts_straight_away_when_the_project_is_armed(
+    desk: Store, a_project: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Пусть сразу запускается если проект армирован." Pressing a button and watching nothing
+    happen for a minute is the wrong answer to "build it", and the switch is where somebody
+    already said this project may start work by itself."""
+    started: list[str] = []
+
+    def start(task: object, *, cwd: str, name: str) -> object:
+        started.append(name)
+        return SimpleNamespace(started=True, agent_id="agent-1", detail="")
+
+    monkeypatch.setattr(routes.dispatch, "start", start)
+    monkeypatch.setattr(routes.autostart, "live_agents", lambda: set())
+    await desk.arm(KEY, per_hour=4)
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+
+    await routes._build_it(idea)
+
+    assert started == ["cache the probe results"]
+    (task,) = await desk.tasks()
+    assert not task.waiting, "it was queued and left there on an armed project"
+    assert task.agent_id == "agent-1"
+
+
+@pytest.mark.unit
+async def test_build_it_only_queues_when_the_project_is_not_armed(
+    desk: Store, a_project: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Off is the default and it means what it says. The queue is where the work waits until
+    somebody switches the project on or presses start on it themselves."""
+
+    def never(*args: object, **kwargs: object) -> object:  # pragma: no cover
+        raise AssertionError("an agent was started in a project nobody armed")
+
+    monkeypatch.setattr(routes.dispatch, "start", never)
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+
+    await routes._build_it(idea)
+
+    (task,) = await desk.tasks()
+    assert task.waiting
+
+
+@pytest.mark.unit
+async def test_build_it_respects_the_seat_the_loop_respects(
+    desk: Store, a_project: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One agent at a time in a project, which is the loop's rule and not a different one — the
+    button asks `why_not`, the same function the loop asks."""
+    monkeypatch.setattr(routes.autostart, "live_agents", lambda: {"agent-0"})
+    monkeypatch.setattr(routes.autostart, "still_going", lambda agent, live: (True, None))
+
+    def never(*args: object, **kwargs: object) -> object:  # pragma: no cover
+        raise AssertionError("a second agent was started in a project already running one")
+
+    monkeypatch.setattr(routes.dispatch, "start", never)
+    await desk.arm(KEY, per_hour=4)
+    busy = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="already going", instruction="x", source_kind="idea"
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(busy.id, "agent-0")
+
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    await routes._build_it(idea)
+
+    queued = [one for one in await desk.tasks() if one.waiting]
+    assert len(queued) == 1, "it jumped a seat the loop would have waited for"
+
+
+@pytest.mark.unit
+async def test_a_start_that_fails_is_recorded_on_the_task_rather_than_lost(
+    desk: Store, a_project: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed start with nothing written down is a task that reads as running forever."""
+
+    def refuses(task: object, *, cwd: str, name: str) -> object:
+        return SimpleNamespace(started=False, agent_id="", detail="no such directory")
+
+    monkeypatch.setattr(routes.dispatch, "start", refuses)
+    monkeypatch.setattr(routes.autostart, "live_agents", lambda: set())
+    await desk.arm(KEY, per_hour=4)
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+
+    await routes._build_it(idea)
+
+    (task,) = await desk.tasks()
+    assert task.failed_at is not None
+    assert task.detail == "no such directory"
