@@ -73,3 +73,49 @@ def test_the_console_still_works_with_the_library_missing() -> None:
 
     assert "if (!window.htmx)" in script
     assert "hx-post" in script and "hx-target" in script
+
+
+@pytest.mark.unit
+def test_a_browser_that_has_never_chosen_a_size_gets_the_full_one() -> None:
+    """`localStorage.getItem` returns null when nothing is stored, and `Number(null)` is 0 — a
+    perfectly valid index into the zoom scale. The first version of this therefore handed every
+    browser that had never chosen a size the *smallest* one, which under the scale it shipped with
+    was 50%: the console arrived at half size for everybody, with nothing on screen saying why.
+
+    Asserted against the source because there is no JavaScript runtime in this gate. The shape
+    that was wrong is `Number(getItem(...))` used directly as an index, and the shape that is
+    right checks for the absent case before converting."""
+    script = (STATIC / "console.js").read_text()
+
+    assert "stored === null ? FULL_SIZE" in script, (
+        "the absent case must be handled before the string becomes a number"
+    )
+    assert "Number(localStorage.getItem" not in script, (
+        "Number(null) is 0, which is a valid index and therefore a silent wrong default"
+    )
+
+
+@pytest.mark.unit
+def test_the_smallest_size_the_console_can_be_set_to_is_still_readable() -> None:
+    """Half size on a 13px body is 6px. A control that can make the page unreadable, remembers it,
+    and shows nothing explaining it, is a control that breaks the page and then hides the reason."""
+    script = (STATIC / "console.js").read_text()
+    scale = re.search(r"const ZOOMS = \[([0-9., ]+)\]", script)
+
+    assert scale is not None
+    smallest = min(float(one) for one in scale.group(1).split(","))
+    assert smallest >= 0.8, f"the bench can be shrunk to {smallest:.0%}, which is not readable"
+
+
+@pytest.mark.unit
+def test_nothing_on_the_page_is_smaller_than_twelve_pixels() -> None:
+    """A console is read at a glance, across a desk, at the end of a long day. This page had 9px
+    and 10px text on it, which is legible on the machine it was written on and nowhere else."""
+    css = (STATIC / "console.css").read_text()
+
+    raw = re.findall(r"font-size:\s*([0-9.]+)(px|rem)", css)
+    assert raw == [], f"a size that is not on the scale: {raw}"
+
+    scale = dict(re.findall(r"--t-(x?s|m?d|lg|xl):\s*([0-9]+)px", css))
+    for name, size in scale.items():
+        assert int(size) >= 12, f"--t-{name} is {size}px"

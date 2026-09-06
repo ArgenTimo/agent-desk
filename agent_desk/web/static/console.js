@@ -834,12 +834,18 @@ pins.addEventListener('scroll', markOffEdge, { passive: true });
 window.addEventListener('resize', markOffEdge);
 
 try {
-  const remembered = Number(localStorage.getItem('agent-desk:bench-size'));
-  if (Number.isInteger(remembered) && remembered >= 0 && remembered < ZOOMS.length) {
-    zoomAt = remembered;
-  }
+  // `getItem` returns null when there is nothing stored, and `Number(null)` is **0** — a perfectly
+  // valid index. So the first version of this gave every browser that had never chosen a size the
+  // *smallest* one, which under the scale it shipped with was 50%, and the console arrived at
+  // half size for everybody with no way to tell why. Checked as a string before it is a number.
+  const stored = localStorage.getItem('agent-desk:bench-size');
+  const remembered = stored === null ? FULL_SIZE : Number(stored);
+  zoomAt =
+    Number.isInteger(remembered) && remembered >= 0 && remembered < ZOOMS.length
+      ? remembered
+      : FULL_SIZE;
 } catch {
-  // No storage: full size, which is the default anybody would expect.
+  // No storage at all: full size, which is the default anybody would expect.
   zoomAt = FULL_SIZE;
 }
 applyZoom();
