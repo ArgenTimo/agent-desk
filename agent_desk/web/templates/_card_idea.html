@@ -14,6 +14,22 @@
   <div class="plain-only">
     {% if said %}<p class="card-said">{{ said }}</p>{% endif %}
     {% if not said %}<p class="card-said">{{ idea.summary }}</p>{% endif %}
+
+    {# Which project it is about. Worked out when it was written — a thought typed with nothing on
+       the workbench is about the thing in front of you — and correctable here, because a guess
+       needs a way to be wrong out loud. #}
+    <form class="idea-project" method="post" action="/ideas/{{ idea.id }}/project"
+          hx-post="/ideas/{{ idea.id }}/project" hx-target="closest .card-detail"
+          hx-swap="outerHTML">
+      <label class="visually-hidden" for="project-of-{{ idea.id }}">which project this is about</label>
+      <select id="project-of-{{ idea.id }}" name="key" onchange="this.form.requestSubmit()">
+        <option value="">nothing in particular</option>
+        {% for key, name in projects %}
+        <option value="{{ key }}"{% if idea.project_key == key %} selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="visually-hidden">point it at this project</button>
+    </form>
   </div>
 
   <div class="technical-only" hidden>

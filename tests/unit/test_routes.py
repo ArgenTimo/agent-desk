@@ -1626,3 +1626,24 @@ async def test_a_folder_is_a_card_of_what_is_in_it(
     status, said = await _get("/cards/folder?id=/nowhere/at/all")
     assert status == 404
     assert "not a folder" in said
+
+
+@pytest.mark.unit
+async def test_an_idea_can_be_pointed_at_a_different_project(home: Home, desk: Store) -> None:
+    """ "Проект определяется автоматически, но пользователь может скорректировать." Automatically
+    is a guess, and a guess needs a way to be wrong out loud."""
+    key = await _the_project(home)
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+
+    status, card = await _post(f"/ideas/{idea.id}/project", {"key": key})
+
+    assert status == 200
+    assert (await desk.idea(idea.id)).project_key == key  # type: ignore[union-attr]
+    assert "nothing in particular" in card, "the list offers the empty answer too"
+
+    # Blank is a real answer, not an absence.
+    await _post(f"/ideas/{idea.id}/project", {"key": ""})
+    assert (await desk.idea(idea.id)).project_key is None  # type: ignore[union-attr]
+
+    # And an idea that has gone is a 404 rather than a stack trace.
+    assert (await _post("/ideas/nope/project", {"key": key}))[0] == 404

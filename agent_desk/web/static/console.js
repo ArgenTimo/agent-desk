@@ -646,6 +646,29 @@ async function pin(card, how) {
 const VIEWS = ['hint', 'metadata', 'full'];
 const VIEW_SAYS = { hint: 'a line', metadata: 'what it is', full: 'everything' };
 
+// "Вместе с хинтом — сопутствующая информация: визуальные индикаторы или числа, не текст, плюс
+// связанные/дочерние."
+//
+// A hint is one line, so what else it can carry has to be countable rather than said. What a card
+// is joined to is a number this page already knows, and it is the number that answers "is there
+// more of this than I can see" — which is the question a folded card raises.
+function markHintCounts(holder) {
+  const name = holder.dataset.name;
+  const joined = everyTie().filter((tie) => tie.from === name || tie.to === name).length;
+  let dot = holder.querySelector('.pin-joined');
+  if (!joined) {
+    dot?.remove();
+    return;
+  }
+  if (!dot) {
+    dot = document.createElement('span');
+    dot.className = 'pin-joined';
+    holder.querySelector('.pin-label')?.after(dot);
+  }
+  dot.textContent = String(joined);
+  dot.title = `joined to ${joined} other card${joined === 1 ? '' : 's'}`;
+}
+
 function setView(holder, view) {
   holder.dataset.view = view;
   const button = holder.querySelector('.pin-view');
@@ -1211,6 +1234,7 @@ function drawTies() {
     drew += 1;
   }
   ties.hidden = drew === 0;
+  for (const pin of surface?.querySelectorAll('.pin') || []) markHintCounts(pin);
 }
 
 /* --- what is off the screen ------------------------------------------------------------------- */

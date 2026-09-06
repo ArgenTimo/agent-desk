@@ -948,7 +948,9 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
         idea = await store.idea(id)
         return HTMLResponse(
             env.get_template("_card_idea.html").render(
-                idea=idea, said=await describe_card("idea", id) if idea else ""
+                idea=idea,
+                said=await describe_card("idea", id) if idea else "",
+                projects=await _project_choices(),
             ),
             status_code=200 if idea else 404,
         )
@@ -1480,6 +1482,36 @@ async def read_meeting(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(""))
+
+
+@router.post("/ideas/{idea_id}/project", response_class=HTMLResponse)
+async def point_idea_at_project(idea_id: str, request: Request) -> Response:
+    """Say which project an idea is about, over whatever was worked out for it.
+
+    "Проект определяется автоматически, но при этом пользователь может скорректировать; если это
+    блокер или идея — есть выпадающий список с проектами."
+
+    Automatically is a guess — a thought typed with nothing on the workbench is about the thing in
+    front of you — and a guess needs a way to be wrong out loud. Blank means "nothing in
+    particular", which is a real answer and not an absence.
+    """
+    form = await _form(request)
+    await store.set_idea_project(idea_id, form.get("key", "").strip() or None)
+    idea = await store.idea(idea_id)
+    return HTMLResponse(
+        env.get_template("_card_idea.html").render(
+            idea=idea,
+            said=await describe_card("idea", idea_id) if idea else "",
+            projects=await _project_choices(),
+        ),
+        status_code=200 if idea else 404,
+    )
+
+
+async def _project_choices() -> list[tuple[str, str]]:
+    """Every project a card could be pointed at, as (key, name)."""
+    rows, _ = await asyncio.to_thread(board)
+    return [(one.key, one.name) for one in shape(rows, await store.groups())]
 
 
 @router.get("/ideas/{idea_id}/kin", response_class=HTMLResponse)

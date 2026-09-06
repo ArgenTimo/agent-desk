@@ -1746,3 +1746,31 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 
 /* The card you are joining from, while you pick the one to join it to. */
 .pin.joining { outline: 2px dashed var(--focus); outline-offset: 2px; }
+
+/* What a hint carries besides its line: a number, not more words. "Визуальные индикаторы или
+   числа, не текст" — and this is the number that answers "is there more of this than I can see",
+   which is the question a folded card raises. */
+.pin-joined {
+  flex: 0 0 auto;
+  min-width: 1.15rem;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--focus) 20%, transparent);
+  color: var(--focus);
+  font-size: var(--t-xs);
+  text-align: center;
+}
+
+/* Two lines at most for a hint, whatever the label says: "все элементы отображают свой
+   информативный хинт (2 строки текста максимум)". */
+.pin-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Which project an idea is about, correctable on its card. */
+.idea-project { margin: 6px 0 0; }
+.idea-project select { font: inherit; font-size: var(--t-xs); max-width: 100%; }
