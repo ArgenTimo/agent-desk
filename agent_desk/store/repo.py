@@ -1928,6 +1928,24 @@ class Store:
             return {str(row[0]): str(row[1]) for row in rows}
 
     # --- what a card is, in a sentence (028-card-descriptions.sql) ----------------------------
+    async def cards_said(self, names: Sequence[str]) -> dict[str, str]:
+        """What has been written about each of these cards, in one query.
+
+        Same shape of fix as `drafts_by_idea`, and the same reason: the ideas column asked once
+        per idea it was about to render. The names are bound rather than interpolated — this takes
+        card names, and a card name is `kind:id` where the id came off a card in the page.
+        """
+        if not names:
+            return {}
+        keys = {f"n{index}": name for index, name in enumerate(names)}
+        holes = ", ".join(f":{key}" for key in keys)
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(f"SELECT name, said FROM card_said WHERE name IN ({holes})"),  # noqa: S608
+                keys,
+            )
+            return {str(row[0]): str(row[1]) for row in rows}
+
     async def card_said(self, name: str) -> tuple[str, str]:
         """The sentence written about this card, and what it was written from."""
         async with self.engine.connect() as conn:
@@ -2220,6 +2238,28 @@ class Store:
                 text("SELECT DISTINCT idea_id FROM draft WHERE kind = :kind"), {"kind": kind}
             )
             return {str(row._mapping["idea_id"]) for row in rows}
+
+    async def drafts_by_idea(self) -> dict[str, list[Draft]]:
+        """Every draft, grouped by the idea it belongs to. One query.
+
+        The inbox needs the drafts of every idea it shows, and it used to ask for them one idea at
+        a time — 183 connections and 183 statements to render one column, awaited in order.
+        Measured at 141ms per render on this machine's own store, on a page that re-renders itself
+        every time anything on the board changes.
+
+        A whole table read at once is the right shape here and it is not a general licence: this
+        one is bounded by the number of ideas somebody has kept, and the alternative is a query
+        per row of a list that is *already* being read in full.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, idea_id, kind, body, created_at FROM draft ORDER BY id DESC")
+            )
+            found: dict[str, list[Draft]] = {}
+            for row in rows:
+                draft = Draft(**{**row._mapping, "body": scrub(row._mapping["body"])})
+                found.setdefault(draft.idea_id, []).append(draft)
+            return found
 
     async def drafts_for(self, idea_id: str) -> list[Draft]:
         async with self.engine.connect() as conn:

@@ -678,6 +678,11 @@ async def render_blockers() -> str:
     )
 
 
+def _said_about(said: dict[str, str]) -> dict[str, str]:
+    """The sentences, keyed by idea id rather than by card name, which is what the column wants."""
+    return {name.split(":", 1)[1]: what for name, what in said.items()}
+
+
 async def render_ideas() -> str:
     """The bottom half of the right column: what has been written down.
 
@@ -711,7 +716,7 @@ async def render_ideas() -> str:
         says=appraise.SAYS,
         # And the evidence, where there is any: a card that *knows* an idea was built must not
         # look like one that merely suspects it.
-        said_about={idea.id: (await store.card_said(f"idea:{idea.id}"))[0] for idea in ideas},
+        said_about=_said_about(await store.cards_said([f"idea:{idea.id}" for idea in ideas])),
         # Which project the column is narrowed to, so it can say so rather than looking empty.
         only=only,
         only_named=await _project_name(only),
@@ -734,7 +739,7 @@ async def render_ideas() -> str:
 async def render_inbox() -> str:
     """Kept ideas, each carrying where it came from (docs/05-ideas.md)."""
     ideas = await store.ideas()
-    drafts = {idea.id: await store.drafts_for(idea.id) for idea in ideas}
+    drafts = await store.drafts_by_idea()
     return env.get_template("_inbox.html").render(
         ideas=ideas,
         drafts=drafts,
@@ -1537,9 +1542,32 @@ async def point_idea_at_project(idea_id: str, request: Request) -> Response:
     )
 
 
+def sessions_only() -> list[BoardRow]:
+    """The board without the reading: every session, and none of their transcripts.
+
+    `board` reads the registry and then opens the tail of every live session, which is where
+    almost all of its time goes. `shape` — the thing that folds sessions into projects — never
+    looks at a tail or a hint: it groups by working directory and asks git what repository each
+    one is. So anything that only wants the list of projects was paying for a file read per
+    session to get a field it does not use.
+
+    Measured at 37ms against 15 sessions on this machine, on a path that runs whenever the ideas
+    column re-renders. `test_shape_reads_only_the_session` is what keeps this true.
+    """
+    now = now_ms()
+    return [
+        BoardRow(
+            session=session,
+            tail=None,
+            hint=attention_hint(session, None, now=now, after_seconds=settings.idle_hint_seconds),
+        )
+        for session in registry.read_registry().sessions
+    ]
+
+
 async def _project_choices() -> list[tuple[str, str]]:
     """Every project a card could be pointed at, as (key, name)."""
-    rows, _ = await asyncio.to_thread(board)
+    rows = await asyncio.to_thread(sessions_only)
     return [(one.key, one.name) for one in shape(rows, await store.groups())]
 
 
