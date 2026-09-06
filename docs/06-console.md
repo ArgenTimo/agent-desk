@@ -217,3 +217,29 @@ Three things it will show you afterwards, in the place the button was:
 
 A session that is *working* is never continued, ever. That is the half of
 [`adr/0002`](adr/0002-read-first-never-interrupt.md) this console still keeps whole.
+
+
+## The workbench is a surface
+
+Asked for as *"давай сделаем верстак чем-то похожим на app.diagrams.net"*, and the shape is the
+one that tool established: cards you put where you want them, joined by lines, on a background you
+pan by dragging and zoom with Ctrl and the wheel.
+
+- **A card is moved by its head**, which is where every tool of this kind puts the grip. A press
+  that does not move is still a click, so taking a card out of the message still works.
+- **`×` is how a card leaves.** It used to be "drag it out of the middle", and that gesture now
+  means "move it" — one of them had to give, and the button is on every card already.
+- **The lines are drawn from where the cards are**, in surface coordinates, so they are correct at
+  any zoom and while something is being dragged. Nothing is measured off the screen.
+- **The grid moves with the pan.** Without that, dragging an empty patch of surface looks like
+  nothing happened, which is the one thing a canvas has to get right.
+- **Where you put things is remembered**, per browser, and **tidy up** puts everything back where
+  a fresh card lands. A surface you can move things about on is a surface you can lose things on.
+
+**Written by hand, in about a screen of code.** There is no JavaScript build step here
+([`adr/0003`](adr/0003-sqlite-and-one-process.md)) and a diagramming library is exactly the kind of
+thing that arrives with one. What that costs is everything nobody asked for — no waypoints, no
+snapping, no undo. What it buys is that the whole surface is one file somebody can read.
+
+Two coordinate systems, and keeping them apart is most of the work: a card's position is in
+*surface* space and does not change when you pan or zoom, and the surface carries one transform.

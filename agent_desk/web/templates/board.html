@@ -81,14 +81,30 @@
                 title="back to full size">100%</button>
         <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
       </span>
+      {# A surface you can move things about on is a surface you can lose things on. #}
+      <button type="button" class="chip" data-tidy
+              title="put every card back where a fresh one lands, and centre the view">tidy up</button>
       <span class="spacer"></span>
     </div>
-    {# The cards, with the relations drawn between them. The lines are an SVG behind the pins
-       rather than a diagram beside them: what is wanted is *these* cards, readable, joined —
-       not a second set of boxes with the same words truncated into them. #}
-    <div class="pins-frame">
-      <svg id="bench-ties" class="bench-ties" aria-hidden="true" hidden></svg>
-      <div id="pins" class="pins" aria-label="what the next message is about"></div>
+    {# The workbench proper: a surface you move cards about on, joined by lines, panned by
+       dragging the background and zoomed with the buttons above or Ctrl and the wheel.
+
+       Two coordinate systems, kept apart: a card's position is in *surface* space and does not
+       change when you pan or zoom, and the surface carries one transform. So a line between two
+       cards is drawn from where they are and is right at any size. #}
+    <div id="bench-canvas" class="bench-canvas" data-drop="pins"
+         aria-label="the workbench: what the next message is about">
+      <div id="bench-surface" class="bench-surface">
+        <svg id="bench-ties" class="bench-ties" aria-hidden="true" hidden>
+          <defs>
+            <marker id="tie-end" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7"
+                    markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+        </svg>
+        <div id="pins" class="pins" aria-label="what the next message is about"></div>
+      </div>
     </div>
 
     <div class="context-strip">

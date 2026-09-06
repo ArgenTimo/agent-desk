@@ -545,7 +545,10 @@ async function pin(card) {
   holder.className = 'pin';
   holder.dataset.kind = card.kind;
   holder.dataset.id = card.id;
-  holder.draggable = true;
+  // Its own name, so a line can find it without re-deriving the pair every time it is drawn.
+  holder.dataset.name = `${card.kind}:${card.id}`;
+  // Not `draggable`: on the surface a card is moved by its head with the pointer, and the HTML5
+  // drag would fight that. `×` is how a card leaves.
   holder.dataset.deep = 'no';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
@@ -555,6 +558,7 @@ async function pin(card) {
     <div class="pin-body">reading…</div>`;
   holder.querySelector('.pin-label').textContent = card.label || card.id;
   pins.appendChild(holder);
+  place(holder);
   syncTargets();
 
   try {
@@ -639,11 +643,8 @@ document.addEventListener('dragstart', (event) => {
 document.addEventListener('dragend', (event) => {
   event.target.closest?.('[data-kind]')?.classList.remove('dragging');
   document.body.classList.remove('dragging-card');
-  // Dropped outside the middle: that is how a card is taken back out of the conversation.
-  if (dragged?.fromPins && !dragged.handled) {
-    pins.querySelector(`[data-kind="${dragged.kind}"][data-id="${CSS.escape(dragged.id)}"]`)?.remove();
-    syncTargets();
-  }
+  // A card on the bench is moved with the pointer and removed with its `×`, so a stray HTML5
+  // drag no longer takes one off. Dragging a card *in* is unchanged.
   dragged = null;
 });
 
@@ -651,7 +652,7 @@ function zoneOf(event) {
   // The output and the staging area under it are one target: dropping a card anywhere in the
   // middle means "this is what the next message is about".
   return event.target.closest(
-    '#out, #pins, [data-drop="project"], [data-drop="idea"], [data-drop="ungroup"]'
+    '#out, #bench-canvas, [data-drop="project"], [data-drop="idea"], [data-drop="ungroup"]'
   );
 }
 
@@ -671,7 +672,7 @@ document.addEventListener('drop', (event) => {
   zone.classList.remove('drop-target');
   dragged.handled = true;
 
-  if (zone.id === 'out' || zone.id === 'pins') {
+  if (zone.id === 'out' || zone.id === 'bench-canvas') {
     if (!dragged.fromPins) pin(dragged);
     document.getElementById('ask-text').focus();
     return;
@@ -751,104 +752,338 @@ document.addEventListener('mouseover', (event) => {
 
 document.addEventListener('mouseleave', () => lightUp(''), true);
 
-/* --- scaling the bench, and the cards that are off the screen --------------------------------- */
-// "Верстак масштабируем и можно двигаться по нему в лучших практиках; на блоки которые есть на
-// верстаке но находятся за пределами экрана указывают подвижные точки по краям."
+/* --- the workbench, as a surface you move things about on ------------------------------------- */
+// Asked for as "давай сделаем верстак чем-то похожим на app.diagrams.net": cards you place where
+// you want them, joined by lines, on a surface you pan and zoom.
 //
-// Scrolling is how you move around a column, and the browser already does it well. What it does
-// not do is let six cards be six cards you can see at once, and it does not tell you that a card
-// is down there at all — which matters more here than in most places, because a card you cannot
-// see still goes into the next message.
-// The floor is 80%, not 50%. The first version of this went down to half size, and half size on a
-// 13px body is 6px — text nobody can read, reached by two clicks, remembered afterwards, and with
-// nothing on the screen to explain why everything had gone small. That is a control that breaks
-// the page and then hides the reason.
+// Vanilla, because there is no JavaScript build step here (docs/adr/0003) and a diagramming
+// library is exactly the kind of thing that arrives with one. What that costs is the features
+// nobody asked for — there are no waypoints, no snapping, no undo. What it buys is that the whole
+// thing is one screen of code in a file somebody can read.
 //
-// It goes *up* as well now, which is what somebody on a large screen actually wants, and the
-// storage key is new so a browser still holding the old half-size value starts at 100% again.
-const ZOOMS = [0.8, 0.9, 1, 1.15, 1.3];
-const FULL_SIZE = ZOOMS.indexOf(1);
-let zoomAt = FULL_SIZE;
+// Two coordinate systems, and keeping them apart is most of the work. A card's `x`/`y` are in
+// *surface* space and never change when you pan or zoom; the surface carries one transform. So a
+// line between two cards is drawn from their stored positions and is right at any zoom, without
+// measuring anything.
+const surface = document.getElementById('bench-surface');
+const canvas = document.getElementById('bench-canvas');
+const ties = document.getElementById('bench-ties');
 
-function applyZoom() {
-  const scale = ZOOMS[zoomAt];
-  pins.style.setProperty('--bench-scale', String(scale));
-  pins.classList.toggle('scaled', scale !== 1);
-  const label = document.querySelector('[data-zoom="0"]');
-  if (label) label.textContent = `${Math.round(scale * 100)}%`;
+const PLACED = 'agent-desk:bench-layout';
+const CARD_WIDTH = 260;
+// Where a new card lands: down and to the right of the last one, the way a stack of paper falls.
+const STEP = 28;
+
+let view = { x: 0, y: 0, scale: 1 };
+let placed = new Map();
+let tieList = [];
+
+function cardName(pin) {
+  return `${pin.dataset.kind}:${pin.dataset.id}`;
+}
+
+function rememberLayout() {
   try {
-    localStorage.setItem('agent-desk:bench-size', String(zoomAt));
+    localStorage.setItem(PLACED, JSON.stringify([...placed.entries()]));
   } catch {
-    // A window that will not remember the zoom still zooms.
+    // A window that will not remember where things were still lets you move them.
   }
+}
+
+function recallLayout() {
+  try {
+    const said = localStorage.getItem(PLACED);
+    placed = new Map(said ? JSON.parse(said) : []);
+  } catch {
+    placed = new Map();
+  }
+}
+
+function applyView() {
+  if (!surface) return;
+  surface.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  // The grid moves with it. Without this, panning an empty patch of surface looks like nothing
+  // happened at all, which is the one thing a canvas has to get right.
+  if (canvas) {
+    canvas.style.backgroundSize = `${22 * view.scale}px ${22 * view.scale}px`;
+    canvas.style.backgroundPosition = `${view.x}px ${view.y}px`;
+  }
+  const label = document.querySelector('[data-zoom="0"]');
+  if (label) label.textContent = `${Math.round(view.scale * 100)}%`;
   markOffEdge();
+}
+
+function place(pin, at) {
+  const where = at || placed.get(cardName(pin)) || nextFreeSpot();
+  placed.set(cardName(pin), where);
+  pin.style.left = `${where.x}px`;
+  pin.style.top = `${where.y}px`;
+  rememberLayout();
+}
+
+// Down and to the right of whatever is already there, wrapping when it runs off the bottom. Not a
+// layout algorithm — just somewhere that is not on top of the last one.
+function nextFreeSpot() {
+  // Minus the one being placed: `place` runs after the card is in the document, so counting them
+  // all would leave the first card in the second slot.
+  const taken = Math.max(0, [...surface.querySelectorAll('.pin')].length - 1);
+  // Across first, then down a row. A card is taller than `STEP`, so stepping only downwards put
+  // each new one on top of the last.
+  const across = 4;
+  return {
+    x: 20 + (taken % across) * (CARD_WIDTH + 24),
+    y: 20 + Math.floor(taken / across) * 220 + (taken % across) * STEP,
+  };
+}
+
+/* --- moving a card ---------------------------------------------------------------------------- */
+// By its head, which is where every tool like this puts the grip. A press that does not move is
+// still a click, so taking a card out of the message (below) keeps working.
+let moving = null;
+
+canvas?.addEventListener('pointerdown', (event) => {
+  const head = event.target.closest('.pin-head');
+  const pin = event.target.closest('.pin');
+  if (event.button !== 0) return;
+  if (event.target.closest('button, a, input, textarea, select')) return;
+
+  if (head && pin) {
+    const at = placed.get(cardName(pin)) || { x: 0, y: 0 };
+    moving = {
+      pin,
+      from: { ...at },
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    pin.setPointerCapture?.(event.pointerId);
+    pin.classList.add('moving');
+    return;
+  }
+
+  // Empty surface: pan. The same gesture the whole class of tool uses.
+  if (!pin) {
+    moving = {
+      pan: true,
+      from: { x: view.x, y: view.y },
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    canvas.classList.add('panning');
+  }
+});
+
+canvas?.addEventListener('pointermove', (event) => {
+  if (!moving) return;
+  const dx = event.clientX - moving.startX;
+  const dy = event.clientY - moving.startY;
+  if (!moving.moved && Math.hypot(dx, dy) < 4) return; // still a click, not yet a drag
+  moving.moved = true;
+
+  if (moving.pan) {
+    view.x = moving.from.x + dx;
+    view.y = moving.from.y + dy;
+    applyView();
+    return;
+  }
+  place(moving.pin, {
+    x: Math.round(moving.from.x + dx / view.scale),
+    y: Math.round(moving.from.y + dy / view.scale),
+  });
   drawTies();
+});
+
+function endMove() {
+  if (!moving) return;
+  moving.pin?.classList.remove('moving');
+  canvas?.classList.remove('panning');
+  const wasAMove = moving.moved;
+  moving = null;
+  if (wasAMove) drawTies();
+  return wasAMove;
+}
+
+canvas?.addEventListener('pointerup', endMove);
+canvas?.addEventListener('pointercancel', endMove);
+
+/* --- how big it is ---------------------------------------------------------------------------- */
+const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
+const FULL_SIZE = ZOOMS.indexOf(1);
+
+function zoomTo(index, around) {
+  const next = ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, index))];
+  const frame = canvas.getBoundingClientRect();
+  const at = around || { x: frame.width / 2, y: frame.height / 2 };
+  // Keep the point under the cursor where it is, which is what makes zooming feel like zooming
+  // rather than like the page jumping.
+  view.x = at.x - ((at.x - view.x) * next) / view.scale;
+  view.y = at.y - ((at.y - view.y) * next) / view.scale;
+  view.scale = next;
+  applyView();
+  try {
+    // The *scale*, not its index. An index is a reference into an array that is allowed to
+    // change, and when this one gained two entries every browser holding a "2" silently started
+    // meaning 80% where it had meant 100%. A number that means a size still means that size.
+    localStorage.setItem('agent-desk:bench-size', String(next));
+  } catch {
+    // Not remembering the size is not a reason to refuse to change it.
+  }
 }
 
 document.addEventListener('click', (event) => {
   const button = event.target.closest('[data-zoom]');
   if (!button) return;
   const step = Number(button.dataset.zoom);
-  zoomAt = step === 0 ? FULL_SIZE : Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + step));
-  applyZoom();
+  if (step === 0) {
+    view = { x: 0, y: 0, scale: 1 };
+    applyView();
+    return;
+  }
+  zoomTo(ZOOMS.indexOf(view.scale) + step);
 });
 
-// Ctrl and the wheel, which is what this gesture means everywhere else. Without the modifier the
-// wheel still scrolls, because taking that away from a list would be worse than never zooming.
-pins.addEventListener(
+canvas?.addEventListener(
   'wheel',
   (event) => {
     if (!event.ctrlKey) return;
     event.preventDefault();
-    zoomAt = Math.min(ZOOMS.length - 1, Math.max(0, zoomAt + (event.deltaY < 0 ? 1 : -1)));
-    applyZoom();
+    const frame = canvas.getBoundingClientRect();
+    zoomTo(ZOOMS.indexOf(view.scale) + (event.deltaY < 0 ? 1 : -1), {
+      x: event.clientX - frame.left,
+      y: event.clientY - frame.top,
+    });
   },
   { passive: false }
 );
 
-// A dot per card that is on the bench and off the screen, on the edge it went off. Clicking one
-// brings that card back into view — the point is to be able to reach it, not only to know.
+/* --- the lines ---------------------------------------------------------------------------------*/
+// Drawn from the cards' stored positions rather than measured off the screen, so they are correct
+// at any zoom and while something is being dragged.
+async function loadTies() {
+  if (!ties) return;
+  const cards = [...surface.querySelectorAll('.pin[data-kind]:not(.own)')].map(cardName).join(',');
+  if (!cards) {
+    tieList = [];
+    drawTies();
+    return;
+  }
+  try {
+    const response = await fetch(`/workbench/ties?cards=${encodeURIComponent(cards)}`);
+    tieList = response.ok ? await response.json() : [];
+  } catch {
+    tieList = [];
+  }
+  drawTies();
+}
+
+function drawTies() {
+  if (!ties) return;
+  ties.textContent = '';
+  let drew = 0;
+  for (const tie of tieList) {
+    const one = surface.querySelector(`.pin[data-name="${CSS.escape(tie.from)}"]`);
+    const other = surface.querySelector(`.pin[data-name="${CSS.escape(tie.to)}"]`);
+    const a = placed.get(tie.from);
+    const b = placed.get(tie.to);
+    if (!one || !other || !a || !b) continue;
+
+    // Edge to edge: out of the right of one and into the left of the other, or the other way
+    // round when they are the other way round.
+    const rightward = a.x <= b.x;
+    const from = {
+      x: a.x + (rightward ? one.offsetWidth : 0),
+      y: a.y + one.offsetHeight / 2,
+    };
+    const to = { x: b.x + (rightward ? 0 : other.offsetWidth), y: b.y + other.offsetHeight / 2 };
+    const bend = Math.max(30, Math.abs(to.x - from.x) / 2);
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute(
+      'd',
+      `M ${from.x} ${from.y} C ${from.x + (rightward ? bend : -bend)} ${from.y}, ` +
+        `${to.x - (rightward ? bend : -bend)} ${to.y}, ${to.x} ${to.y}`
+    );
+    path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('marker-end', 'url(#tie-end)');
+    ties.appendChild(path);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', String((from.x + to.x) / 2));
+    label.setAttribute('y', String((from.y + to.y) / 2 - 5));
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('class', 'tie-label');
+    label.textContent = tie.says;
+    ties.appendChild(label);
+    drew += 1;
+  }
+  ties.hidden = drew === 0;
+}
+
+/* --- what is off the screen ------------------------------------------------------------------- */
+// More useful on a surface than it was on a list: a card you moved somewhere and then panned away
+// from is a card that still goes into the next message.
 function markOffEdge() {
   const edge = document.getElementById('off-edge');
-  if (!edge) return;
-  const frame = pins.getBoundingClientRect();
-  const away = [...pins.querySelectorAll('.pin')].filter((pin) => {
-    const box = pin.getBoundingClientRect();
-    return box.bottom < frame.top + 2 || box.top > frame.bottom - 2;
-  });
+  if (!edge || !canvas) return;
+  const frame = canvas.getBoundingClientRect();
   edge.textContent = '';
-  edge.hidden = away.length === 0;
-  for (const pin of away) {
+  let away = 0;
+  for (const pin of surface.querySelectorAll('.pin')) {
     const box = pin.getBoundingClientRect();
+    if (box.right > frame.left && box.left < frame.right &&
+        box.bottom > frame.top && box.top < frame.bottom) {
+      continue;
+    }
     const dot = document.createElement('button');
     dot.type = 'button';
-    dot.className = `edge-dot ${box.top > frame.bottom - 2 ? 'below' : 'above'}`;
-    dot.title = pin.querySelector('.pin-label')?.textContent || 'a card up there';
-    dot.setAttribute('aria-label', `go to ${dot.title}`);
-    dot.addEventListener('click', () => pin.scrollIntoView({ block: 'nearest' }));
+    dot.className = 'edge-dot';
+    dot.title = pin.querySelector('.pin-label')?.textContent || 'a card over there';
+    dot.setAttribute('aria-label', `bring ${dot.title} into view`);
+    dot.addEventListener('click', () => {
+      const at = placed.get(cardName(pin));
+      if (!at) return;
+      view.x = frame.width / 2 - (at.x + CARD_WIDTH / 2) * view.scale;
+      view.y = frame.height / 2 - (at.y + 40) * view.scale;
+      applyView();
+    });
     edge.appendChild(dot);
+    away += 1;
   }
+  edge.hidden = away === 0;
 }
 
-pins.addEventListener('scroll', markOffEdge, { passive: true });
-window.addEventListener('resize', markOffEdge);
+document.querySelector('[data-tidy]')?.addEventListener('click', () => {
+  // One button, because a surface you can move things about on is a surface you can lose things
+  // on. It does not lay anything out cleverly; it puts everything back where a fresh card lands.
+  placed = new Map();
+  [...surface.querySelectorAll('.pin')].forEach((pin, index) => {
+    place(pin, { x: 20 + (index % 4) * (CARD_WIDTH + 24), y: 20 + index * STEP });
+  });
+  view = { x: 0, y: 0, scale: view.scale };
+  applyView();
+  drawTies();
+});
 
+window.addEventListener('resize', () => {
+  markOffEdge();
+  drawTies();
+});
+
+recallLayout();
 try {
-  // `getItem` returns null when there is nothing stored, and `Number(null)` is **0** — a perfectly
-  // valid index. So the first version of this gave every browser that had never chosen a size the
-  // *smallest* one, which under the scale it shipped with was 50%, and the console arrived at
-  // half size for everybody with no way to tell why. Checked as a string before it is a number.
+  // `getItem` returns null when nothing is stored and `Number(null)` is 0 — which was once a
+  // valid index and therefore a silent wrong default, so the absent case is checked as a string
+  // first. Anything that is not one of the sizes on offer falls back to full size rather than to
+  // whatever it rounds to.
   const stored = localStorage.getItem('agent-desk:bench-size');
-  const remembered = stored === null ? FULL_SIZE : Number(stored);
-  zoomAt =
-    Number.isInteger(remembered) && remembered >= 0 && remembered < ZOOMS.length
-      ? remembered
-      : FULL_SIZE;
+  const remembered = stored === null ? 1 : Number(stored);
+  view.scale = ZOOMS.includes(remembered) ? remembered : 1;
 } catch {
-  // No storage at all: full size, which is the default anybody would expect.
-  zoomAt = FULL_SIZE;
+  view.scale = 1;
 }
-applyZoom();
+applyView();
 
 /* --- what is charged, and what is only sitting there ------------------------------------------- */
 // "При перемещении на верстак объект сразу заряжается (значит будет участвовать в контексте),
@@ -888,7 +1123,7 @@ function addOwnBlock() {
   holder.className = 'pin own';
   holder.dataset.kind = 'note';
   holder.dataset.id = `note-${++ownBlocks}`;
-  holder.draggable = true;
+  holder.dataset.name = `note:${holder.dataset.id}`;
   holder.dataset.deep = 'no';
   holder.innerHTML = `<div class="pin-head"><span class="pin-kind">note</span>
     <span class="pin-label">a block of your own</span>
@@ -897,6 +1132,7 @@ function addOwnBlock() {
     <div class="pin-body"><textarea class="own-text" rows="4"
       placeholder="Anything: a link, a paragraph of a document, a snippet of code. It goes with the next message and is gone when this tab is."></textarea></div>`;
   pins.appendChild(holder);
+  place(holder);
   syncTargets();
   holder.querySelector('.own-text').focus();
 }
@@ -915,92 +1151,6 @@ function ownBlockText() {
     .filter(Boolean)
     .join('\n\n---\n\n');
 }
-
-/* --- the cards on the bench, and the lines between them --------------------------------------- */
-// "Я хочу видеть блоки, помещённые на верстак, как связанные карточки."
-//
-// The first attempt at this drew its own diagram: a second set of boxes with the same words
-// truncated into them, next to the cards they were about. That answered the wrong half — what is
-// wanted is *these* cards, readable, with the relations drawn between them. So the lines are an
-// SVG behind the pins, and the pins are exactly what they were.
-const ties = document.getElementById('bench-ties');
-let tieList = [];
-
-async function loadTies() {
-  if (!ties) return;
-  const cards = [...pins.querySelectorAll('.pin[data-kind]:not(.own)')]
-    .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}`)
-    .join(',');
-  if (!cards) {
-    tieList = [];
-    drawTies();
-    return;
-  }
-  try {
-    const response = await fetch(`/workbench/ties?cards=${encodeURIComponent(cards)}`);
-    tieList = response.ok ? await response.json() : [];
-  } catch {
-    tieList = [];
-  }
-  drawTies();
-}
-
-// Redrawn on every scroll and resize because the cards move: a line that stays where the card was
-// is worse than no line.
-function drawTies() {
-  if (!ties) return;
-  const frame = pins.getBoundingClientRect();
-  ties.setAttribute('viewBox', `0 0 ${frame.width} ${frame.height}`);
-  ties.style.width = `${frame.width}px`;
-  ties.style.height = `${frame.height}px`;
-  ties.textContent = '';
-  if (!tieList.length) {
-    ties.hidden = true;
-    return;
-  }
-
-  const where = (name) => {
-    const [kind, ...rest] = name.split(':');
-    const pin = pins.querySelector(
-      `.pin[data-kind="${CSS.escape(kind)}"][data-id="${CSS.escape(rest.join(':'))}"]`
-    );
-    if (!pin) return null;
-    const box = pin.getBoundingClientRect();
-    return { top: box.top - frame.top, bottom: box.bottom - frame.top, left: box.left - frame.left };
-  };
-
-  let drew = 0;
-  for (const tie of tieList) {
-    const one = where(tie.from);
-    const other = where(tie.to);
-    if (!one || !other) continue;
-    // Down the left-hand margin of the cards, which is the only space a stacked list has. A
-    // bracket rather than a straight line, so two ties between the same pair are still two.
-    const x = 9 + (drew % 3) * 7;
-    const y1 = one.bottom - 10;
-    const y2 = other.top + 10;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute(
-      'd',
-      `M ${one.left - frame.left + 2} ${y1} H ${x} V ${y2} H ${other.left - frame.left + 2}`
-    );
-    path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
-    path.setAttribute('fill', 'none');
-    ties.appendChild(path);
-
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', String(x + 4));
-    label.setAttribute('y', String((y1 + y2) / 2));
-    label.setAttribute('class', 'tie-label');
-    label.textContent = tie.says;
-    ties.appendChild(label);
-    drew += 1;
-  }
-  ties.hidden = drew === 0;
-}
-
-pins.addEventListener('scroll', drawTies, { passive: true });
-window.addEventListener('resize', drawTies);
 
 /* --- plain words, and the technical half behind a toggle ---------------------------------------- */
 // A card dropped on the workbench opens in plain words: a card that leads with paths and pids is a

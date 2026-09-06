@@ -875,8 +875,8 @@ button.menu-item {
   min-height: 0;
   overflow-y: auto;
   background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px);
+    linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line) 1px, transparent 1px);
   background-size: 22px 22px;
   background-position: -1px -1px;
   border-radius: var(--radius);
@@ -900,15 +900,9 @@ button.menu-item {
    what the next message is about. Dragging it back out undoes both. */
 /* The staging area: what the next message will be sent with, sitting where it can be seen while
    it is typed. It scrolls on its own — five cards must not push the input field off the screen. */
-.pins {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 40vh;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  margin-top: 8px;
-}
+/* The workbench is a surface now, not a list: cards sit where they were put, in surface
+   coordinates, and the surface carries the pan and the zoom (docs/06-console.md). */
+.pins { position: relative; width: 100%; height: 100%; }
 .pins:not(:empty) { padding-top: 2px; }
 .pin {
   border: 1px solid var(--line-strong);
@@ -1508,3 +1502,58 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 }
 /* The cards sit above the lines, so a line runs behind a card rather than across its words. */
 .pins > .pin { position: relative; z-index: 2; }
+
+/* --- the workbench as a surface --------------------------------------------------------------- */
+.bench-canvas {
+  position: relative;
+  height: 40vh;
+  min-height: 180px;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  /* The grid the workbench was asked for at the start, and it earns its place here: without it
+     there is no way to see that panning did anything. */
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 55%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  cursor: grab;
+  touch-action: none;
+}
+.bench-canvas.panning { cursor: grabbing; }
+.bench-canvas.drop-target { border-color: var(--focus); }
+
+.bench-surface {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* A card on the surface: placed, not stacked. */
+.pins > .pin {
+  position: absolute;
+  width: 260px;
+  max-height: 60vh;
+  overflow: auto;
+  z-index: 2;
+  box-shadow: var(--shadow, 0 2px 8px rgb(0 0 0 / 18%));
+}
+.pins > .pin.moving { z-index: 3; box-shadow: 0 8px 24px rgb(0 0 0 / 30%); }
+.pin-head { cursor: grab; user-select: none; }
+.pin.moving .pin-head { cursor: grabbing; }
+
+/* The lines live on the surface, so they pan and zoom with the cards they join. */
+/* No viewBox and `overflow: visible`, so the coordinates are the surface's own pixels and a line
+   to a card somebody dragged off to the left is still drawn. */
+.bench-ties {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}

@@ -87,24 +87,35 @@ def test_a_browser_that_has_never_chosen_a_size_gets_the_full_one() -> None:
     right checks for the absent case before converting."""
     script = (STATIC / "console.js").read_text()
 
-    assert "stored === null ? FULL_SIZE" in script, (
+    assert "stored === null ? 1" in script, (
         "the absent case must be handled before the string becomes a number"
     )
     assert "Number(localStorage.getItem" not in script, (
-        "Number(null) is 0, which is a valid index and therefore a silent wrong default"
+        "Number(null) is 0, which was a valid index and therefore a silent wrong default"
     )
+    # And what is stored is the *size*, not a position in a list that is allowed to change.
+    # When that list gained two entries, every browser holding a "2" silently started meaning
+    # 80% where it had meant 100% — the same class of bug twice in one control.
+    assert "String(next)" in script
+    assert "ZOOMS.indexOf(next)" not in script
+    assert "ZOOMS.includes(remembered)" in script
 
 
 @pytest.mark.unit
-def test_the_smallest_size_the_console_can_be_set_to_is_still_readable() -> None:
-    """Half size on a 13px body is 6px. A control that can make the page unreadable, remembers it,
-    and shows nothing explaining it, is a control that breaks the page and then hides the reason."""
+def test_full_size_is_the_default_and_the_way_back_to_it_is_one_press() -> None:
+    """The bench is a diagram surface, so half size is a perfectly good *choice* — seeing the whole
+    layout at once is what a zoom is for. What was wrong was never the range: it was that the
+    smallest was what you got without choosing, and that there was nothing obvious to press to
+    undo it. So the invariant is the default and the escape hatch, not a floor."""
     script = (STATIC / "console.js").read_text()
     scale = re.search(r"const ZOOMS = \[([0-9., ]+)\]", script)
-
     assert scale is not None
-    smallest = min(float(one) for one in scale.group(1).split(","))
-    assert smallest >= 0.8, f"the bench can be shrunk to {smallest:.0%}, which is not readable"
+
+    sizes = [float(one) for one in scale.group(1).split(",")]
+    assert 1 in sizes, "there has to be a full size to go back to"
+    assert "const FULL_SIZE = ZOOMS.indexOf(1)" in script, "the default is full size, by name"
+    # And pressing the middle control puts the whole view back, not just the scale.
+    assert "view = { x: 0, y: 0, scale: 1 }" in script
 
 
 @pytest.mark.unit
