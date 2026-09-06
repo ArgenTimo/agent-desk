@@ -128,3 +128,76 @@ def test_nothing_here_writes_to_a_repository() -> None:
 
     assert "POST" not in methods and "PATCH" not in methods and "PUT" not in methods
     assert "GET" in methods
+
+
+@pytest.mark.unit
+def test_a_refusal_is_a_status_and_a_body_rather_than_an_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reached from a loop that has to carry on either way, like every other reader here."""
+    import io
+    import urllib.request
+
+    def refuse(request: object, timeout: float = 0) -> object:
+        raise urllib.error.HTTPError(
+            "https://api.github.com/x", 401, "Unauthorized", {}, io.BytesIO(b'{"message":"bad"}')
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+
+    status, raw = github._get("https://api.github.com/repos/o/n/pulls", "Bearer x")
+    assert status == 401
+    assert b"bad" in raw
+
+    monkeypatch.setenv("GH_TOKEN", "a-token")
+    read = github.open_pulls("owner/name", "GH_TOKEN")
+    assert not read.ok
+    assert "401" in read.detail
+
+
+@pytest.mark.unit
+def test_a_successful_read_returns_what_github_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request
+
+    class Answer:
+        status = 200
+
+        def read(self) -> bytes:
+            return b"[]"
+
+        def __enter__(self) -> Answer:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout=0: Answer())
+
+    assert github._get("https://api.github.com/x", "Bearer x") == (200, b"[]")
+
+    # An empty list is a repository with nothing open, which is a fine answer.
+    monkeypatch.setenv("GH_TOKEN", "a-token")
+    read = github.open_pulls("owner/name", "GH_TOKEN")
+    assert read.ok and read.pulls == ()
+
+
+@pytest.mark.unit
+def test_a_body_that_is_not_a_list_is_not_an_empty_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable answer must never look like a repository with nothing waiting."""
+    monkeypatch.setattr(github, "_get", lambda url, auth: (200, b'{"message":"Not Found"}'))
+    monkeypatch.setenv("GH_TOKEN", "a-token")
+
+    read = github.open_pulls("owner/name", "GH_TOKEN")
+
+    assert not read.ok
+    assert "does not understand" in read.detail
+
+
+@pytest.mark.unit
+def test_a_link_that_is_not_a_repository_is_refused_before_anything_is_asked() -> None:
+    read = github.open_pulls("", "GH_TOKEN")
+
+    assert not read.ok
+    assert "does not name a GitHub repository" in read.detail
