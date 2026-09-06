@@ -40,6 +40,10 @@ class Blocker:
     what: str
     why: str
     when: int
+    # Which project it is about, where it is about one. A blocker with none — a question to a
+    # model that came back an error — belongs to no project and is shown whatever is focused,
+    # because hiding it behind a filter it does not belong to would lose it entirely.
+    repo_key: str = ""
     # A name of its own, so this card can be dragged onto the workbench and opened like any other
     # — `kind:ref`, stable for as long as the thing is stuck, which is as long as the card exists.
     ref: str = ""
@@ -55,8 +59,13 @@ class Blocker:
         return f"{self.kind}:{self.ref}"
 
 
-async def blockers(store: Store) -> list[Blocker]:
-    """Everything that is stopped, newest first. Never raises: this renders a column."""
+async def blockers(store: Store, only: str = "") -> list[Blocker]:
+    """Everything that is stopped, newest first. Never raises: this renders a column.
+
+    `only` narrows it to one project. A blocker that belongs to no project — a question to a model
+    that came back an error — survives the narrowing, because hiding it behind a filter it was
+    never part of would lose it entirely.
+    """
     found: list[Blocker] = []
 
     for task in await store.tasks(limit=200):
@@ -65,6 +74,7 @@ async def blockers(store: Store) -> list[Blocker]:
                 Blocker(
                     kind="task",
                     ref=task.id,
+                    repo_key=task.repo_key,
                     what=task.title,
                     why=task.detail or "it failed and said nothing",
                     when=task.failed_at,
@@ -78,6 +88,7 @@ async def blockers(store: Store) -> list[Blocker]:
                 Blocker(
                     kind="branch",
                     ref=task.id,
+                    repo_key=task.repo_key,
                     what=task.title,
                     why=task.detail,
                     when=task.finished_at,
@@ -90,6 +101,7 @@ async def blockers(store: Store) -> list[Blocker]:
                 Blocker(
                     kind="project",
                     ref=arming.repo_key,
+                    repo_key=arming.repo_key,
                     what=arming.repo_key.split(":")[-1],
                     why=f"it stopped starting work: {arming.disarmed_why}",
                     when=arming.armed_at or 0,
@@ -129,12 +141,15 @@ async def blockers(store: Store) -> list[Blocker]:
             Blocker(
                 kind="ticket",
                 ref=ticket.key,
+                repo_key=ticket.repo_key,
                 what=f"{ticket.key} · {ticket.summary}",
                 why=f"the ticket says: {ticket.said}",
                 when=ticket.seen_at,
             )
         )
 
+    if only:
+        found = [one for one in found if one.repo_key in ("", only)]
     found.sort(key=lambda one: one.when, reverse=True)
     return found[:MOST_SHOWN]
 

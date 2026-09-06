@@ -1247,3 +1247,72 @@ async def test_the_workbench_draws_what_is_on_it(home: Home, desk: Store) -> Non
     status, page = await _get("/workbench?cards=")
     assert status == 200
     assert "Drop a card or two" in page
+
+
+@pytest.mark.unit
+async def test_choosing_a_project_narrows_the_right_hand_column(home: Home, desk: Store) -> None:
+    """ "Выбор проекта слева фильтрует блокеры и идеи; без выбора — всё." A board with six
+    projects has a column about all six, and when you are working on one that is mostly noise."""
+    key = await _the_project(home)
+    mine = await desk.create_idea(
+        text_="about this one", summary="about this one", source_kind="typed"
+    )
+    await desk.set_idea_project(mine.id, key)
+    theirs = await desk.create_idea(
+        text_="about another", summary="about another", source_kind="typed"
+    )
+    await desk.set_idea_project(theirs.id, "origin:someone/else")
+    loose = await desk.create_idea(
+        text_="about nothing", summary="about nothing", source_kind="typed"
+    )
+
+    # Without a choice: everything.
+    column = await routes.render_ideas()
+    assert "about this one" in column and "about another" in column and "about nothing" in column
+
+    status, column = await _post("/projects/focus", {"key": key})
+
+    assert status == 200
+    assert "about this one" in column
+    assert "about another" not in column
+    # A thought with no project is about whatever is in front of you, so it survives the
+    # narrowing — hiding it behind a filter it was never part of would lose it.
+    assert "about nothing" in column
+    assert "showing" in column and "show everything" in column
+
+    # And it survives a push, which is what a query parameter could not do.
+    assert "about another" not in await routes.render_ideas()
+
+    status, column = await _post("/projects/focus", {"key": ""})
+    assert "about another" in column
+
+
+@pytest.mark.unit
+async def test_the_blockers_narrow_with_the_ideas_and_the_loose_ones_stay(
+    home: Home, desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """One decision moves both columns; a failed question belongs to no repository at all."""
+    key = await _the_project(home)
+    mine = await desk.queue_task(
+        repo_key=key,
+        cwd=str(tmp_path),
+        title="this project",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(mine.id, "it fell over")
+    theirs = await desk.queue_task(
+        repo_key="origin:someone/else",
+        cwd=str(tmp_path),
+        title="another project",
+        instruction="x",
+        source_kind="instruction",
+    )
+    await desk.task_failed(theirs.id, "it fell over too")
+
+    await _post("/projects/focus", {"key": key})
+    column = await routes.render_blockers()
+
+    assert "this project" in column
+    assert "another project" not in column
+    assert "for this project only" in column

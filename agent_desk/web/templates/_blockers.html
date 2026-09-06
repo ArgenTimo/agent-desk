@@ -4,10 +4,13 @@
    the session card, in amber, next to the observation it was made from (CLAUDE.md, rule five).
 
    Red is the colour of stopped, and everything in this column is stopped. #}
+{% if only and found %}
+<p class="small dim one">…for this project only.</p>
+{% endif %}
 {% if not found %}
-<p class="empty small">Nothing is stuck. A task that fails, a branch a gate refuses, or a switch
-  that turns itself off lands here — with the reason it gave and the one thing that would clear
-  it.</p>
+<p class="empty small">Nothing is stuck{% if only %} in this project{% endif %}. A task that
+  fails, a branch a gate refuses, a ticket that says it is waiting, or a switch that turns itself
+  off lands here — with the reason it gave and the one thing that would clear it.</p>
 {% endif %}
 
 {% for one in found %}

@@ -1342,3 +1342,35 @@ async def test_an_idea_typed_with_nothing_in_front_of_it_is_about_the_desk(
     await blocks.submit(desk, "/idea the api half is slow", [stamped])
     newest = (await desk.ideas())[0]
     assert newest.project_key == "origin:acme/api"
+
+
+@pytest.mark.unit
+async def test_a_block_somebody_wrote_on_the_bench_travels_with_the_message(
+    desk: Store, fake_claude: pathlib.Path
+) -> None:
+    """ "Блок может содержать ссылки/документы/просто текст или кусок кода." It is text rather than
+    a card this console read, so it is carried as text and named as the person's own — which is
+    the difference an agent needs in order to weigh it."""
+    block = await blocks.submit(
+        desk,
+        "what do you make of this",
+        [],
+        notes_="  https://example.com/spec\n\ndef broken():\n    return None  ",
+    )
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    assert stored.context is not None
+    assert "what they wrote on the workbench" in stored.context
+    assert "https://example.com/spec" in stored.context
+    assert "def broken()" in stored.context
+
+
+@pytest.mark.unit
+async def test_an_empty_block_carries_nothing(desk: Store, fake_claude: pathlib.Path) -> None:
+    """A block somebody added and never typed into is not context."""
+    block = await blocks.submit(desk, "a question", [], notes_="   \n  ")
+
+    stored = await desk.block(block.id)
+    assert stored is not None
+    assert "workbench" not in (stored.context or "")

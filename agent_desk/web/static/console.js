@@ -465,11 +465,16 @@ document.addEventListener('dragend', () => {
 // the card actually contains, and it says that what you type next is about that. Dragging it back
 // out undoes both.
 function showBenchToggle() {
-  if (benchHead) benchHead.hidden = pins.children.length === 0;
+  // The "+ a block" button is always there — an empty bench is exactly when somebody wants one.
+  // The diagram toggle is not: there is nothing to draw until something is on it.
+  const toggle = document.querySelector('[data-bench-toggle]');
+  if (toggle) toggle.hidden = pins.children.length === 0;
 }
 
 function pinnedTargets() {
-  return [...pins.querySelectorAll('[data-kind]')]
+  // A note is not a card the server can look up — it is text that exists only here — so it is
+  // carried in its own field rather than named as a target that would 404.
+  return [...pins.querySelectorAll('[data-kind]:not(.own)')]
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -715,6 +720,53 @@ document.addEventListener(
   true
 );
 
+/* --- a block of your own on the workbench ----------------------------------------------------- */
+// "ПКМ в рабочем пространстве — можно добавить временный блок; блок может содержать
+// ссылки/документы/просто текст или кусок кода."
+//
+// A button rather than the right mouse button. Overriding the browser's own context menu takes
+// away paste, open-in-new-tab and inspect from somebody who was reaching for them, and this is a
+// window people paste *into* all day — the one gesture worth least is the one that costs that.
+//
+// Temporary is the whole of it: this block lives in the page, travels with the next message as
+// context like every other card on the bench, and is gone when the tab is. Nothing is stored,
+// because a note that outlived the question it was written for would be a second idea pool
+// nobody asked for (docs/05-ideas.md).
+let ownBlocks = 0;
+
+function addOwnBlock() {
+  const holder = document.createElement('div');
+  holder.className = 'pin own';
+  holder.dataset.kind = 'note';
+  holder.dataset.id = `note-${++ownBlocks}`;
+  holder.draggable = true;
+  holder.dataset.deep = 'no';
+  holder.innerHTML = `<div class="pin-head"><span class="pin-kind">note</span>
+    <span class="pin-label">a block of your own</span>
+    <button type="button" class="pin-fold" title="fold this away">–</button>
+    <button type="button" class="pin-off" title="throw it away">×</button></div>
+    <div class="pin-body"><textarea class="own-text" rows="4"
+      placeholder="Anything: a link, a paragraph of a document, a snippet of code. It goes with the next message and is gone when this tab is."></textarea></div>`;
+  pins.appendChild(holder);
+  syncTargets();
+  holder.querySelector('.own-text').focus();
+}
+
+document.addEventListener('click', (event) => {
+  if (event.target.closest('[data-add-note]')) {
+    event.preventDefault();
+    addOwnBlock();
+  }
+});
+
+// What is typed into one travels with the message, in the same field the pinned cards use.
+function ownBlockText() {
+  return [...pins.querySelectorAll('.pin.own .own-text')]
+    .map((field) => field.value.trim())
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+}
+
 /* --- the workbench as a diagram --------------------------------------------------------------- */
 // A stack of cards says what each one is. It cannot say that this session is in that project, or
 // that this idea needs that one — and when four things were dragged here to ask one question, the
@@ -878,6 +930,7 @@ const KEYS = `<div class="keys card"><div class="card-head"><span class="card-na
 // A question carries its pins with it, and once it has been asked they are spent: the next message
 // is about whatever is dropped in after this answer, which is what "the last blocks" means.
 document.getElementById('ask').addEventListener('submit', () => {
+  document.getElementById('say-notes').value = ownBlockText();
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   setTimeout(clearPins, 0);

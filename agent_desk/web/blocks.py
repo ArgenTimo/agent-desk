@@ -473,6 +473,7 @@ async def submit(
     targets: Sequence[str] = (),
     thread_id: str = "",
     history: Sequence[str] = (),
+    notes_: str = "",
 ) -> Block:
     """Accept one line of input and start working on it.
 
@@ -502,6 +503,11 @@ async def submit(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
     carried = await _context_lines(store, rows, targets, history)
+    if notes_.strip():
+        # Blocks somebody wrote on the workbench themselves — a link, a paragraph of a document, a
+        # snippet of code. They are text rather than a card this console read, so they are carried
+        # as text and named as the person's own, which is the difference an agent needs.
+        carried = [*carried, "what they wrote on the workbench:", notes_.strip()]
     if carried:
         await store.set_block_context(block.id, "\n".join(carried))
     dropped_ideas = [_card(target)[1] for target in targets if _card(target)[0] == "idea"]
@@ -521,7 +527,7 @@ async def submit(
             about=about,
             deep=deep,
             history=list(history),
-            written=written,
+            written=[*written, notes_.strip()] if notes_.strip() else written,
             # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
             pointed_at=len(targets),
         ),

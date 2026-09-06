@@ -1290,3 +1290,46 @@ svg.map.bench .tie.needs path { stroke: var(--focus); color: var(--focus); }
 svg.map.bench .node.project rect { fill: color-mix(in srgb, var(--focus) 6%, var(--surface)); }
 svg.map.bench .node.idea rect { fill: color-mix(in srgb, var(--attention) 6%, var(--surface)); }
 svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
+
+/* The right-hand column narrowed to one project. It says so rather than looking empty, and the
+   way back out is in the banner rather than somewhere else on the page. */
+.focus-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--focus) 8%, transparent);
+}
+.focus-banner button { margin-left: auto; font-size: 11px; }
+
+/* A block of somebody's own on the workbench: text they brought, rather than a card the console
+   read. It looks like the other pins so it reads as one more thing the message is about. */
+.chip.add-note {
+  border: 1px dashed var(--line-strong);
+  background: none;
+  color: var(--fg-dim);
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.chip.add-note:hover { color: var(--fg); border-color: var(--focus); }
+.pin.own { border-left: 2px solid var(--focus); }
+.pin.own .own-text {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.pin.own .own-text:focus { border-color: var(--focus); outline: none; }

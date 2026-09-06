@@ -230,6 +230,16 @@
       <span class="menu-what">New instance…</span>
       <span class="menu-why">a copy of the checkout with an agent working in it</span>
     </a>
+    {# Narrow the right-hand column to this one. A board with six projects on it has a column
+       about all six, and when you are working on one of them that column is mostly noise. #}
+    <form method="post" action="/projects/focus"
+          hx-post="/projects/focus" hx-target="#idea-list">
+      <input type="hidden" name="key" value="{{ project.key }}">
+      <button type="submit" class="menu-item">
+        <span class="menu-what">Show only this one</span>
+        <span class="menu-why">narrow the blockers and the ideas to {{ project.name }}</span>
+      </button>
+    </form>
     <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
       <span class="menu-what">Project settings</span>
       <span class="menu-why">services, environment, the queue</span>

@@ -529,6 +529,10 @@ IDEA_SORTS: tuple[tuple[str, str], ...] = (
     ("needs", "by what it needs next"),
 )
 IDEA_SORT_KEY = "ideas.sort"
+# Which project the right-hand column is narrowed to, or empty for all of them. In the store for
+# the same reason the sort is: a server-sent event replaces those columns every couple of seconds,
+# and a filter that resets two seconds after it is set is a filter that looks broken.
+FOCUS_KEY = "board.project"
 
 # Where an idea with no project sorts: last, and named rather than blank — "no project" is a fact
 # about it, and a group of them at the top would push the answered ones down.
@@ -560,7 +564,10 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
 
 async def render_blockers() -> str:
     """The top of the right column: what has stopped (agent_desk/web/blockers.py)."""
-    return env.get_template("_blockers.html").render(found=await blockers.blockers(store))
+    only = await store.setting(FOCUS_KEY)
+    return env.get_template("_blockers.html").render(
+        found=await blockers.blockers(store, only), only=only
+    )
 
 
 async def render_ideas() -> str:
@@ -570,7 +577,12 @@ async def render_ideas() -> str:
     notebook is for — but a column somebody glances at is about what is still live.
     """
     how = await store.setting(IDEA_SORT_KEY, "newest")
+    only = await store.setting(FOCUS_KEY)
     ideas = [idea for idea in await store.ideas() if idea.state not in ("dropped", "done")]
+    if only:
+        # A thought with no project is about whatever is in front of you, so it survives the
+        # narrowing — the same rule the blockers follow, for the same reason.
+        ideas = [idea for idea in ideas if (idea.project_key or "") in ("", only)]
     known = {idea.id for idea in ideas}
     children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
     roots: list[Idea] = []
@@ -589,6 +601,9 @@ async def render_ideas() -> str:
         sorted_by=how,
         # The words the pass's two answers are shown as, in one place rather than in the template.
         says=appraise.SAYS,
+        # Which project the column is narrowed to, so it can say so rather than looking empty.
+        only=only,
+        only_named=await _project_name(only),
         # What depends on what (024-idea-links.sql). Read with the column: it is a handful of
         # rows, and a card that fetched its own links would be a card that flickers.
         links=await store.idea_links(),
@@ -1185,6 +1200,8 @@ async def ask(request: Request) -> Response:
             # The earlier exchanges attached to this one, in the order they were attached. Empty
             # is not "everything": it means this page named nothing, and the thread is used.
             history=[one for one in form.get("history", "").split(",") if one],
+            # Blocks somebody wrote on the bench themselves: text, not a card to look up.
+            notes_=form.get("notes", ""),
         )
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
@@ -1296,6 +1313,35 @@ async def link_ideas(request: Request) -> Response:
     panel = await render_ideas()
     if _wants_fragment(request):
         return HTMLResponse(panel)
+    return HTMLResponse(await render_page(""))
+
+
+async def _project_name(key: str) -> str:
+    """A project's own name for a key, or the key when there is nothing better."""
+    if not key:
+        return ""
+    rows, _ = await asyncio.to_thread(board)
+    named = next((one for one in shape(rows, await store.groups()) if one.key == key), None)
+    return named.name if named else key.split(":")[-1]
+
+
+@router.post("/projects/focus", response_class=HTMLResponse)
+async def focus_project(request: Request) -> Response:
+    """Narrow the blockers and the ideas to one project, or open them up again.
+
+    "Выбор проекта слева фильтрует блокеры и идеи; без выбора — всё." A board with six projects on
+    it has a right-hand column about all six, and when you are working on one of them that column
+    is mostly noise.
+
+    Anything belonging to no project survives the narrowing: a thought typed with nothing on the
+    workbench is about whatever is in front of you, and a failed question belongs to no repository
+    at all. Hiding those behind a filter they were never part of would lose them.
+    """
+    form = await _form(request)
+    await store.set_setting(FOCUS_KEY, form.get("key", "").strip())
+    if _wants_fragment(request):
+        # Both columns move together, because they are one decision.
+        return HTMLResponse(await render_ideas())
     return HTMLResponse(await render_page(""))
 
 

@@ -134,6 +134,16 @@
 </details>
 {% endmacro %}
 
+{% if only %}
+{# The column is narrowed. It says so rather than looking empty, and the way back out is here
+   rather than somewhere else on the page. #}
+<form class="focus-banner" method="post" action="/projects/focus"
+      hx-post="/projects/focus" hx-target="#idea-list">
+  <input type="hidden" name="key" value="">
+  <span>showing <strong>{{ only_named }}</strong> only</span>
+  <button type="submit">show everything</button>
+</form>
+{% endif %}
 <div class="ideas-head">
   <span class="tree-count">{{ counted }} idea{{ "" if counted == 1 else "s" }}</span>
   {% if grouped %}

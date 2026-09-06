@@ -61,7 +61,13 @@
     {# Two ways to look at the same bench: the cards themselves, and the relations between them.
        A stack says what each one is; the diagram says how they stand to each other, which is
        usually the question when four things were dragged here at once. #}
-    <div class="bench-head" hidden>
+    <div class="bench-head">
+      {# A button rather than the right mouse button: overriding the browser's context menu takes
+         paste and open-in-new-tab away from somebody who was reaching for them, and this is a
+         window people paste into all day. #}
+      <button type="button" class="chip add-note" data-add-note
+              title="a block of your own: a link, a paragraph, a snippet of code">+ a block</button>
+      <span class="spacer"></span>
       <button type="button" class="chip bench-toggle" data-bench-toggle aria-pressed="false"
               title="draw what is on the workbench and how it is related">as a diagram</button>
     </div>
@@ -87,6 +93,9 @@
       <input type="hidden" name="thread" id="say-thread" value="{{ threads[0].id if threads else '' }}">
       <input type="hidden" name="targets" id="say-targets" value="">
       <input type="hidden" name="history" id="say-history" value="">
+      {# What was typed into the blocks somebody added to the bench themselves. Text rather than a
+         card id, because a note exists only in this page and there is nothing to look up. #}
+      <input type="hidden" name="notes" id="say-notes" value="">
       <label class="visually-hidden" for="ask-text">what do you want to say</label>
       <input id="ask-text" name="text" autocomplete="off" autofocus
              placeholder="ask, or record an idea, or say what should happen">
