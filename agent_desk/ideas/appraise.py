@@ -104,6 +104,35 @@ async def appraise(idea: Idea) -> tuple[str, str] | None:
     return read_appraisal(reply)
 
 
+async def already_there(store: Store, idea: Idea) -> str:
+    """Evidence that this idea is already built, or an empty string. Facts, not a reading.
+
+    "Сервис сам определяет, исполнена ли идея и зарегистрирована ли она как фича" — and the whole
+    difference between this and the `built` the sweep can guess at is where the answer comes from.
+    The sweep reads the idea's own words and says "this looks like something that exists", which
+    is a hunch. This looks at what the console actually did:
+
+    - a ticket filed for it (docs/adr/0005), which is the strongest evidence there is: somebody
+      pressed the button and a tracker answered with a key;
+    - a task queued or finished that names it, which means work was started on it here.
+
+    What it deliberately does *not* do is search the repository. "There is a function with a
+    similar name" is not evidence that somebody's idea was built, and a check that says so would
+    be worse than no check — it is the guess this exists to replace, wearing a grep.
+    """
+    filing = await store.filing_of(idea.id)
+    if filing is not None:
+        return f"filed as {filing.issue_key}"
+
+    for task in await store.tasks(limit=500):
+        if idea.id not in (task.source_ref or ""):
+            continue
+        if task.finished_at:
+            return f"an agent worked on it and finished ({task.title[:60]})"
+        return f"an agent is working on it ({task.title[:60]})"
+    return ""
+
+
 async def sweep(store: Store) -> int:
     """Read the ideas nobody has read yet. Returns how many were looked at.
 
@@ -111,6 +140,15 @@ async def sweep(store: Store) -> int:
     """
     looked = 0
     for idea in await store.unappraised_ideas(AT_A_TIME):
+        # Evidence first, because it is free and it is a fact. Only where there is none does a
+        # reading of the text get a say.
+        evidence = await already_there(store, idea)
+        if evidence:
+            await store.appraise_idea(idea.id, size="small", shape="built")
+            await store.say_card(f"idea:{idea.id}", f"already built — {evidence}", idea.text[:400])
+            log.info("ideas.already_built", idea=idea.id, evidence=evidence)
+            looked += 1
+            continue
         made_of_it = await appraise(idea)
         if made_of_it is None:
             # Left unread rather than marked with a guess: an unread idea should look unread.

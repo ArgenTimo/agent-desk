@@ -124,3 +124,94 @@ async def test_a_discarded_idea_is_not_worth_a_model_call(
     _answers("small ready", monkeypatch)
 
     assert await appraise.sweep(store) == 0
+
+
+@pytest.mark.unit
+async def test_a_filed_idea_is_known_to_be_built_rather_than_suspected(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Сервис сам определяет, исполнена ли идея и зарегистрирована ли она как фича." The whole
+    difference is where the answer comes from: a ticket that exists is a fact, and a reading of
+    the idea's own words is a hunch."""
+    idea = await store.create_idea(text_="add a grid", summary="a grid", source_kind="typed")
+    await store.record_filing(
+        idea_id=idea.id, tracker="jira", issue_key="DUCK-7", url="https://x/browse/DUCK-7"
+    )
+
+    def never(*a: object, **k: object) -> None:  # pragma: no cover — reaching it is the failure
+        raise AssertionError("it asked a model about something it could check")
+
+    monkeypatch.setattr(appraise, "stream_answer", never)
+
+    assert await appraise.sweep(store) == 1
+
+    read = await store.idea(idea.id)
+    assert read is not None and read.shape == "built"
+    said, _ = await store.card_said(f"idea:{idea.id}")
+    assert "already built" in said and "DUCK-7" in said
+    # And it is still the human's call: the state a person sets is untouched.
+    assert read.state == "new"
+
+
+@pytest.mark.unit
+async def test_an_idea_an_agent_finished_counts_as_evidence_too(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    idea = await store.create_idea(text_="cache it", summary="cache it", source_kind="typed")
+    task = await store.queue_task(
+        repo_key="origin:acme/api",
+        cwd="/tmp",
+        title="cache the probes",
+        instruction="cache it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await store.take_next_task("origin:acme/api")
+    await store.task_started(task.id, "agent1")
+    await store.finish_task(task.id)
+
+    assert await appraise.already_there(store, idea) != ""
+    assert "finished" in await appraise.already_there(store, idea)
+
+
+@pytest.mark.unit
+async def test_with_no_evidence_it_is_still_only_a_reading(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing was filed and nothing was started, so the text is all there is — and a hunch stays
+    a hunch."""
+    idea = await store.create_idea(text_="something new", summary="new", source_kind="typed")
+    _answers("small built", monkeypatch)
+
+    assert await appraise.already_there(store, idea) == ""
+    await appraise.sweep(store)
+
+    said, _ = await store.card_said(f"idea:{idea.id}")
+    assert said == "", "a reading must not be written down as evidence"
+    assert (await store.idea(idea.id)).shape == "built"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_it_never_searches_the_repository_for_something_that_looks_similar() -> None:
+    """ "There is a function with a similar name" is not evidence that somebody's idea was built,
+    and a check that said so would be the guess this replaces, wearing a grep."""
+    # Against the code rather than the prose: the docstring says it does not grep, which a naive
+    # search for the word would trip over.
+    import ast
+
+    tree = ast.parse(pathlib.Path(appraise.__file__).read_text())
+    reader = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "already_there"
+    )
+    used = {node.attr for node in ast.walk(reader) if isinstance(node, ast.Attribute)} | {
+        node.func.id
+        for node in ast.walk(reader)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    for searching in ("glob", "rglob", "walk", "read_text", "open", "run"):
+        assert searching not in used, searching
+    # What it does use: the two things this console actually did.
+    assert {"filing_of", "tasks"} <= used

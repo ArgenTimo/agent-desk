@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from agent_desk import dispatch
 from agent_desk.observe.model import Session
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import Kicking, Store
 from agent_desk.web import kicking
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
@@ -297,3 +297,29 @@ async def test_a_pass_that_raises_does_not_end_the_loop(
             await running
 
     assert len(calls) >= 2
+
+
+@pytest.mark.unit
+async def test_a_session_coming_back_is_told_what_it_was_doing(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Как только время наступило и лимиты сняты — проект сам пинает агентов продолжать работу,
+    указав точный промпт в соответствии с тем, чем они занимались до этого."
+
+    A session coming back after an hour has had its own last turn pushed a long way up its
+    context, and "continue what you were doing" is a weaker instruction than the same sentence
+    with the thing in it."""
+    said = kicking.carry_on(
+        Kicking(short_id=SHORT),
+        _session(),
+        was_doing="I was halfway through rewriting the transcript reader's tail seek.",
+    )
+
+    assert "halfway through rewriting the transcript reader" in said
+    # Quoted, not summarised: what it said is a fact, a paraphrase of it is a claim.
+    assert "“" in said and "”" in said
+
+    # With nothing read, it still says something rather than quoting an empty string.
+    generic = kicking.carry_on(Kicking(short_id=SHORT), _session())
+    assert "If the work you were doing is not finished" in generic
+    assert "“" not in generic

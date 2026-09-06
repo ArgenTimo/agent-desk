@@ -33,7 +33,7 @@ import structlog
 
 from agent_desk import dispatch
 from agent_desk.ideas import appraise
-from agent_desk.observe import registry
+from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import Session
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Kicking, Store
@@ -73,6 +73,17 @@ def kickable(session: Session) -> str:
     if session.status != "idle":
         return f"it is {session.status}, and a session that is working is never interrupted"
     return ""
+
+
+def _last_said(session: Session) -> str:
+    """The last thing this session said, for the prompt that brings it back.
+
+    Read here rather than passed in, because the loop has a session and not a board row — and the
+    transcript is on disk, which is free to read (docs/adr/0002).
+    """
+    tail = transcript.read_tail(session.session_id)
+    last = tail.last_entry if tail else None
+    return last.text if last and last.role == "assistant" and last.text else ""
 
 
 def _repo_key(session: Session) -> str:
@@ -124,6 +135,7 @@ def carry_on(
     session: Session,
     standing: str = "",
     glossary: Sequence[tuple[str, str]] = (),
+    was_doing: str = "",
 ) -> str:
     """What to say to a session that has stopped. Two prompts, and there is no third.
 
@@ -135,6 +147,14 @@ def carry_on(
     Every kicked turn says who sent it. A transcript somebody reads in a month has to show which
     turns a person asked for and which a console kept alive, and that marking is the whole of what
     makes this survivable (docs/adr/0008, docs/adr/0009).
+
+    `was_doing` is the last thing the session actually said, quoted back to it. "Как только время
+    наступило и лимиты сняты — проект сам пинает агентов продолжать работу, указав точный промпт в
+    соответствии с тем, чем они занимались до этого": a session coming back after an hour's break
+    has had its own last turn pushed a long way up its context, and "continue what you were doing"
+    is a weaker instruction than the same sentence with the thing in it.
+
+    Quoted, not summarised. What it said is a fact; a paraphrase of it is a claim.
     """
     project = session.project
     standing_lines: list[str] = []
@@ -157,7 +177,12 @@ def carry_on(
             "where you would ask one, make the reasonable choice, write down what you chose, and "
             "carry on.",
             "",
-            "If the work you were doing is not finished, continue it and finish it.",
+            (
+                f"The last thing you said was: “{was_doing.strip()[:400]}”. If that is not "
+                "finished, continue it and finish it."
+                if was_doing.strip()
+                else "If the work you were doing is not finished, continue it and finish it."
+            ),
             "",
             "If it is finished, then:",
             "",
@@ -172,7 +197,12 @@ async def kick_one(store: Store, arming: Kicking, session: Session) -> bool:
     result = await asyncio.to_thread(
         dispatch.kick,
         arming.session_id or session.session_id,
-        carry_on(arming, session, **await autostart.about(store, _repo_key(session))),  # type: ignore[arg-type]
+        carry_on(
+            arming,
+            session,
+            was_doing=_last_said(session),
+            **await autostart.about(store, _repo_key(session)),  # type: ignore[arg-type]
+        ),
         cwd=arming.cwd or session.cwd,
         agent_id=arming.short_id,
     )

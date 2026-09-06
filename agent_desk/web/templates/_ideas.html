@@ -36,9 +36,16 @@
     <p class="small attention-line" title="a reading of the text, not a fact about the world">
       ⚑ {{ says["decide"] }} before anybody can start.</p>
     {% elif idea.shape == "built" %}
-    {# Offered as a question with a button, never as a state: "this is already built" from a
-       reading of the text is exactly the claim CLAUDE.md's fifth rule says not to make. #}
+    {# Two different claims, and they must not look the same. Evidence — a ticket that was filed,
+       an agent that worked on it — is a fact and says so. A reading of the text is a hunch and is
+       offered as a question, because "this is already built" from a reading is exactly the claim
+       CLAUDE.md's fifth rule says not to make (agent_desk/ideas/appraise.py). #}
+    {% set evidence = said_about.get(idea.id, "") %}
+    {% if evidence.startswith("already built") %}
+    <p class="small">✓ {{ evidence }}</p>
+    {% else %}
     <p class="small attention-line">🤔 This reads like something that already exists — is it?</p>
+    {% endif %}
     {% endif %}
     <div class="idea-buttons">
       {% if idea.state == "new" %}

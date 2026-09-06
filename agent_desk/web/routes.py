@@ -686,6 +686,9 @@ async def render_ideas() -> str:
         sorted_by=how,
         # The words the pass's two answers are shown as, in one place rather than in the template.
         says=appraise.SAYS,
+        # And the evidence, where there is any: a card that *knows* an idea was built must not
+        # look like one that merely suspects it.
+        said_about={idea.id: (await store.card_said(f"idea:{idea.id}"))[0] for idea in ideas},
         # Which project the column is narrowed to, so it can say so rather than looking empty.
         only=only,
         only_named=await _project_name(only),
