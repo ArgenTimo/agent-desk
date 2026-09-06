@@ -216,7 +216,7 @@ async def settle(store: Store, live: set[str]) -> list[str]:
         # owner amended it). A failing gate leaves the branch exactly where it is and says why.
         if task.source_kind == "found":
             result = await asyncio.to_thread(land.land, task.cwd, _worktree_of(task, ended))
-            await store.task_landed(task.id, result.detail)
+            await store.task_landed(task.id, result.detail, landed=result.landed)
             log.info("autostart.landed", repo=task.repo_key, landed=result.landed)
 
         for idea_id in (task.source_ref or "").split(","):

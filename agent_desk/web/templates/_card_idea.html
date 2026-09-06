@@ -15,6 +15,13 @@
     {% if said %}<p class="card-said">{{ said }}</p>{% endif %}
     {% if not said %}<p class="card-said">{{ idea.summary }}</p>{% endif %}
 
+    {# When it comes back, when it was put off rather than left in the pool (031-deferred.sql).
+       Said on the card because a deferral nobody can see is the thing this replaced: a task
+       waiting for a moment nobody could name. #}
+    {% if idea.deferred %}
+    <p class="deferred small"><span aria-hidden="true">⏱</span> comes back {{ idea | comes_back }}</p>
+    {% endif %}
+
     {# Which project it is about. Worked out when it was written — a thought typed with nothing on
        the workbench is about the thing in front of you — and correctable here, because a guess
        needs a way to be wrong out loud. #}

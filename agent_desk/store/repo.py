@@ -139,6 +139,9 @@ class Task(BaseModel):
     failed_at: int | None = None
     finished_at: int | None = None
     detail: str | None = None
+    # Whether the project's own gate passed when this task's branch was offered to it, or `None`
+    # when nothing was offered — which is most tasks (032-task-landed.sql).
+    landed: bool | None = None
 
     @property
     def waiting(self) -> bool:
@@ -304,6 +307,18 @@ class Idea(BaseModel):
     size: str | None = None
     shape: str | None = None
     appraised_at: int | None = None
+    # When this one comes back, if it was put off rather than left in the pool
+    # (031-deferred.sql). `wakes_at` is a clock, `wakes_when` names a condition from
+    # agent_desk/ideas/waking.py, and `woke_at` is the record that it fired — which is what keeps
+    # a condition like "when nothing is running" from firing on every pass while it stays true.
+    wakes_at: int | None = None
+    wakes_when: str | None = None
+    woke_at: int | None = None
+
+    @property
+    def deferred(self) -> bool:
+        """Put off with a moment attached, and that moment has not come round yet."""
+        return (self.wakes_at is not None or self.wakes_when is not None) and self.woke_at is None
 
 
 LinkKind = Literal["needs", "touches"]
@@ -871,8 +886,14 @@ class Store:
         source_ref: str | None = None,
         block_id: str | None = None,
     ) -> Task:
-        """Put one piece of approved work in the queue. Only a route reaches this: nothing
-        enqueues itself (docs/adr/0007)."""
+        """Put one piece of approved work in the queue.
+
+        What may reach this is bounded, and the bound is docs/adr/0007: the loop decides *when*,
+        never *what*. A route reaches it because a person pressed something; `web/later.py`
+        reaches it because a person wrote work down and said when to come back to it, which is the
+        same approval with a delay on it. Nothing else enqueues, and in particular nothing here
+        invents work of its own.
+        """
         task = Task(
             id=_new_id(),
             repo_key=repo_key,
@@ -893,7 +914,14 @@ class Store:
                     ":source_ref, :block_id, :queued_at, NULL, NULL, NULL, NULL)"
                 ),
                 task.model_dump(
-                    exclude={"started_at", "agent_id", "failed_at", "finished_at", "detail"}
+                    exclude={
+                        "started_at",
+                        "agent_id",
+                        "failed_at",
+                        "finished_at",
+                        "detail",
+                        "landed",
+                    }
                 ),
             )
         return task
@@ -901,12 +929,12 @@ class Store:
     async def tasks(self, *, repo_key: str | None = None, limit: int = 100) -> list[Task]:
         one = (
             "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, block_id, "
-            "queued_at, started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "queued_at, started_at, agent_id, failed_at, finished_at, detail, landed FROM task "
             "WHERE repo_key = :repo_key ORDER BY queued_at LIMIT :limit"
         )
         every = (
             "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, block_id, "
-            "queued_at, started_at, agent_id, failed_at, finished_at, detail FROM task "
+            "queued_at, started_at, agent_id, failed_at, finished_at, detail, landed FROM task "
             "ORDER BY queued_at LIMIT :limit"
         )
         async with self.engine.connect() as conn:
@@ -991,12 +1019,17 @@ class Store:
                 {"agent_id": agent_id, "id": task_id},
             )
 
-    async def task_landed(self, task_id: str, detail: str) -> None:
-        """What happened when its branch was offered to the project (docs/adr/0008)."""
+    async def task_landed(self, task_id: str, detail: str, *, landed: bool) -> None:
+        """What happened when its branch was offered to the project (docs/adr/0008).
+
+        Both halves: the sentence for whoever reads the card, and the boolean for whatever has to
+        decide something from it. A condition that had to read the sentence would be depending on
+        the shape of prose (032-task-landed.sql).
+        """
         async with self.engine.begin() as conn:
             await conn.execute(
-                text("UPDATE task SET detail = :detail WHERE id = :id"),
-                {"detail": detail[:500], "id": task_id},
+                text("UPDATE task SET detail = :detail, landed = :landed WHERE id = :id"),
+                {"detail": detail[:500], "landed": int(landed), "id": task_id},
             )
 
     async def task_failed(self, task_id: str, detail: str) -> None:
@@ -1558,7 +1591,8 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id, project_key, size, shape, appraised_at FROM idea "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at, "
+                    "wakes_at, wakes_when, woke_at FROM idea "
                     "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
                 ),
                 {"state": state, "limit": limit},
@@ -1575,13 +1609,64 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id, project_key, size, shape, appraised_at "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at, "
+                    "wakes_at, wakes_when, woke_at "
                     "FROM idea WHERE appraised_at IS NULL AND state IN ('new', 'kept') "
                     "ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
             return [self._idea(row._mapping) for row in rows]
+
+    # --- putting a thing off, with a moment on it (031-deferred.sql) --------------------------
+    async def defer_idea(self, idea_id: str, *, at: int | None, when: str | None) -> None:
+        """Give an idea a moment to come back at.
+
+        Writing `NULL` to both is how a deferral is taken off again, and `woke_at` is cleared with
+        it: an idea deferred a second time has not fired yet.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE idea SET wakes_at = :at, wakes_when = :when, woke_at = NULL "
+                    "WHERE id = :id"
+                ),
+                {"at": at, "when": when, "id": idea_id},
+            )
+
+    async def deferred_ideas(self) -> list[Idea]:
+        """Everything waiting for a moment, oldest moment first.
+
+        `woke_at IS NULL` is the whole of what keeps a standing condition from firing repeatedly:
+        "when nothing is running" stays true for as long as nothing is running, and an idea that
+        has already gone off is no longer waiting for anything.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at, "
+                    "wakes_at, wakes_when, woke_at FROM idea "
+                    "WHERE woke_at IS NULL AND state IN ('new', 'kept') "
+                    "AND (wakes_at IS NOT NULL OR wakes_when IS NOT NULL) "
+                    "ORDER BY COALESCE(wakes_at, 0), id"
+                )
+            )
+            return [self._idea(row._mapping) for row in rows]
+
+    async def idea_woke(self, idea_id: str) -> bool:
+        """Mark a moment as fired, and say whether this call is the one that fired it.
+
+        The `woke_at IS NULL` in the statement is not decoration: two passes overlapping would
+        otherwise both read a due idea and both start work on it. The row count answers which one
+        won, and the loser does nothing.
+        """
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("UPDATE idea SET woke_at = :t WHERE id = :id AND woke_at IS NULL"),
+                {"t": _now_ms(), "id": idea_id},
+            )
+            return bool(done.rowcount)
 
     async def appraise_idea(self, idea_id: str, *, size: str, shape: str) -> None:
         """What the pass made of it. Never touches `state`, which is the human's column."""
@@ -1973,7 +2058,8 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
-                    "context, created_at, parent_id, project_key, size, shape, appraised_at "
+                    "context, created_at, parent_id, project_key, size, shape, appraised_at, "
+                    "wakes_at, wakes_when, woke_at "
                     "FROM idea WHERE id = :id"
                 ),
                 {"id": idea_id},

@@ -32,7 +32,7 @@ from markupsafe import Markup, escape
 from agent_desk import connectors, dispatch, peer, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, bench, chart, describe, meeting
+from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
 from agent_desk.observe import attach, folder, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -169,6 +169,18 @@ def _tokens(count: int | None) -> str:
     return str(count)
 
 
+def _comes_back(idea: Idea) -> str:
+    """When a deferred idea is due, in the words somebody would use (031-deferred.sql).
+
+    Both halves when both were said: "завтра, когда гейт позеленеет" is one moment, and showing
+    only the clock half of it would be a card that says a thing will happen at nine which will
+    not happen at nine.
+    """
+    wake = waking.Wake(at=idea.wakes_at, when=idea.wakes_when)
+    return wake.says
+
+
+env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens
 env.filters["plainly"] = _plainly
 env.filters["prose"] = _prose

@@ -70,7 +70,7 @@ async def test_a_branch_a_gate_refused_is_work_nobody_has_read(
     await desk.take_next_task(KEY)
     await desk.task_started(task.id, "agent1")
     await desk.finish_task(task.id)
-    await desk.task_landed(task.id, "not merged: `make verify` failed: 1 test")
+    await desk.task_landed(task.id, "not merged: `make verify` failed: 1 test", landed=False)
 
     found = await blockers.blockers(desk)
 

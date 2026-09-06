@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_desk.web import autostart, blocks, kicking, routes, sse
+from agent_desk.web import autostart, blocks, kicking, later, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -52,12 +52,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # And the pass that reads the idea pool, so a list of sixty is a list
             # somebody can scan (agent_desk/ideas/appraise.py).
             reading = group.create_task(kicking.appraising(routes.store))
+            # And the one that brings back what somebody put off until a moment that has now
+            # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
+            # would be a daemon, and this program does not have one.
+            recalling = group.create_task(later.run(routes.store))
             try:
                 yield
             finally:
                 watching.cancel()
                 nudging.cancel()
                 reading.cancel()
+                recalling.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

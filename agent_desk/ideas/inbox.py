@@ -21,8 +21,10 @@ has removed the review that made the artefact worth reading.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
+from agent_desk.ideas import waking
 from agent_desk.store.repo import DraftKind, Idea, SourceKind, Store
 
 # A fallback summary is a trimmed first line. Long enough to recognise the thought in a list, short
@@ -47,8 +49,14 @@ async def capture(
     parent_id: str | None = None,
     project_key: str | None = None,
 ) -> Idea:
-    """Record the thought. No model call, no second question, no way to fail on a busy machine."""
-    return await store.create_idea(
+    """Record the thought. No model call, no second question, no way to fail on a busy machine.
+
+    A thought that named a moment — "напомни завтра", "когда освободится" — is recorded with that
+    moment on it, and `web/later.py` brings it back then (031-deferred.sql). Read here rather than
+    asked of a model, because it is a regular expression over a handful of phrases and because
+    this function's promise is that it cannot fail on a busy machine.
+    """
+    idea = await store.create_idea(
         text_=text.strip(),
         summary=fallback_summary(text),
         source_kind=source_kind,
@@ -58,6 +66,11 @@ async def capture(
         parent_id=parent_id,
         project_key=project_key,
     )
+    wake = waking.read(text, now=datetime.now(UTC))
+    if wake is not None:
+        await store.defer_idea(idea.id, at=wake.at, when=wake.when)
+        return idea.model_copy(update={"wakes_at": wake.at, "wakes_when": wake.when})
+    return idea
 
 
 def summary_prompt(text: str) -> str:
