@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
+from agent_desk.ideas import inbox
 from agent_desk.store.repo import Store
 from agent_desk.web import blockers
 
@@ -190,18 +192,28 @@ async def test_a_blocker_that_cleared_is_gone_rather_than_an_error(
 
 
 @pytest.mark.unit
-async def test_a_blocker_says_what_it_is_holding_up_and_roughly_what_it_costs(
+async def test_a_failed_task_holds_up_the_ideas_it_was_going_to_build(
     desk: Store, tmp_path: pathlib.Path
 ) -> None:
-    """The two things that decide whether somebody clears it now or after lunch."""
+    """And not the rest of the project's queue, which is what it used to claim.
+
+    The old count was every waiting task in the blocker's project, put on every blocker in it: a
+    project with three blockers and five queued tasks showed five on each of the three, the same
+    five. What a failed task actually stops is the ideas it recorded when it was queued, and
+    those are the ones somebody wants named.
+    """
+    wanted = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    other = await inbox.capture(desk, "something else entirely", project_key=KEY)
     stuck = await desk.queue_task(
         repo_key=KEY,
         cwd=str(tmp_path),
         title="the one that failed",
         instruction="x",
-        source_kind="instruction",
+        source_kind="idea",
+        source_ref=wanted.id,
     )
     await desk.task_failed(stuck.id, "it fell over")
+    # Queued work of its own, in the same project, which this blocker does not stop.
     for number in range(3):
         await desk.queue_task(
             repo_key=KEY,
@@ -213,8 +225,107 @@ async def test_a_blocker_says_what_it_is_holding_up_and_roughly_what_it_costs(
 
     (found,) = await blockers.blockers(desk)
 
-    assert found.holding_up == 3
+    assert [held.id for held in found.holding_up] == [wanted.id]
+    assert found.holds == 1
+    assert other.id not in [held.id for held in found.holding_up]
+    assert found.holding_up[0].card == f"idea:{wanted.id}", (
+        "the thing that is stuck cannot be opened from the blocker holding it up"
+    )
     assert found.roughly, "an estimate that is named as a rule of thumb beats saying nothing"
+
+
+@pytest.mark.unit
+async def test_an_idea_that_got_built_anyway_is_not_still_held_up(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A blocker naming work that is finished is a blocker nobody trusts twice."""
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+    await desk.set_idea_state(idea.id, "done")
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.holding_up == ()
+
+
+@pytest.mark.unit
+async def test_a_project_that_switched_itself_off_holds_up_its_whole_queue(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """This is the one case where the project's queue *is* the answer: nothing in it can start
+    while the switch is off, which is a causal link rather than a shared label."""
+    idea = await inbox.capture(desk, "the deferred one", project_key=KEY)
+    await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="from an idea",
+        instruction="x",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="found work",
+        instruction="x",
+        source_kind="found",
+    )
+    await desk.arm(KEY, per_hour=2)
+    await desk.disarm(KEY, why="two in a row died")
+
+    found = [one for one in await blockers.blockers(desk) if one.kind == "project"]
+
+    assert len(found) == 1
+    held = found[0].holding_up
+    assert len(held) == 2
+    # An idea where the task names one, and the task itself where it does not — a queued piece of
+    # work with no idea behind it is still something somebody is waiting for.
+    assert {one.kind for one in held} == {"idea", "task"}
+    assert idea.id in [one.id for one in held]
+
+
+@pytest.mark.unit
+async def test_a_switched_off_session_belongs_to_the_project_it_is_checked_out_in(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It used to belong to nothing, which meant it showed under every project's filter and was
+    counted under none of them — the "не правильно мапятся на проекты" of the report."""
+    blockers._projects.clear()
+    monkeypatch.setattr(blockers, "repository_of", lambda cwd: SimpleNamespace(key=KEY, name="api"))
+    await desk.kick_session("abc123", on=True, session_id="abc123-full", cwd=str(tmp_path))
+    await desk.stop_kicking("abc123", why="two in a row failed")
+
+    found = [one for one in await blockers.blockers(desk) if one.kind == "session"]
+
+    assert len(found) == 1
+    assert found[0].repo_key == KEY, "a switched-off session is still somebody's project's problem"
+    assert found[0].about_a_project
+    assert await blockers.blockers(desk, only=KEY), "it is filtered out of its own project"
+
+
+@pytest.mark.unit
+async def test_a_blocker_about_no_project_says_so_rather_than_reading_as_yours(desk: Store) -> None:
+    """A failed question belongs to no project. It survives a project filter — hiding it behind
+    one it was never part of would lose it — and the card says which of the two it is."""
+    thread = await desk.create_thread("why is it slow")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="why is it slow", thread_set_by="human"
+    )
+    await desk.fail_block(block.id, "the run came back empty")
+
+    (found,) = await blockers.blockers(desk, only=KEY)
+
+    assert found.kind == "answer"
+    assert not found.about_a_project
+    assert found.repo_key == ""
 
 
 @pytest.mark.unit
@@ -299,3 +410,135 @@ async def test_checking_nothing_costs_nothing(desk: Store) -> None:
     from agent_desk.web import autostart
 
     assert await autostart.check_claims(desk) == 0
+
+
+@pytest.mark.unit
+async def test_the_column_renders_what_is_held_up_by_name(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """StrictUndefined means a template referring to a field the dataclass lost is a 500 at the
+    moment somebody opens the board, not a caught test. This renders the real one."""
+    from agent_desk.web.routes import env
+
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    stuck = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="the one that failed",
+        instruction="x",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+
+    html = env.get_template("_blockers.html").render(found=await blockers.blockers(desk), only="")
+
+    assert "holding up 1 thing" in html
+    assert "cache the probe results" in html
+    assert "a job that failed" in html, "the card still shows this program's word for the kind"
+    assert f'data-card="idea:{idea.id}"' in html, "what is stuck cannot be dragged onto the bench"
+
+
+@pytest.mark.unit
+async def test_the_open_card_renders_for_every_kind_of_blocker(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """One template, six kinds, and StrictUndefined between them."""
+    from agent_desk.web.routes import env
+
+    await desk.arm(KEY, per_hour=2)
+    await desk.disarm(KEY, why="two starts in a row failed")
+    await desk.kick_session("abc12345", on=True, session_id="abc-x", cwd=str(tmp_path))
+    await desk.stop_kicking("abc12345", why="two in a row failed")
+    stuck = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="a job", instruction="x", source_kind="instruction"
+    )
+    await desk.task_failed(stuck.id, "it fell over")
+
+    kinds = set()
+    for one in await blockers.blockers(desk):
+        kinds.add(one.kind)
+        html = env.get_template("_card_blocker.html").render(one=one, card_id=one.id)
+        assert "What is waiting on it" in html
+        assert "Which project it belongs to" in html
+
+    assert kinds == {"project", "session", "task"}
+
+
+@pytest.mark.unit
+def test_every_kind_a_blocker_can_be_has_plain_words_for_it() -> None:
+    """A card that prints `kind` asks the reader to learn six of this program's words. Both maps
+    are keyed by the same set, and a kind missing from either is a card that says nothing useful
+    or offers no sense of what clearing it costs."""
+    assert set(blockers.PLAINLY) == set(blockers.ROUGHLY)
+
+
+@pytest.mark.unit
+async def test_a_stuck_ticket_names_the_idea_this_console_filed_as_it(desk: Store) -> None:
+    """The one link a ticket blocker is allowed to draw: the filing this program wrote itself
+    when somebody sent the idea to the board (docs/adr/0005). Not "ideas in the same project",
+    which would be a picture of a guess in the column that exists to refuse them."""
+    idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
+    other = await inbox.capture(desk, "unrelated, same project", project_key=KEY)
+    await desk.record_filing(
+        idea_id=idea.id, tracker="jira", issue_key="API-42", url="https://x/API-42"
+    )
+    await desk.replace_tracker_blockers(KEY, [("API-42", "cache probes", "waiting on infra")])
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.kind == "ticket"
+    assert [held.id for held in found.holding_up] == [idea.id]
+    assert other.id not in [held.id for held in found.holding_up]
+
+
+@pytest.mark.unit
+async def test_a_pull_request_is_its_own_kind_rather_than_a_ticket_with_a_hash(
+    desk: Store,
+) -> None:
+    """They both stop on a person and they are still not the same thing to somebody deciding what
+    to do about one. The column used to call both "ticket" and leave the `#` to explain it."""
+    await desk.replace_tracker_blockers(KEY, [("#7", "the folder cards", "waiting for review")])
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.kind == "pull"
+    assert found.holding_up == (), "nothing here records what a pull request is holding up"
+
+
+@pytest.mark.unit
+async def test_a_session_in_a_directory_that_is_not_a_checkout_still_gets_a_project(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """A folder somebody works in without git is its own project, which is what
+    `repository_of` says and what this must not second-guess."""
+    blockers._projects.clear()
+    await desk.kick_session("abc999", on=True, session_id="abc999-x", cwd=str(tmp_path))
+    await desk.stop_kicking("abc999", why="two in a row failed")
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.repo_key == f"dir:{tmp_path}"
+    # And it is remembered, because this runs on every render of the column.
+    assert blockers._projects[str(tmp_path)] == f"dir:{tmp_path}"
+
+
+@pytest.mark.unit
+async def test_a_session_whose_directory_has_gone_belongs_to_nothing(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The blocker is still real — the session did stop being kept going. It simply cannot be
+    filed under a project, and an empty key is how that is said."""
+    blockers._projects.clear()
+
+    def gone(cwd: str) -> object:
+        raise OSError("no such directory")
+
+    monkeypatch.setattr(blockers, "repository_of", gone)
+    await desk.kick_session("abc998", on=True, session_id="abc998-x", cwd="/gone")
+    await desk.stop_kicking("abc998", why="two in a row failed")
+
+    (found,) = await blockers.blockers(desk)
+
+    assert found.repo_key == ""
+    assert not found.about_a_project

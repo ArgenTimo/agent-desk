@@ -1835,3 +1835,23 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
 /* Which project an idea is about, correctable on its card. */
 .idea-project { margin: 6px 0 0; }
 .idea-project select { font: inherit; font-size: var(--t-xs); max-width: 100%; }
+
+
+/* --- what a blocker is holding up ------------------------------------------------------------- */
+/* Named rather than counted. The count that used to sit here was the blocker's whole project's
+   queue, repeated on every blocker in it; a list of the ideas somebody is actually waiting on is
+   what the column is opened to find. */
+.holding { margin: 6px 0 2px; color: var(--fg); }
+.held {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 0 0 10px;
+  border-left: 2px solid var(--line);
+}
+.held li {
+  padding: 1px 0;
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+.held a { color: var(--fg-soft); }
+.held a:hover { color: var(--fg); }

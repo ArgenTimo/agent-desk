@@ -180,6 +180,16 @@ def _comes_back(idea: Idea) -> str:
     return wake.says
 
 
+def _blocker_is(kind: str) -> str:
+    """What a blocker is, in the words somebody reading the column would use.
+
+    `kind` is this program's word for the thing — it keys the map, the styling and the id — and
+    printing it on a card asked the reader to learn six of them.
+    """
+    return blockers.PLAINLY.get(kind, kind)
+
+
+env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens
 env.filters["plainly"] = _plainly

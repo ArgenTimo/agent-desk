@@ -18,7 +18,7 @@
   <div class="card-head">
     <span class="dot flag" aria-hidden="true"></span>
     <span class="card-name">{{ one.what }}</span>
-    <span class="pill quiet">{{ one.kind }}</span>
+    <span class="pill quiet">{{ one.kind | blocker_is }}</span>
     <span class="pill quiet">{{ one.when | ago }}</span>
   </div>
   <div class="card-body">
@@ -35,15 +35,38 @@
         row, rather than firing into a broken condition all night (docs/adr/0007).
       {% elif one.kind == "session" %}This session stopped being kept going after two attempts in
         a row failed (docs/adr/0009).
-      {% elif one.kind == "ticket" and one.ref.startswith("#") %}A pull request on this
-        project's repository, waiting on a person. Nothing here reviews, comments on or merges it
-        — this console reads (docs/adr/0010).
+      {% elif one.kind == "pull" %}A pull request on this project's repository, waiting on a
+        person. Nothing here reviews, comments on or merges it — this console reads
+        (docs/adr/0010).
       {% elif one.kind == "ticket" %}A ticket on this project's own board that says it is stuck.
         It is not in the queue and no agent was started on it: what it is waiting for is a person
         (docs/adr/0010). The words above are the ticket's own.
       {% else %}A question this console asked, and the run came back an error.
       {% endif %}
     </p>
+
+    <h4>What is waiting on it</h4>
+    {% if one.holding_up %}
+    <ul class="held">
+      {% for held in one.holding_up %}
+      <li>{% if held.card %}<a href="/cards/{{ held.kind }}?id={{ held.id | urlencode }}"
+             data-card="{{ held.card }}">{{ held.title }}</a>{% else %}{{ held.title }}
+        <span class="dim tiny">queued work</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="small dim">Nothing this console can see. That is not the same as nothing — it means
+      no idea, task or filing here records a dependency on this, and a list built from anything
+      weaker than a recorded one would be a guess (CLAUDE.md, rule five).</p>
+    {% endif %}
+
+    <h4>Which project it belongs to</h4>
+    {% if one.repo_key %}
+    <p class="small mono">{{ one.repo_key }}</p>
+    {% else %}
+    <p class="small dim">None. It is shown under every project rather than hidden behind a filter
+      it was never part of — but it is not one of theirs.</p>
+    {% endif %}
 
     {% if one.card %}
     <p class="small"><a href="/cards/{{ one.card.split(':')[0] }}?id={{ one.card.split(':', 1)[1] | urlencode }}"

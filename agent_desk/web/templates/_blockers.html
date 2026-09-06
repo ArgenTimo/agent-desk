@@ -26,12 +26,25 @@
   </div>
   <div class="card-body">
     <p class="small">{{ one.why }}</p>
-    {# What it is holding up and roughly what clearing it costs — the two things that decide
-       whether somebody does it now or after lunch. The count is from this console's own queue;
-       the estimate is named as a rule of thumb rather than dressed up as a measurement. #}
+    {# What it is holding up, by name. It used to be a count — and the same count on every
+       blocker in a project, because it counted the project's whole queue rather than what this
+       one actually stops. A number that is wrong on every card is worse than no number; a list
+       of the ideas somebody is waiting on is what they came to this column to find. #}
+    {% if one.holding_up %}
+    <p class="small holding">holding up {{ one.holds }} {{ "thing" if one.holds == 1 else "things" }}:</p>
+    <ul class="held">
+      {% for held in one.named %}
+      <li>{% if held.card %}<a href="/cards/{{ held.kind }}?id={{ held.id | urlencode }}"
+             data-card="{{ held.card }}">{{ held.title }}</a>{% else %}{{ held.title }}
+        <span class="dim tiny">queued work</span>{% endif %}</li>
+      {% endfor %}
+      {% if one.unnamed %}<li class="dim">and {{ one.unnamed }} more</li>{% endif %}
+    </ul>
+    {% else %}
+    <p class="small dim">Nothing this console can see is waiting on it.</p>
+    {% endif %}
     <p class="small dim">
-      {% if one.holding_up %}holding up {{ one.holding_up }} queued
-        thing{{ "" if one.holding_up == 1 else "s" }}{% else %}nothing is queued behind it{% endif %}
+      {{ one.kind | blocker_is }}{% if not one.about_a_project %} · not about a project{% endif %}
       {% if one.roughly %}· {{ one.roughly }}{% endif %}
     </p>
 
