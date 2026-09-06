@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Insurance — cover for a car, a home, a trip</title>
+<meta name="description" content="Car, home and travel cover with the excess, the exclusions and the claims line stated on the page. Get an indicative price without giving your name.">
+<link rel="stylesheet" href="styles.css">
+<!--
+  No analytics tag here on purpose. Nothing is requested from Google or Yandex until somebody has
+  agreed to it in the banner at the bottom — see site.js. A script tag in the head would have
+  already made the request by the time the banner is read.
+-->
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="#main">
+      <span class="brand-mark" aria-hidden="true">◈</span>
+      <span>Northwind <span class="brand-thin">Insurance</span></span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#quote">Get a price</a>
+      <a href="#cover">What is covered</a>
+      <a href="#claims">Claims</a>
+      <a href="#questions">Questions</a>
+    </nav>
+    <a class="call" href="tel:+00000000000">
+      <span class="call-label">Claims line</span>
+      <strong>000 0000 0000</strong>
+    </a>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- Price is the question people came with, so it is the first thing on the page and it does
+       not ask who they are before answering. -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-words">
+        <h1>Know the price, the excess and the exclusions before you give us your name.</h1>
+        <p class="lede">Car, home and travel cover. The estimate below needs three answers and no
+          contact details. Everything it does not cover is on this page, in the same size type as
+          everything it does.</p>
+        <ul class="plain-list">
+          <li>Cooling-off period of 14 days, refunded in full if you have not claimed.</li>
+          <li>No automatic renewal without an email 21 days before, showing last year's price
+            beside this year's.</li>
+          <li>Claims answered by a person, 24 hours a day.</li>
+        </ul>
+      </div>
+
+      <!-- The estimator. Deliberately three fields: enough to give a number that is not a lie,
+           few enough that nobody abandons it. -->
+      <form class="quote card" id="quote" novalidate>
+        <h2>What it would cost</h2>
+        <p class="quote-sub">An indicative figure. It is not an offer and it is not a quote.</p>
+
+        <div class="field">
+          <label for="kind">What are you insuring?</label>
+          <select id="kind" name="kind">
+            <option value="car">A car</option>
+            <option value="home">A home</option>
+            <option value="travel">A trip</option>
+          </select>
+          <p class="why">Each is priced differently; nothing else on this form changes because of
+            it.</p>
+        </div>
+
+        <div class="field">
+          <label for="value">What is it worth, roughly?</label>
+          <div class="with-unit">
+            <span class="unit" aria-hidden="true">£</span>
+            <input id="value" name="value" type="number" min="0" step="500" value="12000"
+                   inputmode="numeric" autocomplete="off">
+          </div>
+          <p class="why">The most we would ever pay out, which is the biggest thing in the price.</p>
+        </div>
+
+        <div class="field">
+          <label for="excess">How much would you pay yourself on a claim?</label>
+          <select id="excess" name="excess">
+            <option value="250">£250</option>
+            <option value="500" selected>£500</option>
+            <option value="1000">£1,000</option>
+          </select>
+          <p class="why">This is the excess. A higher one lowers the price and costs you more on
+            the day you claim.</p>
+        </div>
+
+        <output class="estimate" id="estimate" for="kind value excess" aria-live="polite">
+          <span class="estimate-figure" id="figure">£—</span>
+          <span class="estimate-unit">a month, indicative</span>
+          <span class="estimate-note" id="note">Answer the three questions above.</span>
+        </output>
+
+        <button class="primary" type="button" id="continue">Continue to a real quote</button>
+        <p class="fineprint">Continuing asks for the details a real quote needs, and says why each
+          one is needed. Nothing is submitted anywhere from this page.</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- What is covered and what is not, side by side and the same size. Exclusions in small type
+       below the fold is the pattern the rules exist about. -->
+  <section class="band" id="cover">
+    <div class="wrap">
+      <h2>What is covered, and what is not</h2>
+      <p class="section-lede">Both columns are written by the same people and shown at the same
+        size. If something is missing from the right-hand column, it is missing because it is
+        covered — not because it did not fit.</p>
+
+      <div class="cover-grid">
+        <article class="card cover">
+          <h3>Car</h3>
+          <p class="excess-line">Excess from <strong>£250</strong></p>
+          <div class="two">
+            <div>
+              <h4 class="yes">Covered</h4>
+              <ul>
+                <li>Damage to your car and to somebody else's</li>
+                <li>Fire and theft, including the keys</li>
+                <li>Windscreen, without affecting your no-claims</li>
+                <li>A courtesy car while yours is repaired</li>
+                <li>Driving in the EU for up to 90 days</li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="no">Not covered</h4>
+              <ul>
+                <li>Wear, tear and mechanical failure</li>
+                <li>Anyone driving who is not on the policy</li>
+                <li>Use for hire, reward or delivery work</li>
+                <li>Belongings left in the car overnight</li>
+                <li>Track days and competitive driving</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="card cover">
+          <h3>Home</h3>
+          <p class="excess-line">Excess from <strong>£350</strong></p>
+          <div class="two">
+            <div>
+              <h4 class="yes">Covered</h4>
+              <ul>
+                <li>Fire, flood, storm and escape of water</li>
+                <li>Theft and attempted theft</li>
+                <li>Alternative accommodation while it is repaired</li>
+                <li>Liability to visitors</li>
+                <li>Contents away from home, if you add it</li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="no">Not covered</h4>
+              <ul>
+                <li>Damage that happened gradually</li>
+                <li>A home left empty for more than 60 days</li>
+                <li>Anything used for a business at the address</li>
+                <li>Subsidence, unless you add it</li>
+                <li>Damage by a tenant or a lodger</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="card cover">
+          <h3>Travel</h3>
+          <p class="excess-line">Excess from <strong>£100</strong></p>
+          <div class="two">
+            <div>
+              <h4 class="yes">Covered</h4>
+              <ul>
+                <li>Medical treatment and getting you home</li>
+                <li>Cancellation for a reason on the list</li>
+                <li>Baggage and delayed baggage</li>
+                <li>Missed departure outside your control</li>
+                <li>Legal costs abroad</li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="no">Not covered</h4>
+              <ul>
+                <li>Anything you were told about before you booked</li>
+                <li>A condition you did not declare</li>
+                <li>Travel against official advice</li>
+                <li>Winter sports, unless you add them</li>
+                <li>Claims after drinking or drug use</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <p class="fineprint">This is a summary. The policy wording is the contract, and it is
+        available in full before you buy and at any time afterwards.</p>
+    </div>
+  </section>
+
+  <!-- People choose an insurer for the day something goes wrong. A site that only sells is a site
+       that answers the easy question. -->
+  <section class="band alt" id="claims">
+    <div class="wrap">
+      <h2>Claiming</h2>
+      <p class="section-lede">The part that matters. Written here rather than in a document, so
+        you can read it before you need it.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Tell us, any hour</h3>
+          <p>Call <a href="tel:+00000000000">000 0000 0000</a> or start it online. Nothing has to
+            wait until Monday.</p>
+        </li>
+        <li>
+          <h3>We say yes or no in writing</h3>
+          <p>Within five working days of having what we asked for, with the reason if it is no and
+            what to do about it.</p>
+        </li>
+        <li>
+          <h3>We pay</h3>
+          <p>Within five working days of agreeing the amount. Emergency repairs can start before
+            that — call first.</p>
+        </li>
+      </ol>
+
+      <div class="card note-card">
+        <h3>If you disagree with us</h3>
+        <p>Complain to us first: we answer within eight weeks. If you are still unhappy, the
+          financial ombudsman for your country will look at it independently and free of charge,
+          and our answer to you will name it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="questions">
+    <div class="wrap narrow">
+      <h2>Questions people actually ask</h2>
+
+      <details>
+        <summary>Is the estimate on this page the price I will pay?</summary>
+        <p>No. It is worked out from three answers, and a real quote uses more — where the car is
+          kept, who else drives it, what has been claimed before. The estimate is honest about the
+          direction it moves in: more value up, more excess down.</p>
+      </details>
+
+      <details>
+        <summary>What happens at renewal?</summary>
+        <p>We email you 21 days before, showing last year's price next to this year's. If you do
+          nothing the policy renews; if you cancel before it starts you pay nothing.</p>
+      </details>
+
+      <details>
+        <summary>Can I cancel?</summary>
+        <p>Within 14 days, in full, if you have not claimed. After that you pay for the cover you
+          have used and we return the rest.</p>
+      </details>
+
+      <details>
+        <summary>Does making a claim put the price up?</summary>
+        <p>Usually yes, and for most claims for several years. A windscreen claim on a car policy
+          does not affect your no-claims discount.</p>
+      </details>
+
+      <details>
+        <summary>What do you do with what I type here?</summary>
+        <p>The estimator sends nothing anywhere — it does the arithmetic in your browser. Anything
+          you enter on a real quote is used to price and issue the policy, and the privacy notice
+          says who else sees it.</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-grid">
+    <div>
+      <p class="brand"><span class="brand-mark" aria-hidden="true">◈</span> Northwind Insurance</p>
+      <p class="fineprint">Northwind Insurance is a trading name of COMPANY-PLACEHOLDER, registered
+        at ADDRESS-PLACEHOLDER. Authorised and regulated under licence LICENCE-PLACEHOLDER — check
+        it on the regulator's own register.</p>
+    </div>
+    <nav aria-label="More">
+      <a href="#cover">What is covered</a>
+      <a href="#claims">Claiming</a>
+      <a href="#questions">Questions</a>
+      <a href="#" data-open-privacy>Privacy</a>
+    </nav>
+    <div>
+      <p class="fineprint">Claims: <a href="tel:+00000000000">000 0000 0000</a><br>
+        Everything else: <a href="tel:+00000000001">000 0000 0001</a><br>
+        <a href="mailto:hello@example.invalid">hello@example.invalid</a></p>
+      <!-- Consent you cannot withdraw is not consent, so the way back is in the footer. -->
+      <button class="linky" type="button" id="change-consent">Change what is measured</button>
+    </div>
+  </div>
+</footer>
+
+<!-- Nothing is loaded from Google or Yandex until this is answered, and "no" is the same size as
+     "yes". See site.js. -->
+<aside class="consent" id="consent" hidden aria-live="polite">
+  <div class="wrap consent-row">
+    <p>We would like to measure which pages people read, using Google Analytics and Yandex
+      Metrica. Nothing is loaded from either until you say yes, and you can change your mind from
+      the footer at any time. Saying no does not change the site.</p>
+    <div class="consent-buttons">
+      <button class="ghost" type="button" data-consent="no">No measuring</button>
+      <button class="primary" type="button" data-consent="yes">That is fine</button>
+    </div>
+  </div>
+</aside>
+
+<script src="site.js"></script>
+</body>
+</html>
