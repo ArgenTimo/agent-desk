@@ -1749,6 +1749,7 @@ async def keep_bench(request: Request) -> JSONResponse:
                     y=int(one["at"]["y"]),
                     shown=str(one.get("shown", "hint"))[:20],
                     spent=bool(one.get("spent")),
+                    by_hand=bool(one.get("by_hand")),
                     ord=place,
                 )
             )

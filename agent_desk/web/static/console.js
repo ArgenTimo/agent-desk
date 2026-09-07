@@ -1139,6 +1139,9 @@ function benchState() {
       at: placed.get(cardName(pin)),
       shown: pin.dataset.view || 'hint',
       spent: pin.classList.contains('spent'),
+      // Whether somebody put it where it is. The page has always known this and always forgot it
+      // on reload, so a bench arranged by hand became sweepable again by the next morning (042).
+      by_hand: pin.dataset.moved === 'yes',
     }))
     .filter((one) => one.at);
 }
@@ -1255,7 +1258,9 @@ async function undoBench() {
       { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
-    if (node) node.classList.toggle('spent', !!one.spent);
+    if (!node) continue;
+    node.classList.toggle('spent', !!one.spent);
+    if (one.by_hand) node.dataset.moved = 'yes';
   }
   restored = true;
   syncTargets();
@@ -1276,7 +1281,11 @@ function restoreBench() {
       { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
-    if (node) node.classList.toggle('spent', !!one.spent);
+    if (!node) continue;
+    node.classList.toggle('spent', !!one.spent);
+    // A card somebody placed stays a card somebody placed. Without this the console's own layout
+    // was free to sweep a hand-made arrangement on the first load after it was made.
+    if (one.by_hand) node.dataset.moved = 'yes';
   }
   restored = true;
   syncTargets();
@@ -3255,11 +3264,27 @@ function clearBench() {
   emptyOrNot();
 }
 
+// "Сценарий 11 раскладывает карточки по смыслу, человек двигает их сам, а «tidy up» сметает и то и
+// другое в сетку."
+//
+// It did, and that is the reason a bench somebody had arranged was never arranged for long: the
+// one control that promises to sort out a mess could not tell the mess from the work. It emptied
+// the whole layout and laid every card out in a grid, so a set of cards put on the left because
+// they belonged on the left went into column two.
+//
+// So it lays out what nobody placed, *around* what somebody did — collision avoidance is already
+// doing that work, and the cards it must not overlap are exactly the ones being left alone. And it
+// says what it left, because a button that did less than everything and did not mention it is a
+// button somebody presses twice.
 function tidyUp() {
-  placed = new Map();
+  const loose = [...surface.querySelectorAll('.pin:not([data-moved])')];
+  const kept = surface.querySelectorAll('.pin[data-moved]').length;
+  // Only the loose ones forget where they were. Emptying the whole map took the placed cards'
+  // positions with it, which is the sweep this is fixing.
+  for (const pin of loose) placed.delete(cardName(pin));
   // Down one column, then the next: with collision avoidance doing the vertical spacing, a column
   // of tall cards and a column of short ones both come out right.
-  [...surface.querySelectorAll('.pin')].forEach((pin, index) => {
+  loose.forEach((pin, index) => {
     place(pin, { x: 20 + (index % 3) * (CARD_WIDTH + GAP * 2), y: 20 });
   });
   view.x = 0;
@@ -3269,6 +3294,11 @@ function tidyUp() {
   drawRings();
   // "Разложенный по колонкам верстак" is one of the four things the undo was asked for by name.
   moveWasDeliberate();
+  if (!loose.length && kept) {
+    say(`Nothing to lay out — you placed all ${kept} of these yourself.`);
+  } else if (kept) {
+    say(`Laid out ${loose.length}. The ${kept} you placed yourself stayed where they were.`);
+  }
 }
 
 // Everything on screen at once, whatever size that takes. The counterpart to tidying: it moves

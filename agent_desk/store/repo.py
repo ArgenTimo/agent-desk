@@ -331,6 +331,9 @@ class BenchCard(BaseModel):
     # Where it is in the stack. The page sends the surface in the order it holds it, and this is
     # that order given back — see 040-bench.sql on why it is an index and not a clock.
     ord: int
+    # Whether somebody put it where it is, as opposed to it having landed there (042). What every
+    # layout that runs without being asked has to leave alone.
+    by_hand: bool = False
 
 
 class Template(BaseModel):
@@ -2160,7 +2163,12 @@ class Store:
         button that did nothing at all on every page load.
         """
         rows = [
-            {**card.model_dump(), "spent": int(card.spent), "ord": place}
+            {
+                **card.model_dump(),
+                "spent": int(card.spent),
+                "by_hand": int(card.by_hand),
+                "ord": place,
+            }
             for place, card in enumerate(list(cards)[:MOST_CARDS_ON_A_BENCH])
         ]
         async with self.engine.begin() as conn:
@@ -2170,8 +2178,8 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card "
-                        "(name, kind, card_id, label, x, y, shown, spent, ord) VALUES "
-                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord)"
+                        "(name, kind, card_id, label, x, y, shown, spent, ord, by_hand) VALUES "
+                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand)"
                     ),
                     rows,
                 )
@@ -2186,7 +2194,7 @@ class Store:
         """
         cards = await conn.execute(
             text(
-                "SELECT name, kind, card_id, label, x, y, shown, spent, ord "
+                "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
                 "FROM bench_card ORDER BY ord"
             )
         )
@@ -2291,8 +2299,8 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card "
-                        "(name, kind, card_id, label, x, y, shown, spent, ord) VALUES "
-                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord)"
+                        "(name, kind, card_id, label, x, y, shown, spent, ord, by_hand) VALUES "
+                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand)"
                     ),
                     was["cards"],
                 )
@@ -2321,7 +2329,7 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord "
+                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
                     "FROM bench_card ORDER BY ord"
                 )
             )

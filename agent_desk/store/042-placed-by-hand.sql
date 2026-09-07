@@ -1,0 +1,29 @@
+-- Which cards somebody put where they are, as opposed to where they landed.
+--
+-- "Сценарий 11 раскладывает карточки по смыслу, человек двигает их сам, а «tidy up» сметает и то и
+-- другое в сетку. Нужно, чтобы карточка, поставленная намеренно, оставалась на месте, а
+-- автоматическая раскладка трогала только то, что никто не ставил."
+--
+-- The page has always known this — `data-moved`, which is why the console's own settling steps
+-- around a card you dragged — and it has always forgotten it on reload. So a bench arranged by
+-- hand survived until the tab was closed and then became sweepable again, which is the complaint
+-- one layer down: it is not that "tidy up" is too eager, it is that by the next morning there is
+-- nothing on the bench it knows it should be careful with.
+--
+-- One column, because this is one fact about one card and it already has a row (040-bench.sql).
+--
+-- ## Why this is not the flag the undo already has
+--
+-- 041-bench-undo.sql takes a `moved` flag *per write*, meaning "a person caused this
+-- rearrangement". This is per *card*, meaning "a person chose this spot". They look alike and
+-- neither can be derived from the other:
+--
+--   * Tidying up is a person causing a rearrangement — it goes in the undo history — but the cards
+--     it lays out are not cards anybody placed, and marking them would make the second press of
+--     "tidy up" do nothing.
+--   * A card somebody dragged is both, which is the case that makes them look like one thing.
+--
+-- So there are two, and each is read by exactly one thing: the write flag by the undo history, and
+-- this column by every layout that runs without being asked.
+
+ALTER TABLE bench_card ADD COLUMN by_hand INTEGER NOT NULL DEFAULT 0;
