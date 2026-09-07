@@ -2296,6 +2296,110 @@ document.addEventListener('click', (event) => {
   showLeaveMenu(chip.closest('.pin'), box.left, box.bottom + 4);
 });
 
+
+/* --- running a drawing --------------------------------------------------------------------------- */
+// "Ход исполнения виден на самой схеме: где сейчас, что прошло, что упало." The run is drawn on
+// the cards themselves rather than only in a list, because the drawing is the thing somebody made
+// and a second representation of it beside the first is two things to keep in your head.
+let runs = [];
+
+async function readRuns() {
+  try {
+    const answer = await fetch('/workbench/runs');
+    if (!answer.ok) return;
+    runs = (await answer.json()).runs || [];
+    showRuns();
+  } catch {
+    // The bench still works; it simply cannot say what is running.
+  }
+}
+
+function showRuns() {
+  const states = new Map();
+  let going = null;
+  for (const one of runs) {
+    if (one.going) going = one;
+    for (const step of one.steps) states.set(step.name, step);
+  }
+  for (const pin of surface?.querySelectorAll('.pin') || []) {
+    const step = states.get(cardName(pin));
+    pin.dataset.step = step ? step.state : '';
+    pin.classList.toggle('at-now', Boolean(going && going.at === cardName(pin)));
+    let mark = pin.querySelector('.pin-step');
+    if (!step) {
+      mark?.remove();
+      continue;
+    }
+    if (!mark) {
+      mark = document.createElement('span');
+      mark.className = 'pin-step';
+      pin.querySelector('.pin-role')?.before(mark);
+    }
+    mark.textContent = STEP_MARK[step.state] || '';
+    mark.title = step.detail || step.made || step.state;
+  }
+  showRunBar(going);
+}
+
+const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', failed: '✕' };
+
+function showRunBar(going) {
+  const bar = document.getElementById('run-bar');
+  if (!bar) return;
+  bar.hidden = !going;
+  if (!going) return;
+  const at = surface?.querySelector(`.pin[data-name="${CSS.escape(going.at || '')}"]`);
+  const held = going.steps.find((step) => step.state === 'held');
+  bar.querySelector('.run-where').textContent = held
+    ? `waiting: ${held.detail}`
+    : `at ${at?.querySelector('.pin-label')?.textContent?.trim() || going.at || 'the start'}`;
+  const happened = bar.querySelector('[data-happened]');
+  happened.hidden = !held;
+  happened.dataset.run = going.id;
+  happened.dataset.name = held ? held.name : '';
+  bar.querySelector('[data-stop]').dataset.run = going.id;
+}
+
+document.getElementById('run-bar')?.addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  const body = new URLSearchParams({ run: button.dataset.run || '' });
+  if (button.dataset.happened !== undefined) body.set('name', button.dataset.name || '');
+  await fetch(button.dataset.stop !== undefined ? '/workbench/stop' : '/workbench/happened', {
+    method: 'POST',
+    headers: FORM,
+    body,
+  });
+  readRuns();
+});
+
+document.querySelector('[data-run]')?.addEventListener('click', async () => {
+  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  if (!names.length) return;
+  try {
+    const answer = await fetch('/workbench/run', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ cards: names.join(',') }),
+    });
+    const said = await answer.json();
+    if (!said.started) {
+      // The same sentence the panel shows, because it is the same function behind both.
+      const panel = document.getElementById('process-panel');
+      if (panel) panel.hidden = false;
+      readProcess();
+      say(said.why || 'This cannot be run yet.');
+      return;
+    }
+    readRuns();
+  } catch {
+    say('Could not start it.');
+  }
+});
+
+readRuns();
+setInterval(readRuns, 20000);
+
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
 const FULL_SIZE = ZOOMS.indexOf(1);

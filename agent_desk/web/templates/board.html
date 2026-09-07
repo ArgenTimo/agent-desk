@@ -74,6 +74,10 @@
          panel says and what a run would do cannot disagree. #}
       <button type="button" class="chip" data-process
               title="read the workbench as a process">as a process</button>
+      {# And run it. It queues each step in turn; the loop that already starts queued work is what
+         actually starts anything, under the rules that were already there (docs/adr/0007). #}
+      <button type="button" class="chip go" data-run
+              title="run this drawing, one step at a time">run it</button>
       <span class="spacer"></span>
       {# Cards on the workbench that are off the screen. One you cannot see and do not know is
          there is one that goes into the next message by surprise. #}
@@ -89,6 +93,15 @@
          answer to a bench bigger than its window, the first being zooming out until nothing can
          be read at all. Off until somebody asks for it. #}
       <div id="bench-map" class="bench-map" hidden aria-label="a map of the whole workbench"></div>
+      {# Where a run has got to, and the two things a person can do about one: say that the thing
+         an Event was waiting for has happened, or stop it. #}
+      <div id="run-bar" class="run-bar" hidden>
+        <span class="run-gear" aria-hidden="true">⚙</span>
+        <span class="run-where"></span>
+        <button type="button" data-happened hidden>it happened</button>
+        <button type="button" data-stop>stop</button>
+      </div>
+
       <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">
         <header>in this order</header>
         <div class="process-body"></div>

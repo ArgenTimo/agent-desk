@@ -2384,3 +2384,53 @@ button.go:hover, button.yes:hover {
 /* Amber, not green: it is a request. The difference between the two words is the reason this
    column exists at all. */
 .leave-held.asked { color: var(--attention); }
+
+/* --- a run, drawn on the drawing ----------------------------------------------------------------- */
+/* "Ход исполнения виден на самой схеме: где сейчас, что прошло, что упало." On the cards
+   themselves rather than only in a list: the drawing is the thing somebody made, and a second
+   representation of it beside the first is two things to keep in your head. */
+.pin-step { flex: 0 0 auto; font-size: var(--t-sm); line-height: 1; }
+.pin[data-step="done"] .pin-step { color: var(--busy); }
+.pin[data-step="going"] .pin-step { color: var(--focus); }
+.pin[data-step="failed"] .pin-step { color: var(--flag); }
+/* Held is amber and not red, and that is the whole distinction: a run waiting on Tuesday's
+   release is a run that is fine. */
+.pin[data-step="held"] .pin-step { color: var(--attention); }
+.pin[data-step="done"] { opacity: 0.8; }
+.pin.at-now { box-shadow: 0 0 0 2px var(--focus); }
+
+.run-bar {
+  position: absolute;
+  z-index: 35;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--focus);
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--fg) 16%, transparent);
+  font-size: var(--t-sm);
+}
+.run-gear {
+  color: var(--focus);
+  animation: ring-turn 3.6s linear infinite;
+  display: inline-block;
+}
+@media (prefers-reduced-motion: reduce) { .run-gear { animation: none; } }
+.run-where { color: var(--fg-soft); white-space: nowrap; }
+.run-bar button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.run-bar button:hover { color: var(--fg); border-color: var(--focus); }
+.chip.go { border-color: var(--focus); color: var(--focus); }

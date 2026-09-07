@@ -63,7 +63,7 @@ from agent_desk.store.repo import (
     Task,
     Thread,
 )
-from agent_desk.web import autostart, blockers, plans
+from agent_desk.web import autostart, blockers, engine, plans
 from agent_desk.web import blocks as block_runs
 from agent_desk.web import kicking as nudge
 
@@ -1716,6 +1716,92 @@ async def workbench_process(cards: str = "") -> JSONResponse:
             },
         }
     )
+
+
+@router.post("/workbench/run", response_class=JSONResponse)
+async def start_run(request: Request) -> JSONResponse:
+    """Run the drawing on somebody's workbench (agent_desk/web/engine.py).
+
+    The refusal comes from the same function the panel shows, so a button that is offered and a
+    run that is refused cannot disagree about why.
+    """
+    form = await _form(request)
+    names = [one for one in form.get("cards", "").split(",") if one]
+    where = await _where_for(names)
+    made, why = await engine.begin(store, names=names, repo_key=where[0], cwd=where[1])
+    if made is None:
+        return JSONResponse({"started": False, "why": why}, status_code=409)
+    return JSONResponse({"started": True, "run": made.id})
+
+
+async def _where_for(names: Sequence[str]) -> tuple[str, str]:
+    """Which project a run happens in: the one the cards are about.
+
+    Read from the ideas on the bench, because that is the only card kind that carries a project a
+    person chose. A drawing whose cards are about nothing in particular has nowhere to run, and
+    `engine.begin` says so rather than picking a project.
+    """
+    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    keys = [ideas[name].project_key for name in names if name in ideas and ideas[name].project_key]
+    if not keys:
+        return ("", "")
+    rows = await asyncio.to_thread(sessions_only)
+    named = next((one for one in shape(rows, await store.groups()) if one.key == keys[0]), None)
+    if named is None or not named.instances:
+        return (keys[0] or "", "")
+    return (named.key, named.instances[0].path)
+
+
+@router.post("/workbench/happened", response_class=JSONResponse)
+async def event_happened(request: Request) -> JSONResponse:
+    """Somebody says the thing an Event step was waiting for has happened.
+
+    A human act, and it has to be: whether the release went out is not something this console can
+    read, and guessing would start the rest of a process on the strength of nothing.
+    """
+    form = await _form(request)
+    run_id = form.get("run", "").strip()
+    name = form.get("name", "").strip()
+    if run_id and name:
+        await engine.it_happened(store, run_id, name)
+    return JSONResponse({"noted": True})
+
+
+@router.post("/workbench/stop", response_class=JSONResponse)
+async def stop_run(request: Request) -> JSONResponse:
+    """Stop a run. It keeps its reason: "it ended" and "somebody stopped it at step three" are
+    different things to come back to."""
+    form = await _form(request)
+    run_id = form.get("run", "").strip()
+    if run_id:
+        await store.end_run(run_id, why="stopped here")
+    return JSONResponse({"stopped": True})
+
+
+@router.get("/workbench/runs", response_class=JSONResponse)
+async def workbench_runs() -> JSONResponse:
+    """Every run and where it got to, so the bench can show it on the cards themselves."""
+    found = []
+    for one in await store.runs():
+        found.append(
+            {
+                "id": one.id,
+                "cards": one.names,
+                "at": one.at,
+                "going": one.going,
+                "why": one.stopped_why or "",
+                "steps": [
+                    {
+                        "name": step.name,
+                        "state": step.state,
+                        "made": step.made,
+                        "detail": step.detail,
+                    }
+                    for step in await store.run_steps(one.id)
+                ],
+            }
+        )
+    return JSONResponse({"runs": found})
 
 
 @router.get("/workbench", response_class=HTMLResponse)

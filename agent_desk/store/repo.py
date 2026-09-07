@@ -233,6 +233,51 @@ class Filing(BaseModel):
     created_at: int
 
 
+# What a step of a run is doing. `held` is the one that is not a failure and not progress: an
+# Event waiting for something to happen, or a step whose project is not armed.
+StepState = Literal["waiting", "going", "held", "done", "failed"]
+
+
+class Run(BaseModel):
+    """One drawing being run (037-runs.sql)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    # The card names the run was started with. Frozen: what is on a workbench is a fact about a
+    # browser, and a run that re-read it would change what it is doing because somebody dragged a
+    # card off in another tab.
+    cards: str
+    repo_key: str
+    cwd: str
+    at: str = ""
+    started_at: int = 0
+    finished_at: int | None = None
+    stopped_why: str | None = None
+
+    @property
+    def going(self) -> bool:
+        return self.finished_at is None and not self.stopped_why
+
+    @property
+    def names(self) -> list[str]:
+        return [one for one in self.cards.split(",") if one]
+
+
+class RunStep(BaseModel):
+    """What happened at one step of one run."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_id: str
+    name: str
+    task_id: str | None = None
+    state: StepState = "waiting"
+    made: str = ""
+    detail: str = ""
+    at: int = 0
+
+
 class CardTie(BaseModel):
     """One line somebody drew between two cards, and what happens along it (034-card-ties.sql).
 
@@ -1962,6 +2007,96 @@ class Store:
                 keys,
             )
             return {str(row[0]): str(row[1]) for row in rows}
+
+    # --- a drawing being run (037-runs.sql) ---------------------------------------------------
+    async def start_run(self, *, cards: Sequence[str], repo_key: str, cwd: str) -> Run:
+        run = Run(
+            id=_new_id(),
+            cards=",".join(cards),
+            repo_key=repo_key,
+            cwd=cwd,
+            started_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO run (id, cards, repo_key, cwd, at, started_at) "
+                    "VALUES (:id, :cards, :repo_key, :cwd, '', :started_at)"
+                ),
+                run.model_dump(exclude={"at", "finished_at", "stopped_why"}),
+            )
+        return run
+
+    async def runs(self, *, going: bool | None = None) -> list[Run]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why "
+                    "FROM run ORDER BY started_at DESC LIMIT 60"
+                )
+            )
+            found = [Run(**row._mapping) for row in rows]
+        if going is None:
+            return found
+        return [one for one in found if one.going == going]
+
+    async def run_at(self, run_id: str, name: str) -> None:
+        """Say which step this run is on now."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE run SET at = :at WHERE id = :id"), {"at": name, "id": run_id}
+            )
+
+    async def end_run(self, run_id: str, why: str = "") -> None:
+        """Finished, or stopped and why. A run that stopped keeps its reason: "it ended" and "it
+        gave up at step three because the gate said no" are different things to come back to."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE run SET finished_at = :t, stopped_why = :why, at = '' WHERE id = :id"),
+                {"t": _now_ms(), "why": why or None, "id": run_id},
+            )
+
+    async def set_run_step(
+        self,
+        *,
+        run_id: str,
+        name: str,
+        state: StepState,
+        task_id: str | None = None,
+        made: str = "",
+        detail: str = "",
+    ) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO run_step (run_id, name, task_id, state, made, detail, at) "
+                    "VALUES (:run_id, :name, :task_id, :state, :made, :detail, :t) "
+                    "ON CONFLICT (run_id, name) DO UPDATE SET state = :state, "
+                    "task_id = COALESCE(:task_id, run_step.task_id), "
+                    "made = CASE WHEN :made = '' THEN run_step.made ELSE :made END, "
+                    "detail = :detail, at = :t"
+                ),
+                {
+                    "run_id": run_id,
+                    "name": name,
+                    "task_id": task_id,
+                    "state": state,
+                    "made": made[:8000],
+                    "detail": detail[:500],
+                    "t": _now_ms(),
+                },
+            )
+
+    async def run_steps(self, run_id: str) -> list[RunStep]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT run_id, name, task_id, state, made, detail, at FROM run_step "
+                    "WHERE run_id = :run_id ORDER BY at"
+                ),
+                {"run_id": run_id},
+            )
+            return [RunStep(**row._mapping) for row in rows]
 
     # --- what a step may do, and what it made (036-step-memory.sql) ---------------------------
     async def set_card_leave(self, name: str, given: Sequence[str]) -> None:
