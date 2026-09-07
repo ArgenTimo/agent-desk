@@ -988,11 +988,52 @@ async def card_roles() -> JSONResponse:
             "roles": await store.card_roles(),
             "naturally": roles.NATURALLY,
             "says": {
-                name: {"says": one.says, "means": one.means, "shape": one.shape}
+                name: {
+                    "says": one.says,
+                    "means": one.means,
+                    "shape": one.shape,
+                    # What a card of this role is asked, so the page can draw the form. Defined in
+                    # agent_desk/roles.py and sent, never listed twice — the same rule the five
+                    # names follow, and the one that matters more, because a field the page knows
+                    # about and the store does not is a field that silently fails to save.
+                    "fields": [
+                        {
+                            "name": field.name,
+                            "says": field.says,
+                            "asks": field.asks,
+                            "lines": field.lines,
+                            "needed": field.needed,
+                        }
+                        for field in roles.fields_of(name)
+                    ],
+                }
                 for name, one in roles.ROLES.items()
             },
+            "fields": await store.card_fields(),
         }
     )
+
+
+@router.post("/cards/field", response_class=JSONResponse)
+async def set_card_field(request: Request) -> JSONResponse:
+    """Write one of the fields a card's role asks for (035-card-fields.sql).
+
+    The field must be one the role actually has. That check is the whole difference between this
+    and a notes table: *"поле, которое можно назвать как угодно, — это снова свободный текст, а
+    свободный текст движок исполнить не может."*
+
+    The role is taken from the form because the page knows it — including the role a card was
+    just given, before anything has been stored for it — but it is validated the same way as
+    everywhere else, so a name that is not one of the five reaches nothing.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    role = form.get("role", "").strip()
+    field = form.get("field", "").strip()
+    if not name or not roles.is_a_role(role) or not roles.is_a_field(role, field):
+        return JSONResponse({"kept": False}, status_code=400)
+    await store.set_card_field(name, field, form.get("value", ""))
+    return JSONResponse({"kept": True})
 
 
 @router.get("/cards/folder", response_class=HTMLResponse)

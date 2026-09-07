@@ -1963,6 +1963,43 @@ class Store:
             )
             return {str(row[0]): str(row[1]) for row in rows}
 
+    # --- what a card says in the fields its role asks for (035-card-fields.sql) ---------------
+    async def set_card_field(self, name: str, field: str, value: str) -> None:
+        """Write one field, or clear it.
+
+        Clearing deletes the row rather than storing an empty string: "nobody has answered this"
+        and "somebody answered it with nothing" are the same state here, and keeping two ways to
+        say it would mean `missing` had to know about both.
+        """
+        async with self.engine.begin() as conn:
+            if not value.strip():
+                await conn.execute(
+                    text("DELETE FROM card_field WHERE name = :name AND field = :field"),
+                    {"name": name, "field": field},
+                )
+                return
+            await conn.execute(
+                text(
+                    "INSERT INTO card_field (name, field, value, set_at) "
+                    "VALUES (:name, :field, :value, :t) "
+                    "ON CONFLICT (name, field) DO UPDATE SET value = :value, set_at = :t"
+                ),
+                {"name": name, "field": field, "value": value[:4000], "t": _now_ms()},
+            )
+
+    async def card_fields(self) -> dict[str, dict[str, str]]:
+        """Everything anybody has typed into a card, by card name then field. One query.
+
+        Read whole for the same reason the roles are: there are as many rows as fields somebody
+        has filled in by hand, and the bench wants all of them at once.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT name, field, value FROM card_field"))
+            found: dict[str, dict[str, str]] = {}
+            for row in rows:
+                found.setdefault(str(row[0]), {})[str(row[1])] = str(row[2])
+            return found
+
     # --- lines between cards, and what they mean (034-card-ties.sql) --------------------------
     async def tie_cards(self, *, from_name: str, to_name: str, kind: str, says: str = "") -> None:
         """Draw one line, or change the one that is already there.

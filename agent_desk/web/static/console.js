@@ -1794,6 +1794,7 @@ function say(words) {
 let roleSays = {};
 let roleNaturally = {};
 let roleChosen = {};
+let roleFilled = {};
 
 async function readRoles() {
   try {
@@ -1803,6 +1804,7 @@ async function readRoles() {
     roleSays = said.says || {};
     roleNaturally = said.naturally || {};
     roleChosen = said.roles || {};
+    roleFilled = said.fields || {};
     for (const pin of surface?.querySelectorAll('.pin') || []) showRole(pin);
   } catch {
     // A console that cannot reach itself still shows the cards; they simply have no shapes.
@@ -1824,6 +1826,88 @@ function showRole(pin) {
   if (chip) {
     chip.textContent = roleSays[role]?.says || role;
     chip.title = `${roleSays[role]?.means || ''} — press to change what this is`;
+  }
+  showFields(pin);
+}
+
+// The small fixed set of things this role is asked (agent_desk/roles.py).
+//
+// Drawn here rather than in the card templates, and that is the point rather than a shortcut: any
+// card can have any role, so a form that lived in the session template would have to be copied
+// into the idea template, the blocker template and the folder template — four copies of one
+// question, three of which would fall behind.
+//
+// Rebuilt only when the role changes. Redrawing it on every pass would take the caret out of an
+// input somebody is typing in, which is the worst failure a form on a live-updating page has.
+function showFields(pin) {
+  const role = roleOf(pin);
+  const asked = roleSays[role]?.fields || [];
+  const body = pin.querySelector('.pin-body');
+  if (!body) return;
+  let form = pin.querySelector('.pin-fields');
+  if (!asked.length) {
+    form?.remove();
+    return;
+  }
+  if (form && form.dataset.role === role) {
+    markUnfilled(pin, form);
+    return;
+  }
+  form?.remove();
+  form = document.createElement('div');
+  form.className = 'pin-fields';
+  form.dataset.role = role;
+  const said = roleFilled[cardName(pin)] || {};
+  for (const field of asked) {
+    const row = document.createElement('label');
+    row.className = `pin-field${field.needed ? ' needed' : ''}`;
+    const says = document.createElement('span');
+    says.className = 'field-says';
+    says.textContent = field.says;
+    const box = document.createElement('textarea');
+    box.rows = field.lines || 1;
+    box.placeholder = field.asks;
+    box.value = said[field.name] || '';
+    box.dataset.field = field.name;
+    box.addEventListener('change', () => keepField(pin, field.name, box.value));
+    // Leaving the card counts as finishing the sentence. Without this, a value typed and then
+    // clicked away from is a value the engine never sees.
+    box.addEventListener('blur', () => keepField(pin, field.name, box.value));
+    row.append(says, box);
+    form.appendChild(row);
+  }
+  body.prepend(form);
+  markUnfilled(pin, form);
+}
+
+// What an engine would stop on, shown before it does. Not a refusal: half-drawn is the normal
+// state of a diagram somebody is thinking in.
+function markUnfilled(pin, form) {
+  const said = roleFilled[cardName(pin)] || {};
+  const asked = roleSays[roleOf(pin)]?.fields || [];
+  const short = asked.filter((field) => field.needed && !(said[field.name] || '').trim());
+  pin.classList.toggle('unfilled', short.length > 0);
+  for (const row of form.querySelectorAll('.pin-field.needed')) {
+    const box = row.querySelector('textarea');
+    row.classList.toggle('empty', !(box?.value || '').trim());
+  }
+}
+
+async function keepField(pin, field, value) {
+  const name = cardName(pin);
+  const said = (roleFilled[name] = roleFilled[name] || {});
+  if (said[field] === value) return;
+  said[field] = value;
+  const form = pin.querySelector('.pin-fields');
+  if (form) markUnfilled(pin, form);
+  try {
+    await fetch('/cards/field', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ name, role: roleOf(pin), field, value }),
+    });
+  } catch {
+    // It is right on this page for this session; the next load reads what was stored.
   }
 }
 

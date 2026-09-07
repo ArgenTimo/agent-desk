@@ -45,6 +45,86 @@ class Role:
     shape: str
 
 
+@dataclass(frozen=True)
+class Field:
+    """One thing a card of this role has to say about itself.
+
+    *"У Action — что делать и чем; у Decision — условие и ветки; у Event — что должно произойти;
+    у Result — что считается результатом. Набор маленький и фиксированный на тип: поле, которое
+    можно назвать как угодно, — это снова свободный текст, а свободный текст движок исполнить не
+    может."*
+
+    That last sentence is the design. A card with a free-form list of fields is a card with a note
+    on it: it can be read by a person and by nothing else. Each role gets a small fixed set, so
+    that "what does this step do" has one answer in one place — which is the difference between a
+    diagram and something that can be run.
+    """
+
+    name: str
+    says: str
+    asks: str
+    lines: int = 1
+    # Whether a step is incomplete without it. Not a validation that refuses a card — half-drawn
+    # is the normal state of a diagram somebody is thinking in — but the thing an engine would
+    # have to stop on, and therefore the thing worth showing before it does.
+    needed: bool = False
+
+
+# What each role is asked. Small on purpose: three fields is a form somebody fills in, six is a
+# form somebody abandons, and every field here has to be a thing an engine would actually read.
+#
+# Decision is the shortest and that is not an oversight. Its branches are the `if` lines going out
+# of it (agent_desk/ties.py) — they live on the lines because that is where somebody draws them,
+# and a "branches" field on the card would be the same information written twice, wrong the moment
+# the two disagree.
+FIELDS: dict[str, tuple[Field, ...]] = {
+    "object": (Field("what", "what it is", "the thing this stands for", lines=2),),
+    "action": (
+        Field("do", "what to do", "the work itself, as you would say it to somebody", 3, True),
+        Field("using", "what it may use", "the project, the tools, what it is allowed to touch", 2),
+    ),
+    "decision": (
+        Field(
+            "ask",
+            "what to check",
+            "the question this answers — the ways out are the lines",
+            2,
+            True,
+        ),
+    ),
+    "event": (Field("awaits", "what has to happen", "the thing this waits for", 2, True),),
+    "result": (
+        Field(
+            "counts", "what counts as done", "how you would know this actually happened", 2, True
+        ),
+    ),
+}
+
+
+def fields_of(role: str) -> tuple[Field, ...]:
+    """What a card of this role is asked. Empty for a role this program does not have."""
+    return FIELDS.get(role, ())
+
+
+def is_a_field(role: str, name: str) -> bool:
+    """Whether this role has a field by that name. The route's whole validation, and the reason
+    the set is fixed: a field that can be called anything is free text with a label on it."""
+    return any(field.name == name for field in fields_of(role))
+
+
+def missing(role: str, said: dict[str, str]) -> tuple[str, ...]:
+    """Which of this role's needed fields have nothing in them.
+
+    Not an error and not a refusal: a diagram half-drawn is a diagram being thought about. It is
+    what an engine would have to stop on, which makes it worth showing on the card first.
+    """
+    return tuple(
+        field.says
+        for field in fields_of(role)
+        if field.needed and not said.get(field.name, "").strip()
+    )
+
+
 ROLES: dict[str, Role] = {
     "object": Role("object", "Object", "something that exists", "box"),
     "action": Role("action", "Action", "something to do", "bar"),

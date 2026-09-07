@@ -2260,3 +2260,42 @@ button.go:hover, button.yes:hover {
    condition rather than a word from a list of five. */
 .tie-label.is-if { font-style: italic; }
 .tie-label.is-with { opacity: 0.65; }
+
+/* --- what a card of this role is asked ---------------------------------------------------------- */
+/* A small fixed set per role (agent_desk/roles.py). Drawn by the script into whatever card is
+   carrying the role, because any card can carry any role — a form living in the session template
+   would have to be copied into the idea, blocker and folder templates, three of which would fall
+   behind the fourth. */
+.pin-fields {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.pin-field { display: grid; gap: 2px; }
+.field-says {
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.pin-field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-sm);
+  resize: vertical;
+}
+.pin-field textarea:focus { outline: none; border-color: var(--focus); }
+/* Needed and empty. Amber rather than red, and for the documented reason: red on this page means
+   stopped, and a step somebody has not finished describing has not stopped — it is being written.
+   This is what an engine would have to stop on, said before it does. */
+.pin-field.needed.empty textarea { border-color: var(--attention); }
+.pin-field.needed .field-says::after { content: " ·"; color: var(--attention); }
+.pin.unfilled .pin-role::after { content: " ·"; color: var(--attention); }
+/* Folded, the form is not the thing you are looking at. */
+.pin[data-view="hint"] .pin-fields { display: none; }
