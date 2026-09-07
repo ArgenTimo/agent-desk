@@ -65,6 +65,12 @@ ThreadSetBy = Literal["classifier", "human"]
 # cap is here so that bug fills a table slowly instead of filling the disk (040-bench.sql).
 MOST_CARDS_ON_A_BENCH = 500
 
+# How far back the workbench can be put. Each step is the whole surface and a surface is written
+# every time somebody drags a card, so this is a disk budget as much as a promise — and past a
+# handful of steps "undo until it looks right" stops being something a person can aim, which is
+# what a saved workbench is for instead (041-bench-undo.sql).
+MOST_UNDO_STEPS = 50
+
 
 # The store's own clock, in the units the registry writes (design/02-data-model.md). Deliberately
 # not imported from `observe`: a store does not need to know that a session reader exists.
@@ -2132,7 +2138,7 @@ class Store:
             return [StepCard(**row._mapping) for row in rows]
 
     # --- the workbench ------------------------------------------------------------------------
-    async def keep_bench(self, cards: Sequence[BenchCard]) -> None:
+    async def keep_bench(self, cards: Sequence[BenchCard], *, moved: bool = False) -> None:
         """What is on the workbench, replacing what was on it. One transaction, not a diff.
 
         The page knows the whole surface and the store knows nothing else about it, so sending the
@@ -2143,12 +2149,22 @@ class Store:
         Bounded because a surface is something a person arranges: a bench of two thousand cards is
         a bug upstream, and writing it every time somebody drags a card would be that bug's
         symptom rather than its cure.
+
+        `moved` says whether somebody moved a card, which is the only part of this the store cannot
+        work out for itself: the console lays cards out again whenever one grows to fit its body,
+        so a coordinate that changed is not evidence that anybody did anything (041-bench-undo.sql).
+        Everything else about the surface changes only when a person changes it and needs no flag.
+
+        It defaults to false, and that is the safe direction: a gesture added later that forgets to
+        set it costs one move that cannot be taken back, while the other default cost an undo
+        button that did nothing at all on every page load.
         """
         rows = [
             {**card.model_dump(), "spent": int(card.spent), "ord": place}
             for place, card in enumerate(list(cards)[:MOST_CARDS_ON_A_BENCH])
         ]
         async with self.engine.begin() as conn:
+            before = await self._surface(conn)
             await conn.execute(text("DELETE FROM bench_card"))
             if rows:
                 await conn.execute(
@@ -2159,6 +2175,146 @@ class Store:
                     ),
                     rows,
                 )
+            await self._note_change(conn, before, where=moved)
+
+    async def _surface(self, conn: Any) -> dict[str, list[dict[str, Any]]]:
+        """The workbench as it is right now: everything an undo has to put back.
+
+        Both halves of it — the cards and the lines — because "one undo for everything" is the
+        whole design (041-bench-undo.sql), and a history that recorded only one of them would leave
+        the other to grow an undo of its own within the year.
+        """
+        cards = await conn.execute(
+            text(
+                "SELECT name, kind, card_id, label, x, y, shown, spent, ord "
+                "FROM bench_card ORDER BY ord"
+            )
+        )
+        ties = await conn.execute(
+            text("SELECT from_name, to_name, kind, says FROM card_tie ORDER BY from_name, to_name")
+        )
+        return {
+            "cards": [dict(row._mapping) for row in cards],
+            "ties": [dict(row._mapping) for row in ties],
+        }
+
+    @staticmethod
+    def _arranged(surface: dict[str, list[dict[str, Any]]], *, where: bool) -> str:
+        """The surface as a string, for telling two of them apart.
+
+        Not everything stored is something somebody did, and comparing the whole snapshot meant
+        that *opening the page* recorded undo steps — three of them and twenty cards moved on one
+        ordinary load. Undo then walked back through the console tidying up after itself, which
+        from the outside is a button that does nothing.
+
+        Three columns are never anybody's doing. `ord` is the stacking order, rebuilt from the
+        document every time the page draws itself. `label` is a copy of what a card is called, and
+        a card's real name arrives a moment after the card does, once its body has been fetched.
+        `kind` and `card_id` are `name` said twice.
+
+        **Position is the interesting one**, and it is why this takes an argument. Which cards are
+        on the bench, whether one is folded, whether one is left out of the message and the lines
+        between them are things only a person changes — so a change in any of those is a change,
+        full stop. A card's coordinates are not: the console lays cards out again every time one
+        grows to fit its body. So position counts only when the page says somebody moved something,
+        which it does for the three gestures that move a card on purpose.
+
+        A block card is left out altogether. It is a question and its answer, put on the bench by
+        the conversation and taken off by it, and undo has no business managing that: pressing undo
+        should not make an answer disappear.
+
+        Sorted by name, because which card is described first is not something anybody chose.
+        """
+        keys = ("name", "shown", "spent") + (("x", "y") if where else ())
+        return json.dumps(
+            {
+                "cards": sorted(
+                    (
+                        {key: card[key] for key in keys}
+                        for card in surface["cards"]
+                        if card["kind"] != "block"
+                    ),
+                    key=lambda card: str(card["name"]),
+                ),
+                "ties": surface["ties"],
+            },
+            sort_keys=True,
+        )
+
+    async def _note_change(
+        self, conn: Any, before: dict[str, list[dict[str, Any]]], *, where: bool = True
+    ) -> None:
+        """Record what the surface was, if this write actually changed it.
+
+        Compared rather than assumed, because the page asks for the bench to be written whenever it
+        recounts what is on it — which happens on plenty of things that change nothing. Recording
+        those would fill the history with steps that undo to the state you are already in, and
+        somebody pressing undo four times to see one card move has been given a broken control
+        rather than a slow one.
+        """
+        if self._arranged(await self._surface(conn), where=where) == self._arranged(
+            before, where=where
+        ):
+            return
+        await conn.execute(
+            text("INSERT INTO bench_was (made_at, surface) VALUES (:t, :surface)"),
+            {"t": _now_ms(), "surface": json.dumps(before, sort_keys=True)},
+        )
+        await conn.execute(
+            text(
+                "DELETE FROM bench_was WHERE at <= "
+                "(SELECT at FROM bench_was ORDER BY at DESC LIMIT 1 OFFSET :keep)"
+            ),
+            {"keep": MOST_UNDO_STEPS},
+        )
+
+    async def undo_bench(self) -> bool:
+        """Put the workbench back the way it was before the last thing that changed it.
+
+        False when there is nothing to go back to, which the page says out loud rather than
+        rendering as a press that did nothing.
+
+        Restoring does **not** record a step of its own. Undo walks backwards through the history;
+        a restore that recorded itself would make the second press undo the first one, and the
+        control would toggle between two states for ever.
+        """
+        async with self.engine.begin() as conn:
+            rows = await conn.execute(
+                text("SELECT at, surface FROM bench_was ORDER BY at DESC LIMIT 1")
+            )
+            row = rows.first()
+            if row is None:
+                return False
+            was = json.loads(str(row._mapping["surface"]))
+            await conn.execute(text("DELETE FROM bench_card"))
+            if was["cards"]:
+                await conn.execute(
+                    text(
+                        "INSERT INTO bench_card "
+                        "(name, kind, card_id, label, x, y, shown, spent, ord) VALUES "
+                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord)"
+                    ),
+                    was["cards"],
+                )
+            await conn.execute(text("DELETE FROM card_tie"))
+            for tie in was["ties"]:
+                await conn.execute(
+                    text(
+                        "INSERT INTO card_tie (id, from_name, to_name, kind, says, created_at) "
+                        "VALUES (:id, :from_name, :to_name, :kind, :says, :t)"
+                    ),
+                    {**tie, "id": _new_id(), "t": _now_ms()},
+                )
+            await conn.execute(
+                text("DELETE FROM bench_was WHERE at = :at"), {"at": row._mapping["at"]}
+            )
+            return True
+
+    async def can_undo_bench(self) -> bool:
+        """Whether there is anything to go back to, for a control that should say so."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT 1 FROM bench_was LIMIT 1"))
+            return rows.first() is not None
 
     async def bench_cards(self) -> list[BenchCard]:
         """The workbench as it was left, in the order the page had it, so it stacks the same way."""
@@ -2485,6 +2641,7 @@ class Store:
         if not from_name or not to_name or from_name == to_name:
             return
         async with self.engine.begin() as conn:
+            before = await self._surface(conn)
             await conn.execute(
                 text(
                     "INSERT INTO card_tie (id, from_name, to_name, kind, says, created_at) "
@@ -2500,10 +2657,13 @@ class Store:
                     "t": _now_ms(),
                 },
             )
+            await self._note_change(conn, before)
 
     async def untie_cards(self, tie_id: str) -> None:
         async with self.engine.begin() as conn:
+            before = await self._surface(conn)
             await conn.execute(text("DELETE FROM card_tie WHERE id = :id"), {"id": tie_id})
+            await self._note_change(conn, before)
 
     async def card_ties(self) -> list[CardTie]:
         """Every line somebody has drawn. Read whole: there are as many as somebody has drawn by

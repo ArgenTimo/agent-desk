@@ -1754,8 +1754,30 @@ async def keep_bench(request: Request) -> JSONResponse:
             )
         except (KeyError, TypeError, ValueError):
             continue
-    await store.keep_bench(cards)
+    # Whether somebody moved a card, which is the one part of this the store cannot work out for
+    # itself — the console lays cards out again whenever one grows to fit its body, so a coordinate
+    # that changed is not evidence that anybody did anything (041-bench-undo.sql).
+    moved = bool(said.get("moved")) if isinstance(said, dict) else False
+    await store.keep_bench(cards, moved=moved)
     return JSONResponse({"kept": len(cards)})
+
+
+@router.post("/workbench/undo", response_class=JSONResponse)
+async def undo_bench() -> JSONResponse:
+    """Put the workbench back the way it was before the last thing that changed it.
+
+    The restored surface comes back with the answer rather than being fetched afterwards, because
+    between the two the page would still be holding the state it just undid — and its next write
+    would put that state back. Undoing has to hand the page what to draw.
+
+    `undone: false` is a real answer, not an error: there is nothing to go back to, and the page
+    says so. A press that quietly does nothing is the one outcome a control like this cannot have,
+    because its whole job is to make somebody confident that trying things is safe.
+    """
+    undone = await store.undo_bench()
+    return JSONResponse(
+        {"undone": undone, "cards": [card.model_dump() for card in await store.bench_cards()]}
+    )
 
 
 async def _bench_cards(names: Sequence[str]) -> list[process.Card]:

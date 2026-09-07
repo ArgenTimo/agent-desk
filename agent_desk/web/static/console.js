@@ -723,7 +723,14 @@ async function pin(card, how) {
   holder.querySelector('.pin-label').textContent = card.label || card.id;
   pins.appendChild(holder);
   showRole(holder);
-  place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null);
+  // `exact` is for a position that was *remembered* rather than worked out — restoring the bench,
+  // undoing, opening a saved workbench. Without it every restore ran the layout through collision
+  // avoidance again, so a bench came back close to where it was left rather than where it was left
+  // and drifted a little further on each load. `bringItsKin` does want avoidance: it asks for a
+  // spot beside another card and does not mind which side of it ends up free.
+  place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null, {
+    avoid: !how?.exact,
+  });
   if (how?.under) {
     ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
     // Brought by the conversation rather than dropped by a person, which is what decides whether
@@ -1146,6 +1153,28 @@ let restored = false;
 // the rate a pointer reports, which on a fast mouse is over a hundred times a second.
 let writing = 0;
 
+// Whether the write now waiting includes somebody *moving* a card, which is the one part of the
+// surface the console also changes on its own (041-bench-undo.sql).
+//
+// A card is placed before its body arrives and grows when it does, so `settleOverlaps` lays its
+// neighbours out again — several times, as the bodies land. Treated as changes, those made
+// *opening the page* undoable: measured at three steps and twenty cards moved on one ordinary
+// load. Undo then walked back through the console tidying up after itself, which from the outside
+// is a button that appears to do nothing.
+//
+// The split that works is not "who wrote this" but "what changed". Which cards are on the bench,
+// whether one is folded, whether one is left out of the message, and the lines between them are
+// things only a person changes, so the store can tell on its own and nothing has to be flagged.
+// Position is the exception, and this is the flag for it — set by the three gestures that move a
+// card on purpose. A gesture added later that forgets to set it costs one un-undoable move; the
+// other polarity cost an undo button that did nothing on every page load.
+let movedByHand = false;
+
+function moveWasDeliberate() {
+  movedByHand = true;
+  rememberLayout();
+}
+
 function rememberLayout() {
   if (!restored) return;
   clearTimeout(writing);
@@ -1159,11 +1188,12 @@ function rememberLayout() {
       // unreadable. A bench that saved itself perfectly as nothing, silently, on every write. So
       // there is one shape and it is this one; the route reads the position where the page keeps
       // it rather than where it would rather have it.
-      body: JSON.stringify({ cards: benchState() }),
+      body: JSON.stringify({ cards: benchState(), moved: movedByHand }),
     }).catch(() => {
       // A console whose server has gone still lets you move cards about. It will be written the
       // next time one moves and the server answers.
     });
+    movedByHand = false;
   }, 400);
 }
 
@@ -1184,6 +1214,56 @@ function recallLayout() {
   placed = new Map(keptBench().map((one) => [one.name, { x: one.x, y: one.y }]));
 }
 
+// Put the workbench back the way it was before the last thing that changed it.
+//
+// One undo for everything, because everything that changes the surface already goes through the
+// same two writes (041-bench-undo.sql). Joining two cards, expanding a project into forty, laying
+// the bench out in columns, drawing a whole process — all of them come back, and none of them had
+// to know this exists.
+//
+// Three things have to happen in this order, and each of them is a way it can go wrong.
+//
+// **The pending write is cancelled first.** A drag half a second ago has a write waiting; letting
+// it land after the undo would put the state back that the undo just took away.
+//
+// **Writing is switched off while the surface is rebuilt.** `clearBench` and every `pin` ask for
+// the bench to be written down, and the surface is not the restored one until the last of them
+// has run. Without this the undo saves itself over the thing it restored.
+//
+// **What to draw comes back with the answer.** Fetching it afterwards would read a bench the page
+// is about to overwrite, which is the same race one step further along.
+async function undoBench() {
+  clearTimeout(writing);
+  let said;
+  try {
+    said = await (await fetch('/workbench/undo', { method: 'POST' })).json();
+  } catch {
+    return say('The console did not answer, so nothing was changed.');
+  }
+  if (!said.undone) return say('Nothing to go back to — this is how the workbench started.');
+  restored = false;
+  clearBench();
+  for (const one of said.cards) {
+    if (one.kind === 'block') {
+      // Brought back by the conversation, not by us. Its place is remembered so that `syncBlocks`
+      // puts it where it was rather than stacking it in the corner.
+      placed.set(one.name, { x: one.x, y: one.y });
+      continue;
+    }
+    pin(
+      { kind: one.kind, id: one.card_id, label: one.label },
+      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
+    );
+    const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    if (node) node.classList.toggle('spent', !!one.spent);
+  }
+  restored = true;
+  syncTargets();
+  await loadTies();
+  drawMap();
+  say('Put back the way it was.');
+}
+
 // And the cards themselves, which is the half that was missing. `pin` is not awaited: it puts the
 // card in the document before it goes to fetch the body, so by the time this returns the surface
 // is populated and `syncBlocks` will not draw a second copy of anything.
@@ -1193,7 +1273,7 @@ function restoreBench() {
     if (one.kind === 'block') continue;
     pin(
       { kind: one.kind, id: one.card_id, label: one.label },
-      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown }
+      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
     if (node) node.classList.toggle('spent', !!one.spent);
@@ -1498,8 +1578,9 @@ function endMove() {
   if (wasAMove) {
     drawTies();
     drawRings();
-    // Once, here, rather than on every event of the drag.
-    if (wasACard) rememberLayout();
+    // Once, here, rather than on every event of the drag. Deliberate: this is the gesture undo
+    // exists for, and the only way a position gets into the history.
+    if (wasACard) moveWasDeliberate();
   }
   return wasAMove;
 }
@@ -1543,6 +1624,7 @@ function nudge(pin, dx, dy) {
   drawTies();
   drawRings();
   markOffEdge();
+  moveWasDeliberate();
 }
 
 document.addEventListener('keydown', (event) => {
@@ -1860,7 +1942,10 @@ async function openBench(name) {
   if (!cards) return;
   clearBench();
   for (const one of cards) {
-    await pin({ kind: one.kind, id: one.id, label: one.label }, { at: one.at, quiet: true });
+    await pin(
+      { kind: one.kind, id: one.id, label: one.label },
+      { at: one.at, quiet: true, exact: true }
+    );
     const node = surface.querySelector(`.pin[data-name="${CSS.escape(`${one.kind}:${one.id}`)}"]`);
     if (!node) continue;
     node.classList.toggle('spent', !!one.spent);
@@ -2935,6 +3020,7 @@ function markOffEdge() {
 
 // One button, because a surface you can move things about on is a surface you can lose things on.
 document.querySelector('[data-tidy]')?.addEventListener('click', tidyUp);
+document.querySelector('[data-undo]')?.addEventListener('click', undoBench);
 
 window.addEventListener('resize', () => {
   markOffEdge();
@@ -3181,6 +3267,8 @@ function tidyUp() {
   applyView();
   drawTies();
   drawRings();
+  // "Разложенный по колонкам верстак" is one of the four things the undo was asked for by name.
+  moveWasDeliberate();
 }
 
 // Everything on screen at once, whatever size that takes. The counterpart to tidying: it moves
@@ -3476,6 +3564,15 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     document.getElementById('ask-text').focus();
   }
+  // Ctrl+Z, which is what somebody presses without being told. Not while typing: in a field it
+  // has to undo the typing, and a shortcut that ate a paragraph to move a card would be worse
+  // than not having one.
+  if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey) && !typing) {
+    event.preventDefault();
+    undoBench();
+    return;
+  }
+
   // Ctrl+L clears a terminal; here it folds the conversation up out of the way and leaves the
   // field where it was. Pressing it again brings the conversation back.
   if (event.key === 'l' && (event.ctrlKey || event.metaKey)) {

@@ -64,6 +64,11 @@
                 title="back to full size and centred">100%</button>
         <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
       </span>
+      {# One undo for everything that changes the surface — joining two cards, expanding a project
+         into forty, laying the bench out in columns, drawing a whole process. Without it nobody
+         tries any of them a second time (041-bench-undo.sql). #}
+      <button type="button" class="chip" data-undo
+              title="put the workbench back the way it was (Ctrl+Z)">undo</button>
       {# A surface you can move things about on is a surface you can lose things on. #}
       <button type="button" class="chip" data-tidy
               title="lay everything out again and centre the view">tidy up</button>

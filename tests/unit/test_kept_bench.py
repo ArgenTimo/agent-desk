@@ -332,7 +332,7 @@ def test_the_page_sends_its_bench_unreshaped() -> None:
 
     write = console[console.index("function rememberLayout(") :]
     write = write[: write.index("\n}\n")]
-    assert "JSON.stringify({ cards: benchState() })" in write, (
+    assert "cards: benchState()" in write, (
         "the bench is reshaped between being read and being sent, which is where the two shapes "
         "that disagreed came from"
     )
