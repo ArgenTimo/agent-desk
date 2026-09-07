@@ -55,6 +55,7 @@ agent_desk/
     process.py     a bench read as a process: the order, what feeds what, what a step is told
     allowed.py     what a step may do, and which of those this program actually enforces (036)
     telling.py     a drawing said in words, and words read back as a drawing
+    looking.py     the bench as the model is shown it: numbered cards, and the lines between
 
   dispatch.py    starting an agent: the argv, the briefing, the worktree name
   land.py        offering a branch to the project's own gate (adr/0008)
@@ -70,7 +71,7 @@ agent_desk/
 ```
 web  →  ideas  →  store  →  observe
  │        │                    ↑
- │        └──→  roles/ties/process/allowed/telling   (pure; import nothing but each other)
+ │        └──→  roles/ties/process/allowed/telling/looking  (pure; import nothing but each other)
  │
  ├──→  answer  ───────────────┘
  ├──→  tracker

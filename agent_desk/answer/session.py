@@ -343,11 +343,12 @@ def build_prompt(
     about: str = "",
     transcripts: Iterable[str] = (),
     notes: Iterable[str] = (),
+    workbench: Iterable[str] = (),
 ) -> str:
     """What a block is answered *from* (docs/04-threads-and-blocks.md).
 
-    The board, the thread so far, what the question was pointed at, and the question. Two
-    instructions matter as much as the evidence.
+    The board, the workbench, the thread so far, what the question was pointed at, and the
+    question. Two instructions matter as much as the evidence.
 
     The first is the document's: an answer built from what agents left on disk can be out of date
     or wrong about intent, and where it cannot tell it says so and names the session to look at.
@@ -377,6 +378,14 @@ def build_prompt(
 
     if about:
         lines += ["", "## What this question is about", about]
+
+    surface = list(workbench)
+    if surface:
+        # The cards themselves, numbered (agent_desk/looking.py). Before the thread and before the
+        # transcripts, because a question asked with cards in front of it is usually a question
+        # *about* those cards, and the thing a question is about should not be reached by scrolling
+        # past everything it is not about.
+        lines += ["", "## The workbench", *surface]
 
     previous = list(history)
     if previous:

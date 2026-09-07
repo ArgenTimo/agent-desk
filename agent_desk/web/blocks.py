@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch
+from agent_desk import dispatch, looking
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
@@ -400,6 +400,69 @@ def _targets(rows: Sequence[BoardRow], dropped: Sequence[str]) -> tuple[list[Boa
     return chosen, ", ".join(labels)
 
 
+async def on_the_bench(
+    store: Store, rows: Sequence[BoardRow], dropped: Sequence[str]
+) -> looking.Look:
+    """The cards in front of this question, as the model is shown them (agent_desk/looking.py).
+
+    Gathered here because this is where the store and the board both are; what to *do* with them is
+    `looking`'s, which is pure and therefore testable without either.
+
+    What is written on a card comes from the best source that kind has, and the order is not
+    arbitrary — it is most-specific first. An idea's own words beat any sentence written about it,
+    because a person wrote them and a pass did not. A session's description beats the headline it writes
+    about itself, which beats its last line: "rewriting the registry reader" says what it is, and
+    "npm ERR!" says what happened to scroll past a second before somebody asked.
+    A card with nothing behind it contributes its label and no invented sentence, which is what
+    "nobody has looked at this yet" is supposed to look like (CLAUDE.md, rule five).
+
+    A block card is left out. It is the question and its answer, already in the prompt twice over
+    as the thread's history — listing it again as a card would have the model reason about the
+    conversation as a thing on the bench.
+    """
+    names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
+    said = await store.cards_said(names)
+    chosen = await store.card_roles()
+    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    steps = {one.name: one.label for one in await store.step_cards()}
+    cards: list[looking.OnBench] = []
+    seen: set[str] = set()
+    for target in dropped:
+        kind, ident, _ = _card(target)
+        name = f"{kind}:{ident}"
+        if kind == "block" or not ident or name in seen:
+            continue
+        seen.add(name)
+        idea = ideas.get(name)
+        if idea is not None:
+            cards.append(
+                looking.OnBench(
+                    name=name,
+                    kind="idea",
+                    label=idea.summary,
+                    said=idea.text,
+                    role=chosen.get(name, ""),
+                )
+            )
+            continue
+        found, label = _rows_named(rows, kind, ident)
+        about = said.get(name, "")
+        if not about and found and found[0].tail is not None:
+            tail = found[0].tail
+            about = tail.title or (tail.last_entry.text if tail.last_entry else "")
+        cards.append(
+            looking.OnBench(
+                name=name,
+                kind=kind,
+                label=label or steps.get(name) or ident,
+                said=about,
+                role=chosen.get(name, ""),
+            )
+        )
+    ties_ = [(tie.from_name, tie.to_name, tie.says or tie.kind) for tie in await store.card_ties()]
+    return looking.look(cards, ties_)
+
+
 # How much of one transcript a card marked `full` is allowed to contribute. The tail itself is
 # already bounded when it is read (docs/03-session-observation.md); this bounds what three of them
 # together can do to one prompt.
@@ -516,6 +579,9 @@ async def submit(
     aimed, about = aim(rows, project, session, targets)
     deep = transcripts(rows, targets)
     written = await notes(store, targets)
+    # Read now rather than when the run reaches the prompt: this is what was in front of the person
+    # when they pressed send, and a bench read a minute later is a different bench.
+    surface = looking.as_lines(await on_the_bench(store, rows, targets))
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
@@ -528,6 +594,7 @@ async def submit(
             deep=deep,
             history=list(history),
             written=[*written, notes_.strip()] if notes_.strip() else written,
+            surface=surface,
             # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
             pointed_at=len(targets),
         ),
@@ -663,6 +730,7 @@ async def _work(
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
     written: Sequence[str] = (),
+    surface: Sequence[str] = (),
     pointed_at: int = 0,
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
@@ -698,6 +766,7 @@ async def _work(
             deep=deep,
             history=history,
             written=written,
+            surface=surface,
         )
     except asyncio.CancelledError:
         # Cancellation before `answer_block` is entered used to leave the block `queued` with no
@@ -1118,6 +1187,7 @@ async def _classify_and_answer(
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
     written: Sequence[str] = (),
+    surface: Sequence[str] = (),
 ) -> None:
     thread_id = block.thread_id
     if classify:
@@ -1154,6 +1224,7 @@ async def _classify_and_answer(
         about=about,
         transcripts=deep,
         notes=written,
+        workbench=surface,
     )
     await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
 
