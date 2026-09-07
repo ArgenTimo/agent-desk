@@ -3073,6 +3073,7 @@ function clearBench() {
   // back with the thread — this clears the surface, not the conversation.
   for (const node of surface?.querySelectorAll('.pin, .ring') || []) node.remove();
   placed = new Map();
+  forgetColumns();
   ownTies.length = 0;
   wentWith.clear();
   letGoOfAttached();
@@ -3084,6 +3085,9 @@ function clearBench() {
 
 function tidyUp() {
   placed = new Map();
+  // The columns are gone, so their headings go with them. A heading left floating over a tidied
+  // bench says something about the cards under it that stopped being true.
+  forgetColumns();
   // Down one column, then the next: with collision avoidance doing the vertical spacing, a column
   // of tall cards and a column of short ones both come out right.
   [...surface.querySelectorAll('.pin')].forEach((pin, index) => {
@@ -3121,6 +3125,189 @@ function fitEverything() {
   drawTies();
   drawRings();
 }
+
+/* --- where things go, asked for in words ------------------------------------------------------- */
+// "Справа помести все карточки идеи которых интересны простым пользователям, а слева те которые
+// более интересны разработчикам."
+//
+// The one kind of request whose answer is neither a card nor a paragraph: it changes what is
+// already lying here. So it applies rather than proposing — a written proposal listing thirty
+// cards is harder to read than the arrangement itself — and what makes that safe is the way back,
+// built here beside the way there. Nothing is written down anywhere but this browser.
+//
+// What goes to the model is what a folded card shows: its kind, its name, and the line under it.
+// The columns come back as numbers and the arithmetic is done here, because where a card sits is
+// a fact about this window and the server has no view on it.
+const COLUMNS = 'agent-desk:bench-columns';
+// Room above a column for its heading. A column without one is two piles nobody can name a minute
+// later, which is the difference between an arrangement and a shuffle.
+const HEAD_ROOM = 30;
+
+let columnHeads = [];
+// Where everything was before the last arrangement. One deep, on purpose: this is "undo the thing
+// I just tried", not a history — and without it nobody would risk trying a second wording, which
+// is the whole value of being able to ask in words.
+let layoutBefore = null;
+
+function recallColumns() {
+  try {
+    columnHeads = JSON.parse(localStorage.getItem(COLUMNS) || '[]');
+  } catch {
+    columnHeads = [];
+  }
+  drawColumnHeads();
+}
+
+function rememberColumns() {
+  try {
+    localStorage.setItem(COLUMNS, JSON.stringify(columnHeads));
+  } catch {
+    // A window that will not remember the headings still shows them until it is closed.
+  }
+}
+
+function drawColumnHeads() {
+  for (const node of surface?.querySelectorAll('.column-head') || []) node.remove();
+  for (const head of columnHeads) {
+    const node = document.createElement('div');
+    node.className = 'column-head';
+    node.style.left = `${head.x}px`;
+    node.style.top = `${head.y}px`;
+    node.style.width = `${head.width}px`;
+    node.textContent = head.title;
+    node.title = head.title;
+    surface?.appendChild(node);
+  }
+}
+
+function forgetColumns() {
+  columnHeads = [];
+  rememberColumns();
+  drawColumnHeads();
+}
+
+// What the model is told about one card: exactly what the card says about itself when it is
+// folded. Nothing is opened in order to arrange it, and nothing is read that is not already on
+// the screen in front of whoever asked.
+function sayWhatACardIs(pin) {
+  const said = (what) => (pin.querySelector(what)?.textContent || '').replace(/\s+/g, ' ').trim();
+  return [pin.dataset.kind || 'card', said('.pin-label'), said('.pin-hint')]
+    .filter(Boolean)
+    .join(' — ')
+    .slice(0, 200);
+}
+
+// Down each column in turn, with its heading above it. Collision avoidance is off: the columns are
+// where the answer put them, and a card nudged aside to avoid a neighbour would be in the wrong
+// one — which is the one thing an arrangement must never do.
+function layOutInColumns(columns) {
+  layoutBefore = new Map(placed);
+  columnHeads = [];
+  let x = 20;
+  for (const column of columns) {
+    if (!column.cards.length) continue;
+    // Measured rather than assumed: a block card is wider than a dropped one, and a column laid
+    // out on the constant would run underneath the next.
+    const width = Math.max(...column.cards.map((pin) => pin.offsetWidth || CARD_WIDTH));
+    let y = 20 + HEAD_ROOM;
+    for (const pin of column.cards) {
+      place(pin, { x, y }, { avoid: false });
+      y += (pin.offsetHeight || 120) + GAP;
+    }
+    columnHeads.push({ title: column.title, x, y: 20, width });
+    x += width + GAP * 2;
+  }
+  rememberColumns();
+  drawColumnHeads();
+  view.x = 0;
+  view.y = 0;
+  applyView();
+  drawTies();
+  drawRings();
+}
+
+function putItBack() {
+  if (!layoutBefore) return;
+  // Merged rather than replaced: a card that arrived *after* the arrangement — an answer landing,
+  // a card somebody dropped in — is not in the snapshot, and replacing the map outright would
+  // forget where it is and send it to the corner on its next touch.
+  placed = new Map([...placed, ...layoutBefore]);
+  layoutBefore = null;
+  for (const pin of surface?.querySelectorAll('.pin') || []) {
+    const at = placed.get(cardName(pin));
+    if (at) place(pin, at, { avoid: false, remember: false });
+  }
+  rememberLayout();
+  forgetColumns();
+  drawTies();
+  drawRings();
+}
+
+async function layOutByRequest() {
+  const panel = document.getElementById('lay-panel');
+  const field = panel?.querySelector('.words-in');
+  const shown = panel?.querySelector('.lay-said');
+  if (!field || !shown) return;
+  const cards = onBench();
+  if (!cards.length) {
+    shown.textContent = 'There is nothing on the workbench to lay out.';
+    return;
+  }
+  shown.textContent = 'thinking…';
+  try {
+    const answer = await fetch('/workbench/columns', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({
+        said: field.value,
+        cards: cards.map(sayWhatACardIs).join('\n'),
+      }),
+    });
+    const said = await answer.json();
+    if (!said.laid) {
+      shown.textContent = said.why || 'Could not read that.';
+      return;
+    }
+    const columns = said.columns.map((one) => ({
+      title: one.title,
+      cards: one.cards.map((number) => cards[number - 1]).filter(Boolean),
+    }));
+    // Cards the request said nothing about get a column of their own rather than being left where
+    // they were, underneath the new ones. Named for what it is: nobody placed these.
+    const left = (said.left || []).map((number) => cards[number - 1]).filter(Boolean);
+    if (left.length) columns.push({ title: 'not placed', cards: left });
+    layOutInColumns(columns);
+    shown.textContent = columns.map((one) => `${one.title} — ${one.cards.length}`).join('\n');
+    panel.querySelector('[data-lay-back]').hidden = false;
+  } catch {
+    shown.textContent = 'Could not read that.';
+  }
+}
+
+document.querySelector('[data-lay]')?.addEventListener('click', () => {
+  const panel = document.getElementById('lay-panel');
+  if (!panel) return;
+  panel.hidden = false;
+  panel.querySelector('.words-in')?.focus();
+});
+
+document.getElementById('lay-panel')?.addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.dataset.layGo !== undefined) return layOutByRequest();
+  if (button.dataset.layBack !== undefined) {
+    putItBack();
+    button.hidden = true;
+    return;
+  }
+  if (button.dataset.layOff !== undefined) document.getElementById('lay-panel').hidden = true;
+});
+
+// What the columns were called, back with the positions they belong to. Here rather than beside
+// `recallLayout()` above, and that is not tidiness: `columnHeads` is a `let` declared in this
+// section, and calling this before the declaration has run throws on the way past — which on a
+// top-level script means everything after it never runs at all.
+recallColumns();
 
 /* --- the conversation, as cards on the surface ------------------------------------------------- */
 // "Есть только верстак и поле ввода." A question and its answer are cards like everything else,

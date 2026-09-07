@@ -67,6 +67,10 @@
       {# A surface you can move things about on is a surface you can lose things on. #}
       <button type="button" class="chip" data-tidy
               title="lay everything out again and centre the view">tidy up</button>
+      {# And the other way of laying it out: say where things should go and they go there.
+         "Справа помести эти, слева те." #}
+      <button type="button" class="chip" data-lay
+              title="say where things should go — right these, left those">lay out…</button>
       <button type="button" class="chip" data-map
               title="a small map of the whole workbench">map</button>
       {# The bench read as a process: what order it runs in, what each step would be told, and
@@ -122,6 +126,24 @@
           <button type="button" data-keep-sketch hidden>Put it on the workbench</button>
         </div>
         <pre class="words-offer"></pre>
+      </aside>
+
+      {# Where things go, asked for in words. Unlike the sketch above it, this one *applies*: it
+         moves what is already here rather than making anything, a proposal listing thirty cards
+         would be harder to read than the arrangement itself, and the way back is the button
+         beside it (docs/06-console.md). #}
+      <aside id="lay-panel" class="words-panel lay-panel" hidden aria-label="where things go">
+        <header>where things go
+          <span class="spacer"></span>
+          <button type="button" data-lay-off aria-label="close">×</button>
+        </header>
+        <textarea class="words-in" rows="3"
+                  placeholder="On the right the ones a developer would care about, on the left the ones an ordinary user would."></textarea>
+        <div class="words-do">
+          <button type="button" data-lay-go>Lay them out</button>
+          <button type="button" data-lay-back hidden>Put it back</button>
+        </div>
+        <pre class="words-offer lay-said"></pre>
       </aside>
 
       <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">

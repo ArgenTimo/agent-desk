@@ -2549,6 +2549,27 @@ button.go:hover, button.yes:hover {
 .step-name { display: flex; gap: 6px; margin: 6px 0 0; }
 .step-name input { flex: 1; min-width: 0; font: inherit; font-size: var(--t-sm); }
 
+/* --- where things go, asked for in words --------------------------------------------------------- */
+/* The same panel as the one above it, on the other side, because the two are often open together:
+   the process in words on the right, where things should go on the left. */
+.lay-panel { right: auto; left: 10px; }
+/* What a column is called, over the top of it. Quiet — it is a label on the surface and not a
+   card — and it does not take the pointer, because the thing under it is what somebody is
+   reaching for. An arrangement without headings is two piles nobody can name a minute later. */
+.column-head {
+  position: absolute;
+  z-index: 1;
+  padding: 0 2px 3px;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 /* --- a card you can read while it is folded ------------------------------------------------------ */
 /* "Во многих блоках не видно названия и текста в свёрнутом виде, и очень тяжело понять что они из
    себя представляют."

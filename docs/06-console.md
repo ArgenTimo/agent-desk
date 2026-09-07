@@ -243,3 +243,43 @@ snapping, no undo. What it buys is that the whole surface is one file somebody c
 
 Two coordinate systems, and keeping them apart is most of the work: a card's position is in
 *surface* space and does not change when you pan or zoom, and the surface carries one transform.
+
+### Where things go, asked for in words
+
+*"Справа помести все карточки идеи которых интересны простым пользователям, а слева те которые
+более интересны разработчикам."*
+
+**lay out…** takes a sentence and moves what is already on the bench into columns, each headed in
+the words the request was asked in. It is the only request in this console whose answer is neither
+a new card nor a paragraph: nothing is created, nothing is written down, and nothing is started.
+
+That is also why it is the one place a guess is applied rather than proposed. Everywhere else a
+machine proposes and a person disposes, because what follows the press is a card in the store, an
+agent in a worktree, or a message in somebody's context. Here what follows is thirty cards in
+different places on one person's screen, and a written proposal listing thirty of them would be
+harder to read than the arrangement itself. What makes that safe is **put it back**, which
+restores the layout as it was before the request — built in the same afternoon as the arrangement,
+because without it nobody tries a second wording, and trying wordings is the whole of it.
+
+Four rules, and each of them is a thing that would otherwise go quietly wrong:
+
+- **A column has a heading or it is not a column.** Two piles nobody can name a minute later are a
+  shuffle. A column the model gave no name is dropped rather than named here.
+- **Nothing is opened to arrange it.** What travels to the model is what the folded card already
+  shows: its kind, its name and the line under it.
+- **A reply that is a paragraph about an arrangement arranges nothing.** A line whose right-hand
+  side is not only card numbers is thrown away unread, and a reply where nothing parses moves
+  nothing at all — a bench half rearranged reads as an answer and is not one.
+- **Cards the request said nothing about get a column called `not placed`.** Left where they were,
+  they would end up underneath the new columns; filed into one of them, they would be a confident
+  lie about what somebody asked.
+
+The columns come back from the model as *numbers*, in the order the page sent its cards. Where a
+card sits is a fact about a browser, so the arithmetic and the headings live on the page, beside
+the layout it already remembers ([`agent_desk/placing.py`](../agent_desk/placing.py)).
+
+**Typing that sentence into the input field instead does not work yet**, and that is a separate
+piece of work: the classifier knows four kinds of line — a question, an idea, an instruction to an
+agent, an instruction to this console — and "arrange what is in front of me" is a fifth it has not
+been taught. It is in the pool, with the reason a wrong guess here is cheap and a wrong guess about
+"make me a project" is not.

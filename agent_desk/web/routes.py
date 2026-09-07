@@ -43,6 +43,7 @@ from agent_desk import (
     dispatch,
     land,
     peer,
+    placing,
     process,
     roles,
     telling,
@@ -2013,6 +2014,56 @@ async def sketch_from_words(request: Request) -> JSONResponse:
             status_code=422,
         )
     return JSONResponse({"read": True, "steps": steps, "lines": lines})
+
+
+# How many cards one arrangement may be asked about. Not a guard against cost — the whole bench is
+# what somebody means by "these" — but against a prompt so long the request it ends with is the
+# two hundredth thing the model read.
+MOST_CARDS = 120
+
+
+@router.post("/workbench/columns", response_class=JSONResponse)
+async def lay_out_in_columns(request: Request) -> JSONResponse:
+    """ "Справа помести эти, слева те." Which card belongs in which column, and what to call them.
+
+    The columns come back as *numbers*, in the order the page sent them, and the page does the
+    moving: where a card sits is a fact about a browser and this program has no view on it. So
+    nothing here is written down and nothing is remembered — the whole of it is one model call
+    over the cards' own headings, and the way back lives on the page beside the way there.
+    """
+    form = await _form(request)
+    said = form.get("said", "").strip()
+    # One card per line, exactly as the page has them folded: kind, name, and the line under it.
+    cards = [one.strip()[:200] for one in form.get("cards", "").split("\n") if one.strip()][
+        :MOST_CARDS
+    ]
+    if not said or not cards:
+        return JSONResponse({"laid": False, "why": "there is nothing to lay out"}, status_code=400)
+    try:
+        reply = "".join(
+            [
+                chunk
+                async for chunk in answer_session.stream_answer(placing.columns_prompt(said, cards))
+            ]
+        )
+    except (answer_session.AnswerFailed, OSError) as gone:
+        return JSONResponse({"laid": False, "why": str(gone)[:200]}, status_code=502)
+    columns, left = placing.read_columns(reply, len(cards))
+    if not columns:
+        # Nothing moves. An arrangement half-read is worse than none: the cards that did parse
+        # would be stacked into a column and the rest left where they were, which reads as an
+        # answer and is not one.
+        return JSONResponse(
+            {"laid": False, "why": "it did not come back with an arrangement this could read"},
+            status_code=422,
+        )
+    return JSONResponse(
+        {
+            "laid": True,
+            "columns": [{"title": one.title, "cards": one.cards} for one in columns],
+            "left": left,
+        }
+    )
 
 
 @router.post("/workbench/sketch/keep", response_class=JSONResponse)
