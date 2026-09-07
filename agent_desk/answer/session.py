@@ -267,10 +267,24 @@ class Tally:
         A sentence rather than a boolean, because what somebody needs at this moment is the number,
         the ceiling and the name of the thing that raises it — "the console stops and *says*", not
         the console stops.
+
+        **Counting money must never be able to fail a question.** A ceiling is a fuse, not part of
+        the path an answer travels: if the tally cannot be read — a locked database, a store closed
+        under a shutdown, a disk that has gone — then the honest thing is to let the question
+        through and say so in the log. Raising instead left the block `running` for ever, because
+        this is called from inside the run and nothing above it catches anything but `AnswerFailed`.
+        That is exactly the state the crash rule exists to prevent, and it was reachable from a
+        counter.
         """
         if self._store is None or settings.daily_usd <= 0:
             return ""
-        spent = await self._store.spent_today()
+        try:
+            spent = await self._store.spent_today()
+        # Broad on purpose: a fuse that blows the circuit is not a fuse. Whatever the store
+        # failed with, the question goes through.
+        except Exception as exc:
+            log.warning("spend.unreadable", why=str(exc)[:120])
+            return ""
         if spent < settings.daily_usd:
             return ""
         return (
@@ -279,8 +293,14 @@ class Tally:
         )
 
     async def note(self, usd: float) -> None:
-        if self._store is not None:
+        """Record what a run cost. Same rule: an answer that arrived is not thrown away because
+        the note about what it cost could not be written."""
+        if self._store is None:
+            return
+        try:
             await self._store.note_spend(usd)
+        except Exception as exc:
+            log.warning("spend.unrecorded", usd=usd, why=str(exc)[:120])
 
 
 tally = Tally()

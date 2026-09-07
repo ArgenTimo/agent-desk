@@ -310,3 +310,50 @@ async def test_a_board_rendered_without_the_number_shows_no_number(desk: Store) 
     from agent_desk.web import routes
 
     assert "today" not in routes.render_board()
+
+
+# --- and it cannot take an answer down with it ---------------------------------------------------
+@pytest.mark.unit
+async def test_a_tally_that_cannot_be_read_lets_the_question_through(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A ceiling is a fuse, not part of the path an answer travels.
+
+    This is checked from inside the run, where nothing above it catches anything but `AnswerFailed`
+    — so an exception here left the block `running` for ever, which is exactly the state the crash
+    rule exists to prevent, reachable from a counter. Found as a test that passed alone and failed
+    in the suite, with a store closed under it.
+    """
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    await store.close()
+    session.tally.attach(store)
+    try:
+        assert await session.tally.stop_here() == ""
+        await session.tally.note(1.0)
+    finally:
+        session.tally.attach(None)
+
+
+@pytest.mark.unit
+async def test_a_run_still_answers_when_the_tally_is_broken(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of the rule above, end to end: the answer arrives."""
+    fake = tmp_path / "claude"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n\'\n'
+        'printf \'{"type":"result","total_cost_usd":0.5,"result":"an answer"}\\n\'\n'
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(fake), daily_usd=25.0))
+
+    broken = Store(tmp_path / "gone.db")
+    await broken.open()
+    await broken.close()
+    session.tally.attach(broken)
+    try:
+        assert [c async for c in session.stream_answer("q")] == ["an answer"]
+    finally:
+        session.tally.attach(None)
