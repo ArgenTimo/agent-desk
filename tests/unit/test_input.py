@@ -212,12 +212,19 @@ async def test_the_console_stops_even_with_questions_in_the_air(
     project already fixed once, wearing a different coat.
     """
     monkeypatch.setattr(routes, "store", Store(tmp_path / "lifespan.db"))
-    started = time.monotonic()
+    closing = 0.0
     async with app.router.lifespan_context(app):
         block = await blocks.submit(routes.store, "PLEASE_HANG during shutdown", [])
         await until(lambda: _running(routes.store, block.id), "the run is in flight")
-    elapsed = time.monotonic() - started
+        # The clock starts here, not at the top. Timed from the beginning, this was measuring how
+        # long a subprocess took to start as well as how long the console took to stop — and on a
+        # busy machine the first of those spent the whole budget, which made a test about shutdown
+        # fail because of a fork.
+        closing = time.monotonic()
+    elapsed = time.monotonic() - closing
 
+    # The run hangs for thirty seconds. Five is not a performance budget, it is the gap between
+    # "ended it" and "waited for it".
     assert elapsed < 5
     assert len(blocks.runs) == 0
 
@@ -449,7 +456,12 @@ async def test_a_block_never_has_two_runs(desk: Store, fake_claude: pathlib.Path
     that was no longer there — two `claude -p` processes racing to write one row.
     """
     block = await blocks.submit(desk, "PLEASE_HANG one", [])
-    await until(lambda: block.id in blocks.runs._by_block, "the first run has started")
+    # Running, not merely *present in the map*. A run appears there before it has finished its
+    # first write, and retrying in that window cancels a task in the middle of a store write —
+    # which leaves the connection mid-statement and fails an unrelated question seconds later.
+    # That is a real fragility and it is written down as its own idea; this test is about two runs
+    # never owning one block, so it waits for the state that means the first one has settled in.
+    await until(lambda: _running(desk, block.id), "the first run has started")
     first = blocks.runs._by_block[block.id]
 
     stored = await desk.block(block.id)

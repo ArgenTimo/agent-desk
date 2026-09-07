@@ -3334,13 +3334,87 @@ function foldConversation() {
 // about anything else. Pick one card, then the other.
 let joiningFrom = null;
 
+// The lines somebody drew to or from this card, **and can see**.
+//
+// Two filters and both are load-bearing. Only lines somebody drew, because the ones this console
+// works out for itself — which project a session is in, what a question went out with — are
+// readings of facts, and rubbing one out would be rubbing out the fact.
+//
+// And only lines with both ends on this bench. A line is a statement about two cards rather than
+// about a surface, so `card_tie` is not scoped to a chat — measured in a browser, a card with two
+// lines drawn on this bench offered to rub out three, the third being a line to a card on another
+// chat's workbench. Offering to remove something nobody can see is the same mistake the undo had,
+// and it is worse here because it is presented as a count somebody is reading.
+function linesOf(name) {
+  return drawnTies.filter(
+    (line) =>
+      (line.from === name || line.to === name) && showing(line.from) && showing(line.to)
+  );
+}
+
+async function rubOutLinesOf(name) {
+  const going = linesOf(name);
+  for (const line of going) await rubOutLine(line.id);
+  say(`Rubbed out ${going.length} line${going.length === 1 ? '' : 's'}.`);
+}
+
+// A collection, laid back out into the cards it holds.
+//
+// A card that is already on the bench is left where it is rather than added a second time, and the
+// count says how many actually came back — "разложить обратно" over a bench that still has three
+// of the five is two cards, and a message claiming five would be describing a different bench.
+async function layBackOut(card) {
+  const rows = [...card.querySelectorAll('.collected li[data-kind]')];
+  let back = 0;
+  for (const row of rows) {
+    const name = `${row.dataset.kind}:${row.dataset.id}`;
+    if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) continue;
+    await pin(
+      { kind: row.dataset.kind, id: row.dataset.id, label: row.dataset.label },
+      { quiet: true, came: 'laid back out of a group' }
+    );
+    back += 1;
+  }
+  placed.delete(cardName(card));
+  card.remove();
+  syncTargets();
+  drawTies();
+  const already = rows.length - back;
+  say(
+    `Laid out ${back} card${back === 1 ? '' : 's'}` +
+      (already ? `; ${already} ${already === 1 ? 'was' : 'were'} already on the workbench.` : '.')
+  );
+}
+
 function cardMenuFor(pin) {
   const name = pin.dataset.name;
+  if (pin.classList.contains('collection')) {
+    return [
+      { what: 'lay it back out', act: () => layBackOut(pin) },
+      { what: 'a line', act: () => setView(pin, 'hint') },
+      { what: 'everything', act: () => setView(pin, 'full') },
+      {
+        what: 'take it off the workbench',
+        act: () => {
+          placed.delete(cardName(pin));
+          pin.remove();
+          syncTargets();
+          drawTies();
+        },
+      },
+    ];
+  }
   const joining = joiningFrom && joiningFrom !== name;
   return [
     joining
       ? { what: `join to “${labelOf(joiningFrom)}”`, act: () => finishJoin(name) }
       : { what: 'join this to another card…', act: () => startJoin(name) },
+    // "Линии стираются по одной. Когда карточка ошиблась ролью и обросла пятью неправильными
+    // связями, это пять нажатий и меню каждый раз." Offered only when there is more than one, so
+    // the menu does not carry a second way to do what the line's own menu already does.
+    ...(linesOf(name).length > 1
+      ? [{ what: `rub out all ${linesOf(name).length} of its lines`, act: () => rubOutLinesOf(name) }]
+      : []),
     { what: 'a line', act: () => setView(pin, 'hint') },
     { what: 'what it is', act: () => setView(pin, 'metadata') },
     { what: 'everything', act: () => setView(pin, 'full') },
@@ -4312,6 +4386,14 @@ function collect(ring) {
     row.querySelector('.collected-kind').textContent = copy.dataset.kind || '';
     row.querySelector('.collected-name').textContent =
       copy.querySelector('.pin-label')?.textContent?.trim() || copy.dataset.id || '';
+    // What it takes to put this card back. "Группа, ушедшая в запрос, сворачивается в одну
+    // карточку — и разложить её обратно нельзя. А это ровно то, что захочется сделать, чтобы
+    // повторить вопрос с одной изменённой карточкой." The row was a name and a kind for reading;
+    // these three are the same three things `pin` needs, so the list is now the record *and* the
+    // way back rather than a description of one.
+    row.dataset.kind = copy.dataset.kind || '';
+    row.dataset.id = copy.dataset.id || '';
+    row.dataset.label = copy.querySelector('.pin-label')?.textContent?.trim() || '';
     list.appendChild(row);
     placed.delete(copy.dataset.name);
     copy.remove();

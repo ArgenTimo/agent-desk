@@ -149,10 +149,10 @@ def test_every_way_of_putting_a_card_on_the_bench_says_which_one_it_was() -> Non
     console = _code()
 
     said = console.count("came: '") + console.count("came: `")
-    assert said == 11, (
-        f"{said} places name where a card came from; there are ten ways in plus the one that puts "
-        "a stored bench back, and a new one that says nothing renders a card with no answer to "
-        "'why is this here'"
+    assert said == 12, (
+        f"{said} places name where a card came from; there are eleven ways in — the tenth is a "
+        "collection laid back out — plus the one that puts a stored bench back, and a new one "
+        "that says nothing renders a card with no answer to 'why is this here'"
     )
 
 
