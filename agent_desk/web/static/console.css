@@ -2434,3 +2434,87 @@ button.go:hover, button.yes:hover {
 }
 .run-bar button:hover { color: var(--fg); border-color: var(--focus); }
 .chip.go { border-color: var(--focus); color: var(--focus); }
+
+/* --- this process in words ---------------------------------------------------------------------- */
+/* Two directions, and they are shown differently on purpose: the description is computed and has
+   one right answer, the sketch is a guess. A proposal that looked like a fact would be a machine
+   deciding what somebody's process is. */
+.words-panel {
+  position: absolute;
+  z-index: 32;
+  right: 10px;
+  top: 10px;
+  width: min(420px, 54%);
+  max-height: 82%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--fg) 18%, transparent);
+  overflow: hidden;
+}
+.words-panel header {
+  display: flex;
+  align-items: baseline;
+  padding: 6px 10px 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.words-panel header.second { border-top: 1px solid var(--line); }
+.words-panel header button {
+  border: none;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.words-panel header button:hover { color: var(--flag); }
+.words-said {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  color: var(--fg);
+  font-family: var(--prose);
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+}
+.words-in {
+  margin: 8px 10px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 7px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--t-sm);
+  resize: vertical;
+}
+.words-in:focus { outline: none; border-color: var(--focus); }
+.words-do { display: flex; gap: 6px; padding: 6px 10px; }
+.words-do button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2px 9px;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.words-do button:hover { color: var(--fg); border-color: var(--focus); }
+/* The proposal reads as a proposal: dimmer than the description above it, and behind a second
+   press before anything of it exists. */
+.words-offer {
+  margin: 0;
+  padding: 0 10px 10px;
+  max-height: 14rem;
+  overflow: auto;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+  white-space: pre-wrap;
+}
+.step-name { display: flex; gap: 6px; margin: 6px 0 0; }
+.step-name input { flex: 1; min-width: 0; font: inherit; font-size: var(--t-sm); }

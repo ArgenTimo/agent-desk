@@ -1,0 +1,26 @@
+{# A card that is only a card (038-steps-and-templates.sql).
+
+   Everything else on the workbench stands for something that already exists — a session, an idea,
+   a blocker, a folder. This is the one you draw before the thing exists, which is what describing
+   a process requires: "описываем процесс как в лего".
+
+   It is deliberately almost empty. What a step *is* lives in its role and the fields that role
+   asks for, and both of those are drawn onto every card by the console itself — so a body full of
+   its own fields here would be the same questions asked twice. #}
+{% if not card %}
+<p class="empty small">that step is not here any more</p>
+{% else %}
+<div class="card-detail" data-detail="plain">
+  <div class="plain-only">
+    <p class="card-said">A step in a process. What it is and what it does are on the card itself.</p>
+    <form class="step-name" method="post" action="/cards/step/name"
+          hx-post="/cards/step/name" hx-swap="none">
+      <input type="hidden" name="id" value="{{ card.id }}">
+      <label class="visually-hidden" for="name-{{ card.id }}">what to call this step</label>
+      <input id="name-{{ card.id }}" name="label" value="{{ card.label }}"
+             placeholder="what to call it">
+      <button type="submit">rename</button>
+    </form>
+  </div>
+</div>
+{% endif %}

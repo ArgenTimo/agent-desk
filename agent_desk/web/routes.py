@@ -36,8 +36,20 @@ from fastapi.responses import (
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import allowed, connectors, dispatch, land, peer, process, roles, ties, tracker
+from agent_desk import (
+    allowed,
+    connectors,
+    dispatch,
+    land,
+    peer,
+    process,
+    roles,
+    telling,
+    ties,
+    tracker,
+)
 from agent_desk import secrets as kept
+from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
 from agent_desk.observe import attach, folder, registry, transcript
@@ -61,6 +73,8 @@ from agent_desk.store.repo import (
     ProjectLink,
     Store,
     Task,
+    TemplateLine,
+    TemplateStep,
     Thread,
 )
 from agent_desk.web import autostart, blockers, engine, plans
@@ -1110,6 +1124,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             ),
             status_code=200 if link else 404,
         )
+    if kind == "step":
+        # A card that is only a card. What it *is* lives in its role and that role's fields, both
+        # of which the console draws onto every card — so this is almost empty on purpose.
+        one = await store.step_card(id)
+        return HTMLResponse(
+            env.get_template("_card_step.html").render(card=one),
+            status_code=200 if one else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
@@ -1652,6 +1674,7 @@ async def _bench_cards(names: Sequence[str]) -> list[process.Card]:
     said = await store.card_fields()
     made = await store.cards_made()
     labels = {f"idea:{one.id}": one.summary for one in await store.ideas(limit=400)}
+    labels |= {one.name: one.label for one in await store.step_cards()}
     cards = []
     for name in names:
         kind = name.split(":", 1)[0]
@@ -1802,6 +1825,208 @@ async def workbench_runs() -> JSONResponse:
             }
         )
     return JSONResponse({"runs": found})
+
+
+@router.post("/cards/step", response_class=JSONResponse)
+async def add_step_card(request: Request) -> JSONResponse:
+    """A card that is only a card (038-steps-and-templates.sql).
+
+    Everything else on the workbench stands for something that already exists. This is the one you
+    draw before the thing exists, which is what describing a process requires.
+    """
+    form = await _form(request)
+    made = await store.add_step_card(form.get("label", "").strip() or "a step")
+    if form.get("role", "") and roles.is_a_role(form["role"]):
+        await store.set_card_role(made.name, form["role"])
+    return JSONResponse({"id": made.id, "name": made.name, "label": made.label})
+
+
+@router.post("/cards/step/name", response_class=HTMLResponse)
+async def name_step_card(request: Request) -> Response:
+    """What to call a step. The one thing a step card holds that is its own."""
+    form = await _form(request)
+    card_id = form.get("id", "").strip()
+    label = form.get("label", "").strip()
+    if card_id and label:
+        await store.name_step_card(card_id, label)
+    return HTMLResponse("", status_code=204)
+
+
+@router.post("/workbench/template", response_class=JSONResponse)
+async def keep_template(request: Request) -> JSONResponse:
+    """Save the drawing on somebody's workbench under a name.
+
+    A shape rather than a copy: the roles, what each step says, what each may do, and the lines —
+    with the steps numbered, because the cards a template makes are new cards and cannot be the
+    ones it was saved from.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    names = [one for one in form.get("cards", "").split(",") if one]
+    if not name or not names:
+        return JSONResponse({"kept": False, "why": "it needs a name and some cards"}, 400)
+    cards = await _bench_cards(names)
+    here = {one: number for number, one in enumerate(names, start=1)}
+    leaves = await store.card_leaves()
+    steps = [
+        TemplateStep(
+            ord=here[card.name],
+            role=card.role,
+            label=card.label,
+            fields=dict(card.said),
+            leave=tuple(leaves.get(card.name, ())),
+        )
+        for card in cards
+    ]
+    lines = [
+        TemplateLine(
+            from_ord=here[tie.from_name],
+            to_ord=here[tie.to_name],
+            kind=tie.kind,
+            says=tie.says,
+        )
+        for tie in await store.card_ties()
+        if tie.from_name in here and tie.to_name in here
+    ]
+    await store.keep_template(name=name, steps=steps, lines=lines)
+    return JSONResponse({"kept": True, "steps": len(steps), "lines": len(lines)})
+
+
+@router.get("/workbench/templates", response_class=JSONResponse)
+async def list_templates() -> JSONResponse:
+    return JSONResponse(
+        {
+            "templates": [
+                {"name": one.name, "steps": len(one.steps), "lines": len(one.lines)}
+                for one in await store.templates()
+            ]
+        }
+    )
+
+
+@router.post("/workbench/template/use", response_class=JSONResponse)
+async def use_template(request: Request) -> JSONResponse:
+    """Make a fresh set of cards in the shape of a saved drawing.
+
+    New cards every time, which is the whole point: *"процесс, который собрали один раз, должен
+    запускаться второй раз с другими входами"*. A template that put the same cards back would be
+    a bookmark rather than a template — the second run would overwrite what the first produced.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    made = next((one for one in await store.templates() if one.name == name), None)
+    if made is None:
+        return JSONResponse({"made": False, "why": "there is no template by that name"}, 404)
+    fresh: dict[int, str] = {}
+    for step in made.steps:
+        card = await store.add_step_card(step.label)
+        fresh[step.ord] = card.name
+        await store.set_card_role(card.name, step.role)
+        for asked, value in step.fields.items():
+            # Only what this role actually asks. A template saved before a role learned or lost a
+            # field must not write one that no longer exists — a card that looks filled in and
+            # reads as empty to everything else.
+            if roles.is_a_field(step.role, asked):
+                await store.set_card_field(card.name, asked, value)
+        if step.leave:
+            await store.set_card_leave(card.name, list(step.leave))
+    for line in made.lines:
+        if line.from_ord in fresh and line.to_ord in fresh:
+            await store.tie_cards(
+                from_name=fresh[line.from_ord],
+                to_name=fresh[line.to_ord],
+                kind=line.kind,
+                says=line.says,
+            )
+    return JSONResponse({"made": True, "cards": [{"name": one} for one in fresh.values()]})
+
+
+@router.post("/workbench/template/drop", response_class=JSONResponse)
+async def drop_template(request: Request) -> JSONResponse:
+    form = await _form(request)
+    await store.drop_template(form.get("name", "").strip())
+    return JSONResponse({"gone": True})
+
+
+@router.get("/workbench/words", response_class=JSONResponse)
+async def workbench_words(cards: str = "") -> JSONResponse:
+    """The drawing said in words somebody can read without opening it.
+
+    No model call: the order comes from the lines and the words from the fields, so this has one
+    right answer. A description that came back differently on two afternoons would be no use for
+    the thing it is for — handing work to somebody who was not in the room.
+    """
+    names = [one for one in cards.split(",") if one]
+    on_bench = await _bench_cards(names)
+    here = set(names)
+    lines = [
+        process.Line(from_name=tie.from_name, to_name=tie.to_name, kind=tie.kind, says=tie.says)
+        for tie in await store.card_ties()
+        if tie.from_name in here and tie.to_name in here
+    ]
+    return JSONResponse({"words": telling.as_words(on_bench, lines)})
+
+
+@router.post("/workbench/sketch", response_class=JSONResponse)
+async def sketch_from_words(request: Request) -> JSONResponse:
+    """Read a description and *propose* a drawing. Nothing is put on the bench here.
+
+    A guess, so it is offered rather than applied — the same rule the meeting intake and the whole
+    idea pool follow: a machine may propose, a person disposes.
+    """
+    form = await _form(request)
+    said = form.get("words", "").strip()
+    if not said:
+        return JSONResponse({"read": False, "why": "there is nothing to read"}, status_code=400)
+    try:
+        reply = "".join(
+            [chunk async for chunk in answer_session.stream_answer(telling.shape_prompt(said))]
+        )
+    except (answer_session.AnswerFailed, OSError) as gone:
+        return JSONResponse({"read": False, "why": str(gone)[:200]}, status_code=502)
+    steps, lines = telling.read_shape(reply)
+    if not steps:
+        return JSONResponse(
+            {"read": False, "why": "it did not come back with a shape this could read"},
+            status_code=422,
+        )
+    return JSONResponse({"read": True, "steps": steps, "lines": lines})
+
+
+@router.post("/workbench/sketch/keep", response_class=JSONResponse)
+async def keep_sketch(request: Request) -> JSONResponse:
+    """Put a proposed drawing on the bench, once somebody has said so.
+
+    Split from the proposal deliberately: the model call and the write are two acts, and a person
+    presses between them.
+    """
+    form = await _form(request)
+    made: dict[int, str] = {}
+    for number, raw in enumerate(form.get("steps", "").split("\n"), start=1):
+        role, _, rest = raw.partition("|")
+        label, _, words = rest.partition("|")
+        role = role.strip()
+        if not roles.is_a_role(role):
+            continue
+        card = await store.add_step_card(label.strip() or "a step")
+        made[number] = card.name
+        await store.set_card_role(card.name, role)
+        field = telling.words_for(role)
+        if field and words.strip():
+            await store.set_card_field(card.name, field, words.strip())
+    for raw in form.get("lines", "").split("\n"):
+        bits = raw.split("|")
+        if len(bits) < 3:
+            continue
+        one, other, kind = bits[0].strip(), bits[1].strip(), bits[2].strip()
+        says = bits[3].strip() if len(bits) > 3 else ""
+        if not one.isdigit() or not other.isdigit() or not ties.is_a_kind(kind):
+            continue
+        if int(one) in made and int(other) in made:
+            await store.tie_cards(
+                from_name=made[int(one)], to_name=made[int(other)], kind=kind, says=says
+            )
+    return JSONResponse({"made": True, "cards": [{"name": one} for one in made.values()]})
 
 
 @router.get("/workbench", response_class=HTMLResponse)

@@ -140,6 +140,10 @@ ROLES: dict[str, Role] = {
 # and has not been done. A collection is the one that is obviously a Result: it is what a question
 # produced.
 NATURALLY = {
+    # A card somebody drew in order to describe a process is a step until it is told it is
+    # something else. Defaulting it to Object would mean every box drawn by hand, and every box a
+    # template makes, started as the one role that does not do anything.
+    "step": "action",
     "session": "action",
     "agent": "action",
     "task": "action",

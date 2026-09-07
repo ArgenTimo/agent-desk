@@ -2400,6 +2400,195 @@ document.querySelector('[data-run]')?.addEventListener('click', async () => {
 readRuns();
 setInterval(readRuns, 20000);
 
+
+/* --- a step of your own, and drawings kept to be used again ------------------------------------- */
+// "Описываем процесс как в лего." Everything else on this bench stands for something that already
+// exists; a step card is the one you draw before the thing exists, which is what describing a
+// process requires.
+async function addStep(role = 'action') {
+  const label = (prompt('What is this step?', '') || '').trim();
+  if (!label) return;
+  try {
+    const answer = await fetch('/cards/step', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ label, role }),
+    });
+    const said = await answer.json();
+    await pin({ kind: 'step', id: said.id, label: said.label }, { quiet: true });
+    await readRoles();
+  } catch {
+    say('Could not add a step.');
+  }
+}
+
+// "Процесс, который собрали один раз, должен запускаться второй раз с другими входами."
+async function keepTemplate() {
+  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  if (!names.length) return say('There is nothing to save.');
+  const name = (prompt('Save this process as:', '') || '').trim();
+  if (!name) return;
+  const answer = await fetch('/workbench/template', {
+    method: 'POST',
+    headers: FORM,
+    body: new URLSearchParams({ name, cards: names.join(',') }),
+  });
+  const said = await answer.json();
+  say(said.kept ? `Saved “${name}” — ${said.steps} steps.` : said.why || 'Could not save it.');
+  showTemplates();
+}
+
+// Fresh cards every time, which is the point: a template that put the same cards back would be a
+// bookmark, and the second run would overwrite what the first produced.
+async function useTemplate(name) {
+  const answer = await fetch('/workbench/template/use', {
+    method: 'POST',
+    headers: FORM,
+    body: new URLSearchParams({ name }),
+  });
+  const said = await answer.json();
+  if (!said.made) return say(said.why || 'Could not use it.');
+  for (const one of said.cards) {
+    const [kind, ...rest] = one.name.split(':');
+    await pin({ kind, id: rest.join(':'), label: '' }, { quiet: true });
+  }
+  await readRoles();
+  await readLines();
+  tidyUp();
+}
+
+async function showTemplates() {
+  const into = document.getElementById('bench-templates');
+  if (!into) return;
+  into.replaceChildren();
+  let saved = [];
+  try {
+    saved = ((await (await fetch('/workbench/templates')).json()).templates) || [];
+  } catch {
+    return;
+  }
+  if (!saved.length) {
+    const none = document.createElement('li');
+    none.className = 'saved-none';
+    none.textContent = 'nothing saved yet';
+    into.appendChild(none);
+    return;
+  }
+  for (const one of saved) {
+    const row = document.createElement('li');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'saved-open';
+    open.textContent = `${one.name} · ${one.steps} steps`;
+    open.addEventListener('click', () => {
+      hideMenu();
+      useTemplate(one.name);
+    });
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'saved-drop';
+    drop.textContent = '×';
+    drop.title = `forget ${one.name}`;
+    drop.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await fetch('/workbench/template/drop', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ name: one.name }),
+      });
+      showTemplates();
+    });
+    row.append(open, drop);
+    into.appendChild(row);
+  }
+}
+
+/* --- the drawing, said in words ----------------------------------------------------------------- */
+// "Менеджер собирает схему; кто-то другой должен её понять, не открывая верстак."
+//
+// One direction is a fact and the other is a guess, and they are shown differently. The
+// description is computed — no model call, one right answer, because a description that came back
+// differently on two afternoons would be no use for handing work to somebody. The sketch is a
+// proposal, and nothing reaches the bench until somebody presses.
+async function tellInWords() {
+  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  const panel = document.getElementById('words-panel');
+  if (!panel) return;
+  panel.hidden = false;
+  const into = panel.querySelector('.words-said');
+  into.textContent = 'reading…';
+  try {
+    const answer = await fetch(`/workbench/words?cards=${encodeURIComponent(names.join(','))}`);
+    const said = await answer.json();
+    into.textContent = said.words || 'There is no process drawn here yet.';
+  } catch {
+    into.textContent = 'Could not read it.';
+  }
+}
+
+let sketched = null;
+
+async function sketchFromWords() {
+  const panel = document.getElementById('words-panel');
+  const field = panel?.querySelector('.words-in');
+  const shown = panel?.querySelector('.words-offer');
+  if (!field || !shown) return;
+  shown.textContent = 'thinking…';
+  try {
+    const answer = await fetch('/workbench/sketch', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ words: field.value }),
+    });
+    const said = await answer.json();
+    if (!said.read) {
+      shown.textContent = said.why || 'Could not read that.';
+      sketched = null;
+      return;
+    }
+    sketched = said;
+    // Shown as what it is: a proposal, in the words it would put on the cards.
+    shown.textContent = said.steps
+      .map((one, index) => `${index + 1}. ${one.role} — ${one.label}${one.words ? `: ${one.words}` : ''}`)
+      .concat(said.lines.map((one) => `   ${one.from} → ${one.to} (${one.kind}${one.says ? `: ${one.says}` : ''})`))
+      .join('\n');
+    panel.querySelector('[data-keep-sketch]').hidden = false;
+  } catch {
+    shown.textContent = 'Could not read that.';
+  }
+}
+
+document.getElementById('words-panel')?.addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.dataset.sketch !== undefined) return sketchFromWords();
+  if (button.dataset.wordsOff !== undefined) {
+    document.getElementById('words-panel').hidden = true;
+    return;
+  }
+  if (button.dataset.keepSketch === undefined || !sketched) return;
+  const answer = await fetch('/workbench/sketch/keep', {
+    method: 'POST',
+    headers: FORM,
+    body: new URLSearchParams({
+      steps: sketched.steps.map((one) => `${one.role}|${one.label}|${one.words}`).join('\n'),
+      lines: sketched.lines.map((one) => `${one.from}|${one.to}|${one.kind}|${one.says}`).join('\n'),
+    }),
+  });
+  const said = await answer.json();
+  for (const one of said.cards || []) {
+    const [kind, ...rest] = one.name.split(':');
+    await pin({ kind, id: rest.join(':'), label: '' }, { quiet: true });
+  }
+  await readRoles();
+  await readLines();
+  tidyUp();
+  button.hidden = true;
+  sketched = null;
+});
+
+document.querySelector('[data-words]')?.addEventListener('click', tellInWords);
+
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
 const FULL_SIZE = ZOOMS.indexOf(1);
@@ -2599,6 +2788,7 @@ function showMenu(x, y) {
   // Rebuilt every time it opens: a list kept in step by hand is a list that offers a workbench
   // somebody deleted.
   showBenches();
+  showTemplates();
   benchMenu.hidden = false;
   const frame = document.getElementById('bench-canvas').getBoundingClientRect();
   // Kept inside the window: a menu opened near the bottom edge that runs off it is a menu with
@@ -2669,6 +2859,8 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'folder') addFolder();
   else if (what === 'clear') clearBench();
   else if (what === 'keep') keepBench();
+  else if (what === 'step') addStep();
+  else if (what === 'template') keepTemplate();
 });
 
 // The conversation folded away, and back. What folds is every card holding a block — the cards

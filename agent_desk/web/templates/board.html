@@ -76,6 +76,9 @@
               title="read the workbench as a process">as a process</button>
       {# And run it. It queues each step in turn; the loop that already starts queued work is what
          actually starts anything, under the rules that were already there (docs/adr/0007). #}
+      {# The drawing said in words, for somebody who will never open the workbench. #}
+      <button type="button" class="chip" data-words
+              title="say this process in words — or describe one and have it drawn">in words</button>
       <button type="button" class="chip go" data-run
               title="run this drawing, one step at a time">run it</button>
       <span class="spacer"></span>
@@ -101,6 +104,25 @@
         <button type="button" data-happened hidden>it happened</button>
         <button type="button" data-stop>stop</button>
       </div>
+
+      {# Two directions, shown differently on purpose. The description is computed and has one
+         right answer; the sketch is a guess, so it is a proposal with a button under it and
+         nothing reaches the bench until somebody presses. #}
+      <aside id="words-panel" class="words-panel" hidden aria-label="this process in words">
+        <header>in words
+          <span class="spacer"></span>
+          <button type="button" data-words-off aria-label="close">×</button>
+        </header>
+        <pre class="words-said"></pre>
+        <header class="second">or describe one and have it drawn</header>
+        <textarea class="words-in" rows="4"
+                  placeholder="First we read the failing logs. If anything looks like a real bug we open a branch and fix it, otherwise we write it up and stop."></textarea>
+        <div class="words-do">
+          <button type="button" data-sketch>Draw it</button>
+          <button type="button" data-keep-sketch hidden>Put it on the workbench</button>
+        </div>
+        <pre class="words-offer"></pre>
+      </aside>
 
       <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">
         <header>in this order</header>
@@ -147,6 +169,12 @@
       <li><button type="button" data-add="clear">Take everything off</button></li>
       {# A set of cards gathered for one piece of work is gathered by hand every time. Saving it
          under a name is the difference between a surface and a desk you can leave things on. #}
+      {# A card that is only a card: the one you draw before the thing exists, which is what
+         describing a process requires. #}
+      <li class="sep"><button type="button" data-add="step">Add a step</button></li>
+      <li><button type="button" data-add="template">Save this as a process…</button></li>
+      <li class="saved-head">saved processes</li>
+      <li><ul id="bench-templates" class="bench-saved"></ul></li>
       <li class="sep"><button type="button" data-add="keep">Save this workbench…</button></li>
       <li class="saved-head">saved workbenches</li>
       <li><ul id="bench-saved" class="bench-saved"></ul></li>

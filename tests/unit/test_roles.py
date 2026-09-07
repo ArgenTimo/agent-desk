@@ -341,3 +341,147 @@ async def test_what_a_step_produced_is_kept_latest_only(desk: Store) -> None:
 
     await desk.card_made("idea:one", "   ")
     assert await desk.cards_made() == {}
+
+
+@pytest.mark.unit
+async def test_a_saved_process_makes_fresh_cards_every_time(desk: Store) -> None:
+    """ "Процесс, который собрали один раз, должен запускаться второй раз с другими входами."
+
+    Fresh cards, which is the whole point: a template that put the same cards back would be a
+    bookmark, and the second run would overwrite what the first produced.
+    """
+    from agent_desk.store.repo import TemplateLine, TemplateStep
+
+    await desk.keep_template(
+        name="the release",
+        steps=[
+            TemplateStep(ord=1, role="action", label="cut it", fields={"do": "cut the release"}),
+            TemplateStep(
+                ord=2,
+                role="event",
+                label="it lands",
+                fields={"awaits": "it is out"},
+                leave=("read",),
+            ),
+        ],
+        lines=[TemplateLine(from_ord=1, to_ord=2, kind="then", says="")],
+    )
+
+    (kept,) = await desk.templates()
+    assert kept.name == "the release"
+    assert len(kept.steps) == 2 and len(kept.lines) == 1
+    assert kept.steps[0].fields == {"do": "cut the release"}
+    assert kept.steps[1].leave == ("read",)
+
+
+@pytest.mark.unit
+async def test_saving_over_a_template_replaces_it(desk: Store) -> None:
+    """Saving over one is what somebody means by saving a template they have just improved, and a
+    second one called "release, but the good version" is how a library becomes unusable."""
+    from agent_desk.store.repo import TemplateStep
+
+    await desk.keep_template(
+        name="the release",
+        steps=[TemplateStep(ord=1, role="action", label="old", fields={"do": "old way"})],
+        lines=[],
+    )
+    await desk.keep_template(
+        name="the release",
+        steps=[TemplateStep(ord=1, role="action", label="new", fields={"do": "new way"})],
+        lines=[],
+    )
+
+    kept = await desk.templates()
+    assert len(kept) == 1
+    assert kept[0].steps[0].label == "new"
+
+
+@pytest.mark.unit
+async def test_a_template_can_be_forgotten(desk: Store) -> None:
+    from agent_desk.store.repo import TemplateStep
+
+    await desk.keep_template(
+        name="the release",
+        steps=[TemplateStep(ord=1, role="action", label="one", fields={})],
+        lines=[],
+    )
+
+    await desk.drop_template("the release")
+
+    assert await desk.templates() == []
+
+
+@pytest.mark.unit
+async def test_using_a_template_draws_it_with_new_cards_and_its_lines(desk: Store) -> None:
+    from agent_desk.store.repo import TemplateLine, TemplateStep
+
+    from tests.unit.test_input import _post
+
+    await desk.keep_template(
+        name="the release",
+        steps=[
+            TemplateStep(ord=1, role="action", label="cut it", fields={"do": "cut the release"}),
+            TemplateStep(ord=2, role="action", label="tell them", fields={"do": "tell the team"}),
+        ],
+        lines=[TemplateLine(from_ord=1, to_ord=2, kind="then", says="")],
+    )
+
+    await _post("/workbench/template/use", {"name": "the release"})
+
+    made = await desk.step_cards()
+    assert len(made) == 2
+    roles_now = await desk.card_roles()
+    assert all(roles_now[one.name] == "action" for one in made)
+    (drawn,) = await desk.card_ties()
+    assert {drawn.from_name, drawn.to_name} == {one.name for one in made}
+
+    # And a second use makes a second set, rather than pointing at the first.
+    await _post("/workbench/template/use", {"name": "the release"})
+    assert len(await desk.step_cards()) == 4
+
+
+@pytest.mark.unit
+async def test_a_template_saved_before_a_role_changed_does_not_write_a_field_that_is_gone(
+    desk: Store,
+) -> None:
+    """A card that looks filled in and reads as empty to everything else is the failure."""
+    from agent_desk.store.repo import TemplateStep
+
+    from tests.unit.test_input import _post
+
+    await desk.keep_template(
+        name="old",
+        steps=[
+            TemplateStep(
+                ord=1, role="action", label="one", fields={"do": "go", "gone": "a field that was"}
+            )
+        ],
+        lines=[],
+    )
+
+    await _post("/workbench/template/use", {"name": "old"})
+
+    (made,) = await desk.step_cards()
+    assert (await desk.card_fields())[made.name] == {"do": "go"}
+
+
+@pytest.mark.unit
+async def test_a_step_card_is_a_card_with_a_name_and_nothing_behind_it(desk: Store) -> None:
+    """Everything else on the workbench stands for something that already exists. This is the one
+    you draw before the thing exists, which is what describing a process requires."""
+    made = await desk.add_step_card("read the logs")
+
+    assert made.name == f"step:{made.id}"
+    assert (await desk.step_card(made.id)).label == "read the logs"  # type: ignore[union-attr]
+
+    await desk.name_step_card(made.id, "read yesterday's logs")
+    assert (await desk.step_card(made.id)).label == "read yesterday's logs"  # type: ignore[union-attr]
+    assert await desk.step_card("nothing") is None
+
+
+@pytest.mark.unit
+async def test_a_step_card_is_an_action_unless_somebody_says_otherwise(desk: Store) -> None:
+    """A box you drew to describe a process is a step until it is told it is something else."""
+    from agent_desk import roles as role_words
+
+    assert role_words.role_of("step").name == "action"

@@ -278,6 +278,55 @@ class RunStep(BaseModel):
     at: int = 0
 
 
+class StepCard(BaseModel):
+    """A card that is only a card (038-steps-and-templates.sql).
+
+    Everything else on the workbench stands for something that already exists. This is the one you
+    draw before the thing exists, which is what describing a process requires.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    label: str
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"step:{self.id}"
+
+
+class Template(BaseModel):
+    """A drawing kept to be used again: a shape, not a copy."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    made_at: int
+    steps: tuple[TemplateStep, ...] = ()
+    lines: tuple[TemplateLine, ...] = ()
+
+
+class TemplateStep(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    ord: int
+    role: str
+    label: str
+    fields: dict[str, str] = {}
+    leave: tuple[str, ...] = ()
+
+
+class TemplateLine(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    from_ord: int
+    to_ord: int
+    kind: str
+    says: str = ""
+
+
 class CardTie(BaseModel):
     """One line somebody drew between two cards, and what happens along it (034-card-ties.sql).
 
@@ -2007,6 +2056,168 @@ class Store:
                 keys,
             )
             return {str(row[0]): str(row[1]) for row in rows}
+
+    # --- cards that are only cards, and saved drawings (038-steps-and-templates.sql) ----------
+    async def add_step_card(self, label: str) -> StepCard:
+        card = StepCard(id=_new_id(), label=label[:200] or "a step", made_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO step_card (id, label, made_at) VALUES (:id, :label, :made_at)"),
+                card.model_dump(),
+            )
+        return card
+
+    async def name_step_card(self, card_id: str, label: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE step_card SET label = :label WHERE id = :id"),
+                {"label": label[:200], "id": card_id},
+            )
+
+    async def step_card(self, card_id: str) -> StepCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, label, made_at FROM step_card WHERE id = :id"), {"id": card_id}
+            )
+            row = rows.first()
+            return None if row is None else StepCard(**row._mapping)
+
+    async def step_cards(self) -> list[StepCard]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, label, made_at FROM step_card ORDER BY made_at DESC LIMIT 400")
+            )
+            return [StepCard(**row._mapping) for row in rows]
+
+    async def keep_template(
+        self,
+        *,
+        name: str,
+        steps: Sequence[TemplateStep],
+        lines: Sequence[TemplateLine],
+    ) -> Template:
+        """Save a drawing under a name, replacing one saved under the same name.
+
+        Replacing rather than refusing: saving over a template is what somebody means by saving a
+        template they have just improved, and a second one called "release, but the good version"
+        is how a library becomes unusable.
+        """
+        made = Template(
+            id=_new_id(), name=name[:120], made_at=_now_ms(), steps=tuple(steps), lines=tuple(lines)
+        )
+        async with self.engine.begin() as conn:
+            gone = await conn.execute(
+                text("SELECT id FROM template WHERE name = :name"), {"name": made.name}
+            )
+            for row in gone:
+                old = str(row[0])
+                await conn.execute(
+                    text("DELETE FROM template_step WHERE template_id = :id"), {"id": old}
+                )
+                await conn.execute(
+                    text("DELETE FROM template_line WHERE template_id = :id"), {"id": old}
+                )
+                await conn.execute(text("DELETE FROM template WHERE id = :id"), {"id": old})
+            await conn.execute(
+                text("INSERT INTO template (id, name, made_at) VALUES (:id, :name, :made_at)"),
+                {"id": made.id, "name": made.name, "made_at": made.made_at},
+            )
+            for step in made.steps:
+                await conn.execute(
+                    text(
+                        "INSERT INTO template_step (template_id, ord, role, label, fields, leave) "
+                        "VALUES (:t, :ord, :role, :label, :fields, :leave)"
+                    ),
+                    {
+                        "t": made.id,
+                        "ord": step.ord,
+                        "role": step.role,
+                        "label": step.label[:200],
+                        "fields": json.dumps(step.fields),
+                        "leave": ",".join(step.leave),
+                    },
+                )
+            for line in made.lines:
+                await conn.execute(
+                    text(
+                        "INSERT INTO template_line (template_id, from_ord, to_ord, kind, says) "
+                        "VALUES (:t, :from_ord, :to_ord, :kind, :says)"
+                    ),
+                    {
+                        "t": made.id,
+                        "from_ord": line.from_ord,
+                        "to_ord": line.to_ord,
+                        "kind": line.kind,
+                        "says": line.says[:200],
+                    },
+                )
+        return made
+
+    async def templates(self) -> list[Template]:
+        """Every saved drawing, whole. There are as many as somebody has saved by hand."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT id, name, made_at FROM template ORDER BY name"))
+            found = [dict(row._mapping) for row in rows]
+            steps = await conn.execute(
+                text(
+                    "SELECT template_id, ord, role, label, fields, leave FROM template_step "
+                    "ORDER BY template_id, ord"
+                )
+            )
+            by_template: dict[str, list[TemplateStep]] = {}
+            for row in steps:
+                said = row._mapping
+                by_template.setdefault(str(said["template_id"]), []).append(
+                    TemplateStep(
+                        ord=int(said["ord"]),
+                        role=str(said["role"]),
+                        label=str(said["label"]),
+                        fields=json.loads(said["fields"] or "{}"),
+                        leave=tuple(one for one in str(said["leave"]).split(",") if one),
+                    )
+                )
+            lines = await conn.execute(
+                text(
+                    "SELECT template_id, from_ord, to_ord, kind, says FROM template_line "
+                    "ORDER BY template_id, from_ord, to_ord"
+                )
+            )
+            drawn: dict[str, list[TemplateLine]] = {}
+            for row in lines:
+                said = row._mapping
+                drawn.setdefault(str(said["template_id"]), []).append(
+                    TemplateLine(
+                        from_ord=int(said["from_ord"]),
+                        to_ord=int(said["to_ord"]),
+                        kind=str(said["kind"]),
+                        says=str(said["says"]),
+                    )
+                )
+        return [
+            Template(
+                id=one["id"],
+                name=one["name"],
+                made_at=one["made_at"],
+                steps=tuple(by_template.get(one["id"], ())),
+                lines=tuple(drawn.get(one["id"], ())),
+            )
+            for one in found
+        ]
+
+    async def drop_template(self, name: str) -> None:
+        async with self.engine.begin() as conn:
+            rows = await conn.execute(
+                text("SELECT id FROM template WHERE name = :name"), {"name": name}
+            )
+            for row in rows:
+                one = str(row[0])
+                await conn.execute(
+                    text("DELETE FROM template_step WHERE template_id = :id"), {"id": one}
+                )
+                await conn.execute(
+                    text("DELETE FROM template_line WHERE template_id = :id"), {"id": one}
+                )
+                await conn.execute(text("DELETE FROM template WHERE id = :id"), {"id": one})
 
     # --- a drawing being run (037-runs.sql) ---------------------------------------------------
     async def start_run(self, *, cards: Sequence[str], repo_key: str, cwd: str) -> Run:
