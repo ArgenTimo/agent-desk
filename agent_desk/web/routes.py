@@ -1002,6 +1002,10 @@ async def render_page(message: str = "") -> str:
         # the first thing the script does after the page opens is write the bench back — and a
         # write that overtook a fetch would save an empty surface over a full one (040-bench.sql).
         kept=[card.model_dump() for card in await store.bench_cards(opening)],
+        # Which column each kind of card belongs in when the bench is laid out again. From
+        # `ideas/bench.py`, which is where the workbench diagram reads the same order — a copy in
+        # the script would be a second place to be wrong, silently.
+        columns={"of": bench.COLUMN, "beside": bench.BESIDE},
     )
 
 

@@ -150,6 +150,9 @@
          the bench back as soon as it has drawn it, and a write that overtook a fetch would save
          an empty surface over a full one (040-bench.sql). #}
       <script type="application/json" id="bench-kept">{{ kept | tojson }}</script>
+      {# Which column each kind of card is laid out in, from agent_desk/ideas/bench.py — the same
+         order the workbench diagram uses, served rather than copied. #}
+      <script type="application/json" id="bench-columns">{{ columns | tojson }}</script>
       <p class="out-empty">Nothing here yet. Ask something, drop a card in, or start with
         <span class="hint-key">/idea</span> to write a thought down — everything lands here as a
         card you can move, open and join up.</p>

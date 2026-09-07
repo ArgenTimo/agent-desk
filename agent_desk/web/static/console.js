@@ -3362,17 +3362,50 @@ function clearBench() {
 // doing that work, and the cards it must not overlap are exactly the ones being left alone. And it
 // says what it left, because a button that did less than everything and did not mention it is a
 // button somebody presses twice.
+// Which column each kind of card belongs in, from the server — the same order the workbench
+// diagram lays a card out in, because a copy here would be a second place to be wrong.
+let column = { of: {}, beside: 0 };
+try {
+  column = JSON.parse(document.getElementById('bench-columns')?.textContent || 'null') || column;
+} catch {
+  // Everything in one column is a worse layout, not a broken one.
+}
+
+function columnOf(kind) {
+  return column.of[kind] ?? column.beside;
+}
+
 function tidyUp() {
   const loose = [...surface.querySelectorAll('.pin:not([data-moved])')];
   const kept = surface.querySelectorAll('.pin[data-moved]').length;
   // Only the loose ones forget where they were. Emptying the whole map took the placed cards'
   // positions with it, which is the sweep this is fixing.
   for (const pin of loose) placed.delete(cardName(pin));
-  // Down one column, then the next: with collision avoidance doing the vertical spacing, a column
-  // of tall cards and a column of short ones both come out right.
-  loose.forEach((pin, index) => {
-    place(pin, { x: 20 + (index % 3) * (CARD_WIDTH + GAP * 2), y: 20 });
-  });
+
+  // Every height first, because placing one card changes the layout the next measurement would be
+  // answered from — the mistake that cost a pan 20ms a frame, one function over.
+  const tall = new Map(loose.map((pin) => [pin, pin.offsetHeight || 120]));
+
+  // "Раскладка, которая не превращается в кашу на сотне элементов." It was three columns filled
+  // in the order the cards happened to arrive, so a project card, the answer about it and an idea
+  // from last week ended up side by side, and a hundred cards were a column twenty screens long
+  // with nothing to navigate by.
+  //
+  // A column per kind, left to right in the order things contain each other: the project, the
+  // checkout, the session, what is blocking it, the conversation, the ideas out of it, the steps
+  // drawn after those. Then a bench of a hundred is read by walking across it, and where a card is
+  // says what it is before you read a word of it.
+  //
+  // Positions are worked out rather than swept into by collision avoidance: that gives up after
+  // forty steps down and starts a column of its own, which on a hundred cards is exactly the
+  // porridge this replaces.
+  const down = new Map();
+  for (const pin of loose) {
+    const at = columnOf(pin.dataset.kind);
+    const y = down.get(at) ?? 20;
+    place(pin, { x: 20 + at * (CARD_WIDTH + GAP * 2), y }, { avoid: false });
+    down.set(at, y + tall.get(pin) + GAP);
+  }
   view.x = 0;
   view.y = 0;
   applyView();

@@ -71,9 +71,34 @@ class Bench:
         return not self.pieces
 
 
-# Where each kind of card sits. A project contains an instance contains a session; an idea is its
-# own thing and sits to the right of all of them, because that is where what-to-do-next goes.
-COLUMN = {"project": 0, "instance": 1, "session": 2, "agent": 2, "blocker": 3, "idea": 4}
+# Where each kind of card sits, left to right: what contains things, then the things, then what
+# somebody is going to do about them. A project contains an instance contains a session; a
+# conversation is about those, an idea comes out of the conversation, and a step is drawn after the
+# idea. Anything not named here goes to the right of all of it, which is where a card whose kind
+# this list has not met yet belongs — beside the work rather than inside the machinery.
+#
+# Read by two things and it is the same order in both: the workbench diagram here, and the
+# workbench's own "lay it out again", which is handed this list rather than keeping a copy of it
+# (`board.html`, `tidyUp`). A second copy is a second place to be wrong, silently — the same
+# argument the line vocabulary and the roles are already served under.
+COLUMN = {
+    "project": 0,
+    "instance": 1,
+    "session": 2,
+    "agent": 2,
+    "blocker": 3,
+    "connector": 3,
+    "block": 4,
+    "idea": 5,
+    "step": 6,
+    "folder": 7,
+    "file": 7,
+    "note": 7,
+}
+
+# Where a kind nobody has placed goes. One past the last of them, so a new kind appears in a column
+# of its own rather than landing on top of the ideas.
+BESIDE = max(COLUMN.values()) + 1
 
 
 def _label(kind: str, card_id: str, rows: Sequence[object], ideas: dict[str, Idea]) -> str:
@@ -116,7 +141,7 @@ def lay_out(
         card_id = card_id.removesuffix(":full")
         if not kind or not card_id or card in placed:
             continue
-        column = COLUMN.get(kind, 4)
+        column = COLUMN.get(kind, BESIDE)
         line = rows_in.get(column, 0)
         rows_in[column] = line + 1
         idea = by_id.get(card_id)
