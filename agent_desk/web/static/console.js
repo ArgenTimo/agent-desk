@@ -3912,10 +3912,10 @@ function openPalette() {
   palette = document.createElement('div');
   palette.className = 'palette';
   palette.innerHTML = `<div class="palette-box">
-    <input type="text" class="palette-field" placeholder="a project, a session, an idea, something stuck…"
-           autocomplete="off" spellcheck="false" aria-label="find anything on this board">
+    <input type="text" class="palette-field" placeholder="undo, lay it out again, a project, a session, an idea…"
+           autocomplete="off" spellcheck="false" aria-label="do anything, or find anything on this board">
     <ul class="palette-list"></ul>
-    <p class="palette-foot">Enter puts it on the workbench · Esc closes</p>
+    <p class="palette-foot">Enter does it, or puts it on the workbench · Esc closes</p>
   </div>`;
   document.body.appendChild(palette);
   const field = palette.querySelector('.palette-field');
@@ -3937,11 +3937,50 @@ function closePalette() {
 // Every word has to appear somewhere in the name, in any order. Not a fuzzy match: on a list this
 // short a fuzzy match mostly produces confident wrong answers, and "api sess" finding the session
 // in api is the whole of what somebody wants from it.
+// Everything the console can *do*, read off the page rather than listed here.
+//
+// "Ctrl+K сегодня ищет карточки. Жестов стало столько, что нужен и второй режим: не «найди вещь»,
+// а «сделай действие» — соединить, раскрыть, запустить, разложить, сохранить как процесс."
+//
+// One door rather than a second shortcut: somebody who has to remember which of two palettes holds
+// the thing they want has been given a filing problem instead of a keyboard. Typing "undo" finds
+// the action, typing "duck" finds the project, and the row says which it is.
+//
+// **Gathered from the controls themselves.** A hand-written list of what the console can do is a
+// list that falls behind the day somebody adds a button — and this idea is precisely "everything
+// the console can do", so a list that can be incomplete answers the wrong question. These are the
+// two places a control that acts on the workbench lives, so anything added to either is in the
+// palette on the same commit, without being mentioned twice.
+const ACTION_BARS = ['.bench-head', '#bench-menu'];
+
+function everyAction() {
+  const seen = new Set();
+  const actions = [];
+  for (const bar of ACTION_BARS) {
+    for (const button of document.querySelectorAll(`${bar} button`)) {
+      // The dots for cards that are off the screen live in the bench head, and each is a way to
+      // reach one card rather than a thing the console can do. Thirty of them fill the palette
+      // with the card list it already has, under worse names.
+      if (button.closest('#off-edge')) continue;
+      // A control with no words is a control nobody can ask for by name. The zoom's `−` and `+`
+      // are the honest example: "smaller" is their aria-label, and that is what to type.
+      const what = (button.getAttribute('aria-label') || button.textContent || '').trim();
+      if (!what || seen.has(what)) continue;
+      seen.add(what);
+      actions.push({ kind: 'do', name: what, why: button.title || '', button });
+    }
+  }
+  return actions;
+}
+
 function paletteMatches(said) {
   const words = said.toLowerCase().split(/\s+/).filter(Boolean);
-  return everythingOnThePage()
-    .filter((one) => words.every((word) => `${one.kind} ${one.name}`.toLowerCase().includes(word)))
-    .slice(0, 12);
+  const fits = (one, against) => words.every((word) => against.toLowerCase().includes(word));
+  // Actions first. With nothing typed the question is "what can I do", and with something typed a
+  // word that names an action almost always means the action — "undo" is not a card.
+  const doing = everyAction().filter((one) => fits(one, `${one.name} ${one.why}`));
+  const things = everythingOnThePage().filter((one) => fits(one, `${one.kind} ${one.name}`));
+  return [...doing, ...things].slice(0, 12);
 }
 
 function drawPalette(said) {
@@ -3963,6 +4002,8 @@ function drawPalette(said) {
     row.innerHTML = '<span class="palette-kind"></span><span class="palette-name"></span>';
     row.querySelector('.palette-kind').textContent = one.kind;
     row.querySelector('.palette-name').textContent = one.name;
+    // What the button's tooltip says, for the actions whose name is a word ("map", "fold").
+    if (one.why) row.title = one.why;
     row.addEventListener('pointerdown', () => takePalette(one));
     list.appendChild(row);
   });
@@ -3988,6 +4029,12 @@ function paletteKeys(event) {
 // answer, and this one has a surface.
 function takePalette(one) {
   closePalette();
+  // An action is done by pressing the control it was read off, rather than by calling the function
+  // behind it: one path, so the palette cannot do a thing differently from the button for it.
+  if (one.button) {
+    one.button.click();
+    return;
+  }
   pin(
     { kind: one.kind === 'checkout' ? 'instance' : one.kind, id: one.id, label: one.name },
     { came: 'found with Ctrl+K' }

@@ -60,7 +60,9 @@
     <div class="bench-head">
       <span class="zoom" role="group" aria-label="how big the workbench is">
         <button type="button" class="chip zoom-out" data-zoom="-1" aria-label="smaller">−</button>
-        <button type="button" class="chip zoom-at" data-zoom="0"
+        {# Its words are a number that changes, so the name it answers to is said out loud —
+           otherwise this control is called "65%" in the palette and nobody can ask for it. #}
+        <button type="button" class="chip zoom-at" data-zoom="0" aria-label="back to full size"
                 title="back to full size and centred">100%</button>
         <button type="button" class="chip zoom-in" data-zoom="1" aria-label="bigger">+</button>
       </span>
