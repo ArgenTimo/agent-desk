@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from agent_desk.answer import session
 from agent_desk.web import autostart, blocks, engine, kicking, later, routes, sse
 from agent_desk.web.origin import guard
 
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     same failure as one that will not close while a browser is watching the board.
     """
     await routes.store.open()
+    # What the asking costs, counted against the day's ceiling (043-spending.sql). Attached the
+    # same way the run group is and for the same reason: every model call in this program goes
+    # through one function, and a dozen callers should not each have to remember to say so.
+    session.tally.attach(routes.store)
     try:
         async with asyncio.TaskGroup() as group:
             blocks.runs.attach(group)
@@ -76,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                         await blocks.cancel(routes.store, block_id)
                 blocks.runs.attach(None)
     finally:
+        session.tally.attach(None)
         await routes.store.close()
 
 

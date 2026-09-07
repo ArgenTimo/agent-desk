@@ -15,6 +15,23 @@
 <div class="tree-head">
   <span class="tree-count">{{ rows | length }} session{{ "" if rows | length == 1 else "s" }}</span>
   {% if flagged %}<span class="tree-count flagged-count">{{ flagged }} may want you</span>{% endif %}
+  {# What the asking has cost today, as the runs themselves reported it (043-spending.sql). Here
+     rather than on a page of its own, because "это та вещь, отсутствие которой обнаруживается в
+     конце месяца" is a complaint about a number nobody was shown, and a number behind a link is a
+     number nobody is shown. It says the ceiling only once it is worth thinking about: a counter
+     that reads "$0.14 of $25.00" all day teaches people to stop reading it. #}
+  {% if spent and spent.ceiling %}
+  <span class="tree-count spend{% if spent.stopped %} spend-stopped{% elif spent.close %} spend-close{% endif %}"
+        title="what today's questions have cost, as each run reported it · AGENT_DESK_DAILY_USD is the ceiling">
+    {% if spent.stopped %}${{ '%.2f' % spent.usd }} spent — at today's ceiling
+    {%- elif spent.close %}${{ '%.2f' % spent.usd }} of ${{ '%.2f' % spent.ceiling }} today
+    {%- else %}${{ '%.2f' % spent.usd }} today{% endif %}
+  </span>
+  {% elif spent and spent.usd %}
+  <span class="tree-count spend" title="what today's questions have cost, as each run reported it · no ceiling is set">
+    ${{ '%.2f' % spent.usd }} today
+  </span>
+  {% endif %}
 </div>
 
 {% if not projects %}

@@ -180,6 +180,53 @@ def _text_of(event: dict[str, object]) -> str:
     return "".join(parts)
 
 
+class Tally:
+    """What the asking has cost today, and the ceiling it stops at (043-spending.sql).
+
+    "У автозапуска есть бюджет в час на агентов. У вызовов модели нет ничего… Это та вещь,
+    отсутствие которой обнаруживается в конце месяца."
+
+    Attached at startup rather than passed in, the same way the run group is (`web/app.py`). Every
+    model call in this program goes through `_run` and there are a dozen callers above it; a
+    parameter would be a thing each of them has to remember, and the one that forgot would be a
+    call that is spent and not counted — which is this feature failing while appearing to work.
+
+    Nothing attached means nothing is counted and nothing is stopped. That is the right behaviour
+    for a runner used outside the console — a test, a script — and it is why the two methods here
+    answer plainly rather than raising when there is no store.
+    """
+
+    def __init__(self) -> None:
+        self._store: Store | None = None
+
+    def attach(self, store: Store | None) -> None:
+        self._store = store
+
+    async def stop_here(self) -> str:
+        """Why this console must not ask anything else today, or an empty string.
+
+        A sentence rather than a boolean, because what somebody needs at this moment is the number,
+        the ceiling and the name of the thing that raises it — "the console stops and *says*", not
+        the console stops.
+        """
+        if self._store is None or settings.daily_usd <= 0:
+            return ""
+        spent = await self._store.spent_today()
+        if spent < settings.daily_usd:
+            return ""
+        return (
+            f"the day's budget is spent: ${spent:.2f} of ${settings.daily_usd:.2f}. "
+            "AGENT_DESK_DAILY_USD raises it, and 0 switches the ceiling off"
+        )
+
+    async def note(self, usd: float) -> None:
+        if self._store is not None:
+            await self._store.note_spend(usd)
+
+
+tally = Tally()
+
+
 async def _run(
     prompt: str,
     *,
@@ -191,7 +238,15 @@ async def _run(
     Cancellation is the caller's to perform and this generator's to survive: the subprocess is
     killed in `finally`, so a cancelled block does not leave a headless Claude running against a
     question nobody is waiting for any more.
+
+    The day's ceiling is checked here rather than in `stream_answer`, and only for the engine that
+    costs money. That is not a detail: it means a console out of budget falls through the machinery
+    that is already there for an engine being unavailable, and reaches the local model if somebody
+    has configured one — which is exactly what a second engine is for. Raised one level up it would
+    stop the console with a free model sitting unused beside it.
     """
+    if not binary and (why := await tally.stop_here()):
+        raise AnswerFailed(why)
     try:
         process = await asyncio.create_subprocess_exec(
             *argv(add_dirs=add_dirs, binary=binary),
@@ -250,6 +305,12 @@ async def _run(
                         said_something = True
                         yield text
                 elif kind == "result":
+                    # What it cost, as the run itself reported it — before the error check, because
+                    # a run that failed after spending money still spent it. Read defensively: the
+                    # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
+                    # cannot be read is recorded as nothing rather than as a guess.
+                    with contextlib.suppress(TypeError, ValueError):
+                        await tally.note(float(event.get("total_cost_usd") or 0))
                     if event.get("is_error"):
                         raise AnswerFailed(str(event.get("subtype") or "the run reported an error"))
                     result_text = str(event.get("result") or "")
@@ -281,6 +342,7 @@ async def _run(
 # test asserts it. Routing a declined request to a model that will not decline it is not something
 # this program does (docs/08-non-goals.md).
 UNAVAILABLE = (
+    "the day's budget is spent",
     "rate limit",
     "rate-limit",
     "usage limit",

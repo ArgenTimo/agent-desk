@@ -636,8 +636,14 @@ button[disabled] { opacity: 0.5; cursor: default; }
   padding: 0 2px 4px;
 }
 .tree > .project-slot { flex: 0 0 auto; }
-.tree-head { display: flex; gap: 8px; align-items: baseline; padding: 0 2px; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }
+.tree-head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; padding: 0 2px; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }
 .flagged-count { color: var(--attention); }
+
+/* What today has cost. Three readings, and only the last two are worth a colour: a number that is
+   coloured all day is a number people stop seeing, which is the whole failure this counter exists
+   to fix (043-spending.sql). */
+.spend-close { color: var(--attention); }
+.spend-stopped { color: var(--warn); font-weight: 600; }
 
 .card {
   border: 1px solid var(--line);

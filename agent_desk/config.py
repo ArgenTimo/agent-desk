@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     local_model_bin: str = ""
     answer_timeout_seconds: float = 180.0
 
+    # --- What a day of asking is allowed to cost (043-spending.sql). ------------------------
+    # A default rather than nothing, because "no ceiling by default" reproduces the problem this
+    # exists to solve: a console that has never been configured is exactly the one whose bill
+    # arrives as a surprise. It is set well above a busy day of somebody working — a single
+    # question costs a few cents and the heaviest scenarios in the idea pool are dozens of calls —
+    # so that reaching it means something has gone wrong rather than that somebody was working
+    # hard. Zero switches it off for anybody who would rather find out at the end of the month.
+    daily_usd: float = 25.0
+
     @property
     def registry_glob(self) -> str:
         """`*.json`, never `*`. See the module docstring."""

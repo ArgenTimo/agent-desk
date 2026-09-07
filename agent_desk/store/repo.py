@@ -19,6 +19,7 @@ import re
 import secrets
 import time
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -2184,6 +2185,37 @@ class Store:
                     rows,
                 )
             await self._note_change(conn, before, where=moved)
+
+    # --- what the asking has cost (043-spending.sql) -------------------------------------------
+    async def note_spend(self, usd: float) -> None:
+        """Record what one model call cost, as the run itself reported it.
+
+        Nothing is recorded for a run that did not say, and nothing is recorded for a zero: a row
+        of zeroes would make "the run did not report a cost" and "the run was free" the same fact,
+        and the first of those is a gap in the counter that somebody should be able to see.
+        """
+        if usd <= 0:
+            return
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO spend (id, at, usd) VALUES (:id, :at, :usd)"),
+                {"id": _new_id(), "at": _now_ms(), "usd": float(usd)},
+            )
+
+    async def spent_today(self) -> float:
+        """What has been spent since midnight, on the clock of whoever is looking.
+
+        Local midnight rather than UTC, because "today" is a question about the person reading it.
+        A console in Buenos Aires that reset its day at nine in the evening would be a counter
+        nobody could use, and a ceiling that lifted then would be worse.
+        """
+        midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT sum(usd) FROM spend WHERE at >= :since"),
+                {"since": int(midnight.timestamp() * 1000)},
+            )
+            return float(rows.scalar() or 0.0)
 
     async def _surface(self, conn: Any) -> dict[str, list[dict[str, Any]]]:
         """The workbench as it is right now: everything an undo has to put back.

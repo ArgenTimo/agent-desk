@@ -69,6 +69,7 @@ async def board_events() -> AsyncIterator[str]:
                     await routes.board_kicks(),
                     await routes.board_canaries(),
                     await routes.board_plans(*await routes.board_rows_and_kicks()),
+                    await routes.board_spent(),
                 ),
             ),
             ("blocks", await routes.render_blocks()),

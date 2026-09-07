@@ -466,6 +466,33 @@ async def board_kicks() -> dict[str, Kicking]:
     return {arming.short_id: arming for arming in await store.kicked_sessions()}
 
 
+@dataclass(frozen=True)
+class Spent:
+    """What today has cost and how close that is to the ceiling.
+
+    Three states rather than a number, because the number alone is not the reading: the same
+    `$24.90` means nothing on a day with no ceiling and means "the next question is the last one"
+    under a ceiling of twenty-five.
+    """
+
+    usd: float
+    ceiling: float
+
+    @property
+    def stopped(self) -> bool:
+        return bool(self.ceiling) and self.usd >= self.ceiling
+
+    @property
+    def close(self) -> bool:
+        """Worth mentioning the ceiling. Below this the ceiling is noise beside the number, and a
+        counter that recites a limit nobody is near is one people stop reading."""
+        return bool(self.ceiling) and self.usd >= self.ceiling * 0.5
+
+
+async def board_spent() -> Spent:
+    return Spent(usd=await store.spent_today(), ceiling=settings.daily_usd)
+
+
 async def board_links() -> dict[str, list[ProjectLink]]:
     """Every project's links, keyed by repository, for the menu on its card."""
     grouped: dict[str, list[ProjectLink]] = {}
@@ -481,8 +508,14 @@ def render_board(
     kicks: dict[str, Kicking] | None = None,
     canaries: dict[str, str] | None = None,
     plans_html: str = "",
+    spent: Spent | None = None,
 ) -> str:
-    """The fragment the page holds and every server-sent event replaces."""
+    """The fragment the page holds and every server-sent event replaces.
+
+    `spent` is read where the store is and handed in, because this runs in a thread. Absent means
+    the counter is simply not rendered, which is deliberate: a caller that forgot to read it should
+    show nothing rather than a confident `$0.00`, which is a different claim entirely.
+    """
     rows, notices = board()
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
@@ -508,6 +541,8 @@ def render_board(
         # A reading of the text, in one place rather than in the template.
         signed=signed,
         flagged=sum(1 for row in rows if row.hint.waiting),
+        # What today has cost (043-spending.sql).
+        spent=spent,
     )
 
 
@@ -951,6 +986,7 @@ async def render_page(message: str = "") -> str:
             canaries=await board_canaries(),
             plans=await board_plans(rows, await board_kicks()),
             flagged=sum(1 for row in rows if row.hint.waiting),
+            spent=await board_spent(),
         ),
         projects=projects,
         message=message,
@@ -1418,6 +1454,7 @@ async def create_project(request: Request) -> Response:
                     await board_kicks(),
                     await board_canaries(),
                     await board_plans(*await board_rows_and_kicks()),
+                    await board_spent(),
                 )
             )
     return RedirectResponse("/", status_code=303)
@@ -1437,6 +1474,7 @@ async def add_to_project(group_id: str, request: Request) -> Response:
                 await board_links(),
                 await board_work(),
                 await board_kicks(),
+                spent=await board_spent(),
             )
         )
     return RedirectResponse("/", status_code=303)
@@ -1454,6 +1492,7 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
                 await board_links(),
                 await board_work(),
                 await board_kicks(),
+                spent=await board_spent(),
             )
         )
     return RedirectResponse("/", status_code=303)
