@@ -887,9 +887,7 @@ document.addEventListener('click', (event) => {
   }
 
   if (event.target.classList.contains('pin-off')) {
-    const holder = event.target.closest('.pin');
-    placed.delete(cardName(holder));
-    holder.remove();
+    event.target.closest('.pin').remove();
     syncTargets();
     return;
   }
