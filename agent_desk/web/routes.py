@@ -67,6 +67,7 @@ from agent_desk.observe.model import (
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import (
     DRAFT_KINDS,
+    BenchCard,
     Group,
     Idea,
     IdeaState,
@@ -955,6 +956,10 @@ async def render_page(message: str = "") -> str:
         message=message,
         blocks=await render_blocks(),
         poll=settings.registry_poll_seconds,
+        # The workbench as it was left. Rendered into the page rather than fetched by it, because
+        # the first thing the script does after the page opens is write the bench back — and a
+        # write that overtook a fetch would save an empty surface over a full one (040-bench.sql).
+        kept=[card.model_dump() for card in await store.bench_cards()],
     )
 
 
@@ -1708,11 +1713,58 @@ async def set_card_leave(request: Request) -> JSONResponse:
     return JSONResponse({"kept": True, "leave": given})
 
 
+@router.post("/workbench/kept", response_class=JSONResponse)
+async def keep_bench(request: Request) -> JSONResponse:
+    """What is on the workbench right now, so that it is still there after a reload.
+
+    The whole surface, not a change to it (040-bench.sql). The page is the only thing that knows
+    what is on the bench; sending the whole set is the smallest message that can say "this card is
+    gone", and a diff would need the page to remember what the store last saw — a second copy of
+    the truth, kept in the place least able to keep it.
+
+    A row that does not parse is dropped rather than failing the write. Losing one card's position
+    is a card in the wrong place; refusing the write is the whole arrangement lost, which is the
+    failure this route exists to stop.
+
+    The stacking order is the order the cards arrive in, not a number they carry. The page has them
+    in surface order already, and a card that had to name its own place could name one twice.
+
+    The position is read out of `at`, which is where the page keeps it, so what arrives here is
+    what the page's own reading of its bench returns and nothing reshapes it in between. The first
+    version of this did reshape it, disagreed with itself about whether `at` was a position or a
+    clock, and dropped every card in every message — correctly, quietly, and for weeks if nobody
+    had opened a browser.
+    """
+    said = await request.json()
+    cards = []
+    for place, one in enumerate(said.get("cards", []) if isinstance(said, dict) else []):
+        try:
+            cards.append(
+                BenchCard(
+                    name=str(one["name"])[:200],
+                    kind=str(one["kind"])[:40],
+                    card_id=str(one["id"])[:200],
+                    label=str(one.get("label", ""))[:200],
+                    x=int(one["at"]["x"]),
+                    y=int(one["at"]["y"]),
+                    shown=str(one.get("shown", "hint"))[:20],
+                    spent=bool(one.get("spent")),
+                    ord=place,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    await store.keep_bench(cards)
+    return JSONResponse({"kept": len(cards)})
+
+
 async def _bench_cards(names: Sequence[str]) -> list[process.Card]:
     """The cards on somebody's bench, as the process reader needs them.
 
-    The bench is a fact about a browser — this program has no idea what is on it — so the names
-    come from the page and everything else is looked up here.
+    The names come from the page rather than from `store.bench_cards()`, and that is not an
+    oversight: the page asks this while somebody is still arranging, before the surface has been
+    written down, and a reading of a bench that lags a drag by a second is a reading of a bench
+    nobody is looking at.
     """
     chosen = await store.card_roles()
     said = await store.card_fields()

@@ -1,9 +1,58 @@
 # Data model
 
-One SQLite file at `~/.local/share/agent-desk/agent-desk.db`. Four tables, and a fifth that
-arrived with the shared view. Timestamps are
-Unix milliseconds, matching what the registry writes, so that a comparison never needs a
-conversion nobody remembers to do.
+One SQLite file at `~/.local/share/agent-desk/agent-desk.db`. Thirty-seven tables, grown one
+migration at a time from the four it opened with. Timestamps are Unix milliseconds, matching what
+the registry writes, so that a comparison never needs a conversion nobody remembers to do.
+
+**The argument for each table is in the migration that added it**, not here. Those files are
+written to be read — `NNN-name.sql` says what the change is *for* and what it refuses to do — and
+copying that reasoning into this document would create a second copy to go stale. What follows is
+the map: what exists, grouped by what it is for, so that somebody looking for the right table can
+find it and then go and read why it is shaped that way.
+
+## The map
+
+**The conversation** — `thread`, `block`, `block_idea`, `directive`.
+One row per message, kept verbatim; the classifier's guess and the human's correction both
+recorded (see below).
+
+**The pool** — `idea`, `idea_link`, `draft`, `filing`.
+Ideas, what depends on what (024), the three drafts an idea can become, and where one went when
+somebody sent it out the one door (adr/0005). `idea.author` (039) says whether a person wrote it
+or this console proposed it — which is about whose head holds the context, not about credit.
+
+**Work this console started** — `task`, `autostart`, `kicking`, `canary`.
+The queue (adr/0007), the per-project arming switch and its budget, the per-session one
+(adr/0009), and the name a session signs its turns with.
+
+**The workbench as a constructor** (adr/0011) — `card_role`, `card_field`, `card_tie`,
+`card_leave`, `card_made`, `card_said`, `step_card`, `template`, `template_step`, `template_line`.
+All keyed by *card name* — `kind:id`, the same string the layout and the lines use — rather than
+by a foreign key, because the two ends of a line may be an idea and a session and only one of
+those is a row in this database. `step_card` is the card that is only a card: the one you draw
+before the thing it stands for exists.
+
+**A drawing being run** — `run`, `run_step`.
+Where a run has got to and what happened at each step, including what each produced, which is the
+memory the next step is told about (037).
+
+**Somebody else's board** — `project_link`, `project_env`, `tracker_blocker`, `blocker_claim`.
+Read, never written past the one door (adr/0010). `project_env` names environment variables and
+never holds a value.
+
+**Projects a human declared** — `project_group`, `project_member`, `project_note`, `glossary`.
+Over the top of what the repositories say, for the case the default cannot know.
+
+**Plans and spending** — `subscription`, `session_subscription`.
+Which plan a session's tokens come out of, and until when.
+
+**The rest** — `setting`, `viewer`, `schema_version`.
+Preferences that must survive a stream replacing a column, the named people a read-only view has
+been minted for, and the migration ledger.
+
+## The four it opened with
+
+Kept here in full because everything else is shaped after them.
 
 ```sql
 CREATE TABLE thread (
@@ -130,9 +179,17 @@ is the failure [`../docs/adr/0004`](../docs/adr/0004-the-transcript-format-is-no
 about.
 
 **No priority, assignee or estimate on an idea.** That is a backlog
-([`../docs/08-non-goals.md`](../docs/08-non-goals.md) §4).
+([`../docs/08-non-goals.md`](../docs/08-non-goals.md) §4). `idea.size` and `idea.shape` (022) look
+like an estimate and are not: they are what a background pass *read in the text*, they are never
+written into `state`, which is the human's column, and the card renders them as a reading rather
+than as a fact.
 
-**No token or cost accounting.** The `claude` CLI reports it and nothing here is decided by it.
+**No cost accounting, and only the token counting somebody asked for.** The `claude` CLI reports
+usage and nothing here is decided by it. `subscription` / `session_subscription` (025) record which
+plan a session's tokens come out of, because a person needs to know which budget is being spent —
+but no money is computed, no rate is stored, and nothing in this program chooses differently
+because of a number. That is still the line, and the open idea "потолок расходов и текущий счёт"
+would move it deliberately rather than by accident.
 
 **No credentials of any kind.** Not the CLI's, which this program never opens
 ([`../docs/07-security.md`](../docs/07-security.md)), and not a tracker's, which a human might
@@ -166,6 +223,12 @@ rule 2 broken in the name of a roadmap.
 
 Plain SQL files applied in order at startup, recorded in a `schema_version` table. Forward-only. No
 Alembic ([`../docs/adr/0003`](../docs/adr/0003-sqlite-and-one-process.md)).
+
+Thirty-nine of them at the time of writing. Each is a small file whose comment is longer than its
+SQL, and that ratio is on purpose: the statement says what changed and the comment says why it is
+that shape and what it refuses to do — which is the part that is expensive to reconstruct and the
+part a reader actually needs. A migration with no argument in it is a migration nobody can
+safely change later.
 
 ## Crash behaviour
 

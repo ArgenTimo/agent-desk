@@ -21,6 +21,7 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | 08 | [non-goals](08-non-goals.md) | what v1 does not do, each with its reason |
 | 09 | [roadmap](09-roadmap.md) | five phases with a done-when criterion each |
 | 10 | [meeting intake](10-meeting-intake.md) | beyond v1 — and the two things the foundation does now |
+| 11 | [the plan](11-the-plan.md) | nine pieces of work, in the order they had to happen (finished) |
 
 ## Decisions
 
@@ -30,6 +31,23 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | [0002](adr/0002-read-first-never-interrupt.md) | read always, write only on a human click |
 | [0003](adr/0003-sqlite-and-one-process.md) | SQLite, one process, no build step |
 | [0004](adr/0004-the-transcript-format-is-not-a-contract.md) | one parser, recorded fixtures, a version check |
+| [0005](adr/0005-one-door-out-to-a-tracker.md) | an idea leaves for a tracker through one door, opened by a human |
+| [0006](adr/0006-the-desk-may-start-work.md) | this console may start an agent, and what that costs |
+| [0007](adr/0007-a-loop-that-decides-when-not-what.md) | a loop decides *when* work starts, never *what* the work is |
+| [0008](adr/0008-an-agent-that-finds-its-own-work.md) | an agent may find its own work; nothing lands that the gate refuses |
+| [0009](adr/0009-a-session-that-is-not-allowed-to-idle.md) | a switched-on session is kept working, and every bound is a test |
+| [0010](adr/0010-reading-a-tracker-back.md) | somebody else's board is quoted, never decided about |
+| [0011](adr/0011-the-workbench-is-a-constructor.md) | the workbench builds things: typed cards, typed lines, an engine that queues |
+
+## Keeping this map honest
+
+Seven ADRs and one document went missing from these tables between 0004 and 0011, because each was
+added by a commit that was thinking about the decision rather than about the index. An index that
+has fallen behind is worse than none: it is a list that reads as complete.
+
+So: **a new document or ADR is not finished until it is in the table above**, in the same commit.
+There is no test for this — the check is the review — and this paragraph is the reason to do it
+anyway.
 
 ## The one sentence
 

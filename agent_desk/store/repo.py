@@ -60,6 +60,11 @@ DraftKind = Literal["proposal", "ticket", "paste"]
 DRAFT_KINDS: tuple[DraftKind, ...] = ("proposal", "ticket", "paste")
 ThreadSetBy = Literal["classifier", "human"]
 
+# How much workbench is kept. Not a tuning knob: a surface is something a person arranges by hand,
+# and a bench past this is a card-making loop somewhere upstream rather than an arrangement. The
+# cap is here so that bug fills a table slowly instead of filling the disk (040-bench.sql).
+MOST_CARDS_ON_A_BENCH = 500
+
 
 # The store's own clock, in the units the registry writes (design/02-data-model.md). Deliberately
 # not imported from `observe`: a store does not need to know that a session reader exists.
@@ -298,6 +303,28 @@ class StepCard(BaseModel):
     @property
     def name(self) -> str:
         return f"step:{self.id}"
+
+
+class BenchCard(BaseModel):
+    """One card on the workbench, where somebody put it (040-bench.sql).
+
+    Named by the same `kind:id` string every line, role, field and permission on the bench is
+    keyed by, so this is a place a card is, not a second identity for it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    kind: str
+    card_id: str
+    label: str
+    x: int
+    y: int
+    shown: str
+    spent: bool
+    # Where it is in the stack. The page sends the surface in the order it holds it, and this is
+    # that order given back — see 040-bench.sql on why it is an index and not a clock.
+    ord: int
 
 
 class Template(BaseModel):
@@ -2103,6 +2130,46 @@ class Store:
                 text("SELECT id, label, made_at FROM step_card ORDER BY made_at DESC LIMIT 400")
             )
             return [StepCard(**row._mapping) for row in rows]
+
+    # --- the workbench ------------------------------------------------------------------------
+    async def keep_bench(self, cards: Sequence[BenchCard]) -> None:
+        """What is on the workbench, replacing what was on it. One transaction, not a diff.
+
+        The page knows the whole surface and the store knows nothing else about it, so sending the
+        whole thing is both the smallest message that can express "this card is gone" and the only
+        one that cannot leave the two out of step. A diff would need the page to track what the
+        store last saw, which is a second copy of the truth and the usual place these things rot.
+
+        Bounded because a surface is something a person arranges: a bench of two thousand cards is
+        a bug upstream, and writing it every time somebody drags a card would be that bug's
+        symptom rather than its cure.
+        """
+        rows = [
+            {**card.model_dump(), "spent": int(card.spent), "ord": place}
+            for place, card in enumerate(list(cards)[:MOST_CARDS_ON_A_BENCH])
+        ]
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM bench_card"))
+            if rows:
+                await conn.execute(
+                    text(
+                        "INSERT INTO bench_card "
+                        "(name, kind, card_id, label, x, y, shown, spent, ord) VALUES "
+                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord)"
+                    ),
+                    rows,
+                )
+
+    async def bench_cards(self) -> list[BenchCard]:
+        """The workbench as it was left, in the order the page had it, so it stacks the same way."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord "
+                    "FROM bench_card ORDER BY ord"
+                )
+            )
+            return [BenchCard(**row._mapping) for row in rows]
 
     async def keep_template(
         self,

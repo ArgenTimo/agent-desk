@@ -246,9 +246,9 @@ def test_a_drag_ends_even_when_the_card_does_not() -> None:
 def test_a_drag_does_not_write_to_disk_on_every_pointer_event() -> None:
     """The other half of "не всегда получается адекватно перемещаться": it stuttered.
 
-    `place` serialises the position of every card on the bench into localStorage. A pointer
-    reports faster than the screen refreshes, so a drag was doing a synchronous disk write and a
-    full rebuild of the tie layer per event, most of it thrown away before it was ever painted.
+    `place` serialises the position of every card on the bench and asks for it to be written down.
+    A pointer reports faster than the screen refreshes, so a drag was doing that work and a full
+    rebuild of the tie layer per event, most of it thrown away before it was ever painted.
     """
     console = (STATIC / "console.js").read_text(encoding="utf-8")
 

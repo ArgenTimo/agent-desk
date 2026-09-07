@@ -1,5 +1,11 @@
 # The plan, from the pool
 
+> **Finished.** All nine went in between 2026-09-05 and 2026-09-07. Kept because the *order* is
+> the part worth reading: each step is here because the one before it made it possible, and the
+> two that were split — 7, and the judgement half of 9 — are split for reasons that are still
+> true. What came after this plan is
+> [`adr/0011`](adr/0011-the-workbench-is-a-constructor.md).
+
 Twenty-three ideas, all of them about this console. Written down as one order of work rather than
 twenty-three, because half of them are the same piece of work seen from different angles and doing
 them separately would mean building the same thing twice.

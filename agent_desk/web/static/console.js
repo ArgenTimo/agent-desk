@@ -612,6 +612,12 @@ function syncTargets() {
   go.hidden = ideas === 0;
   go.textContent = ideas > 1 ? `Get started on these ${ideas}` : 'Get started on it';
   showActiveThread();
+  // And write the bench down. Here rather than at each of the things that change it — taking a
+  // card off, folding one, leaving one out of the message, clearing the lot — because that list
+  // is already six long and the seventh would be the one nobody remembered. Anything that made
+  // this console recount what is on the bench has changed the bench. The write is held back a
+  // moment, so calling this eighteen times costs one request.
+  rememberLayout();
 }
 
 // The attached earlier answers, let go of. Taking the *cards* off is `clearBench`, which also
@@ -737,6 +743,9 @@ async function pin(card, how) {
       : '<p class="empty small">could not read this one</p>';
     nameItProperly(holder, card);
     writeHint(holder);
+    // Folded or open, as it was left. After the body rather than before it: `full` fetches the
+    // technical half *into* the body, and the body is replaced by the line above.
+    if (how?.shown && how.shown !== holder.dataset.view) setView(holder, how.shown);
     settleOverlaps();
   } catch {
     holder.querySelector('.pin-body').innerHTML = '<p class="empty small">could not read this one</p>';
@@ -878,7 +887,9 @@ document.addEventListener('click', (event) => {
   }
 
   if (event.target.classList.contains('pin-off')) {
-    event.target.closest('.pin').remove();
+    const holder = event.target.closest('.pin');
+    placed.delete(cardName(holder));
+    holder.remove();
     syncTargets();
     return;
   }
@@ -1066,7 +1077,6 @@ const surface = document.getElementById('bench-surface');
 const canvas = document.getElementById('bench-canvas');
 const ties = document.getElementById('bench-ties');
 
-const PLACED = 'agent-desk:bench-layout';
 const CARD_WIDTH = 260;
 // Where a new card lands: down and to the right of the last one, the way a stack of paper falls.
 const STEP = 28;
@@ -1099,21 +1109,99 @@ function cardName(pin) {
   return pin.dataset.name || `${pin.dataset.kind}:${pin.dataset.id}`;
 }
 
+// The workbench is a thing in the store, not a state of this page (040-bench.sql).
+//
+// It used to be neither: `agent-desk:bench-layout` held where every card *was*, and nothing held
+// *which cards*, so a reload restored the positions of an empty bench. An investigation, a
+// drawing, a prototype and a set of cards laid out by hand all lasted exactly as long as the tab.
+//
+// Which cards are kept, and why the exceptions are exceptions:
+//
+//   * a **block** card is kept for its position only — the conversation brings it back from the
+//     thread by itself, and re-creating it here as well would put two of it on the surface;
+//   * a **note** is not kept at all, because its own placeholder promises it "is gone when this
+//     tab is", and a promise that specific is not quietly broken by a schema;
+//   * a **copy**, a **collection** and a card inside a **ring** each stand for a gesture that is
+//     still happening rather than for a card somebody put down.
+function benchState() {
+  return onBench('.pin[data-kind]:not(.copy):not(.collection):not(.own)')
+    .filter((pin) => pin.dataset.kind !== 'note')
+    .map((pin) => ({
+      name: cardName(pin),
+      kind: pin.dataset.kind,
+      id: pin.dataset.id,
+      label: pin.querySelector('.pin-label')?.textContent?.trim() || '',
+      at: placed.get(cardName(pin)),
+      shown: pin.dataset.view || 'hint',
+      spent: pin.classList.contains('spent'),
+    }))
+    .filter((one) => one.at);
+}
+
+// Nothing is written until the surface has been restored. The first thing this script does after
+// the page opens is draw the conversation, and every card it draws asks for the bench to be
+// written down — so without this the empty surface of the first millisecond would be saved over
+// the bench somebody left.
+let restored = false;
+
+// Written once the pointer has been still for a moment, not on every event. `place` is called at
+// the rate a pointer reports, which on a fast mouse is over a hundred times a second.
+let writing = 0;
+
 function rememberLayout() {
+  if (!restored) return;
+  clearTimeout(writing);
+  writing = setTimeout(() => {
+    fetch('/workbench/kept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // What `benchState` returns, unchanged. The first version of this reshaped it on the way
+      // out and got the reshaping wrong — the position went in twice, once as `x`/`y` and once as
+      // the `at` it was spread from, and the route dropped every card in the message for being
+      // unreadable. A bench that saved itself perfectly as nothing, silently, on every write. So
+      // there is one shape and it is this one; the route reads the position where the page keeps
+      // it rather than where it would rather have it.
+      body: JSON.stringify({ cards: benchState() }),
+    }).catch(() => {
+      // A console whose server has gone still lets you move cards about. It will be written the
+      // next time one moves and the server answers.
+    });
+  }, 400);
+}
+
+// What the store was left holding, handed to the page rather than fetched by it — see the comment
+// beside `#bench-kept` in board.html.
+function keptBench() {
   try {
-    localStorage.setItem(PLACED, JSON.stringify([...placed.entries()]));
+    return JSON.parse(document.getElementById('bench-kept')?.textContent || '[]');
   } catch {
-    // A window that will not remember where things were still lets you move them.
+    return [];
   }
 }
 
+// The positions first, then the cards. The positions have to be in `placed` before anything is
+// drawn, because `syncBlocks` places a block card the moment it creates one and would otherwise
+// stack the whole conversation in the corner before the layout arrived.
 function recallLayout() {
-  try {
-    const said = localStorage.getItem(PLACED);
-    placed = new Map(said ? JSON.parse(said) : []);
-  } catch {
-    placed = new Map();
+  placed = new Map(keptBench().map((one) => [one.name, { x: one.x, y: one.y }]));
+}
+
+// And the cards themselves, which is the half that was missing. `pin` is not awaited: it puts the
+// card in the document before it goes to fetch the body, so by the time this returns the surface
+// is populated and `syncBlocks` will not draw a second copy of anything.
+function restoreBench() {
+  for (const one of keptBench()) {
+    // Brought back by the conversation, not by us.
+    if (one.kind === 'block') continue;
+    pin(
+      { kind: one.kind, id: one.card_id, label: one.label },
+      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown }
+    );
+    const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    if (node) node.classList.toggle('spent', !!one.spent);
   }
+  restored = true;
+  syncTargets();
 }
 
 function applyView() {
@@ -1248,9 +1336,10 @@ function nextFreeSpot() {
 // the window, which catches a mouse let go anywhere on the screen.
 //
 // **Every move wrote to disk.** `place` calls `rememberLayout`, which serialises the position of
-// every card on the bench into localStorage — synchronously, at the rate the pointer reports,
-// which on a fast mouse is over a hundred times a second, with the tie and ring geometry rebuilt
-// alongside it. That is the stutter. The layout is now written once, when the card is let go.
+// every card on the bench — synchronously, at the rate the pointer reports, which on a fast mouse
+// is over a hundred times a second, with the tie and ring geometry rebuilt alongside it. That is
+// the stutter. The layout is now written once, when the card is let go, and the write itself is
+// held back a moment longer besides.
 //
 // **A card with no remembered position started from 0,0** and jumped to the corner on the first
 // touch. Where it actually is on screen is a better answer than the origin.
@@ -3786,10 +3875,16 @@ function collect(ring) {
 
 applyFolded();
 applyTabOrder();
-showActiveThread();
 
 /* --- and the first paint ----------------------------------------------------------------------- */
-// Everything above defines how the surface behaves; this is what puts the conversation on it when
-// the page opens, rather than only when the next event arrives.
-syncBlocks();
+// Everything above defines how the surface behaves; this is what puts the workbench and the
+// conversation on it when the page opens, rather than only when the next event arrives.
+//
+// The bench before the conversation, and that order is load-bearing twice. `syncBlocks` draws a
+// card for every idea a block recorded, so a restore that ran after it would draw a second one of
+// each; and nothing is written back to the store until `restoreBench` has said the surface is
+// whole, which is what stops the empty surface of the first millisecond being saved over the
+// bench somebody left.
+restoreBench();
+showActiveThread();
 emptyOrNot();
