@@ -18,6 +18,7 @@ import csv
 import io
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ from fastapi.responses import (
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 from markupsafe import Markup, escape
 
-from agent_desk import connectors, dispatch, land, peer, roles, ties, tracker
+from agent_desk import allowed, connectors, dispatch, land, peer, process, roles, ties, tracker
 from agent_desk import secrets as kept
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
@@ -1620,6 +1621,99 @@ async def workbench_lines() -> JSONResponse:
             "from_role": ties.FROM_ROLE,
             "into_role": ties.INTO_ROLE,
             "ordinarily": ties.ORDINARILY,
+        }
+    )
+
+
+@router.post("/cards/leave", response_class=JSONResponse)
+async def set_card_leave(request: Request) -> JSONResponse:
+    """Say what one step is allowed to do (036-step-memory.sql).
+
+    The whole set as it now stands, not a change to one switch: a merge would make turning a
+    permission *off* impossible to express, and a permissions screen where things can only be
+    granted is not one.
+    """
+    form = await _form(request)
+    name = form.get("name", "").strip()
+    given = [one for one in form.get("leave", "").split(",") if allowed.is_allowed(one)]
+    if not name:
+        return JSONResponse({"kept": False}, status_code=400)
+    await store.set_card_leave(name, given)
+    return JSONResponse({"kept": True, "leave": given})
+
+
+async def _bench_cards(names: Sequence[str]) -> list[process.Card]:
+    """The cards on somebody's bench, as the process reader needs them.
+
+    The bench is a fact about a browser — this program has no idea what is on it — so the names
+    come from the page and everything else is looked up here.
+    """
+    chosen = await store.card_roles()
+    said = await store.card_fields()
+    made = await store.cards_made()
+    labels = {f"idea:{one.id}": one.summary for one in await store.ideas(limit=400)}
+    cards = []
+    for name in names:
+        kind = name.split(":", 1)[0]
+        cards.append(
+            process.Card(
+                name=name,
+                role=roles.role_of(kind, chosen.get(name, "")).name,
+                label=labels.get(name, name),
+                said=said.get(name, {}),
+                made=made.get(name, ""),
+            )
+        )
+    return cards
+
+
+@router.get("/workbench/process", response_class=JSONResponse)
+async def workbench_process(cards: str = "") -> JSONResponse:
+    """Read the bench as a process: the order, what is missing, and what each step would be told.
+
+    Everything here comes out of `agent_desk/process.py`, which is pure — so what this answers and
+    what a run would actually do cannot drift apart. That is the same argument as
+    `autostart.why_not`: a console that says one thing and does another is worse than one that
+    says nothing.
+    """
+    names = [one for one in cards.split(",") if one]
+    on_bench = await _bench_cards(names)
+    here = set(names)
+    lines = [
+        process.Line(from_name=tie.from_name, to_name=tie.to_name, kind=tie.kind, says=tie.says)
+        for tie in await store.card_ties()
+        if tie.from_name in here and tie.to_name in here
+    ]
+    walked = process.order(on_bench, lines)
+    leaves = await store.card_leaves()
+    return JSONResponse(
+        {
+            "order": list(walked.steps),
+            "tangled": list(walked.tangled),
+            "why_not": process.ready_to_run(on_bench, lines),
+            "unfinished": {name: list(gaps) for name, gaps in process.unfinished(on_bench).items()},
+            # What each step would be told about what leads into it. Computed here rather than
+            # when a run starts, so that "what does this step actually get" is a question somebody
+            # can answer by looking, before anything costs anything.
+            "memory": {
+                card.name: process.memory_for(card.name, on_bench, lines)
+                for card in on_bench
+                if card.role in process.STEPS
+            },
+            "leave": {
+                card.name: list(allowed.leave_for(leaves.get(card.name)))
+                for card in on_bench
+                if card.role in process.STEPS
+            },
+            "allowed": {
+                name: {
+                    "says": one.says,
+                    "means": one.means,
+                    "held": one.held,
+                    "how": one.how,
+                }
+                for name, one in allowed.ALLOWED.items()
+            },
         }
     )
 

@@ -270,3 +270,74 @@ def test_the_form_is_drawn_from_what_the_role_asks_rather_than_per_card_template
         "the form is rebuilt on every pass, which takes the caret out of an input somebody is "
         "typing in — the worst thing a form on a live-updating page can do"
     )
+
+
+@pytest.mark.unit
+async def test_the_bench_reads_as_a_process_through_one_route(desk: Store) -> None:
+    """What the panel says and what a run would do come out of the same pure functions, so they
+    cannot drift — the same argument as autostart.why_not."""
+    from agent_desk.web.routes import workbench_process
+
+    await desk.set_card_role("idea:one", "action")
+    await desk.set_card_field("idea:one", "do", "read the logs")
+    await desk.set_card_role("idea:two", "action")
+    await desk.set_card_field("idea:two", "do", "write it up")
+    await desk.tie_cards(from_name="idea:one", to_name="idea:two", kind="then")
+    await desk.card_made("idea:one", "six sessions died on a Cyrillic worktree name")
+
+    answer = await workbench_process(cards="idea:two,idea:one")
+    body = bytes(answer.body).decode()
+
+    assert '"order":["idea:one","idea:two"]' in body
+    assert "six sessions died" in body, "what a step produced does not reach the next one"
+    assert '"why_not":""' in body
+    assert '"work"' in body, "a step is not told what it is allowed to do"
+
+
+@pytest.mark.unit
+async def test_a_step_with_nothing_said_is_reported_before_anything_runs(desk: Store) -> None:
+    from agent_desk.web.routes import workbench_process
+
+    await desk.set_card_role("idea:one", "action")
+
+    answer = await workbench_process(cards="idea:one")
+    body = bytes(answer.body).decode()
+
+    assert "what to do" in body
+    assert "have not said what they need" in body
+
+
+@pytest.mark.unit
+async def test_what_a_step_may_do_is_replaced_rather_than_merged(desk: Store) -> None:
+    """A merge would make turning a permission *off* impossible to express, and a permissions
+    screen where things can only be granted is not one."""
+    await desk.set_card_leave("idea:one", ["work", "land"])
+    assert (await desk.card_leaves())["idea:one"] == ["land", "work"]
+
+    await desk.set_card_leave("idea:one", ["work"])
+    assert (await desk.card_leaves())["idea:one"] == ["work"]
+
+    await desk.set_card_leave("idea:one", [])
+    assert await desk.card_leaves() == {}
+
+
+@pytest.mark.unit
+async def test_the_route_drops_a_permission_this_program_does_not_have(desk: Store) -> None:
+    from tests.unit.test_input import _post
+
+    await _post("/cards/leave", {"name": "idea:one", "leave": "work,fly,land"})
+
+    assert (await desk.card_leaves())["idea:one"] == ["land", "work"]
+
+
+@pytest.mark.unit
+async def test_what_a_step_produced_is_kept_latest_only(desk: Store) -> None:
+    """A history of every result a step ever produced answers a different question. What makes a
+    sequence a sequence is what the step in front produced *this time*."""
+    await desk.card_made("idea:one", "first")
+    await desk.card_made("idea:one", "second")
+
+    assert await desk.cards_made() == {"idea:one": "second"}
+
+    await desk.card_made("idea:one", "   ")
+    assert await desk.cards_made() == {}

@@ -1963,6 +1963,52 @@ class Store:
             )
             return {str(row[0]): str(row[1]) for row in rows}
 
+    # --- what a step may do, and what it made (036-step-memory.sql) ---------------------------
+    async def set_card_leave(self, name: str, given: Sequence[str]) -> None:
+        """Replace what one step is allowed to do.
+
+        Replaced rather than merged: the card sends the whole set of switches as they now stand,
+        and a merge would make turning one off impossible to express.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM card_leave WHERE name = :name"), {"name": name})
+            for one in dict.fromkeys(given):
+                await conn.execute(
+                    text("INSERT INTO card_leave (name, leave, set_at) VALUES (:name, :leave, :t)"),
+                    {"name": name, "leave": one, "t": _now_ms()},
+                )
+
+    async def card_leaves(self) -> dict[str, list[str]]:
+        """What every step that has been touched is allowed to do, by card name."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT name, leave FROM card_leave ORDER BY name, leave")
+            )
+            found: dict[str, list[str]] = {}
+            for row in rows:
+                found.setdefault(str(row[0]), []).append(str(row[1]))
+            return found
+
+    async def card_made(self, name: str, made: str) -> None:
+        """What this step produced. The latest only — see 036-step-memory.sql."""
+        async with self.engine.begin() as conn:
+            if not made.strip():
+                await conn.execute(text("DELETE FROM card_made WHERE name = :name"), {"name": name})
+                return
+            await conn.execute(
+                text(
+                    "INSERT INTO card_made (name, made, at) VALUES (:name, :made, :t) "
+                    "ON CONFLICT (name) DO UPDATE SET made = :made, at = :t"
+                ),
+                {"name": name, "made": made[:8000], "t": _now_ms()},
+            )
+
+    async def cards_made(self) -> dict[str, str]:
+        """What each step produced, by card name. The memory a process runs on."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT name, made FROM card_made"))
+            return {str(row[0]): str(row[1]) for row in rows}
+
     # --- what a card says in the fields its role asks for (035-card-fields.sql) ---------------
     async def set_card_field(self, name: str, field: str, value: str) -> None:
         """Write one field, or clear it.

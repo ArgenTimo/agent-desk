@@ -2299,3 +2299,88 @@ button.go:hover, button.yes:hover {
 .pin.unfilled .pin-role::after { content: " ·"; color: var(--attention); }
 /* Folded, the form is not the thing you are looking at. */
 .pin[data-view="hint"] .pin-fields { display: none; }
+
+/* --- the bench read as a process ---------------------------------------------------------------- */
+/* What order these run in, what each step would be told, what is still missing. Everything in it
+   comes out of agent_desk/process.py — the panel and a real run ask the same function, so they
+   cannot disagree. */
+.process-panel {
+  position: absolute;
+  z-index: 30;
+  left: 10px;
+  bottom: 10px;
+  width: min(340px, 46%);
+  max-height: 62%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  overflow: hidden;
+}
+.process-panel header {
+  padding: 6px 10px 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.process-panel header.second { border-top: 1px solid var(--line); }
+.process-body { padding: 6px 10px; overflow-y: auto; font-size: var(--t-sm); }
+.process-why { margin: 0 0 6px; color: var(--attention); }
+.process-ready { margin: 0 0 6px; color: var(--busy); }
+.process-loop { margin: 4px 0 0; color: var(--flag); font-size: var(--t-xs); }
+.process-order { margin: 0; padding-left: 1.4em; }
+.process-order li { padding: 2px 0; cursor: pointer; }
+.process-order li:hover .process-name { text-decoration: underline; }
+.process-order li.unfinished .process-name { color: var(--attention); }
+.process-role {
+  display: inline-block;
+  min-width: 4.6rem;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.process-gap { display: block; margin-left: 4.6rem; color: var(--attention); font-size: var(--t-xs); }
+.process-memory {
+  margin: 0;
+  padding: 6px 10px 10px;
+  max-height: 12rem;
+  overflow: auto;
+  color: var(--fg-soft);
+  font-size: var(--t-xs);
+  white-space: pre-wrap;
+}
+
+/* --- what a step is allowed to do --------------------------------------------------------------- */
+/* Each switch says whether this console enforces it or only asks for it. A row of switches that
+   look alike but do not work alike is worse than no switches at all. */
+.pin-leave {
+  flex: 0 0 auto;
+  border: 1px dashed var(--line-strong);
+  border-radius: 4px;
+  padding: 0 5px;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pin-leave:hover { color: var(--fg); border-color: var(--focus); }
+.role-menu.wide { min-width: 26rem; }
+.leave-tick { flex: 0 0 1rem; color: var(--busy); }
+.leave-held {
+  flex: 0 0 auto;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+.leave-held.enforced { color: var(--busy); }
+/* Amber, not green: it is a request. The difference between the two words is the reason this
+   column exists at all. */
+.leave-held.asked { color: var(--attention); }

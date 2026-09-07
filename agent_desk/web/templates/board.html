@@ -69,6 +69,11 @@
               title="lay everything out again and centre the view">tidy up</button>
       <button type="button" class="chip" data-map
               title="a small map of the whole workbench">map</button>
+      {# The bench read as a process: what order it runs in, what each step would be told, and
+         what is still missing. Everything in it comes out of agent_desk/process.py, so what the
+         panel says and what a run would do cannot disagree. #}
+      <button type="button" class="chip" data-process
+              title="read the workbench as a process">as a process</button>
       <span class="spacer"></span>
       {# Cards on the workbench that are off the screen. One you cannot see and do not know is
          there is one that goes into the next message by surprise. #}
@@ -84,6 +89,12 @@
          answer to a bench bigger than its window, the first being zooming out until nothing can
          be read at all. Off until somebody asks for it. #}
       <div id="bench-map" class="bench-map" hidden aria-label="a map of the whole workbench"></div>
+      <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">
+        <header>in this order</header>
+        <div class="process-body"></div>
+        <header class="second">what a step is told</header>
+        <pre class="process-memory">Press a step above.</pre>
+      </aside>
       <div id="bench-surface" class="bench-surface">
         <svg id="bench-ties" class="bench-ties" aria-hidden="true">
           <defs>

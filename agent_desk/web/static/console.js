@@ -1139,6 +1139,7 @@ function settleOverlaps() {
     drawRings();
     markOffEdge();
     drawMap();
+    readProcess();
   }, 60);
 }
 
@@ -1199,7 +1200,7 @@ let moving = null;
 
 // What may be grabbed, and what is somebody trying to press or read instead.
 const NOT_A_GRIP =
-  'button, a, input, textarea, select, summary, details, option, label, .pin-live, .pin-role';
+  'button, a, input, textarea, select, summary, details, option, label, .pin-live, .pin-role, .pin-leave';
 
 function gripOf(target) {
   if (target.closest(NOT_A_GRIP)) return null;
@@ -1828,6 +1829,7 @@ function showRole(pin) {
     chip.title = `${roleSays[role]?.means || ''} — press to change what this is`;
   }
   showFields(pin);
+  showLeave(pin);
 }
 
 // The small fixed set of things this role is asked (agent_desk/roles.py).
@@ -2118,6 +2120,181 @@ function showLineMenu(line, x, y) {
 }
 
 readLines();
+
+
+/* --- the bench read as a process ---------------------------------------------------------------- */
+// What order these run in, what each step would be told, and what each is allowed to do.
+//
+// All of it comes out of `agent_desk/process.py`, which is pure — so what this panel says and what
+// a run would actually do cannot drift apart. The alternative, working the order out here as well,
+// is two implementations of "what happens first" and one of them wrong.
+let processSaid = {};
+
+async function readProcess() {
+  const panel = document.getElementById('process-panel');
+  if (!panel || panel.hidden) return;
+  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  if (!names.length) {
+    panel.querySelector('.process-body').textContent = 'Nothing on the workbench yet.';
+    return;
+  }
+  try {
+    const answer = await fetch(`/workbench/process?cards=${encodeURIComponent(names.join(','))}`);
+    if (!answer.ok) return;
+    processSaid = await answer.json();
+    showProcess();
+  } catch {
+    // The bench still works; it simply cannot be read as a process right now.
+  }
+}
+
+function showProcess() {
+  const panel = document.getElementById('process-panel');
+  const into = panel?.querySelector('.process-body');
+  if (!into) return;
+  into.replaceChildren();
+
+  const why = processSaid.why_not;
+  const head = document.createElement('p');
+  head.className = why ? 'process-why' : 'process-ready';
+  head.textContent = why || 'This can be run: every step has said what it needs.';
+  into.appendChild(head);
+
+  const list = document.createElement('ol');
+  list.className = 'process-order';
+  for (const name of processSaid.order || []) {
+    const pin = surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+    const row = document.createElement('li');
+    const short = (processSaid.unfinished || {})[name];
+    row.className = short ? 'unfinished' : '';
+    const says = document.createElement('span');
+    says.className = 'process-name';
+    says.textContent = pin?.querySelector('.pin-label')?.textContent?.trim() || name;
+    const role = document.createElement('span');
+    role.className = 'process-role';
+    role.textContent = roleSays[pin ? roleOf(pin) : '']?.says || '';
+    row.append(role, says);
+    if (short) {
+      const gap = document.createElement('span');
+      gap.className = 'process-gap';
+      gap.textContent = `wants ${short.join(', ')}`;
+      row.appendChild(gap);
+    }
+    // Pressing a step shows what it would be told — which is the question "память процесса"
+    // exists to answer, and the one nobody can check by looking at the boxes.
+    row.addEventListener('click', () => showMemory(name));
+    list.appendChild(row);
+  }
+  into.appendChild(list);
+
+  for (const name of processSaid.tangled || []) {
+    const loop = document.createElement('p');
+    loop.className = 'process-loop';
+    loop.textContent = `${name} is in a loop`;
+    into.appendChild(loop);
+  }
+}
+
+// What one step gets told about what leads into it.
+function showMemory(name) {
+  const said = (processSaid.memory || {})[name];
+  const into = document.getElementById('process-panel')?.querySelector('.process-memory');
+  if (!into) return;
+  into.textContent = said || 'Nothing leads into this step, so it starts from what it says itself.';
+}
+
+document.querySelector('[data-process]')?.addEventListener('click', () => {
+  const panel = document.getElementById('process-panel');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  readProcess();
+});
+
+/* --- what one step is allowed to do ------------------------------------------------------------- */
+// "Что отличает конструктор, которому можно доверить запуск, от схемы, которую страшно нажать."
+//
+// And the thing that makes it worth trusting: each switch says whether this console *enforces* it
+// or only asks. A row of switches that look alike but do not work alike would be worse than none.
+function showLeaveMenu(pin, x, y) {
+  document.getElementById('role-menu')?.remove();
+  const name = cardName(pin);
+  const now = new Set((processSaid.leave || {})[name] || []);
+  const menu = document.createElement('menu');
+  menu.id = 'role-menu';
+  menu.className = 'role-menu wide';
+  for (const [key, one] of Object.entries(processSaid.allowed || {})) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `role-pick${now.has(key) ? ' at' : ''}`;
+    button.innerHTML =
+      '<span class="leave-tick"></span><span class="role-says"></span>' +
+      '<span class="role-means"></span><span class="leave-held"></span>';
+    button.querySelector('.leave-tick').textContent = now.has(key) ? '✓' : '';
+    button.querySelector('.role-says').textContent = one.says;
+    button.querySelector('.role-means').textContent = one.means;
+    const held = button.querySelector('.leave-held');
+    held.textContent = one.held === 'enforced' ? 'held' : 'asked only';
+    held.className = `leave-held ${one.held}`;
+    button.title = one.how;
+    button.addEventListener('click', async () => {
+      if (now.has(key)) now.delete(key);
+      else now.add(key);
+      await keepLeave(name, [...now]);
+      menu.remove();
+    });
+    row.appendChild(button);
+    menu.appendChild(row);
+  }
+  document.body.appendChild(menu);
+  menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 8)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`;
+}
+
+async function keepLeave(name, given) {
+  processSaid.leave = processSaid.leave || {};
+  processSaid.leave[name] = given;
+  try {
+    await fetch('/cards/leave', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ name, leave: given.join(',') }),
+    });
+  } catch {
+    // Right on this page for this session; the next read gets what was stored.
+  }
+  for (const pin of surface.querySelectorAll('.pin')) showLeave(pin);
+}
+
+// The chip on a step, saying how far it is allowed to go. Only on the roles that are steps: an
+// Object does not do anything, so a permission on it would be a control with nothing behind it.
+function showLeave(pin) {
+  const role = roleOf(pin);
+  const isStep = role === 'action' || role === 'decision' || role === 'event';
+  let chip = pin.querySelector('.pin-leave');
+  if (!isStep) {
+    chip?.remove();
+    return;
+  }
+  if (!chip) {
+    chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pin-leave';
+    pin.querySelector('.pin-role')?.after(chip);
+  }
+  const given = (processSaid.leave || {})[cardName(pin)] || ['work'];
+  chip.textContent = given.map((one) => processSaid.allowed?.[one]?.says || one).join(' · ');
+  chip.title = 'what this step is allowed to do — press to change';
+}
+
+document.addEventListener('click', (event) => {
+  const chip = event.target.closest('.pin-leave');
+  if (!chip) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const box = chip.getBoundingClientRect();
+  showLeaveMenu(chip.closest('.pin'), box.left, box.bottom + 4);
+});
 
 /* --- how big it is ---------------------------------------------------------------------------- */
 const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25, 1.5];
