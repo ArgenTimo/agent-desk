@@ -2425,6 +2425,8 @@ button.go:hover, button.yes:hover {
    release is a run that is fine. */
 .pin[data-step="held"] .pin-step { color: var(--attention); }
 .pin[data-step="done"] { opacity: 0.8; }
+/* Where the run *is*, as opposed to what is running: a solid edge on the current step, so a
+   held run still says where it stopped. */
 .pin.at-now { box-shadow: 0 0 0 2px var(--focus); }
 
 .run-bar {
@@ -2607,3 +2609,49 @@ button.go:hover, button.yes:hover {
    still be taking a place on the surface — that was the whole complaint: thirty cards nobody
    dropped, with the process being drawn invisible among them. */
 .pin.put-away { display: none; }
+
+/* --- in the message, and working right now ------------------------------------------------------- */
+/* "Я хочу чтобы те блоки что сейчас выполняются как-то явно подсвечивались на верстаке и были
+   отличны от блоков которые подсвечиваются как участвующие в контексте запросов."
+   
+   Two different facts, and before this they were two shades of one highlight: "this card will go
+   with the next message" and "an agent is working on this card right now". On a bench where things
+   are moving, two shades of one thing read as one thing.
+   
+   So they are given different *kinds* of mark rather than different colours:
+   
+   - **in the message** — a dot, on the head, at rest. It is a property of the card.
+   - **working now** — the card's own edge is alive: a moving hatch and a turning gear. It is
+     something happening to the card, and it moves, because nothing else on a still bench does. */
+.pin[data-step="going"] {
+  border-color: var(--focus);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 7px,
+    color-mix(in srgb, var(--focus) 9%, transparent) 7px,
+    color-mix(in srgb, var(--focus) 9%, transparent) 14px
+  );
+  background-size: 200% 200%;
+  animation: card-working 1.4s linear infinite;
+}
+@keyframes card-working {
+  from { background-position: 0 0; }
+  to { background-position: 19.8px 0; }
+}
+.pin[data-step="going"] .pin-step {
+  display: inline-block;
+  animation: ring-turn 2.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin[data-step="going"] { animation: none; }
+  .pin[data-step="going"] .pin-step { animation: none; }
+}
+/* And the one being chosen keeps its own mark, which is neither of those: an outline, drawn
+   outside the card rather than on it, because a choice is something you did and not something the
+   card is. */
+.pin.chosen { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* "Only these" said in the strip, so the difference between the two ways of carrying context is
+   readable rather than inferred from a number. */
+.context-strip.only-these #context-count { color: var(--focus); }

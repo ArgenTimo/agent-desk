@@ -759,3 +759,68 @@ def test_folding_the_conversation_puts_away_what_the_conversation_brought() -> N
     assert ".pin.put-away { display: none; }" in css, (
         "a card put away is merely dimmed, so it is still taking a place on the surface"
     )
+
+
+@pytest.mark.unit
+def test_a_choice_is_the_context_when_there_is_one() -> None:
+    """ "Щёлкать мышкой по карточкам… после чего мои запросы обрабатываются только с тем контекстом
+    что я выбрал."
+
+    The bench used to be "everything except what you switched off", so asking about three cards
+    out of thirty meant switching off twenty-seven. Choosing three and asking is the same gesture
+    as choosing three and moving them, which is why this is not a mode with a switch of its own.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    carried = console[console.index("function pinnedTargets(") :]
+    carried = carried[: carried.index("\n}\n")]
+    assert "chosenCards()" in carried, "a selection does not change what the message carries"
+    assert "chosen.length" in carried, "there is no fallback to the whole bench"
+
+    # And choosing something has to tell the field, or the change is invisible until the next tick.
+    shown = console[console.index("function showChosen(") :]
+    shown = shown[: shown.index("\n}\n")]
+    assert "syncTargets()" in shown
+
+
+@pytest.mark.unit
+def test_in_the_message_and_working_now_are_not_two_shades_of_one_thing() -> None:
+    """ "Блоки что сейчас выполняются… были отличны от блоков которые подсвечиваются как
+    участвующие в контексте запросов."
+
+    Two different facts — "this will go with the next message" and "an agent is working on this
+    right now" — and on a bench where things are moving, two shades of one highlight read as one
+    thing. So they get different kinds of mark: a dot at rest for one, a moving edge for the other.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    working = css[css.index('.pin[data-step="going"] {') :]
+    working = working[: working.index("}")]
+    assert "animation:" in working, "a card being worked on does not move, so it reads as a colour"
+    assert "repeating-linear-gradient" in working
+
+    # The one that means "in the message" is a dot, and it is not animated.
+    dot = css[css.index("\n.pin-live {") :]
+    dot = dot[: dot.index("}")]
+    assert "animation" not in dot
+    assert "prefers-reduced-motion" in css
+
+
+@pytest.mark.unit
+def test_what_a_message_carries_is_cards_and_not_everything_inside_them() -> None:
+    """A bench showing seven cards was sending a hundred and twenty-three targets.
+
+    `[data-kind]` matched every element carrying that attribute *inside* a card as well — the idea
+    lines a block card lists — so every message went out with every idea ever mentioned in the
+    conversation attached to it. Silently, because the count beside the field measures `.pin` and
+    the targets did not.
+
+    The same mistake `pin()` made once, for the same reason: `[data-kind]` is not a card.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    carried = console[console.index("function pinnedTargets(") :]
+    carried = carried[: carried.index("\n}\n")]
+
+    assert "'.pin[data-kind]" in carried, "the message carries elements that are not cards"
+    assert "querySelectorAll('[data-kind]" not in carried

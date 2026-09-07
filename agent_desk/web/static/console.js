@@ -544,10 +544,32 @@ function showBenchToggle() {
   loadTies();
 }
 
+// What the next message is about.
+//
+// **A choice, when there is one, is the whole of it.** "Щёлкать мышкой по карточкам подключая их
+// к контексту либо выделяя специальным инструментом, после чего мои запросы обрабатываются только
+// с тем контекстом что я выбрал."
+//
+// Before this the bench was "everything except what you switched off", so asking about three
+// cards out of thirty meant switching off twenty-seven. Choosing three and asking is the same
+// gesture as choosing three and moving them — one selection, and it means the same thing wherever
+// it is used, which is why this is not a mode with a switch of its own.
+//
+// A note is not a card the server can look up — it is text that exists only here — so it is
+// carried in its own field rather than named as a target that would 404.
 function pinnedTargets() {
-  // A note is not a card the server can look up — it is text that exists only here — so it is
-  // carried in its own field rather than named as a target that would 404.
-  return [...pins.querySelectorAll('[data-kind]:not(.own):not(.spent):not(.ringed):not(.put-away)')]
+  const chosen = chosenCards().filter(
+    (pin) => pin.dataset.kind && !pin.classList.contains('own')
+  );
+  const carried = chosen.length
+    ? chosen
+    : // `.pin` matters. Without it this matched every element carrying `data-kind` *inside* a
+      // card as well — the idea lines a block card lists — and a bench showing seven cards was
+      // sending a hundred and twenty-three targets with every message. Silently, because the
+      // count beside the field was measuring something else. The same mistake `pin()` made once
+      // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
+      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.spent):not(.ringed):not(.put-away)')];
+  return carried
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -567,11 +589,16 @@ function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
-  const live = pins.querySelectorAll('.pin:not(.spent):not(.ringed):not(.put-away)').length;
+  const picked = chosenCards().filter((pin) => pin.dataset.kind).length;
+  const live = picked || pins.querySelectorAll('.pin:not(.spent):not(.ringed):not(.put-away)').length;
   const carried = live + attached;
+  // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
+  // sentence somebody reads twice; "asking about these 3 only" is one they read once.
+  document.querySelector('.context-strip')?.classList.toggle('only-these', picked > 0);
   const deep = pins.querySelectorAll('.pin.deep').length;
   document.getElementById('context-count').textContent = carried
-    ? `carrying ${live} card${live === 1 ? '' : 's'}` +
+    ? `${picked ? 'asking about these' : 'carrying'} ${live} card${live === 1 ? '' : 's'}` +
+      `${picked ? ' only' : ''}` +
       `${deep ? ` (${deep} in full)` : ''}` +
       `${attached ? ` and ${attached} earlier answer${attached === 1 ? '' : 's'}` : ''}`
     : '';
@@ -1495,6 +1522,8 @@ function chooseNone() {
 }
 
 function showChosen() {
+  // The choice is the context, so anything that changes it changes what the next message carries.
+  syncTargets();
   const bar = document.getElementById('chosen-bar');
   if (!bar) return;
   const many = chosenCards();
