@@ -1184,6 +1184,33 @@ async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     runs.start(block.id, lambda: _run(store, block, prompt, add_dirs))
 
 
+async def answer_it_instead(store: Store, block: Block, rows: Sequence[BoardRow]) -> list[str]:
+    """ "That was not an idea — write it." The correction the other way round, and the one that was
+    missing.
+
+    "Напиши мне план" is a plan somebody wants to read, not a wish that the product should have
+    plans in it — and taken as an idea it is *silently not done*: what was asked for never gets
+    written, and it lands in a list of things to build instead. Of the two directions this
+    correction can go, this is the one whose failure is invisible, which is why it needed a button
+    of its own rather than a note in a docstring.
+
+    What it removes is only what nobody has touched: `delete_idea` refuses an idea that has been
+    kept, drafted or filed, so a thought somebody has since decided is worth doing survives the
+    correction. Returns what it could not remove, so the console can say so rather than implying
+    the pool is clean.
+    """
+    left_behind = []
+    for idea in await store.ideas(limit=400):
+        if idea.block_id != block.id:
+            continue
+        await store.delete_idea(idea.id)
+        if await store.idea(idea.id) is not None:
+            left_behind.append(idea.summary)
+    await store.set_block_kind(block.id, "question")
+    await retry(store, block, rows)
+    return left_behind
+
+
 async def set_thread(
     store: Store, block: Block, thread_id: str | None, rows: Sequence[BoardRow]
 ) -> None:

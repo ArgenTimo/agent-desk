@@ -3042,6 +3042,25 @@ async def make_it_an_idea(block_id: str, request: Request) -> Response:
     return RedirectResponse("/", status_code=303)
 
 
+@router.post("/blocks/{block_id}/answer-it", response_class=HTMLResponse)
+async def answer_it_instead(block_id: str, request: Request) -> Response:
+    """ "That was not an idea — write it." The correction that was missing.
+
+    Both directions now exist, and they are not symmetrical. A request taken as an idea is
+    silently not done: nothing was written, and it went into a list of things to build. A thought
+    taken as a question costs one wasted answer. So this is the one whose absence was expensive.
+    """
+    block = await store.block(block_id)
+    if block is None:
+        return HTMLResponse(await render_blocks(), status_code=404)
+    if block.kind == "idea":
+        rows, _ = await asyncio.to_thread(board)
+        await block_runs.answer_it_instead(store, block, rows)
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
+
+
 @router.post("/blocks/{block_id}/delete", response_class=HTMLResponse)
 async def delete_block(block_id: str, request: Request) -> Response:
     """Throw one message away, at a human's asking.

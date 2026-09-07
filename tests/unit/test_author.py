@@ -11,6 +11,7 @@ it, and everything here is about getting that context to them before anything is
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from collections.abc import AsyncIterator
 
@@ -182,3 +183,39 @@ async def test_making_an_idea_from_nothing_is_refused(desk: Store) -> None:
 
     assert status == 400
     assert await desk.ideas() == []
+
+
+@pytest.mark.unit
+async def test_answering_it_instead_removes_the_idea_it_should_not_have_made(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """And only what nobody has touched: `delete_idea` refuses an idea that has been kept, drafted
+    or filed, so a thought somebody has since decided is worth doing survives the correction."""
+    from agent_desk.web import blocks as block_runs
+
+    thread = await desk.create_thread("s")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="idea", input="напиши мне план", thread_set_by="human"
+    )
+    loose = await desk.create_idea(
+        text_="напиши мне план", summary="напиши мне план", source_kind="typed", block_id=block.id
+    )
+    kept = await desk.create_idea(
+        text_="a real one", summary="a real one", source_kind="typed", block_id=block.id
+    )
+    await desk.set_idea_state(kept.id, "kept")
+
+    # The correction re-runs the block, and a run needs the group the console holds open.
+    async with asyncio.TaskGroup() as group:
+        block_runs.runs.attach(group)
+        try:
+            left = await block_runs.answer_it_instead(desk, block, [])
+        finally:
+            block_runs.runs.cancel_all()
+            block_runs.runs.attach(None)
+
+    assert await desk.idea(loose.id) is None, "the idea it should not have made is still there"
+    assert await desk.idea(kept.id) is not None, "an idea somebody kept was deleted by a correction"
+    assert left == ["a real one"], "what could not be removed is not reported"
+    again = await desk.block(block.id)
+    assert again is not None and again.kind == "question"

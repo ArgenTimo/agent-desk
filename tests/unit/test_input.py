@@ -27,7 +27,7 @@ case "$prompt" in
   # Two classifiers ask before the answer does, and both must be matched first: their prompts
   # quote the line that was typed, so every marker in this file appears inside them too. What
   # kind it is comes first of all, because it decides whether the rest happens at all.
-  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"question"}]}}\n' ;;
+  *"One token, nothing else"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"question"}]}}\n' ;;
   *"Open subjects"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"new"}]}}\n' ;;
   *PLEASE_HANG*)
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"thinking"}]}}\\n'
@@ -581,7 +581,7 @@ async def test_the_partial_answer_is_redacted_while_it_streams(
     # about what the console renders while a run is streaming, not about classification.
     binary.write_text(
         '#!/bin/sh\nprompt=$(cat)\ncase "$prompt" in\n'
-        '  *"which of three things"*) printf \'{"type":"assistant","message":{"content":'
+        '  *"One token, nothing else"*) printf \'{"type":"assistant","message":{"content":'
         '[{"type":"text","text":"question"}]}}\\n\' ;;\n'
         '  *) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":'
         '"the config had ' + secret + " in it\"}]}}\\n'\n     sleep 30 ;;\nesac\n"
@@ -797,7 +797,7 @@ async def _settled(store: Store, block_id: str) -> str:
 KINDS = """#!/bin/sh
 prompt=$(cat)
 case "$prompt" in
-  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$KIND" ;;
+  *"One token, nothing else"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$KIND" ;;
   *"## The sessions"*)
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"session: 1\\\\nrun the tests again, all of them"}]}}\\n' ;;
   *) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n' ;;
@@ -890,7 +890,7 @@ async def test_an_instruction_that_names_no_session_prepares_nothing(
     binary.parent.mkdir()
     binary.write_text(
         '#!/bin/sh\nprompt=$(cat)\ncase "$prompt" in\n'
-        '  *"which of three things"*) printf \'{"type":"assistant","message":{"content":'
+        '  *"One token, nothing else"*) printf \'{"type":"assistant","message":{"content":'
         '[{"type":"text","text":"do"}]}}\\n\' ;;\n'
         '  *) printf \'{"type":"assistant","message":{"content":[{"type":"text","text":'
         '"I think session 1 should probably do it"}]}}\\n\' ;;\nesac\n'

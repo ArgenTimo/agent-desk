@@ -368,8 +368,12 @@ def test_what_is_on_the_workbench_is_part_of_what_was_said() -> None:
     assert "That is an addressee" in pointing
     # And the doubtful-case rule is still there, because it is right for a line with nothing
     # dropped on it.
-    assert "unsure between idea and do, answer idea" in alone
-    assert "unsure between idea and do, answer idea" in pointing
+    # The two tie-breaks pull in different directions on purpose, because the two mistakes cost
+    # different things: a thought taken as an instruction starts an agent nobody asked for, while
+    # a request taken as an idea is silently never done.
+    assert "Unsure between `idea` and `do` — answer `idea`" in alone
+    assert "Unsure between `idea` and `question` — answer `question`" in alone
+    assert "Unsure between `idea` and `do` — answer `idea`" in pointing
 
 
 @pytest.mark.unit
@@ -452,3 +456,46 @@ async def test_a_chat_with_barely_anything_in_it_keeps_its_first_name(
         assert (await store.thread(thread.id)).subject == "the parser"  # type: ignore[union-attr]
     finally:
         await store.close()
+
+
+@pytest.mark.unit
+def test_asking_for_something_to_be_written_is_not_an_idea() -> None:
+    """ "Напиши мне план" — это вообще не идея, это просьба."
+
+    The prompt used to say an idea is a wish about the product "even when it is phrased as a
+    command", and then broke ties towards `idea`. So a request for a plan went into the pool: what
+    was asked for never got written, and a list of things to build gained a line that is not one.
+
+    Almost every request is phrased as a command, so being phrased as one has to decide nothing.
+    What decides it is what the message is *about*: an idea is about the product, and after it the
+    thing being built is different; a request is about what somebody wants in their hands now.
+    """
+    from agent_desk.answer.classify import kind_prompt
+
+    asked = kind_prompt("напиши мне план внедрения")
+
+    assert "напиши мне план" in asked.lower(), "the example that broke it is not in the prompt"
+    assert "Being phrased as a command decides nothing" in asked
+    assert '"Add a plans page" is the idea; "write me a plan" is a question' in asked
+    # And the tie-break that caused it now pulls the other way for this pair.
+    assert "Unsure between `idea` and `question` — answer `question`" in asked
+    assert "silently *not done*" in asked
+
+
+@pytest.mark.unit
+def test_a_request_taken_as_an_idea_can_be_put_right() -> None:
+    """Both directions of the correction exist now, and they are not symmetrical: a thought taken
+    as a question costs one wasted answer, while a request taken as an idea is silently not done.
+    The second is the one whose absence was expensive."""
+    from agent_desk.web import blocks as block_runs
+
+    assert hasattr(block_runs, "answer_it_instead")
+    markup = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "agent_desk"
+        / "web"
+        / "templates"
+        / "_blocks.html"
+    ).read_text(encoding="utf-8")
+    assert "/answer-it" in markup
+    assert "record as an idea" in markup, "the correction the other way round has gone"

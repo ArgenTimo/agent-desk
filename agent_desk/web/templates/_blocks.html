@@ -195,6 +195,14 @@
     {% endif %}
     {% if block.kind == "idea" %}
     <a class="as-button" href="/ideas">the inbox</a>
+    {# The correction the other way round. "Напиши мне план" is a plan somebody wants to read, not
+       a wish that the product should have plans in it — and taken as an idea it is silently not
+       done. Of the two directions this can go wrong, this is the one whose failure is invisible,
+       which is why it needs a button and not a docstring. #}
+    <form method="post" action="/blocks/{{ block.id }}/answer-it"
+          hx-post="/blocks/{{ block.id }}/answer-it" hx-target="#blocks">
+      <button type="submit" title="this was not an idea — answer it instead">answer it instead</button>
+    </form>
     <form method="post" action="/blocks/{{ block.id }}/delete"
           hx-post="/blocks/{{ block.id }}/delete" hx-target="#blocks">
       {# The ideas themselves stay in the inbox; what goes is the message that captured them. #}

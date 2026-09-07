@@ -661,7 +661,7 @@ async def test_an_idea_an_agent_has_in_hand_says_so_wherever_it_is_drawn(
 KINDS = """#!/bin/sh
 prompt=$(cat)
 case "$prompt" in
-  *"which of three things"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$SAY" ;;
+  *"One token, nothing else"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$SAY" ;;
   *"which of them this request is about"*) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\\n' "$SAY" ;;
   *) printf '{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n' ;;
 esac
