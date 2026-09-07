@@ -1,0 +1,35 @@
+-- Where each card on the workbench came from.
+--
+-- "Когда карточки начнут появляться из соединения, из раскрытия, из схемы, из ответа модели и из
+-- карантина — вопрос «откуда это здесь» станет постоянным. У карточки должна быть строчка
+-- происхождения: чем сделана, из чего, когда. Это ровно то же требование, которое в этом проекте
+-- уже применено к статусам: показывать, на основании чего сказано (CLAUDE.md, правило пятое)."
+--
+-- The comparison in that last sentence is the design. A status on this board says what it was read
+-- from, so that nobody has to decide whether to believe it. A card on the workbench said nothing
+-- at all about how it got there, and there are already ten ways: dragged off the overview, found
+-- with Ctrl+K, brought in beside an idea because it is that idea's project, written down by an
+-- answer, drawn from a description, made from a saved template, restored with the bench. Ten ways
+-- and no way to tell them apart is a surface where "why is this here" has no answer.
+--
+-- ## Two columns, not three
+--
+-- The idea asks for "чем сделана, из чего, когда". Two of those go here and the third already
+-- exists: **what it was made from is the line drawn to it**. Bringing an idea's project in draws a
+-- line from the project; an answer that writes an idea down joins the two; a template's steps
+-- arrive with the lines between them. Storing the source a second time as text would be a second
+-- copy of a fact that is already on the screen, and the two would disagree the first time somebody
+-- rubbed a line out.
+--
+-- So `came` is the doing — a short phrase in the words a person would use — and `came_at` is when.
+--
+-- ## Why the words and not a code
+--
+-- A code would need a table mapping it to a sentence, and every new way of making a card would
+-- have to be added in two places or render as its own name. The phrase is written where the card
+-- is made, which is the only place that knows the answer, and a way of making a card that forgets
+-- to say leaves the line off rather than inventing one — absent is a real state and it reads as
+-- one, which is the same argument the card descriptions are stored under (028).
+
+ALTER TABLE bench_card ADD COLUMN came    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE bench_card ADD COLUMN came_at INTEGER NOT NULL DEFAULT 0;

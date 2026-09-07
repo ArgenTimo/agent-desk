@@ -335,6 +335,11 @@ class BenchCard(BaseModel):
     # Whether somebody put it where it is, as opposed to it having landed there (042). What every
     # layout that runs without being asked has to leave alone.
     by_hand: bool = False
+    # How this card got onto the bench, in the words a person would use, and when (045). Empty is a
+    # real answer — a way of making a card that does not say leaves the line off rather than
+    # inventing one.
+    came: str = ""
+    came_at: int = 0
 
 
 class Template(BaseModel):
@@ -2189,8 +2194,9 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id) VALUES (:name, :kind, :card_id, :label, :x, :y, "
-                        ":shown, :spent, :ord, :by_hand, :thread_id)"
+                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
+                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
+                        ":came_at)"
                     ),
                     rows,
                 )
@@ -2244,7 +2250,8 @@ class Store:
             dict(row._mapping)
             for row in await conn.execute(
                 text(
-                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
+                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
+                    "came, came_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},
@@ -2385,8 +2392,9 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id) VALUES (:name, :kind, :card_id, :label, :x, :y, "
-                        ":shown, :spent, :ord, :by_hand, :thread_id)"
+                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
+                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
+                        ":came_at)"
                     ),
                     [{**card, "thread_id": thread_id} for card in was["cards"]],
                 )
@@ -2423,7 +2431,8 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
+                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
+                    "came, came_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},

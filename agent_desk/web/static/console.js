@@ -670,7 +670,11 @@ async function bringItsKin(card, at) {
     if (kin.project) {
       await pin(
         { kind: 'project', id: kin.project.key, label: kin.project.name },
-        { at: { x: at.x - CARD_WIDTH - GAP * 3, y: at.y }, quiet: true }
+        {
+          at: { x: at.x - CARD_WIDTH - GAP * 3, y: at.y },
+          quiet: true,
+          came: 'brought in as this idea’s project',
+        }
       );
       ownTies.push({
         from: `project:${kin.project.key}`,
@@ -686,7 +690,11 @@ async function bringItsKin(card, at) {
         brought += 1;
         await pin(
           { kind: 'idea', id: child.id, label: child.summary },
-          { at: { x: at.x + depth * (CARD_WIDTH + GAP * 2), y: at.y + brought * 40 }, quiet: true }
+          {
+            at: { x: at.x + depth * (CARD_WIDTH + GAP * 2), y: at.y + brought * 40 },
+            quiet: true,
+            came: 'brought in as part of another idea',
+          }
         );
         ownTies.push({ from: `idea:${child.parent}`, to: `idea:${child.id}`, says: 'part of' });
         await walk(child.children || [], depth + 1);
@@ -719,6 +727,11 @@ async function pin(card, how) {
   // drag would fight that. `×` is how a card leaves.
   holder.dataset.deep = 'no';
   holder.dataset.view = 'hint';
+  // Where it came from, in the words a person would use, and when (045). Said by whoever makes the
+  // card, because that is the only place that knows; a caller that does not say leaves the line off
+  // rather than having one invented for it.
+  holder.dataset.came = how?.came || '';
+  holder.dataset.cameAt = String(how?.cameAt || Date.now());
   holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
     <button type="button" class="pin-role" title="what this is in the process"></button>
     <span class="pin-kind">${card.kind}</span>
@@ -726,8 +739,10 @@ async function pin(card, how) {
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
+    <p class="pin-came"></p>
     <div class="pin-body">reading…</div>`;
   holder.querySelector('.pin-label').textContent = card.label || card.id;
+  writeCame(holder);
   pins.appendChild(holder);
   showRole(holder);
   // `exact` is for a position that was *remembered* rather than worked out — restoring the bench,
@@ -765,6 +780,34 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = '<p class="empty small">could not read this one</p>';
   }
   syncTargets();
+}
+
+// The one line that says how a card got here. "Это ровно то же требование, которое в этом проекте
+// уже применено к статусам: показывать, на основании чего сказано."
+//
+// What it was made *from* is deliberately not in here: that is the line drawn to it. Bringing an
+// idea's project in draws a line from the project, an answer that writes an idea down joins the
+// two, a template's steps arrive with the lines between them — saying it twice would be two copies
+// of one fact, and they would disagree the first time somebody rubbed a line out.
+function writeCame(holder) {
+  const line = holder.querySelector('.pin-came');
+  if (!line) return;
+  const came = holder.dataset.came;
+  line.hidden = !came;
+  line.textContent = came ? `${came} · ${howLongAgo(Number(holder.dataset.cameAt) || 0)}` : '';
+}
+
+// "Когда", in the units somebody actually thinks in. Ten seconds ago and eleven minutes ago are
+// different answers to "why is this here"; the exact time on a clock is not.
+function howLongAgo(then) {
+  if (!then) return 'just now';
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 45) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 // What a folded card says about itself.
@@ -852,6 +895,10 @@ function markHintCounts(holder, joined) {
 
 function setView(holder, view) {
   holder.dataset.view = view;
+  // "Когда" is written when the card is made and read when somebody opens it, so it is worked out
+  // again here. A tab left open for an hour would otherwise still be saying "just now", which is
+  // the one thing a line about provenance must not do.
+  writeCame(holder);
   const button = holder.querySelector('.pin-view');
   if (button) {
     button.textContent = VIEW_SAYS[view];
@@ -936,7 +983,10 @@ document.addEventListener('click', (event) => {
   const card = (opener || name)?.closest('[data-kind]');
   if (!card) return;
   event.preventDefault();
-  pin({ kind: card.dataset.kind, id: card.dataset.id, label: card.dataset.label });
+  pin(
+    { kind: card.dataset.kind, id: card.dataset.id, label: card.dataset.label },
+    { came: 'picked from the overview' }
+  );
 });
 
 let dragged = null;
@@ -990,7 +1040,7 @@ document.addEventListener('drop', (event) => {
   dragged.handled = true;
 
   if (zone.id === 'bench-canvas') {
-    if (!dragged.fromPins) pin(dragged);
+    if (!dragged.fromPins) pin(dragged, { came: 'dropped on the workbench' });
     document.getElementById('ask-text').focus();
     return;
   }
@@ -1150,6 +1200,8 @@ function benchState() {
       // Whether somebody put it where it is. The page has always known this and always forgot it
       // on reload, so a bench arranged by hand became sweepable again by the next morning (042).
       by_hand: pin.dataset.moved === 'yes',
+      came: pin.dataset.came || '',
+      came_at: Number(pin.dataset.cameAt) || 0,
     }))
     .filter((one) => one.at);
 }
@@ -1289,7 +1341,16 @@ function layOut(cards) {
     }
     pin(
       { kind: one.kind, id: one.card_id, label: one.label },
-      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
+      {
+        at: { x: one.x, y: one.y },
+        quiet: true,
+        shown: one.shown,
+        exact: true,
+        // Where it came from originally, not "restored": how a card got onto the bench is a fact
+        // about the card, and reloading a page is not a way of making one.
+        came: one.came,
+        cameAt: one.came_at,
+      }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
     if (!node) continue;
@@ -1993,7 +2054,7 @@ async function openBench(name) {
   for (const one of cards) {
     await pin(
       { kind: one.kind, id: one.id, label: one.label },
-      { at: one.at, quiet: true, exact: true }
+      { at: one.at, quiet: true, exact: true, came: `from the saved workbench “${name}”` }
     );
     const node = surface.querySelector(`.pin[data-name="${CSS.escape(`${one.kind}:${one.id}`)}"]`);
     if (!node) continue;
@@ -2722,7 +2783,10 @@ async function addStep(role = 'action') {
       body: new URLSearchParams({ label, role }),
     });
     const said = await answer.json();
-    await pin({ kind: 'step', id: said.id, label: said.label }, { quiet: true });
+    await pin(
+      { kind: 'step', id: said.id, label: said.label },
+      { quiet: true, came: 'drawn as a step' }
+    );
     await readRoles();
   } catch {
     say('Could not add a step.');
@@ -2757,7 +2821,10 @@ async function useTemplate(name) {
   if (!said.made) return say(said.why || 'Could not use it.');
   for (const one of said.cards) {
     const [kind, ...rest] = one.name.split(':');
-    await pin({ kind, id: rest.join(':'), label: '' }, { quiet: true });
+    await pin(
+      { kind, id: rest.join(':'), label: '' },
+      { quiet: true, came: `made from the template “${name}”` }
+    );
   }
   await readRoles();
   await readLines();
@@ -2885,7 +2952,10 @@ document.getElementById('words-panel')?.addEventListener('click', async (event) 
   const said = await answer.json();
   for (const one of said.cards || []) {
     const [kind, ...rest] = one.name.split(':');
-    await pin({ kind, id: rest.join(':'), label: '' }, { quiet: true });
+    await pin(
+      { kind, id: rest.join(':'), label: '' },
+      { quiet: true, came: 'drawn from a description' }
+    );
   }
   await readRoles();
   await readLines();
@@ -3337,7 +3407,10 @@ function showCardMenu(pin, x, y) {
 function addFolder() {
   const said = window.prompt('Which folder? A full path, starting at /');
   if (!said) return;
-  pin({ kind: 'folder', id: said.trim(), label: said.trim().split('/').filter(Boolean).pop() || said });
+  pin(
+    { kind: 'folder', id: said.trim(), label: said.trim().split('/').filter(Boolean).pop() || said },
+    { came: 'typed in as a folder' }
+  );
 }
 
 function clearBench() {
@@ -3541,7 +3614,10 @@ function syncBlocks() {
     for (const line of node.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
       if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
-        pin({ kind: 'idea', id: line.dataset.id, label: line.dataset.label }, { under: id });
+        pin(
+          { kind: 'idea', id: line.dataset.id, label: line.dataset.label },
+          { under: id, came: 'written down by an answer' }
+        );
       }
     }
   }
@@ -3912,7 +3988,10 @@ function paletteKeys(event) {
 // answer, and this one has a surface.
 function takePalette(one) {
   closePalette();
-  pin({ kind: one.kind === 'checkout' ? 'instance' : one.kind, id: one.id, label: one.name });
+  pin(
+    { kind: one.kind === 'checkout' ? 'instance' : one.kind, id: one.id, label: one.name },
+    { came: 'found with Ctrl+K' }
+  );
 }
 
 document.addEventListener('keydown', (event) => {

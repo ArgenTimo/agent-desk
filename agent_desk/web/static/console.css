@@ -642,6 +642,11 @@ button[disabled] { opacity: 0.5; cursor: default; }
 /* What today has cost. Three readings, and only the last two are worth a colour: a number that is
    coloured all day is a number people stop seeing, which is the whole failure this counter exists
    to fix (043-spending.sql). */
+/* Where a card came from. Under the label, and only once the card is open past a line: a folded
+   card is a title and this is not the title (045-where-a-card-came-from.sql). */
+.pin-came { margin: 0 0 4px 10px; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }
+.pin[data-view="hint"] .pin-came { display: none; }
+
 /* What a run is doing while it is not saying anything. Dimmed and italic: it is a note about the
    run rather than any part of its answer, and the difference has to be readable at a glance
    (agent_desk/answer/session.py). */
