@@ -254,7 +254,8 @@ async def wired(
 async def test_the_page_serves_the_board_and_opens_one_stream(home: Home, wired: Store) -> None:
     body = (await routes.page()).body.decode()
     assert "No live sessions" in body
-    assert '<script src="/static/console.js">' in body
+    # Stamped with what is in the file, so a browser cannot keep rendering last week's script.
+    assert '<script src="/static/console.js?v=' in body
     # One stream, opened by the one script. It moved out of the page when the page grew a third
     # column; what must not happen is a second EventSource anywhere.
     assert _script().count("new EventSource(") == 1
@@ -422,7 +423,10 @@ async def test_the_styles_are_one_file_rather_than_four_copies(home: Home, wired
 
     for page in ("board.html", "inbox.html", "viewers.html"):
         markup = (TEMPLATES / page).read_text()
-        assert '<link rel="stylesheet" href="/static/console.css">' in markup, page
+        # Stamped with the file's own contents, so a browser cannot keep rendering last week's
+        # stylesheet — which it did, and which is how four panels stayed on screen after the rule
+        # that hides them was already in the file being served.
+        assert "stamped('console.css')" in markup, page
         assert "<style>" not in markup, f"{page} still carries its own copy"
 
 

@@ -1,3 +1,12 @@
+/* Anything the page has switched off stays off.
+   
+   `hidden` is an attribute, and the browser implements it as `[hidden] { display: none }` — a
+   rule of the very lowest weight, which *any* `display` in this file beats. Every panel here is a
+   flex or grid container, so every one of them ignored being hidden: the process panel, the words
+   panel, the run bar and the selection bar were all on screen at once on a console where nobody
+   had opened any of them. One rule, at the top, rather than remembering it per panel. */
+[hidden] { display: none !important; }
+
 /* The console's one stylesheet.
  *
  * It lived inline in four pages, which is how the four drifted. Serving it from `static/` also
@@ -952,7 +961,26 @@ button.menu-item {
   color: var(--fg-soft);
   letter-spacing: 0.02em;
 }
-.pin-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-family: var(--prose); }
+/* The name, and it comes first. It used to come after the live dot, the role, the permissions and
+   the kind — four labels ahead of the one thing that says which card this is, so on a bench of six
+   cards from one template every head read `Action work step 2 a li…` and not one of them said what
+   it was. */
+.pin-label {
+  flex: 1 1 auto;
+  min-width: 4rem;
+  order: -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-family: var(--prose);
+  font-weight: 500;
+}
+/* And the kind is the quietest thing on the head, because the role above it already says what the
+   card is *for*. On a step card it says nothing at all — "step" under a chip that says "Action" —
+   so it goes. */
+.pin[data-kind="step"] .pin-kind { display: none; }
+.pin-kind { opacity: 0.75; }
 .pin-off { min-height: 20px; padding: 0 7px; border-color: transparent; background: none; }
 .pin-body { margin-top: 4px; }
 .pin.folded .pin-body { display: none; }
@@ -2518,3 +2546,64 @@ button.go:hover, button.yes:hover {
 }
 .step-name { display: flex; gap: 6px; margin: 6px 0 0; }
 .step-name input { flex: 1; min-width: 0; font: inherit; font-size: var(--t-sm); }
+
+/* --- a card you can read while it is folded ------------------------------------------------------ */
+/* "Во многих блоках не видно названия и текста в свёрнутом виде, и очень тяжело понять что они из
+   себя представляют."
+   
+   The head had grown to eight things — a dot, the role, the permissions, the kind, a count, three
+   buttons — all on one line 260 pixels wide, with the card's own name last. So every card on a
+   bench read `Action work step 1 a li…` and not one of them said what it was.
+   
+   The fix is an order, not a smaller font. **The name gets a line of its own**, with only the
+   close button beside it; everything that describes the card wraps onto a second line where there
+   is room for it; and the sentence saying what the card actually does goes under both. Three
+   lines, of which two are meaning. */
+.pin-head { flex-wrap: wrap; row-gap: 4px; }
+.pin-label {
+  order: -2;
+  flex: 1 1 60%;
+  font-size: var(--t-sm);
+}
+.pin-live { order: -3; }
+.pin-off { order: -1; margin-left: auto; }
+/* Everything else falls to the second line in the order it is written. */
+.pin-kind, .pin-role, .pin-leave, .pin-joined, .pin-step, .pin-view, .pin-deep { order: 0; }
+.pin-view { margin-left: auto; }
+
+/* --- and no horizontal scrollbars anywhere in a card --------------------------------------------- */
+/* A card you have to scroll sideways to read is a card you do not read. Everything inside one
+   wraps: long words break, wide tables become their own rows, and the few things that genuinely
+   cannot wrap — a transcript, a block of code — are the only ones allowed to scroll, inside
+   themselves rather than dragging the whole card sideways. */
+.pin-body { overflow-x: hidden; }
+.pin-body, .pin-body p, .pin-body li, .pin-body dd, .pin-body dt, .pin-body span, .pin-body a {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+/* Forms inside a card: a default-width input is wider than the card it is in, which is where most
+   of those scrollbars came from. */
+.pin-body input, .pin-body select, .pin-body textarea {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.pin-body form { flex-wrap: wrap; max-width: 100%; }
+/* The two-column fact lists become one column: 7ch of label plus a path is wider than any card. */
+.pin-body .card-facts { grid-template-columns: 1fr; }
+.pin-body .card-facts dt { color: var(--fg-dim); font-size: var(--t-xs); }
+.pin-body .card-facts dd { margin: 0 0 4px; }
+/* What is genuinely unwrappable scrolls inside its own box and nothing wider moves. */
+.pin-body pre, .pin-body .console, .pin-body table {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+/* The two view controls sit together at the end of the second line rather than each taking a row
+   of their own — three lines of head on a card 260 wide leaves no room for the card. */
+.pin-deep { margin-left: 4px; }
+
+/* Folded away means out of the way. A card the conversation brought, put away with it, must not
+   still be taking a place on the surface — that was the whole complaint: thirty cards nobody
+   dropped, with the process being drawn invisible among them. */
+.pin.put-away { display: none; }

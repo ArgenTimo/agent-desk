@@ -547,7 +547,7 @@ function showBenchToggle() {
 function pinnedTargets() {
   // A note is not a card the server can look up — it is text that exists only here — so it is
   // carried in its own field rather than named as a target that would 404.
-  return [...pins.querySelectorAll('[data-kind]:not(.own):not(.spent):not(.ringed)')]
+  return [...pins.querySelectorAll('[data-kind]:not(.own):not(.spent):not(.ringed):not(.put-away)')]
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -567,7 +567,7 @@ function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
-  const live = pins.querySelectorAll('.pin:not(.spent):not(.ringed)').length;
+  const live = pins.querySelectorAll('.pin:not(.spent):not(.ringed):not(.put-away)').length;
   const carried = live + attached;
   const deep = pins.querySelectorAll('.pin.deep').length;
   document.getElementById('context-count').textContent = carried
@@ -578,7 +578,9 @@ function syncTargets() {
   document.querySelector('.context-strip').classList.toggle('on', carried > 0);
   // One idea on the workbench means one obvious next move, so the console offers it rather than
   // waiting to be told in words it already knows.
-  const ideas = pins.querySelectorAll('[data-kind="idea"]:not(.spent):not(.ringed)').length;
+  const ideas = pins.querySelectorAll(
+    '[data-kind="idea"]:not(.spent):not(.ringed):not(.put-away)'
+  ).length;
   const go = document.getElementById('get-started');
   go.hidden = ideas === 0;
   go.textContent = ideas > 1 ? `Get started on these ${ideas}` : 'Get started on it';
@@ -689,7 +691,12 @@ async function pin(card, how) {
   pins.appendChild(holder);
   showRole(holder);
   place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null);
-  if (how?.under) ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
+  if (how?.under) {
+    ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
+    // Brought by the conversation rather than dropped by a person, which is what decides whether
+    // it goes away when the conversation is folded.
+    holder.dataset.brought = 'yes';
+  }
   syncTargets();
   // What it is made of, and what it belongs to. Not for a card brought *by* one of these, or a
   // tree would fetch itself for ever.
@@ -701,6 +708,7 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    nameItProperly(holder, card);
     writeHint(holder);
     settleOverlaps();
   } catch {
@@ -746,6 +754,15 @@ function writeHint(holder) {
   }
   line.textContent = said;
   line.title = said;
+}
+
+// A card put on the bench by something that did not know its name — a template being used, a
+// sketch being placed — arrives with none, and the head then shows its raw id. An identifier is
+// the one thing a card's name must never be, so the body is asked once it has loaded.
+function nameItProperly(holder, card) {
+  if (card.label) return;
+  const said = holder.querySelector('[data-label]')?.dataset.label?.trim();
+  if (said) holder.querySelector('.pin-label').textContent = said;
 }
 
 // The three a card has, and they are the three the pool named: "1 — хинт, то что видно в
@@ -1037,6 +1054,20 @@ let tieList = [];
 // `kind` and `id` as the card it was copied from, and a name derived from those would have the
 // copy's position overwrite the original's the moment it was placed. Every card that has ever
 // been created here sets `data-name`; the fallback is for a node that somehow has not.
+// The cards that are actually on the bench.
+//
+// A card that has been put away with the conversation is still in the document — that is how it
+// comes back — and every count, every line and every reading of the bench as a process was
+// including it. What that looked like: a corner of the surface filled with lines going to nothing,
+// and a panel reporting seven steps that have not said what they need, about cards nobody can see.
+//
+// One helper, so the answer to "what is on the bench" is given in one place.
+function onBench(what = '.pin[data-kind]') {
+  return [...(surface?.querySelectorAll(what) || [])].filter(
+    (pin) => !pin.classList.contains('put-away')
+  );
+}
+
 function cardName(pin) {
   return pin.dataset.name || `${pin.dataset.kind}:${pin.dataset.id}`;
 }
@@ -1880,6 +1911,30 @@ function showFields(pin) {
   }
   body.prepend(form);
   markUnfilled(pin, form);
+  sayWhatItDoes(pin);
+}
+
+// What a folded step says about itself: the thing it does.
+//
+// Without this every card drawn from a template read "A step in a process. What it is and what it
+// does are on the card itself" — six cards, one sentence, no information, because `writeHint`
+// takes the first sentence in the body and for a step card that was boilerplate. A card's own
+// answer to the question its role asks is the only sentence worth showing.
+function sayWhatItDoes(pin) {
+  const asked = roleSays[roleOf(pin)]?.fields || [];
+  const said = roleFilled[cardName(pin)] || {};
+  const words = asked
+    .map((field) => (said[field.name] || '').trim())
+    .find((one) => one.length > 2);
+  if (!words) return;
+  let line = pin.querySelector('.pin-hint');
+  if (!line) {
+    line = document.createElement('p');
+    line.className = 'pin-hint';
+    pin.querySelector('.pin-head')?.after(line);
+  }
+  line.textContent = words;
+  line.title = words;
 }
 
 // What an engine would stop on, shown before it does. Not a refusal: half-drawn is the normal
@@ -1902,6 +1957,7 @@ async function keepField(pin, field, value) {
   said[field] = value;
   const form = pin.querySelector('.pin-fields');
   if (form) markUnfilled(pin, form);
+  sayWhatItDoes(pin);
   try {
     await fetch('/cards/field', {
       method: 'POST',
@@ -2035,11 +2091,7 @@ function naturalTie(fromPin, toPin) {
 // which is the rule the idea map has always followed.
 function processTies() {
   return drawnTies
-    .filter(
-      (line) =>
-        surface?.querySelector(`.pin[data-name="${CSS.escape(line.from)}"]`) &&
-        surface?.querySelector(`.pin[data-name="${CSS.escape(line.to)}"]`)
-    )
+    .filter((line) => showing(line.from) && showing(line.to))
     .map((line) => ({
       from: line.from,
       to: line.to,
@@ -2133,7 +2185,7 @@ let processSaid = {};
 async function readProcess() {
   const panel = document.getElementById('process-panel');
   if (!panel || panel.hidden) return;
-  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  const names = onBench().map(cardName);
   if (!names.length) {
     panel.querySelector('.process-body').textContent = 'Nothing on the workbench yet.';
     return;
@@ -2283,6 +2335,11 @@ function showLeave(pin) {
     pin.querySelector('.pin-role')?.after(chip);
   }
   const given = (processSaid.leave || {})[cardName(pin)] || ['work'];
+  // Only when it is *not* the ordinary one. Every step working in its own copy is the default, and
+  // saying so on every card was six identical chips telling nobody anything — on a head so full of
+  // labels that the card's own name had been squeezed out of it. A step that may merge, or that
+  // may only read, is worth a word.
+  chip.hidden = given.length === 1 && given[0] === 'work';
   chip.textContent = given.map((one) => processSaid.allowed?.[one]?.says || one).join(' · ');
   chip.title = 'what this step is allowed to do — press to change';
 }
@@ -2374,7 +2431,7 @@ document.getElementById('run-bar')?.addEventListener('click', async (event) => {
 });
 
 document.querySelector('[data-run]')?.addEventListener('click', async () => {
-  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  const names = onBench().map(cardName);
   if (!names.length) return;
   try {
     const answer = await fetch('/workbench/run', {
@@ -2424,7 +2481,7 @@ async function addStep(role = 'action') {
 
 // "Процесс, который собрали один раз, должен запускаться второй раз с другими входами."
 async function keepTemplate() {
-  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  const names = onBench().map(cardName);
   if (!names.length) return say('There is nothing to save.');
   const name = (prompt('Save this process as:', '') || '').trim();
   if (!name) return;
@@ -2511,7 +2568,7 @@ async function showTemplates() {
 // differently on two afternoons would be no use for handing work to somebody. The sketch is a
 // proposal, and nothing reaches the bench until somebody presses.
 async function tellInWords() {
-  const names = [...surface.querySelectorAll('.pin[data-kind]')].map(cardName);
+  const names = onBench().map(cardName);
   const panel = document.getElementById('words-panel');
   if (!panel) return;
   panel.hidden = false;
@@ -2665,13 +2722,21 @@ function everyTie() {
   return [...tieList, ...ownTies, ...processTies()];
 }
 
+function showing(name) {
+  const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+  return pin && !pin.classList.contains('put-away') ? pin : null;
+}
+
 function drawTies() {
   if (!ties) return;
   ties.textContent = '';
   let drew = 0;
   for (const tie of everyTie()) {
-    const one = surface.querySelector(`.pin[data-name="${CSS.escape(tie.from)}"]`);
-    const other = surface.querySelector(`.pin[data-name="${CSS.escape(tie.to)}"]`);
+    // Both ends have to be *visible*, not merely present: a card put away with the conversation
+    // is still in the document, and drawing to it filled a corner of the surface with lines
+    // going to nothing.
+    const one = showing(tie.from);
+    const other = showing(tie.to);
     const a = placed.get(tie.from);
     const b = placed.get(tie.to);
     if (!one || !other || !a || !b) continue;
@@ -2870,7 +2935,14 @@ function foldConversation() {
   const cards = [...(surface?.querySelectorAll('.pin.block-card') || [])];
   if (!cards.length) return;
   const folding = !cards[0].classList.contains('put-away');
-  for (const card of cards) {
+  // What the conversation brought goes with it.
+  //
+  // Folding only the block cards left every idea those blocks had written still on the surface:
+  // on a real console that is thirty-odd cards nobody dropped there, and a process you are trying
+  // to draw is invisible among them. A card *somebody put here* stays — that is the whole
+  // distinction, and it is recorded when the card arrives (`bringItsKin`) rather than guessed at
+  // now.
+  for (const card of [...cards, ...surface.querySelectorAll('.pin[data-brought="yes"]')]) {
     card.classList.toggle('put-away', folding);
     if (folding) {
       card.dataset.viewBefore = card.dataset.view || 'hint';
@@ -3526,7 +3598,7 @@ document.getElementById('ask').addEventListener('submit', () => {
 function activeCards() {
   // Not a copy of an earlier question, and not something already inside a ring: those are the
   // record, and a record that took part in the next question would grow by reading itself.
-  return [...pins.querySelectorAll('.pin:not(.spent):not(.ringed)[data-kind]')];
+  return [...pins.querySelectorAll('.pin:not(.spent):not(.ringed):not(.put-away)[data-kind]')];
 }
 
 // Where a snapshot goes: clear of everything already on the bench, so it does not land on top of

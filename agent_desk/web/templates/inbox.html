@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ideas · agent-desk</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231c1b19'/%3E%3Ccircle cx='8' cy='8' r='3.5' fill='%23e0a250'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/console.css">
+<link rel="stylesheet" href="{{ stamped('console.css') }}">
 </head>
 <body>
 <p id="no-htmx" class="notice" hidden>htmx is missing from agent_desk/web/static/, so this list
@@ -26,7 +26,7 @@
        hx-on::before-swap="if (this.contains(document.activeElement) || !document.getSelection().isCollapsed) event.preventDefault()">{{ inbox|safe }}</div>
 </main>
 
-<script src="/static/htmx.min.js"></script>
+<script src="{{ stamped('htmx.min.js') }}"></script>
 <script>if (!window.htmx) document.getElementById('no-htmx').hidden = false;</script>
 </body>
 </html>

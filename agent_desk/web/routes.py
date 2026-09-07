@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import re
@@ -211,6 +212,27 @@ def _blocker_is(kind: str) -> str:
     return blockers.PLAINLY.get(kind, kind)
 
 
+def _stamped(name: str) -> str:
+    """`/static/<name>` with a stamp of what is in the file.
+
+    Without it a browser holds the last stylesheet it saw and keeps rendering from it: the console
+    was serving a fixed `console.css` and showing the broken one, because nothing in the URL had
+    changed. Found by watching four panels stay on screen after the rule that hides them was
+    already in the file being served.
+
+    The stamp is the content, not the clock, so an unchanged file keeps its URL and stays cached —
+    which is the whole point of caching it. Read once, at import: this is a single-user local tool
+    and the process restarts when the file changes.
+    """
+    where = Path(__file__).parent / "static" / name
+    try:
+        return f"/static/{name}?v={hashlib.sha256(where.read_bytes()).hexdigest()[:12]}"
+    except OSError:
+        # A missing file is a page that says so, not a page that will not render.
+        return f"/static/{name}"
+
+
+env.globals["stamped"] = _stamped
 env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens

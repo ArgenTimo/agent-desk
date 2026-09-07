@@ -637,3 +637,125 @@ def test_the_saved_list_is_rebuilt_whenever_the_menu_opens() -> None:
     show = console[console.index("function showMenu(") :]
     show = show[: show.index("\n}\n")]
     assert "showBenches()" in show
+
+
+@pytest.mark.unit
+def test_a_panel_the_page_has_switched_off_stays_off() -> None:
+    """`hidden` is an attribute, and the browser implements it as `[hidden] { display: none }` — a
+    rule of the very lowest weight, which *any* `display` in this stylesheet beats.
+
+    Every panel here is a flex or grid container, so every one of them ignored being hidden: the
+    process panel, the words panel, the run bar and the selection bar were all on screen at once
+    on a console where nobody had opened any of them. Found by looking at it.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    assert "[hidden] { display: none !important; }" in css
+    # At the top, before anything that could have been written after it without noticing.
+    assert css.index("[hidden]") < css.index(".desk-grid {")
+
+
+@pytest.mark.unit
+def test_a_folded_card_gives_its_name_a_line_of_its_own() -> None:
+    """ "Во многих блоках не видно названия и текста в свёрнутом виде."
+
+    The head had grown to eight things on one line 260 pixels wide, with the card's own name last,
+    so every card on a bench read `Action work step 1 a li…` and not one said what it was. The fix
+    is an order rather than a smaller font: the name and the close button on the first line,
+    everything that describes the card on the second, the sentence saying what it does under both.
+    """
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    assert ".pin-head { flex-wrap: wrap;" in css, "the head cannot wrap, so something is cut off"
+    label = css[css.rindex(".pin-label {") :]
+    label = label[: label.index("}")]
+    assert "order: -2" in label, "the name is not first on the head"
+
+
+@pytest.mark.unit
+def test_nothing_inside_a_card_scrolls_sideways() -> None:
+    """A card you have to scroll sideways to read is a card you do not read. Most of it came from
+    one place: a default-width `<input>` is wider than the card it is in."""
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    assert ".pin-body { overflow-x: hidden; }" in css
+    assert ".pin-body input, .pin-body select, .pin-body textarea {" in css
+    assert ".pin-body .card-facts { grid-template-columns: 1fr; }" in css, (
+        "a two-column fact list with a path in it is wider than any card"
+    )
+
+
+@pytest.mark.unit
+def test_a_card_never_shows_its_own_id_as_its_name() -> None:
+    """A card put on the bench by something that did not know its name — a template being used, a
+    sketch being placed — arrived with none, and the head then showed a raw id. An identifier is
+    the one thing a card's name must never be."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    step = (TEMPLATES / "_card_step.html").read_text(encoding="utf-8")
+
+    assert "function nameItProperly(" in console
+    assert 'data-label="{{ card.label }}"' in step
+
+
+@pytest.mark.unit
+def test_the_scripts_and_styles_are_stamped_with_what_is_in_them() -> None:
+    """Without it a browser holds the last stylesheet it saw and keeps rendering from it — which
+    it did. The stamp is the content, not the clock, so an unchanged file keeps its URL and stays
+    cached, which is the whole point of caching it."""
+    from agent_desk.web.routes import _stamped
+
+    stamped = _stamped("console.css")
+    assert stamped.startswith("/static/console.css?v=")
+    assert _stamped("console.css") == stamped, "the same file got two different stamps"
+    # A missing file is a page that says so, not a page that will not render.
+    assert _stamped("nothing-here.css") == "/static/nothing-here.css"
+
+
+@pytest.mark.unit
+def test_a_card_put_away_is_not_on_the_bench() -> None:
+    """A card folded away with the conversation is still in the document — that is how it comes
+    back — and every count, every line and every reading of the bench as a process was including
+    it.
+
+    What that looked like on a real console: a corner of the surface filled with lines going to
+    nothing, a panel reporting seven steps that have not said what they need about cards nobody
+    can see, and "carrying 39 cards" under a bench showing seven.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    assert "function onBench(" in console, "there is no one answer to what is on the bench"
+    assert "function showing(" in console, "a line can still be drawn to a card nobody can see"
+
+    ties = console[console.index("function drawTies(") :]
+    ties = ties[: ties.index("\n}\n")]
+    assert "showing(tie.from)" in ties and "showing(tie.to)" in ties
+
+    for asks in ("pinnedTargets", "activeCards"):
+        body = console[console.index(f"function {asks}(") :]
+        body = body[: body.index("\n}\n")]
+        assert ":not(.put-away)" in body, (
+            f"{asks} carries cards that have been folded away into the next message"
+        )
+
+
+@pytest.mark.unit
+def test_folding_the_conversation_puts_away_what_the_conversation_brought() -> None:
+    """Folding only the block cards left every idea those blocks had written still on the surface.
+    On a real console that is thirty-odd cards nobody dropped there, with the process being drawn
+    invisible among them.
+
+    A card somebody put there by hand stays — that is the distinction, and it is recorded when the
+    card arrives rather than guessed at when the fold happens.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    assert "holder.dataset.brought = 'yes'" in console, (
+        "nothing records that a card came from the conversation rather than from a person"
+    )
+    fold = console[console.index("function foldConversation(") :]
+    fold = fold[: fold.index("\n}\n")]
+    assert 'data-brought="yes"' in fold
+    assert ".pin.put-away { display: none; }" in css, (
+        "a card put away is merely dimmed, so it is still taking a place on the surface"
+    )

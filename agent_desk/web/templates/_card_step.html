@@ -10,9 +10,14 @@
 {% if not card %}
 <p class="empty small">that step is not here any more</p>
 {% else %}
-<div class="card-detail" data-detail="plain">
+{# The name, where the console can find it. A card dragged in by something that did not know its
+   name — a template being used, a sketch being placed — showed its raw id in the head, which is
+   the one thing on a card that must never be an identifier. #}
+<div class="card-detail" data-detail="plain" data-label="{{ card.label }}">
   <div class="plain-only">
-    <p class="card-said">A step in a process. What it is and what it does are on the card itself.</p>
+    {# Deliberately no sentence about what a step card is. Six cards from one template all saying
+       "a step in a process" is six cards saying nothing — what this one *does* is on the card
+       itself, in the field its role asks for, and that is the sentence worth reading. #}
     <form class="step-name" method="post" action="/cards/step/name"
           hx-post="/cards/step/name" hx-swap="none">
       <input type="hidden" name="id" value="{{ card.id }}">
