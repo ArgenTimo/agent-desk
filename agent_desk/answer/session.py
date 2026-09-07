@@ -364,40 +364,49 @@ async def _run(
         stdin.close()
 
         async with asyncio.timeout(settings.answer_timeout_seconds):
-            async for raw in stdout:
-                line = raw.decode(errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    # The CLI's own format, and it is not a contract either (docs/adr/0004). A
-                    # line this program cannot read is skipped rather than raised on: the run may
-                    # still answer, and an unreadable line is not evidence that it will not.
-                    continue
-                if not isinstance(event, dict):
-                    continue
+            # A run that exits the moment it has finished printing can close the pipe while it is
+            # still being read, and asyncio raises `ConnectionResetError` out of the middle of the
+            # loop. Everything already read is still good — the answer is *in* those lines — so
+            # this is the end of the stream rather than a failure, and treating it as one threw
+            # away an answer that had arrived. Caught here rather than left to `OSError` above,
+            # because that path marks the block failed and loses what was said.
+            with contextlib.suppress(ConnectionResetError):
+                async for raw in stdout:
+                    line = raw.decode(errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        # The CLI's own format, and it is not a contract either (docs/adr/0004). A
+                        # line this program cannot read is skipped rather than raised on: the run may
+                        # still answer, and an unreadable line is not evidence that it will not.
+                        continue
+                    if not isinstance(event, dict):
+                        continue
 
-                kind = event.get("type")
-                if kind == "assistant":
-                    # What it is doing, before what it has said: a turn that only used a tool has
-                    # no text in it, and it is exactly those turns that make the silence.
-                    if on_step is not None and (step := _step_of(event)):
-                        on_step(step)
-                    text = _text_of(event)
-                    if text:
-                        said_something = True
-                        yield text
-                elif kind == "result":
-                    # What it cost, as the run itself reported it — before the error check, because
-                    # a run that failed after spending money still spent it. Read defensively: the
-                    # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
-                    # cannot be read is recorded as nothing rather than as a guess.
-                    with contextlib.suppress(TypeError, ValueError):
-                        await tally.note(float(event.get("total_cost_usd") or 0))
-                    if event.get("is_error"):
-                        raise AnswerFailed(str(event.get("subtype") or "the run reported an error"))
-                    result_text = str(event.get("result") or "")
+                    kind = event.get("type")
+                    if kind == "assistant":
+                        # What it is doing, before what it has said: a turn that only used a tool has
+                        # no text in it, and it is exactly those turns that make the silence.
+                        if on_step is not None and (step := _step_of(event)):
+                            on_step(step)
+                        text = _text_of(event)
+                        if text:
+                            said_something = True
+                            yield text
+                    elif kind == "result":
+                        # What it cost, as the run itself reported it — before the error check, because
+                        # a run that failed after spending money still spent it. Read defensively: the
+                        # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
+                        # cannot be read is recorded as nothing rather than as a guess.
+                        with contextlib.suppress(TypeError, ValueError):
+                            await tally.note(float(event.get("total_cost_usd") or 0))
+                        if event.get("is_error"):
+                            raise AnswerFailed(
+                                str(event.get("subtype") or "the run reported an error")
+                            )
+                        result_text = str(event.get("result") or "")
 
             code = await process.wait()
             if code != 0 and not said_something:

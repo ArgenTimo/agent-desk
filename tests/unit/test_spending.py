@@ -357,3 +357,28 @@ async def test_a_run_still_answers_when_the_tally_is_broken(
         assert [c async for c in session.stream_answer("q")] == ["an answer"]
     finally:
         session.tally.attach(None)
+
+
+@pytest.mark.unit
+async def test_an_engine_that_exits_while_its_pipe_is_read_still_answers(
+    tallying: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that exits the moment it has finished printing can close the pipe mid-read, and
+    asyncio raises `ConnectionResetError` out of the middle of the loop.
+
+    Everything already read is good — the answer is *in* those lines — so that is the end of the
+    stream and not a failure. Uncaught it reached the `OSError` branch above, which marks the block
+    failed and throws away an answer that had arrived. Found as one red test in a full run.
+    """
+    fake = tmp_path / "claude"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n\'\n'
+        'printf \'{"type":"result","total_cost_usd":0.02,"result":"an answer"}\\n\'\n'
+        "exit 0\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(fake), daily_usd=25.0))
+
+    for _ in range(12):
+        assert [chunk async for chunk in session.stream_answer("q")] == ["an answer"]
