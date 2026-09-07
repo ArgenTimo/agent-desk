@@ -394,3 +394,149 @@ def _why(status: int, raw: bytes) -> str:
     except ValueError:
         messages = []
     return f"Jira refused it ({status})" + (f": {'; '.join(messages)[:300]}" if messages else "")
+
+
+# --- what the review column's comments say they are waiting on (docs/adr/0011) -------------------
+
+# Which column that is. A board's own word for "somebody is looking at this" differs by team and
+# by language, and a JQL naming a status a board does not have is a 400 rather than an empty
+# answer — so the query asks for the *category* every Jira has and the names are matched here,
+# where one nobody recognised costs a comparison instead of the whole read.
+REVIEW_STATUSES = (
+    "in review",
+    "review",
+    "code review",
+    "peer review",
+    "на ревью",
+    "в ревью",
+    "ревью",
+)
+
+# How many comments of one issue are read. A ticket with two hundred comments is a conversation,
+# and what it is waiting on *now* is at the end of it.
+MOST_COMMENTS = 20
+
+
+@dataclass(frozen=True)
+class Mention:
+    """One sentence in one comment that says something is stuck, and the ticket it was written on.
+
+    A quotation with a source, which is the whole of what this module produces. What the sentence
+    means, and which other sentence it means the same thing as, is a judgement — made elsewhere,
+    by a model, and marked as one (docs/adr/0011).
+    """
+
+    key: str
+    summary: str
+    said: str
+
+
+@dataclass(frozen=True)
+class Reviewed:
+    """What one pass over the review column found, or why it found nothing."""
+
+    ok: bool
+    mentions: tuple[Mention, ...] = ()
+    detail: str = ""
+
+
+def review_jql(destination: Destination) -> str:
+    """Which issues to ask for: this project's, in flight, most recently touched first.
+
+    `statusCategory` rather than `status` on purpose. The three categories are fixed in every Jira
+    and "In Review" is always in the middle one; a status *name* is a thing a team renames, and
+    naming one the board does not have fails the request outright. The names are matched in
+    `read_mentions`, against the list above, where a miss costs nothing.
+    """
+    return (
+        f'project = "{destination.project_key}" AND statusCategory = "In Progress" '
+        "ORDER BY updated DESC"
+    )
+
+
+def _blocked_sentences(said: str) -> list[str]:
+    """Every sentence here that says something is stuck, quoted as it was written.
+
+    `_blocked_by` wants the first one, because a ticket says it once. A comment thread says it
+    eleven times in eleven places, and each of those is a separate thing somebody waits on.
+    """
+    found = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", said):
+        trimmed = sentence.strip()
+        if trimmed and any(word in trimmed.lower() for word in BLOCKED_WORDS):
+            found.append(trimmed[:300])
+    return found
+
+
+def read_mentions(raw: bytes) -> tuple[Mention, ...]:
+    """The blocker sentences in one search response. A shape it does not recognise yields none.
+
+    Never raises, for the same reason `read_tickets` does not: this is on the path of a loop.
+    """
+    try:
+        issues = json.loads(raw)["issues"]
+    except (ValueError, KeyError, TypeError):
+        return ()
+    if not isinstance(issues, list):
+        return ()
+
+    found: list[Mention] = []
+    for issue in issues[:MOST_TICKETS]:
+        if not isinstance(issue, dict):
+            continue
+        fields = issue.get("fields")
+        fields = fields if isinstance(fields, dict) else {}
+        status = fields.get("status")
+        name = str(status.get("name", "")) if isinstance(status, dict) else ""
+        key = str(issue.get("key", "")).strip()
+        if not key or name.strip().lower() not in REVIEW_STATUSES:
+            continue
+        summary = str(fields.get("summary", "")).strip()[:200]
+        comment = fields.get("comment")
+        comments = comment.get("comments") if isinstance(comment, dict) else None
+        for one in (comments if isinstance(comments, list) else [])[-MOST_COMMENTS:]:
+            body = one.get("body") if isinstance(one, dict) else None
+            found += [
+                Mention(key=key, summary=summary, said=said)
+                for said in _blocked_sentences(_text_of(body))
+            ]
+    return tuple(found)
+
+
+def read_review(destination: Destination) -> Reviewed:
+    """What the comments on this project's review column say it waits on (docs/adr/0011).
+
+    Reading only, like `read_board`: no transition, no comment, no assignment. The one write this
+    program does is `file_issue`, unchanged.
+
+    Never raises. Every ending is a `Reviewed`, and a column nobody could read is reported as
+    unread rather than as empty — the distinction 0010 took care over, for the same reason.
+    """
+    secret = kept.get(destination.token_env)
+    if not secret:
+        return Reviewed(
+            False,
+            detail=f"{destination.token_env} is not set — export it, or type the token on the "
+            "project's link",
+        )
+
+    query = urllib.parse.urlencode(
+        {
+            "jql": review_jql(destination),
+            "maxResults": str(MOST_TICKETS),
+            "fields": "summary,status,comment",
+        }
+    )
+    try:
+        status, raw = _get(f"{destination.site}/rest/api/3/search?{query}", _authorization(secret))
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        # The reason, never the request: the request carries an Authorization header.
+        return Reviewed(False, detail=f"could not reach {destination.site}: {type(exc).__name__}")
+
+    if status != 200:
+        return Reviewed(False, detail=_why(status, raw))
+    if b'"issues"' not in raw:
+        return Reviewed(
+            False, detail=f"Jira answered {status} with a body this does not understand"
+        )
+    return Reviewed(True, mentions=read_mentions(raw))

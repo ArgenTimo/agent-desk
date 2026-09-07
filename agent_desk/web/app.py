@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # And the pass that reads the idea pool, so a list of sixty is a list
             # somebody can scan (agent_desk/ideas/appraise.py).
             reading = group.create_task(kicking.appraising(routes.store))
+            # And the pass that reads what a board's review column is waiting on, so that eleven
+            # comments show up as the three problems they are (docs/adr/0011).
+            grouping = group.create_task(kicking.reviewing(routes.store))
             # And the one that brings back what somebody put off until a moment that has now
             # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
             # would be a daemon, and this program does not have one.
@@ -66,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 watching.cancel()
                 nudging.cancel()
                 reading.cancel()
+                grouping.cancel()
                 recalling.cancel()
                 walking.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a

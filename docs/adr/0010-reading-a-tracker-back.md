@@ -98,3 +98,7 @@ like an empty one.
 The queue still comes first, and exploration still comes last: what a person queued here, then
 what their board says, then what an agent would find for itself
 ([0008](0008-an-agent-that-finds-its-own-work.md)).
+
+**Since.** [0011](0011-a-blocker-a-model-grouped.md) carries the reading on to the *comments* on a
+review column, which is where people actually write down what they are waiting on — and states
+the extra rule a blocker a model grouped has to follow before it is allowed on the board.

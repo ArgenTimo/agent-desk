@@ -55,9 +55,16 @@ Dragging it back out undoes both. With nothing in the output the run is given th
 works out from it what the question is about, which is what somebody who has not chosen wants
 rather than an error asking them to choose.
 
-**Right: what is in the way.** Mirrors the left column's cards. Every card in it is a placeholder
-today and says so: nothing on disk states what is blocking a session, and a blocker this program
-cannot observe is one it will not invent.
+**Right: what is in the way.** Mirrors the left column's cards. It stood empty at first and said
+why — nothing on disk states what is blocking a session, and a blocker this program cannot observe
+is one it will not invent. What fills it now is what this console *can* observe: a task it started
+that failed, a branch a gate refused, a switch that turned itself off, a ticket or a pull request
+somebody else's board says is waiting ([adr/0010](adr/0010-reading-a-tracker-back.md)), and the
+one thing several tickets in a review column turn out to be waiting on, grouped from their
+comments and carrying the sentences it was grouped from
+([adr/0011](adr/0011-a-blocker-a-model-grouped.md)). "Waiting for a person" is still not among
+them: it is an inference, and it stays on the session card, in amber, beside the observation it
+was made from.
 
 The middle is for somebody watching work they are not doing — often somebody who does not read
 code — so an answer there is two or three sentences of ordinary words with the answer in the first

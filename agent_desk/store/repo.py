@@ -479,6 +479,25 @@ class TrackerBlocker(BaseModel):
     seen_at: int
 
 
+class ReviewBlocker(BaseModel):
+    """Several tickets in review waiting on the same thing, said once (039-review-blockers.sql).
+
+    Two halves, and they are not the same kind of claim. `title` and `tutorial` are a model's
+    reading of what the comments add up to; `said` is the sentences it read, each with the key of
+    the ticket somebody wrote it on. The card renders the second as the reason to believe the
+    first (docs/adr/0011, CLAUDE.md rule five).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    id: str
+    title: str
+    tutorial: str
+    said: str
+    seen_at: int
+
+
 class Subscription(BaseModel):
     """A plan a session's tokens are spent against (025-subscriptions.sql).
 
@@ -1902,6 +1921,49 @@ class Store:
                 )
             )
             return [TrackerBlocker(**row._mapping) for row in rows]
+
+    # --- what a review column is waiting on (039-review-blockers.sql) --------------------------
+    async def replace_review_blockers(
+        self, repo_key: str, found: Sequence[tuple[str, str, str, str]]
+    ) -> None:
+        """What this project's review column is waiting on, as of now.
+
+        Replaced rather than merged, for the reason `replace_tracker_blockers` is: a comment
+        somebody answered stops being a blocker without anybody telling this console. The caller
+        only reaches here having actually read the board — a pass that could not read it, or could
+        not reach a model, does not call this at all (docs/adr/0011).
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM review_blocker WHERE repo_key = :repo_key"),
+                {"repo_key": repo_key},
+            )
+            for one_id, title, tutorial, said in found:
+                await conn.execute(
+                    text(
+                        "INSERT INTO review_blocker "
+                        "(repo_key, id, title, tutorial, said, seen_at) "
+                        "VALUES (:repo_key, :id, :title, :tutorial, :said, :t)"
+                    ),
+                    {
+                        "repo_key": repo_key,
+                        "id": one_id,
+                        "title": title[:200],
+                        "tutorial": tutorial[:1500],
+                        "said": said[:1500],
+                        "t": _now_ms(),
+                    },
+                )
+
+    async def review_blockers(self) -> list[ReviewBlocker]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, id, title, tutorial, said, seen_at FROM review_blocker "
+                    "ORDER BY seen_at DESC, id"
+                )
+            )
+            return [ReviewBlocker(**row._mapping) for row in rows]
 
     # --- the plan a session's tokens are spent against (025-subscriptions.sql) ----------------
     async def add_subscription(

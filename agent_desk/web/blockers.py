@@ -11,7 +11,11 @@ session:
 - a project that switched itself off after two failures (docs/adr/0007);
 - a session that switched itself off after two (docs/adr/0009);
 - a question this console asked a model that came back an error;
-- a ticket or a pull request that somebody else's board says is waiting (docs/adr/0010).
+- a ticket or a pull request that somebody else's board says is waiting (docs/adr/0010);
+- what the comments on a review column say several tickets are all waiting on, said once instead
+  of eleven times (docs/adr/0011) — the one card here whose *heading* is a model's reading rather
+  than an observation, which is why it carries the sentences it was read from and says whose they
+  are.
 
 What is deliberately *not* here is what the placeholders promised: "waiting on a person" and
 "waiting on a run". Neither is on disk. The board renders the first as an inference, in amber, next
@@ -36,6 +40,7 @@ So each kind now names what it holds up, and only where the link is **causal and
 | `task` (failed)        | the ideas that task was going to build                       |
 | `branch` (not merged)  | the same, still unbuilt because the work never landed        |
 | `ticket` / pull request| the idea this console filed as it, where it filed one        |
+| `review`               | the tickets in review whose own comments name it             |
 | `session`, `answer`    | nothing this console can see, and the card says so           |
 
 Everything in that table is a link something wrote down: `task.source_ref` names the ideas a task
@@ -118,6 +123,10 @@ class Blocker:
     holding_up: tuple[Held, ...] = field(default=())
     # And roughly how long clearing it takes if it is a person who has to do it.
     roughly: str = ""
+    # The steps that would clear it, where somebody wrote them out (docs/adr/0011). A model's
+    # writing, and the card says so above it — every other line on a card here is a fact this
+    # console observed, and one that is not must not be able to pass for one.
+    tutorial: str = ""
     # Somebody has said this is cleared and nothing has checked yet (029-blocker-checking.sql).
     claimed: bool = False
     checked: str = ""
@@ -155,6 +164,7 @@ PLAINLY = {
     "answer": "a question that came back an error",
     "ticket": "a ticket waiting on a person",
     "pull": "a pull request waiting for review",
+    "review": "what several tickets in review are waiting on",
 }
 
 # What clearing one usually costs a person, by kind. Stated as a range and named as a guess on the
@@ -168,6 +178,7 @@ ROUGHLY = {
     "branch": "as long as the gate takes, once the branch is fixed",
     "task": "as long as the task takes, once whatever stopped it is fixed",
     "answer": "moments — ask it again",
+    "review": "as long as the steps below take — every one of them is a person's to do",
 }
 
 
@@ -329,6 +340,34 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     (Held(kind="idea", id=idea.id, title=idea.summary),)
                     if idea is not None and idea.state != "done"
                     else ()
+                ),
+            )
+        )
+
+    # And what several tickets in a review column turned out to be waiting on, grouped once so
+    # that a person reads three problems instead of eleven comments (docs/adr/0011).
+    #
+    # The title and the steps are a model's writing and the card labels them as such; the
+    # sentences under `why` are the board's own, each with the key of the ticket somebody wrote it
+    # on. What it holds up is those tickets, which is not an inference: they are in review and
+    # their comments say this is what they are waiting for.
+    for holdup in await store.review_blockers():
+        quoted = [line for line in holdup.said.splitlines() if line.strip()]
+        found.append(
+            Blocker(
+                kind="review",
+                ref=f"{holdup.repo_key}/{holdup.id}",
+                repo_key=holdup.repo_key,
+                what=holdup.title,
+                why=f"read from {len(quoted)} "
+                + ("comment" if len(quoted) == 1 else "comments")
+                + " on the tickets below, and grouped by a model:\n"
+                + "\n".join(quoted),
+                tutorial=holdup.tutorial,
+                when=holdup.seen_at,
+                holding_up=tuple(
+                    Held(kind="ticket", id=key, title=key)
+                    for key in dict.fromkeys(line.split(" · ")[0] for line in quoted)
                 ),
             )
         )

@@ -428,6 +428,11 @@ async def board_work() -> dict[str, dict[str, int]]:
     # And what somebody else's board says is stuck, against the project it is on.
     for stuck in await store.tracker_blockers():
         tally_for(stuck.repo_key)["stuck"] += 1
+
+    # And what its review column turned out to be waiting on, which is one problem however many
+    # comments named it (docs/adr/0011).
+    for holdup in await store.review_blockers():
+        tally_for(holdup.repo_key)["stuck"] += 1
     return counted
 
 

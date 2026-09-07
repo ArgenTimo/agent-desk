@@ -25,7 +25,15 @@
     <span class="pill quiet">{{ one.when | ago }}</span>
   </div>
   <div class="card-body">
-    <p class="small">{{ one.why }}</p>
+    <p class="small{% if one.tutorial %} verbatim{% endif %}">{{ one.why }}</p>
+    {# The steps that would clear it, where somebody wrote them out (docs/adr/0011). Labelled,
+       because they are the one thing on a blocker card that nothing observed: the sentences above
+       are quoted from a board, and this is a model's reading of what to do about them. A card
+       that let the two look alike would be the guessed status rule five is about. #}
+    {% if one.tutorial %}
+    <p class="small holding">to clear it — read from those comments by a model, not observed:</p>
+    <p class="small verbatim">{{ one.tutorial }}</p>
+    {% endif %}
     {# What it is holding up, by name. It used to be a count — and the same count on every
        blocker in a project, because it counted the project's whole queue rather than what this
        one actually stops. A number that is wrong on every card is worse than no number; a list
@@ -36,7 +44,7 @@
       {% for held in one.named %}
       <li>{% if held.card %}<a href="/cards/{{ held.kind }}?id={{ held.id | urlencode }}"
              data-card="{{ held.card }}">{{ held.title }}</a>{% else %}{{ held.title }}
-        <span class="dim tiny">queued work</span>{% endif %}</li>
+        <span class="dim tiny">{{ "in review" if held.kind == "ticket" else "queued work" }}</span>{% endif %}</li>
       {% endfor %}
       {% if one.unnamed %}<li class="dim">and {{ one.unnamed }} more</li>{% endif %}
     </ul>

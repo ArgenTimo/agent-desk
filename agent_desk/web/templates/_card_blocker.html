@@ -23,7 +23,18 @@
   </div>
   <div class="card-body">
     <h4>Why it is stuck</h4>
-    <p class="last-line">{{ one.why }}</p>
+    <p class="{{ "verbatim" if one.tutorial else "last-line" }}">{{ one.why }}</p>
+
+    {# The steps that would clear it, and the sentence above them saying who wrote them. Every
+       other line on this card is something this console observed; this one is a model's reading
+       of somebody else's comments, and a card that let the two look alike would be exactly the
+       guess CLAUDE.md's fifth rule forbids (docs/adr/0011). #}
+    {% if one.tutorial %}
+    <h4>What to do about it</h4>
+    <p class="small dim">Written by a model from the comments quoted above — not observed, and not
+      anybody's instruction. The quotations are the part to trust.</p>
+    <p class="verbatim">{{ one.tutorial }}</p>
+    {% endif %}
 
     <h4>What it is</h4>
     <p class="small">
@@ -41,6 +52,10 @@
       {% elif one.kind == "ticket" %}A ticket on this project's own board that says it is stuck.
         It is not in the queue and no agent was started on it: what it is waiting for is a person
         (docs/adr/0010). The words above are the ticket's own.
+      {% elif one.kind == "review" %}One thing several tickets in this board's review column are
+        waiting on, grouped from what people wrote in their comments (docs/adr/0011). The
+        sentences above are theirs, each with the key of the ticket it was written on; the heading
+        and the steps are a model's reading of them.
       {% else %}A question this console asked, and the run came back an error.
       {% endif %}
     </p>
@@ -51,7 +66,7 @@
       {% for held in one.holding_up %}
       <li>{% if held.card %}<a href="/cards/{{ held.kind }}?id={{ held.id | urlencode }}"
              data-card="{{ held.card }}">{{ held.title }}</a>{% else %}{{ held.title }}
-        <span class="dim tiny">queued work</span>{% endif %}</li>
+        <span class="dim tiny">{{ "in review" if held.kind == "ticket" else "queued work" }}</span>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}

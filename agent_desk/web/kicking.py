@@ -37,6 +37,7 @@ from agent_desk.observe import registry, transcript
 from agent_desk.observe.model import Session
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Kicking, Store
+from agent_desk.tracker import review
 from agent_desk.web import autostart
 
 log = structlog.get_logger()
@@ -287,3 +288,25 @@ async def appraising(store: Store) -> None:
         except Exception:
             log.exception("ideas.sweep_failed")
         await asyncio.sleep(APPRAISE_SECONDS)
+
+
+# --- and the pass that reads a review column (agent_desk/tracker/review.py) ---------------------
+# On the same shelf as the one above, for the same three reasons: slow, allowed to fail, and one
+# model call per project that has something to group. Twenty minutes because a comment thread does
+# not turn over faster than that, and because the loop above it is what pays for a shorter tick.
+REVIEW_SECONDS = 1200.0
+
+
+async def reviewing(store: Store) -> None:
+    """Read what the review columns are waiting on, for as long as the console runs.
+
+    Same shape and same reason as `run`: a failed pass waits for the next one, and a cancel goes
+    through rather than being swallowed — a pass is an HTTP read and a model call, and the cancel
+    lands inside one of them far more often than it lands in the sleep.
+    """
+    while True:
+        try:
+            await review.sweep(store)
+        except Exception:
+            log.exception("review.sweep_failed")
+        await asyncio.sleep(REVIEW_SECONDS)
