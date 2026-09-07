@@ -2819,6 +2819,16 @@ async function useTemplate(name) {
   });
   const said = await answer.json();
   if (!said.made) return say(said.why || 'Could not use it.');
+  // "Нужно сказать: «в этом шаблоне два поля, которых больше нет»." The cards arrive looking
+  // filled in, and the fields a role has since lost are silently not written — right, and
+  // invisible, which is the half that was missing.
+  if (said.lost?.length) {
+    say(
+      `This template has ${said.lost.length} field${said.lost.length === 1 ? '' : 's'} its roles ` +
+        `no longer ask for, so ${said.lost.length === 1 ? 'it was' : 'they were'} left out: ` +
+        said.lost.join(', ')
+    );
+  }
   for (const one of said.cards) {
     const [kind, ...rest] = one.name.split(':');
     await pin(

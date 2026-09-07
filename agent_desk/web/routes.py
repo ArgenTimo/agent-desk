@@ -2120,6 +2120,15 @@ async def use_template(request: Request) -> JSONResponse:
     if made is None:
         return JSONResponse({"made": False, "why": "there is no template by that name"}, 404)
     fresh: dict[int, str] = {}
+    # Fields the template carries that its role no longer asks for. Dropping them is right and was
+    # already happening; not saying so was the hole. "Поля, которых у роли больше нет, сейчас молча
+    # не записываются — это правильно, но человек об этом не узнаёт и получает карточку, которая
+    # выглядит заполненной."
+    #
+    # Counted by field name rather than per card, because a template of nine steps that all lost
+    # the same field has lost one thing nine times, and "nine fields are gone" reads as nine
+    # different problems.
+    lost: set[str] = set()
     for step in made.steps:
         card = await store.add_step_card(step.label)
         fresh[step.ord] = card.name
@@ -2130,6 +2139,11 @@ async def use_template(request: Request) -> JSONResponse:
             # reads as empty to everything else.
             if roles.is_a_field(step.role, asked):
                 await store.set_card_field(card.name, asked, value)
+            elif value.strip():
+                # Only when something was actually written in it. A field somebody left empty and
+                # a field that has since been removed are the same absence on the new card, and
+                # only one of them is worth a sentence.
+                lost.add(f"{step.role} · {asked}")
         if step.leave:
             await store.set_card_leave(card.name, list(step.leave))
     for line in made.lines:
@@ -2140,7 +2154,13 @@ async def use_template(request: Request) -> JSONResponse:
                 kind=line.kind,
                 says=line.says,
             )
-    return JSONResponse({"made": True, "cards": [{"name": one} for one in fresh.values()]})
+    return JSONResponse(
+        {
+            "made": True,
+            "cards": [{"name": one} for one in fresh.values()],
+            "lost": sorted(lost),
+        }
+    )
 
 
 @router.post("/workbench/template/drop", response_class=JSONResponse)

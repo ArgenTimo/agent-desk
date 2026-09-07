@@ -174,3 +174,87 @@ def test_the_prompt_asks_for_both_and_says_why_the_number_is_first() -> None:
     # The line wraps in the source, so the check is on the halves rather than on the join.
     assert "then a" in said and "few words saying what decided it" in said
     assert "why did it go that way" in said
+
+
+# --- a template that has lost fields says so (01M1XC4Z32P4…) -------------------------------------
+@pytest.mark.unit
+async def test_a_template_names_the_fields_its_roles_no_longer_ask_for() -> None:
+    """ "Поля, которых у роли больше нет, сейчас молча не записываются — это правильно, но человек
+    об этом не узнаёт и получает карточку, которая выглядит заполненной.\" """
+    import json
+    import tempfile
+
+    from agent_desk.store.repo import Store, TemplateStep
+    from agent_desk.web import routes
+
+    from tests.unit.test_kept_bench import _post_form
+
+    with tempfile.TemporaryDirectory() as where:
+        store = Store(pathlib.Path(where) / "agent-desk.db")
+        await store.open()
+        old_store, routes.store = routes.store, store
+        try:
+            await store.keep_template(
+                name="a release",
+                steps=[
+                    TemplateStep(
+                        ord=1,
+                        role="action",
+                        label="run the tests",
+                        # One field the role asks for, and one it never did.
+                        fields={"do": "run them", "how_loudly": "very"},
+                        leave=(),
+                    )
+                ],
+                lines=[],
+            )
+
+            _, body = await _post_form("/workbench/template/use", {"name": "a release"})
+        finally:
+            routes.store = old_store
+            await store.close()
+
+    said = json.loads(body)
+    assert said["made"] is True
+    assert said["lost"] == ["action · how_loudly"]
+
+
+@pytest.mark.unit
+async def test_a_field_nobody_filled_in_is_not_worth_a_sentence() -> None:
+    """A field somebody left empty and a field that has since been removed are the same absence on
+    the new card, and only one of them is news."""
+    import json
+    import tempfile
+
+    from agent_desk.store.repo import Store, TemplateStep
+    from agent_desk.web import routes
+
+    from tests.unit.test_kept_bench import _post_form
+
+    with tempfile.TemporaryDirectory() as where:
+        store = Store(pathlib.Path(where) / "agent-desk.db")
+        await store.open()
+        old_store, routes.store = routes.store, store
+        try:
+            await store.keep_template(
+                name="a release",
+                steps=[
+                    TemplateStep(
+                        ord=1, role="action", label="run the tests", fields={"gone": "  "}, leave=()
+                    )
+                ],
+                lines=[],
+            )
+            _, body = await _post_form("/workbench/template/use", {"name": "a release"})
+        finally:
+            routes.store = old_store
+            await store.close()
+
+    assert json.loads(body)["lost"] == []
+
+
+@pytest.mark.unit
+def test_the_page_says_it_rather_than_keeping_it() -> None:
+    """A count returned and never shown is the same silence with extra steps."""
+    assert "said.lost?.length" in _code()
+    assert "no longer ask for" in _code()
