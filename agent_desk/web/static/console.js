@@ -828,9 +828,10 @@ const VIEW_SAYS = { hint: 'a line', metadata: 'what it is', full: 'everything' }
 // A hint is one line, so what else it can carry has to be countable rather than said. What a card
 // is joined to is a number this page already knows, and it is the number that answers "is there
 // more of this than I can see" — which is the question a folded card raises.
-function markHintCounts(holder) {
-  const name = holder.dataset.name;
-  const joined = everyTie().filter((tie) => tie.from === name || tie.to === name).length;
+// How many lines reach this card, given rather than counted. Counted here it was one walk over
+// every line, for every card, on every redraw — which is the shape that turns a hundred cards into
+// a surface that will not pan.
+function markHintCounts(holder, joined) {
   let dot = holder.querySelector('.pin-joined');
   if (!joined) {
     dot?.remove();
@@ -1861,10 +1862,10 @@ function drawMap() {
     .map((pin) => ({ at: placed.get(cardName(pin)), w: pin.offsetWidth || CARD_WIDTH, h: pin.offsetHeight || 120, pin }))
     .filter((one) => one.at);
   const frame = canvas.getBoundingClientRect();
-  if (!spots.length) {
-    mapBox.replaceChildren();
-    return;
-  }
+  // No special case for an empty bench. Every `Math.min` below already has the viewport in it, so
+  // with no cards the map draws exactly the rectangle saying where you are — which is more use
+  // than an empty box, and one path through this function instead of two.
+  //
   // What the map has to cover: every card, and wherever the window currently is — otherwise
   // panning off into empty space leaves the viewport rectangle outside the map that should be
   // showing it.
@@ -2972,16 +2973,42 @@ function showing(name) {
   return pin && !pin.classList.contains('put-away') ? pin : null;
 }
 
+// Three things made this the second most expensive thing on the surface, and all three are the
+// same mistake in different clothes: work repeated once per line, on a surface where the number of
+// lines grows with the number of cards.
+//
+//   * every line looked both its ends up with `querySelector` over the whole surface;
+//   * every line read `offsetWidth` and `offsetHeight` off its cards *after* the last line had
+//     already been appended, so the browser had to lay the page out again to answer;
+//   * and `markHintCounts` then walked every line again, for every card, to count them.
+//
+// So the cards are gathered once, measured once before anything is written, and the lines are
+// built into a fragment that goes in in one go. 17ms on 35 cards, and the same shape of curve as
+// `markOffEdge` above.
 function drawTies() {
   if (!ties) return;
-  ties.textContent = '';
+
+  // Read. One pass over the cards, and every measurement taken before a single write.
+  const pins = new Map();
+  for (const pin of surface?.querySelectorAll('.pin[data-name]') || []) {
+    if (pin.classList.contains('put-away')) continue;
+    pins.set(pin.dataset.name, {
+      pin,
+      w: pin.offsetWidth || CARD_WIDTH,
+      h: pin.offsetHeight || 120,
+    });
+  }
+  const joined = new Map();
+  const made = document.createDocumentFragment();
   let drew = 0;
   for (const tie of everyTie()) {
+    joined.set(tie.from, (joined.get(tie.from) || 0) + 1);
+    joined.set(tie.to, (joined.get(tie.to) || 0) + 1);
     // Both ends have to be *visible*, not merely present: a card put away with the conversation
     // is still in the document, and drawing to it filled a corner of the surface with lines
     // going to nothing.
-    const one = showing(tie.from);
-    const other = showing(tie.to);
+    const one = pins.get(tie.from);
+    const other = pins.get(tie.to);
     const a = placed.get(tie.from);
     const b = placed.get(tie.to);
     if (!one || !other || !a || !b) continue;
@@ -2990,8 +3017,8 @@ function drawTies() {
     // карточек." An elbow rather than a curve: a catalogue is read as a tree, and a tree is drawn
     // with right angles. Out of the right of one, along, down, and into the left of the other.
     const rightward = a.x <= b.x;
-    const from = { x: a.x + (rightward ? one.offsetWidth : 0), y: a.y + one.offsetHeight / 2 };
-    const to = { x: b.x + (rightward ? 0 : other.offsetWidth), y: b.y + other.offsetHeight / 2 };
+    const from = { x: a.x + (rightward ? one.w : 0), y: a.y + one.h / 2 };
+    const to = { x: b.x + (rightward ? 0 : other.w), y: b.y + other.h / 2 };
     // The corner sits in the gap between the two, so the vertical run is in clear space rather
     // than across a card.
     const bend = from.x + (to.x - from.x) / 2;
@@ -3004,7 +3031,7 @@ function drawTies() {
     path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
     path.setAttribute('fill', 'none');
     path.setAttribute('marker-end', 'url(#tie-end)');
-    ties.appendChild(path);
+    made.appendChild(path);
 
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', String(bend + 5));
@@ -3022,44 +3049,68 @@ function drawTies() {
         showLineMenu(tie, event.clientX, event.clientY);
       });
     }
-    ties.appendChild(label);
+    made.appendChild(label);
     drew += 1;
   }
+
+  // Write. Once for the lines, and once per card for the little count beside its name — which is
+  // now a lookup in a map built above rather than a walk over every line for every card.
+  ties.replaceChildren(made);
   ties.hidden = drew === 0;
-  for (const pin of surface?.querySelectorAll('.pin') || []) markHintCounts(pin);
+  for (const [name, one] of pins) markHintCounts(one.pin, joined.get(name) || 0);
 }
 
 /* --- what is off the screen ------------------------------------------------------------------- */
 // More useful on a surface than it was on a list: a card you moved somewhere and then panned away
 // from is a card that still goes into the next message.
+// Which cards are off the screen, worked out rather than measured.
+//
+// This asked the browser for `getBoundingClientRect()` on every card, in a loop that was also
+// appending to the document — so each read forced a fresh layout of the whole page, once per card.
+// Measured on 35 cards: 19ms, inside `applyView`, which runs on every frame of a pan. On the two
+// hundred cards this idea is about it is over a hundred, which is a workbench that does not move.
+//
+// A card's place on the screen is arithmetic: the surface carries one transform, so screen-x is
+// `view.x + at.x * scale`. The only thing that has to be asked is how big a card is, and that is
+// asked for all of them before anything is written — one layout for the whole pass instead of one
+// per card.
 function markOffEdge() {
   const edge = document.getElementById('off-edge');
   if (!edge || !canvas) return;
   const frame = canvas.getBoundingClientRect();
-  edge.textContent = '';
-  let away = 0;
+
+  // Read. Nothing below this line touches the document until every measurement is taken.
+  const away = [];
   for (const pin of surface.querySelectorAll('.pin')) {
-    const box = pin.getBoundingClientRect();
-    if (box.right > frame.left && box.left < frame.right &&
-        box.bottom > frame.top && box.top < frame.bottom) {
-      continue;
-    }
+    const at = placed.get(cardName(pin));
+    if (!at) continue;
+    const left = view.x + at.x * view.scale;
+    const top = view.y + at.y * view.scale;
+    const right = left + (pin.offsetWidth || CARD_WIDTH) * view.scale;
+    const bottom = top + (pin.offsetHeight || 120) * view.scale;
+    if (right > 0 && left < frame.width && bottom > 0 && top < frame.height) continue;
+    away.push({ pin, at, said: pin.querySelector('.pin-label')?.textContent || 'a card over there' });
+  }
+
+  // Write. Once, into a fragment, so the dots do not each cost a pass of their own.
+  const made = document.createDocumentFragment();
+  for (const one of away) {
     const dot = document.createElement('button');
     dot.type = 'button';
     dot.className = 'edge-dot';
-    dot.title = pin.querySelector('.pin-label')?.textContent || 'a card over there';
-    dot.setAttribute('aria-label', `bring ${dot.title} into view`);
+    dot.title = one.said;
+    dot.setAttribute('aria-label', `bring ${one.said} into view`);
     dot.addEventListener('click', () => {
-      const at = placed.get(cardName(pin));
+      const at = placed.get(cardName(one.pin));
       if (!at) return;
       view.x = frame.width / 2 - (at.x + CARD_WIDTH / 2) * view.scale;
       view.y = frame.height / 2 - (at.y + 40) * view.scale;
       applyView();
     });
-    edge.appendChild(dot);
-    away += 1;
+    made.appendChild(dot);
   }
-  edge.hidden = away === 0;
+  edge.replaceChildren(made);
+  edge.hidden = away.length === 0;
 }
 
 // One button, because a surface you can move things about on is a surface you can lose things on.

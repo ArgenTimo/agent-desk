@@ -726,9 +726,16 @@ def test_a_card_put_away_is_not_on_the_bench() -> None:
     assert "function onBench(" in console, "there is no one answer to what is on the bench"
     assert "function showing(" in console, "a line can still be drawn to a card nobody can see"
 
+    # The rule is that a line is never drawn to a card nobody can see. How it is said changed when
+    # `drawTies` stopped looking each end up on its own — the cards are gathered once now, and the
+    # folded-away ones are left out of that set — so this asserts the rule rather than the call it
+    # used to be made with.
     ties = console[console.index("function drawTies(") :]
     ties = ties[: ties.index("\n}\n")]
-    assert "showing(tie.from)" in ties and "showing(tie.to)" in ties
+    assert "put-away" in ties, "a line can be drawn to a card folded away with the conversation"
+    assert "pins.get(tie.from)" in ties and "pins.get(tie.to)" in ties, (
+        "the ends of a line no longer come from the set that leaves the folded-away cards out"
+    )
 
     for asks in ("pinnedTargets", "activeCards"):
         body = console[console.index(f"function {asks}(") :]
