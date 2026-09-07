@@ -1,0 +1,28 @@
+-- A run that is neither going nor over.
+--
+-- "Сегодня прогон либо идёт, либо остановлен насовсем. Между ними нет «пока не надо» — а именно
+-- оно нужно, когда упёрлись в лимит или ждут человека."
+--
+-- And the same gap from the other side: "Движок останавливает прогон на упавшем шаге и это
+-- правильно — идущие следом описаны в предположении, что он сработал. Но дальше нет ничего:
+-- единственный способ продолжить — запустить всё заново с первого шага… Прогон, который умеет
+-- только начинаться сначала, — это прогон, который запускают один раз."
+--
+-- Both are the same missing thing. `run` had two states — going, or finished with a reason — and
+-- every reason a run stops for is one of two kinds: it is over, or it is *not now*. A limit, a
+-- person who has not answered, a step that failed and is being fixed: none of those means the run
+-- is finished, and recording them as finished is what makes starting again from the top the only
+-- way forward.
+--
+-- ## One column, and why not a state name
+--
+-- `paused_at` rather than a `state` column with four words in it. There is already `finished_at`
+-- and `stopped_why`, and the three of them answer three different questions — did it reach the
+-- end, did somebody stop it, is it waiting. A single state word would have to be kept in step with
+-- all three, and the first thing to go out of step would be the one the loop reads.
+--
+-- Carrying on from a failed step needs no column at all: it is `stopped_why` cleared and the
+-- failed step put back to `waiting`, which the engine already knows how to pick up. That it needs
+-- no schema is the argument for this shape rather than a happy accident.
+
+ALTER TABLE run ADD COLUMN paused_at INTEGER;

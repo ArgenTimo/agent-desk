@@ -2718,14 +2718,29 @@ function showRunBar(going) {
   if (!going) return;
   const at = surface?.querySelector(`.pin[data-name="${CSS.escape(going.at || '')}"]`);
   const held = going.steps.find((step) => step.state === 'held');
-  bar.querySelector('.run-where').textContent = held
-    ? `waiting: ${held.detail}`
-    : `at ${at?.querySelector('.pin-label')?.textContent?.trim() || going.at || 'the start'}`;
+  const broke = going.steps.find((step) => step.state === 'failed');
+  // Three things this bar can be saying, and they are read differently: it is working, it is
+  // waiting for somebody, or it stopped and is holding its place (047-a-run-can-wait.sql).
+  bar.querySelector('.run-where').textContent = going.waiting
+    ? 'set aside — it kept its place'
+    : broke
+      ? `stopped at ${labelOf(broke.name)}: ${broke.detail}`
+      : held
+        ? `waiting: ${held.detail}`
+        : `at ${at?.querySelector('.pin-label')?.textContent?.trim() || going.at || 'the start'}`;
   const happened = bar.querySelector('[data-happened]');
   happened.hidden = !held;
   happened.dataset.run = going.id;
   happened.dataset.name = held ? held.name : '';
-  bar.querySelector('[data-stop]').dataset.run = going.id;
+  for (const [what, when] of [
+    ['[data-pause]', going.going],
+    ['[data-carry-on]', going.canCarryOn],
+    ['[data-stop]', going.going || going.waiting],
+  ]) {
+    const button = bar.querySelector(what);
+    button.hidden = !when;
+    button.dataset.run = going.id;
+  }
 }
 
 document.getElementById('run-bar')?.addEventListener('click', async (event) => {
@@ -2733,11 +2748,14 @@ document.getElementById('run-bar')?.addEventListener('click', async (event) => {
   if (!button) return;
   const body = new URLSearchParams({ run: button.dataset.run || '' });
   if (button.dataset.happened !== undefined) body.set('name', button.dataset.name || '');
-  await fetch(button.dataset.stop !== undefined ? '/workbench/stop' : '/workbench/happened', {
-    method: 'POST',
-    headers: FORM,
-    body,
-  });
+  // Which button, by the attribute it carries. A chain of ternaries would have to be read to add
+  // the fourth; this is a row per button and the template names them the same way.
+  const where = [
+    ['stop', '/workbench/stop'],
+    ['pause', '/workbench/pause'],
+    ['carryOn', '/workbench/carry-on'],
+  ].find(([which]) => button.dataset[which] !== undefined);
+  await fetch(where ? where[1] : '/workbench/happened', { method: 'POST', headers: FORM, body });
   readRuns();
 });
 

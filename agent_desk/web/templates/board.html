@@ -109,6 +109,13 @@
         <span class="run-gear" aria-hidden="true">⚙</span>
         <span class="run-where"></span>
         <button type="button" data-happened hidden>it happened</button>
+        {# "Между ними нет «пока не надо»" — set aside rather than ended, and picked up where it
+           stopped. The same button carries on from a step that failed and was fixed, because they
+           are one act: whatever it was waiting for has been dealt with (047-a-run-can-wait.sql). #}
+        <button type="button" data-pause hidden
+                title="set it aside — it keeps every step it has done">not now</button>
+        <button type="button" data-carry-on hidden
+                title="carry on from where it stopped">carry on</button>
         <button type="button" data-stop>stop</button>
       </div>
 

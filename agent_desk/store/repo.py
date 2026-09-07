@@ -270,10 +270,19 @@ class Run(BaseModel):
     started_at: int = 0
     finished_at: int | None = None
     stopped_why: str | None = None
+    # Set aside for now, rather than finished (047-a-run-can-wait.sql). A limit, a person who has
+    # not answered, a step being fixed — none of those means the run is over.
+    paused_at: int | None = None
 
     @property
     def going(self) -> bool:
-        return self.finished_at is None and not self.stopped_why
+        return self.finished_at is None and not self.stopped_why and self.paused_at is None
+
+    @property
+    def waiting(self) -> bool:
+        """Paused and able to carry on. Distinct from `going` for the loop and from finished for
+        the person: a run somebody set aside is still theirs to come back to."""
+        return self.paused_at is not None and self.finished_at is None
 
     @property
     def names(self) -> list[str]:
@@ -2584,7 +2593,7 @@ class Store:
                     "INSERT INTO run (id, cards, repo_key, cwd, at, started_at) "
                     "VALUES (:id, :cards, :repo_key, :cwd, '', :started_at)"
                 ),
-                run.model_dump(exclude={"at", "finished_at", "stopped_why"}),
+                run.model_dump(exclude={"at", "finished_at", "stopped_why", "paused_at"}),
             )
         return run
 
@@ -2592,8 +2601,8 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why "
-                    "FROM run ORDER BY started_at DESC LIMIT 60"
+                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, "
+                    "stopped_why, paused_at FROM run ORDER BY started_at DESC LIMIT 60"
                 )
             )
             found = [Run(**row._mapping) for row in rows]
@@ -2606,6 +2615,49 @@ class Store:
         async with self.engine.begin() as conn:
             await conn.execute(
                 text("UPDATE run SET at = :at WHERE id = :id"), {"at": name, "id": run_id}
+            )
+
+    async def pause_run(self, run_id: str) -> None:
+        """Set a run aside. It keeps every step it has done and picks up where it stopped."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE run SET paused_at = :t WHERE id = :id AND finished_at IS NULL "
+                    "AND stopped_why IS NULL"
+                ),
+                {"t": _now_ms(), "id": run_id},
+            )
+
+    async def carry_on_run(self, run_id: str) -> None:
+        """Start it going again — after a pause, or after a step failed and was fixed.
+
+        One method for both, because they are the same act: the run is not over, and whatever it
+        was waiting for has been dealt with. A step that failed goes back to `waiting`, which is
+        the state the engine already picks up — so carrying on from a failure needed no schema at
+        all, and needing none is the argument for this shape rather than a happy accident.
+
+        Only the *failed* step is reset. The ones before it are done and doing them twice is how a
+        rerun becomes a second deploy; the ones after never ran.
+        """
+        async with self.engine.begin() as conn:
+            # `finished_at` is cleared too. `end_run` sets both it and the reason, because a run
+            # that gave up *had* ended as far as anything reading it was concerned — and that is
+            # exactly what made starting again from the top the only way forward. A run with a
+            # reason is one that stopped; carrying on is saying the reason has been dealt with.
+            await conn.execute(
+                text(
+                    "UPDATE run SET paused_at = NULL, stopped_why = NULL, finished_at = NULL "
+                    "WHERE id = :id AND stopped_why IS NOT NULL OR "
+                    "(id = :id AND paused_at IS NOT NULL)"
+                ),
+                {"id": run_id},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE run_step SET state = 'waiting', detail = '' "
+                    "WHERE run_id = :id AND state = 'failed'"
+                ),
+                {"id": run_id},
             )
 
     async def end_run(self, run_id: str, why: str = "") -> None:

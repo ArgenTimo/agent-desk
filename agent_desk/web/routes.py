@@ -2003,6 +2003,32 @@ async def stop_run(request: Request) -> JSONResponse:
     return JSONResponse({"stopped": True})
 
 
+@router.post("/workbench/pause", response_class=JSONResponse)
+async def pause_run(request: Request) -> JSONResponse:
+    """Set a run aside without ending it (047-a-run-can-wait.sql).
+
+    "Между ними нет «пока не надо» — а именно оно нужно, когда упёрлись в лимит или ждут человека."
+    """
+    run_id = (await _form(request)).get("run", "").strip()
+    if run_id:
+        await store.pause_run(run_id)
+    return JSONResponse({"paused": True})
+
+
+@router.post("/workbench/carry-on", response_class=JSONResponse)
+async def carry_on_run(request: Request) -> JSONResponse:
+    """Start a run going again — after a pause, or after a step failed and was fixed.
+
+    One route for both because they are one act: whatever it was waiting for has been dealt with.
+    A run that reached its end is not restarted by this; it is over, and starting it again is
+    running the drawing, which is a different button.
+    """
+    run_id = (await _form(request)).get("run", "").strip()
+    if run_id:
+        await store.carry_on_run(run_id)
+    return JSONResponse({"going": True})
+
+
 @router.get("/workbench/runs", response_class=JSONResponse)
 async def workbench_runs() -> JSONResponse:
     """Every run and where it got to, so the bench can show it on the cards themselves."""
@@ -2014,6 +2040,10 @@ async def workbench_runs() -> JSONResponse:
                 "cards": one.names,
                 "at": one.at,
                 "going": one.going,
+                # Set aside, as opposed to over. The page offers different things for the two, and
+                # telling them apart from `going` alone is impossible (047-a-run-can-wait.sql).
+                "waiting": one.waiting,
+                "canCarryOn": one.waiting or bool(one.stopped_why),
                 "why": one.stopped_why or "",
                 "steps": [
                     {
