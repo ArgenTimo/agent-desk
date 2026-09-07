@@ -1,0 +1,24 @@
+-- Whether an idea came out of somebody's head or out of this console.
+--
+-- "Моя-твоя — некорректное описание, скорее идея, в контекст которой я погружён или нет. Когда я
+-- пишу идею, я буквально вынимаю её из контекста своего мозга, но когда ты её генерируешь, мне её
+-- ещё необходимо осознать и понять."
+--
+-- That is the whole reason for this column, and it is a better reason than authorship. An idea a
+-- person wrote arrives with the context it grew out of already in their head, for free. An idea
+-- this console proposed arrives without it, and everything the column is used for is about
+-- getting that context to them: it is marked, it can be sorted for, it is approved before it can
+-- be built, and it can be dragged onto the workbench and talked through until somebody does
+-- understand it — at which point it becomes an ordinary idea, because now there is a person who
+-- holds it.
+--
+-- So the two values are `human` and `desk`, and the default is `human` — every idea written
+-- before this column existed was typed by a person, and a default that guessed otherwise would
+-- put a hundred and eighty ideas behind an approval nobody asked for.
+--
+-- What it deliberately does **not** do is change what the four states mean. Approving a proposal
+-- is `kept`, setting one aside is `dropped` — the words already there for "worth doing" and "we
+-- decided not to". A fifth state meaning "proposed and not yet looked at" would be `new` under
+-- another name.
+
+ALTER TABLE idea ADD COLUMN author TEXT NOT NULL DEFAULT 'human';

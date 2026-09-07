@@ -52,7 +52,7 @@ from agent_desk import (
 from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, bench, chart, describe, meeting, waking
+from agent_desk.ideas import appraise, bench, chart, describe, inbox, meeting, waking
 from agent_desk.observe import attach, folder, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -673,8 +673,16 @@ IDEA_SORTS: tuple[tuple[str, str], ...] = (
     ("project", "by project"),
     ("state", "by what has happened to it"),
     ("needs", "by what it needs next"),
+    # "По ним можно сортироваться." A proposal nobody has looked at is a different kind of thing
+    # from a note somebody made, and finding all of one sort is the first thing anybody does.
+    ("proposed", "what the desk suggested first"),
+    ("mine", "what I wrote first"),
 )
 IDEA_SORT_KEY = "ideas.sort"
+# Whether the pool is showing what was set aside instead of what is live. In the store for the
+# same reason the sort is: the column is replaced by a stream every couple of seconds, and a
+# filter that resets two seconds after it is set is a filter that looks broken.
+ASIDE_KEY = "ideas.aside"
 # Which project the right-hand column is narrowed to, or empty for all of them. In the store for
 # the same reason the sort is: a server-sent event replaces those columns every couple of seconds,
 # and a filter that resets two seconds after it is set is a filter that looks broken.
@@ -710,6 +718,10 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
         return sorted(roots, key=lambda idea: _STATE_ORDER.get(idea.state, 9))
     if how == "needs":
         return sorted(roots, key=lambda idea: _SHAPE_ORDER.get(idea.shape or "", 9))
+    if how == "proposed":
+        return sorted(roots, key=lambda idea: 0 if idea.author == "desk" else 1)
+    if how == "mine":
+        return sorted(roots, key=lambda idea: 0 if idea.author == "human" else 1)
     return roots
 
 
@@ -750,7 +762,15 @@ async def render_ideas() -> str:
     """
     how = await store.setting(IDEA_SORT_KEY, "newest")
     only = await store.setting(FOCUS_KEY)
-    ideas = [idea for idea in await store.ideas() if idea.state not in ("dropped", "done")]
+    # "Пропадает из списка идей, можно жмякнуть фильтр, чтоб показало отменённые." Setting a
+    # proposal aside is `dropped` — the word already there for "we decided not to" — so the filter
+    # is over the state that already exists rather than a fifth one meaning the same thing.
+    aside = await store.setting(ASIDE_KEY) == "yes"
+
+    def shown(idea: Idea) -> bool:
+        return idea.state == "dropped" if aside else idea.state not in ("dropped", "done")
+
+    ideas = [idea for idea in await store.ideas() if shown(idea)]
     if only:
         # A thought with no project is about whatever is in front of you, so it survives the
         # narrowing — the same rule the blockers follow, for the same reason.
@@ -792,6 +812,8 @@ async def render_ideas() -> str:
         # What each project is called, so "build it" can say where it would land rather than
         # asking somebody to recognise a repository key.
         named_projects=dict(await _project_choices()),
+        # Whether it is showing what was set aside, so it can say so and offer the way back.
+        aside=aside,
         # The last thing that was done, so the column can offer to put it back. Named here rather
         # than worked out in the template: which of the three words to show is a fact about what
         # happened, not about how it is drawn.
@@ -2366,6 +2388,73 @@ async def focus_project(request: Request) -> Response:
         # Both columns move together, because they are one decision.
         return HTMLResponse(await render_column())
     return HTMLResponse(await render_page(""))
+
+
+@router.post("/ideas/from-bench", response_class=JSONResponse)
+async def idea_from_bench(request: Request) -> JSONResponse:
+    """Make an idea out of what is on the workbench, and mark it as the person's own.
+
+    "Я перетягиваю твою идею на верстак, начинаю задавать тебе вопросы, уточнения… в финале я
+    должен получить блок, в котором будет кнопка «добавить как идею» — при нажатии собираем
+    контекст из полученных карточек и формируем идею, помеченную как обычную, то есть мою."
+
+    `human` is not a claim about who typed it. It means somebody now holds the context this idea
+    grew out of — which, after a conversation they drove, they do. That is exactly what the column
+    distinguishes (039-idea-author.sql), so marking it here is the honest answer rather than a
+    convenient one.
+
+    What goes in is what the cards say: their names and, where a card has said what it is, that
+    sentence. Not the whole transcript — an idea that arrives as a wall of conversation is an idea
+    nobody reads twice.
+    """
+    form = await _form(request)
+    names = [one for one in form.get("cards", "").split(",") if one]
+    summary = form.get("summary", "").strip()
+    if not names and not summary:
+        return JSONResponse({"made": False, "why": "there is nothing to make one from"}, 400)
+
+    cards = await _bench_cards(names)
+    said = [summary] if summary else []
+    for card in cards:
+        line = card.label or card.name
+        words = next(
+            (
+                (card.said.get(field.name) or "").strip()
+                for field in roles.fields_of(card.role)
+                if (card.said.get(field.name) or "").strip()
+            ),
+            "",
+        )
+        said.append(f"- {line}{f': {words}' if words else ''}")
+        if card.made.strip():
+            said.append(f"  what came of it: {card.made.strip()}")
+
+    made = await inbox.capture(
+        store,
+        "\n".join(said),
+        source_kind="typed",
+        context={"from": "a conversation on the workbench", "cards": str(len(cards))},
+        project_key=(cards[0].name.split(":")[0] and await store.setting(FOCUS_KEY)) or None,
+        author="human",
+    )
+    if summary:
+        await store.set_idea_summary(made.id, summary[:120])
+    return JSONResponse({"made": True, "id": made.id, "cards": len(cards)})
+
+
+@router.post("/ideas/aside", response_class=HTMLResponse)
+async def show_set_aside(request: Request) -> Response:
+    """Show what was set aside, or go back to what is live.
+
+    Setting a proposal aside makes it `dropped`, so this is a filter over a state that already
+    exists — and the way back to something dismissed by accident, which a list with no way back is
+    a list nobody dismisses anything from.
+    """
+    form = await _form(request)
+    await store.set_setting(ASIDE_KEY, "yes" if form.get("aside") == "yes" else "")
+    if _wants_fragment(request):
+        return HTMLResponse(await render_ideas())
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/ideas/sort", response_class=HTMLResponse)

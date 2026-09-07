@@ -8,7 +8,7 @@
    Every card drags into the middle, where it becomes what the next question is about
    (docs/05-ideas.md). #}
 {% macro card(idea, children) %}
-<details class="node card idea-card {{ idea.state }}{% if idea.id in working %} working{% endif %}{% if idea.shape %} needs-{{ idea.shape }}{% endif %}" open
+<details class="node card idea-card {{ idea.state }}{% if idea.id in working %} working{% endif %}{% if idea.shape %} needs-{{ idea.shape }}{% endif %}{% if idea.author == "desk" %} proposed{% endif %}{% if idea.proposed %} unlooked{% endif %}" open
          data-kind="idea" data-id="{{ idea.id }}" data-label="{{ idea.summary }}"
          {# Which project it is about, so hovering it lights that project up on the left. A pool
             of sixty says nothing about where any of them would land. #}
@@ -16,6 +16,10 @@
          data-drop="idea" draggable="true">
   <summary class="card-head">
     <span class="twist{% if not children[idea.id] %} leaf{% endif %}" aria-hidden="true"></span>
+    {# Where it came from, said on the card. Not by recolouring the state pill: on this page
+       colour means status and nothing else, so a proposal is marked with its own label and its
+       own ground instead (039-idea-author.sql). #}
+    {% if idea.author == "desk" %}<span class="from-desk" title="the desk suggested this — nobody has looked at it yet">suggested</span>{% endif %}
     <span class="card-name" title="{{ idea.text }}">{{ idea.summary }}</span>
     {% if children[idea.id] %}<span class="pill">{{ children[idea.id] | length }}</span>{% endif %}
     {% if idea.id in working %}
@@ -66,10 +70,14 @@
     {% endif %}
     <div class="idea-buttons">
       {% if idea.state == "new" %}
+      {# The same two acts, in the words that fit where the idea came from. Approving a proposal
+         is what "kept" already means — worth doing — and setting one aside is what "dropped"
+         already means. A fifth state for "proposed and not yet looked at" would be `new` under
+         another name. #}
       <form method="post" action="/ideas/{{ idea.id }}/keep"
             hx-post="/ideas/{{ idea.id }}/keep" hx-target="#idea-list">
         <input type="hidden" name="from" value="column">
-        <button type="submit">Keep</button>
+        <button type="submit" class="{{ 'yes' if idea.proposed }}">{{ "I approve this" if idea.proposed else "Keep" }}</button>
       </form>
       {% endif %}
       {% if idea.state not in ("dropped", "done") %}
@@ -85,7 +93,11 @@
          what somebody thought about an idea; the only door to actually doing one went through a
          message and the classifier. It queues against the project the card already names, and
          the arming switch decides whether an agent starts on it now (docs/adr/0006, 0007). #}
-      {% if idea.state != "dropped" and idea.project_key %}
+      {# Not while it is a proposal nobody has looked at. The difference between "I wrote this
+         down" and "something suggested this to me" is exactly that the second has not been agreed
+         to — and this console may start agents on its own, so an unapproved proposal reaching the
+         queue would be it deciding what to build. #}
+      {% if idea.state != "dropped" and idea.project_key and not idea.proposed %}
       <form method="post" action="/ideas/{{ idea.id }}/build"
             hx-post="/ideas/{{ idea.id }}/build" hx-target="#idea-list">
         <input type="hidden" name="from" value="column">
@@ -96,7 +108,7 @@
       <form method="post" action="/ideas/{{ idea.id }}/drop"
             hx-post="/ideas/{{ idea.id }}/drop" hx-target="#idea-list">
         <input type="hidden" name="from" value="column">
-        <button type="submit">Discard</button>
+        <button type="submit">{{ "Set it aside" if idea.proposed else "Discard" }}</button>
       </form>
       {% endif %}
       {# Written here, in this program's store, and carried wherever it goes by a human. Offered
@@ -257,6 +269,14 @@
   <form method="post" action="/column" hx-post="/column" hx-target="#idea-list">
     <input type="hidden" name="shows" value="tickets">
     <button type="submit" class="chip" title="show the tickets read from the projects' boards">the board</button>
+  </form>
+  {# The way back to something set aside. A list you can dismiss things from and never see again
+     is a list nobody dismisses anything from. #}
+  <form class="aside-filter" method="post" action="/ideas/aside"
+        hx-post="/ideas/aside" hx-target="#idea-list">
+    <input type="hidden" name="aside" value="{{ '' if aside else 'yes' }}">
+    <button type="submit" class="chip{{ ' on' if aside }}"
+            title="what has been set aside or discarded">{{ "back to the live ones" if aside else "set aside" }}</button>
   </form>
   <a class="map-link" href="/ideas/map" title="the whole pool at once, with what depends on what">the map</a>
   <span class="ungroup" data-drop="ungroup" title="drag an idea here to take it out of its group">out of its group</span>

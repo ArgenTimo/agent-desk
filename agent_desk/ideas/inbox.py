@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agent_desk.ideas import waking
-from agent_desk.store.repo import DraftKind, Idea, SourceKind, Store
+from agent_desk.store.repo import DraftKind, Idea, IdeaAuthor, SourceKind, Store
 
 # A fallback summary is a trimmed first line. Long enough to recognise the thought in a list, short
 # enough that nobody mistakes it for the thought itself.
@@ -48,6 +48,7 @@ async def capture(
     block_id: str | None = None,
     parent_id: str | None = None,
     project_key: str | None = None,
+    author: IdeaAuthor = "human",
 ) -> Idea:
     """Record the thought. No model call, no second question, no way to fail on a busy machine.
 
@@ -65,6 +66,7 @@ async def capture(
         block_id=block_id,
         parent_id=parent_id,
         project_key=project_key,
+        author=author,
     )
     wake = waking.read(text, now=datetime.now(UTC))
     if wake is not None:

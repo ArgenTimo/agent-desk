@@ -2655,3 +2655,34 @@ button.go:hover, button.yes:hover {
 /* "Only these" said in the strip, so the difference between the two ways of carrying context is
    readable rather than inferred from a number. */
 .context-strip.only-these #context-count { color: var(--focus); }
+
+/* --- an idea somebody wrote, and an idea this console suggested ---------------------------------- */
+/* "Скорее идея, в контекст которой я погружён или нет."
+   
+   Marked by its ground and its own label, never by recolouring the status pill: on this page
+   colour means status and nothing else, and that rule is older and worth more than this feature.
+   A proposal reads as a note pinned to the column rather than as a card of a different colour. */
+.idea-card.proposed {
+  border-left: 3px solid var(--line-strong);
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--fg-dim) 7%, transparent),
+    transparent 40%
+  );
+}
+.from-desk {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.02em;
+}
+/* One nobody has looked at yet is the one asking for something. Once approved it stops asking and
+   reads like any other kept idea, which is the point of approving it. */
+.idea-card.unlooked { border-left-color: var(--attention); }
+.idea-card.unlooked .from-desk { border-color: var(--attention); color: var(--attention); }
+.aside-filter { display: inline-flex; }
+.aside-filter .chip.on { border-color: var(--focus); color: var(--focus); }

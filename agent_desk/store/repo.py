@@ -49,6 +49,10 @@ BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # and "it is in the product" are different answers to "what happened to my idea"
 # (docs/05-ideas.md, and 011-idea-done.sql for why the wrong word was tempting).
 IdeaState = Literal["new", "kept", "promoted", "dropped", "done"]
+# Whose head the idea came out of, and it is about context rather than credit (039-idea-author.sql).
+# An idea a person wrote arrives with the context it grew from; one this console proposed does not,
+# and has to earn it.
+IdeaAuthor = Literal["human", "desk"]
 SourceKind = Literal["session", "typed", "meeting"]
 DraftKind = Literal["proposal", "ticket", "paste"]
 # The same three, as values. Defined here so a route validating a path segment and the type that
@@ -418,6 +422,15 @@ class Idea(BaseModel):
     size: str | None = None
     shape: str | None = None
     appraised_at: int | None = None
+    # Who it came from. `desk` means nobody has the context it grew out of yet — see
+    # 039-idea-author.sql, which is about that rather than about authorship.
+    author: IdeaAuthor = "human"
+
+    @property
+    def proposed(self) -> bool:
+        """Waiting for somebody to look at it, rather than waiting to be done."""
+        return self.author == "desk" and self.state == "new"
+
     # When this one comes back, if it was put off rather than left in the pool
     # (031-deferred.sql). `wakes_at` is a clock, `wakes_when` names a condition from
     # agent_desk/ideas/waking.py, and `woke_at` is the record that it fired — which is what keeps
@@ -1623,6 +1636,7 @@ class Store:
         block_id: str | None = None,
         parent_id: str | None = None,
         project_key: str | None = None,
+        author: IdeaAuthor = "human",
     ) -> Idea:
         idea = Idea(
             id=_new_id(),
@@ -1636,14 +1650,15 @@ class Store:
             source_ref=source_ref,
             context=context or {},
             created_at=_now_ms(),
+            author=author,
         )
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO idea (id, block_id, text, summary, state, source_kind, "
-                    "source_ref, context, created_at, parent_id, project_key) VALUES (:id, "
-                    ":block_id, :text, :summary, :state, :source_kind, :source_ref, :context, "
-                    ":created_at, :parent_id, :project_key)"
+                    "source_ref, context, created_at, parent_id, project_key, author) VALUES "
+                    "(:id, :block_id, :text, :summary, :state, :source_kind, :source_ref, "
+                    ":context, :created_at, :parent_id, :project_key, :author)"
                 ),
                 {**idea.model_dump(exclude={"context"}), "context": json.dumps(idea.context)},
             )
@@ -1703,7 +1718,7 @@ class Store:
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
                     "context, created_at, parent_id, project_key, size, shape, appraised_at, "
-                    "wakes_at, wakes_when, woke_at FROM idea "
+                    "wakes_at, wakes_when, woke_at, author FROM idea "
                     "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
                 ),
                 {"state": state, "limit": limit},
@@ -1721,7 +1736,7 @@ class Store:
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
                     "context, created_at, parent_id, project_key, size, shape, appraised_at, "
-                    "wakes_at, wakes_when, woke_at "
+                    "wakes_at, wakes_when, woke_at, author "
                     "FROM idea WHERE appraised_at IS NULL AND state IN ('new', 'kept') "
                     "ORDER BY id DESC LIMIT :limit"
                 ),
@@ -1771,7 +1786,7 @@ class Store:
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
                     "context, created_at, parent_id, project_key, size, shape, appraised_at, "
-                    "wakes_at, wakes_when, woke_at FROM idea "
+                    "wakes_at, wakes_when, woke_at, author FROM idea "
                     "WHERE woke_at IS NULL AND state IN ('new', 'kept') "
                     "AND (wakes_at IS NOT NULL OR wakes_when IS NOT NULL) "
                     "ORDER BY COALESCE(wakes_at, 0), id"
@@ -2608,7 +2623,7 @@ class Store:
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
                     "context, created_at, parent_id, project_key, size, shape, appraised_at, "
-                    "wakes_at, wakes_when, woke_at "
+                    "wakes_at, wakes_when, woke_at, author "
                     "FROM idea WHERE id = :id"
                 ),
                 {"id": idea_id},
