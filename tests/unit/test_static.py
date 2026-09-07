@@ -737,6 +737,17 @@ def test_a_card_put_away_is_not_on_the_bench() -> None:
         "the ends of a line no longer come from the set that leaves the folded-away cards out"
     )
 
+    # The same markup catches the same mistake twice. A block card renders every idea that message
+    # recorded, and each of those lines carries `data-kind="idea"` so it can be dragged out of the
+    # answer onto the bench — so a selector without `.pin` in front of it counts the conversation
+    # as well as the workbench. It is why `pin` never made a card of an idea, and it is why the
+    # console offered to "get started on these 168" under a workbench of twenty-six.
+    targets = console[console.index("function syncTargets(") :]
+    targets = targets[: targets.index("\n}\n")]
+    assert '\'.pin[data-kind="idea"]' in targets, (
+        "the count of ideas on the bench includes the idea lines inside the answers"
+    )
+
     for asks in ("pinnedTargets", "activeCards"):
         body = console[console.index(f"function {asks}(") :]
         body = body[: body.index("\n}\n")]

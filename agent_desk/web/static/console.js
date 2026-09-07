@@ -608,8 +608,12 @@ function syncTargets() {
   document.querySelector('.context-strip').classList.toggle('on', carried > 0);
   // One idea on the workbench means one obvious next move, so the console offers it rather than
   // waiting to be told in words it already knows.
+  // `.pin[...]`, not `[...]`. A block card renders every idea that message recorded, and each of
+  // those lines carries `data-kind="idea"` so it can be dragged out — so this counted the lines
+  // inside the conversation as well as the cards on the bench, and offered to "get started on
+  // these 168" under a workbench of twenty-six. The same mistake `pin` had, in the same markup.
   const ideas = pins.querySelectorAll(
-    '[data-kind="idea"]:not(.spent):not(.ringed):not(.put-away)'
+    '.pin[data-kind="idea"]:not(.spent):not(.ringed):not(.put-away)'
   ).length;
   const go = document.getElementById('get-started');
   go.hidden = ideas === 0;
