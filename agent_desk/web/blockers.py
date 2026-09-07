@@ -49,6 +49,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field, replace
 
+from agent_desk import telling
 from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Idea, Store, Task
 
@@ -215,7 +216,7 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     ref=task.id,
                     repo_key=task.repo_key,
                     what=task.title,
-                    why=task.detail or "it failed and said nothing",
+                    why=" ".join(telling.stopped(task.detail or "")).strip(),
                     when=task.failed_at,
                     action=f"/tasks/{task.id}/retry",
                     action_says="try it again",
@@ -297,7 +298,11 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     kind="answer",
                     ref=block.id,
                     what=block.input.splitlines()[0][:60] if block.input else "a question",
-                    why=block.error or "the run failed and said nothing",
+                    # The same words the block itself shows, because a person reading the
+                    # blockers column and a person reading the conversation are the same person
+                    # and "the run exited 4" is no more use here than it was there
+                    # (agent_desk/telling.py).
+                    why=" ".join(telling.stopped(block.error or "")).strip(),
                     when=block.finished_at,
                     action=f"/blocks/{block.id}/retry",
                     action_says="ask it again",

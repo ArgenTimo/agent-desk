@@ -203,3 +203,66 @@ def words_for(role: str) -> str:
         return needed[0]
     asked = roles.fields_of(role)
     return asked[0].name if asked else ""
+
+
+# --- a refusal, said so it cannot be scrolled past ------------------------------------------------
+# "Если невозможно получить тот результат, что я хочу, из-за технического устройства проекта или
+# других причин — всё это указывается в новых карточках систем-блоках (они должны особенно страшно
+# выглядеть визуально, ярко-красные)."
+#
+# "Это самая важная часть всей идеи и она шире проверки: консоли нужен способ сказать «нет, и вот
+# почему» так, чтобы это нельзя было пролистать. Сегодня отказ выглядит как обычный ответ, а
+# значит читается как обычный ответ."
+#
+# What a run reports when it fails is written for whoever wrote the runner: "the run exited 4",
+# "no answer within 180s", "needs_toolchain: claude is not on PATH". Each is true and none of them
+# says what to do, which is the half a person needs at the moment something has stopped.
+#
+# So a failure is turned into two things: what happened, and what would change it. The mapping is
+# a list of the failures this program can actually produce — everything else keeps its own words,
+# because inventing a next step for a failure nobody has seen is exactly the guess CLAUDE.md's
+# fifth rule forbids.
+_STOPPED: tuple[tuple[str, str, str], ...] = (
+    (
+        "the day's budget is spent",
+        "The day's budget for asking is spent.",
+        "AGENT_DESK_DAILY_USD raises the ceiling, and 0 switches it off.",
+    ),
+    (
+        "needs_toolchain",
+        "The answer engine is not on this machine.",
+        "`claude` has to be on PATH for this console to ask anything.",
+    ),
+    (
+        "rate limit",
+        "The model is rate limited.",
+        "It comes back on its own; asking again now costs another refusal.",
+    ),
+    (
+        "usage limit",
+        "The account is out of budget.",
+        "It comes back when the limit resets.",
+    ),
+    (
+        "no answer within",
+        "The run took longer than it is allowed to.",
+        "AGENT_DESK_ANSWER_TIMEOUT_SECONDS gives it longer; a question about a whole repository "
+        "usually wants a card dropped in rather than more time.",
+    ),
+)
+
+
+def stopped(error: str) -> tuple[str, str]:
+    """What stopped, and what would change it — or the original words and nothing.
+
+    Two strings rather than one, because they are read at different moments: the first is what
+    somebody sees without opening anything, and the second is what they do about it. A failure
+    this list has not met keeps its own words and offers no next step, which reads as "something
+    went wrong and this console does not know what to suggest" — the honest answer, and a visibly
+    different one from the four it does know.
+    """
+    said = error.lower()
+    for shape, what, act in _STOPPED:
+        if shape in said:
+            return what, act
+    return error.strip() or "The run stopped without saying why.", ""

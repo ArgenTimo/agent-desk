@@ -243,6 +243,10 @@ env.filters["prose"] = _prose
 env.filters["ago"] = _ago
 env.filters["clock"] = _clock
 env.filters["at"] = _at
+# What stopped, and what would change it (agent_desk/telling.py). A filter rather than a value
+# prepared for the template, because a failure can appear on a block, on a task and on a card, and
+# three places preparing the same pair is three places for one of them to drift.
+env.filters["stopped"] = telling.stopped
 
 
 @dataclass(frozen=True)

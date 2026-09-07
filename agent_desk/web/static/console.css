@@ -432,6 +432,23 @@ body.stale main { opacity: 0.55; }
 .block.answered .answer { border-left-color: var(--idle); }
 .block.running .answer, .block.queued .answer { border-left-color: var(--busy); color: var(--fg-soft); }
 .failure { color: var(--flag); font-size: var(--t-sm); border-left-color: var(--flag); }
+
+/* A refusal, said so it cannot be read as an ordinary answer. Filled rather than outlined: every
+   other state on this page is a line down the left edge, and one more of those is one more thing
+   to look for. This is the only block that changes colour all the way through, which is the whole
+   point of it (01M1XC1DCJ9D…). */
+.stopped {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--flag);
+  border-left: 4px solid var(--flag);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--flag) 12%, transparent);
+}
+.stopped-what { margin: 0; color: var(--flag); font-weight: 600; }
+.stopped-do { margin: 4px 0 0; font-size: var(--t-sm); color: var(--fg-dim); }
+/* And the card for it on the workbench, which is where somebody is actually looking. */
+.pin.block-card:has(.stopped) { border-color: var(--flag); }
 .caret { color: var(--busy); }
 
 .block .card { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--idle); border-radius: 0; background: none; }

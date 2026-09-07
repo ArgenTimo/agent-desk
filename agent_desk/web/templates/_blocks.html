@@ -152,7 +152,21 @@
     {% endif %}
   </div>
   {% endif %}
+  {% elif block.state in ("failed", "cancelled") and block.error %}
+  {# "Консоли нужен способ сказать «нет, и вот почему» так, чтобы это нельзя было пролистать.
+     Сегодня отказ выглядит как обычный ответ, а значит читается как обычный ответ." Red on this
+     page already means stopped, which is the meaning wanted here, so nothing is being overloaded.
+     What stopped comes first and what would change it comes second, because they are read at
+     different moments (agent_desk/telling.py). #}
+  {% set stopped = block.error | stopped %}
+  <div class="stopped">
+    <p class="stopped-what">{{ stopped[0] }}</p>
+    {% if stopped[1] %}<p class="stopped-do">{{ stopped[1] }}</p>{% endif %}
+  </div>
   {% elif block.error %}
+  {# A block that reached an end *and* left something in `error` behind it. It is not a refusal,
+     so it must not look like one: shouting at somebody about a run that finished is how they
+     learn to scroll past the ones that did not. #}
   <p class="failure">{{ block.error }}</p>
   {% endif %}
 
