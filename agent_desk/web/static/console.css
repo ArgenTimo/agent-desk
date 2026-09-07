@@ -642,6 +642,11 @@ button[disabled] { opacity: 0.5; cursor: default; }
 /* What today has cost. Three readings, and only the last two are worth a colour: a number that is
    coloured all day is a number people stop seeing, which is the whole failure this counter exists
    to fix (043-spending.sql). */
+/* What a run is doing while it is not saying anything. Dimmed and italic: it is a note about the
+   run rather than any part of its answer, and the difference has to be readable at a glance
+   (agent_desk/answer/session.py). */
+.doing { color: var(--fg-dim); font-style: italic; margin: 2px 0 0; }
+
 .spend-close { color: var(--attention); }
 .spend-stopped { color: var(--warn); font-weight: 600; }
 

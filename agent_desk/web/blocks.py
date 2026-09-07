@@ -39,6 +39,18 @@ if TYPE_CHECKING:
 # once (design/02-data-model.md, "What is deliberately not stored").
 PARTIAL: dict[str, str] = {}
 
+# What a running block is *doing*, as opposed to what it has said. One line, replaced each time the
+# run reaches for a tool: "reading store/repo.py", "searching for keep_bench".
+#
+# "Длинный ответ, который возникает целиком через сорок секунд, читается как зависание." A turn
+# that only used a tool produces no text at all, so a run that spends thirty seconds looking
+# through a repository streams nothing — and a caret blinking on an empty line for half a minute
+# is indistinguishable from a console that has stopped.
+#
+# Memory only and dropped when the block finishes, for the same reason as PARTIAL: this is a note
+# about a run in progress, and there is no question it answers once the run is over.
+DOING: dict[str, str] = {}
+
 # Ideas whose draft is being written, so the inbox can say "drafting" instead of showing a click
 # that appeared to do nothing. Memory only, for the same reason as PARTIAL.
 DRAFTING: set[tuple[str, str]] = set()
@@ -1241,9 +1253,14 @@ async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) ->
             # verbatim and the identical finished answer redacted — not a view that forgot to
             # call a filter, but a second output path the document did not know existed.
             on_chunk=lambda text: PARTIAL.__setitem__(block.id, scrub(text)),
+            # Scrubbed for the same reason the answer is: this is a path or a pattern a model wrote
+            # about files it was pointed at, and it never passes through the store, which is where
+            # docs/07-security.md puts the filter.
+            on_step=lambda step: DOING.__setitem__(block.id, scrub(step)),
         )
     finally:
         PARTIAL.pop(block.id, None)
+        DOING.pop(block.id, None)
 
 
 async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:

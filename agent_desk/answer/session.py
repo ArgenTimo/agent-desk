@@ -180,6 +180,65 @@ def _text_of(event: dict[str, object]) -> str:
     return "".join(parts)
 
 
+# What a tool call is, said in words somebody who does not read code would use (docs/06-console.md).
+# Only the three tools this engine is allowed at all: a fourth appearing here would mean the
+# allowlist above had moved, and the honest thing to show then is the name it actually used.
+_DOING = {
+    "Read": "reading",
+    "Grep": "searching",
+    "Glob": "looking for",
+}
+
+
+def _step_of(event: dict[str, object]) -> str:
+    """What this event says the run is doing, or an empty string.
+
+    "Длинный ответ, который возникает целиком через сорок секунд, читается как зависание… по ходу
+    прогона надо видеть вызовы инструментов."
+
+    A line *about* the run, never part of its answer. The chunks a caller collects are joined into
+    what the block says, and a note about reading a file joined into that would be an answer with
+    the working shown in the middle of it.
+
+    Read defensively and bounded: this is the CLI's shape, which is not a contract (docs/adr/0004),
+    and the argument to a tool is text a model wrote about files it was pointed at.
+    """
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        name = str(block.get("name") or "")
+        given = block.get("input")
+        what = ""
+        if isinstance(given, dict):
+            # The one field of each that says what it is about. `file_path` for a read, `pattern`
+            # for a search — the rest is how, and how is not what somebody waiting wants.
+            for key in ("file_path", "pattern", "path", "query"):
+                if given.get(key):
+                    what = _shorten(str(given[key]))
+                    break
+        return f"{_DOING.get(name, name.lower())} {what}".strip()
+    return ""
+
+
+# How much of a path or a pattern is shown. Long enough to recognise a file, short enough that the
+# line stays a line — this sits inside a card, not in a log.
+STEP_CHARS = 60
+
+
+def _shorten(said: str) -> str:
+    """A path by its last two parts, anything else by its start.
+
+    The end of a path is the half that identifies it; the beginning is `/home/somebody/projects`,
+    which is the same on every line and is what pushes the useful half off the edge.
+    """
+    flat = " ".join(said.split())
+    if "/" in flat:
+        flat = "/".join(flat.rsplit("/", 2)[-2:])
+    return flat if len(flat) <= STEP_CHARS else flat[: STEP_CHARS - 1].rstrip() + "…"
+
+
 class Tally:
     """What the asking has cost today, and the ceiling it stops at (043-spending.sql).
 
@@ -232,6 +291,7 @@ async def _run(
     *,
     add_dirs: Sequence[Path] = (),
     binary: str = "",
+    on_step: Callable[[str], None] | None = None,
 ) -> AsyncIterator[str]:
     """One engine, one question. Yields the answer as it arrives, or raises `AnswerFailed`.
 
@@ -300,6 +360,10 @@ async def _run(
 
                 kind = event.get("type")
                 if kind == "assistant":
+                    # What it is doing, before what it has said: a turn that only used a tool has
+                    # no text in it, and it is exactly those turns that make the silence.
+                    if on_step is not None and (step := _step_of(event)):
+                        on_step(step)
                     text = _text_of(event)
                     if text:
                         said_something = True
@@ -364,6 +428,7 @@ async def stream_answer(
     prompt: str,
     *,
     add_dirs: Sequence[Path] = (),
+    on_step: Callable[[str], None] | None = None,
 ) -> AsyncIterator[str]:
     """Yield the answer as it arrives, or raise `AnswerFailed`.
 
@@ -384,7 +449,7 @@ async def stream_answer(
         last = index == len(engines) - 1
         said_anything = False
         try:
-            async for text in _run(prompt, add_dirs=add_dirs, binary=binary):
+            async for text in _run(prompt, add_dirs=add_dirs, binary=binary, on_step=on_step):
                 said_anything = True
                 yield text
         except AnswerFailed as exc:
@@ -524,6 +589,7 @@ async def answer_block(
     *,
     add_dirs: Sequence[Path] = (),
     on_chunk: Callable[[str], None] | None = None,
+    on_step: Callable[[str], None] | None = None,
 ) -> None:
     """Run one block from `queued` to `answered`, or to `failed` with the reason.
 
@@ -535,7 +601,7 @@ async def answer_block(
     await store.set_block_running(block.id)
     chunks: list[str] = []
     try:
-        async for chunk in stream_answer(prompt, add_dirs=add_dirs):
+        async for chunk in stream_answer(prompt, add_dirs=add_dirs, on_step=on_step):
             chunks.append(chunk)
             if on_chunk is not None:
                 # docs/04: the answer as it streams. The partial lives in memory only — a second

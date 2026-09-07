@@ -100,6 +100,12 @@
   </div>
   {% elif block.state in ("queued", "running") %}
   <div class="answer streaming">{{ partial.get(block.id, "") }}<span class="caret" aria-hidden="true">▍</span></div>
+  {# What it is doing, for the stretches when it is not saying anything. A run that spends thirty
+     seconds reading a repository produces no text at all, and a caret blinking on an empty line
+     for half a minute is indistinguishable from a console that has stopped. #}
+  {% if doing.get(block.id) %}
+  <p class="doing small" aria-live="polite">{{ doing[block.id] }}</p>
+  {% endif %}
   {% elif block.answer %}
   <div class="answer">{{ block.answer | prose }}</div>
   {% if block.id in directives %}

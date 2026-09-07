@@ -678,6 +678,8 @@ async def render_blocks() -> str:
         },
         directives=directives,
         partial=block_runs.PARTIAL,
+        # And what a run that has not said anything yet is doing (agent_desk/web/blocks.py).
+        doing=block_runs.DOING,
     )
 
 
