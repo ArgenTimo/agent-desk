@@ -2142,8 +2142,10 @@ class Store:
             return [StepCard(**row._mapping) for row in rows]
 
     # --- the workbench ------------------------------------------------------------------------
-    async def keep_bench(self, cards: Sequence[BenchCard], *, moved: bool = False) -> None:
-        """What is on the workbench, replacing what was on it. One transaction, not a diff.
+    async def keep_bench(
+        self, cards: Sequence[BenchCard], *, thread_id: str = "", moved: bool = False
+    ) -> None:
+        """What is on one chat's workbench, replacing what was on it. One transaction, not a diff.
 
         The page knows the whole surface and the store knows nothing else about it, so sending the
         whole thing is both the smallest message that can express "this card is gone" and the only
@@ -2162,6 +2164,10 @@ class Store:
         It defaults to false, and that is the safe direction: a gesture added later that forgets to
         set it costs one move that cannot be taken back, while the other default cost an undo
         button that did nothing at all on every page load.
+
+        `thread_id` is which chat's bench this is (044-a-bench-per-chat.sql). Scoped rather than
+        global, because the page clears the surface when somebody switches chats — so one shared
+        set of rows meant switching destroyed the bench you were switching away from.
         """
         rows = [
             {
@@ -2169,22 +2175,26 @@ class Store:
                 "spent": int(card.spent),
                 "by_hand": int(card.by_hand),
                 "ord": place,
+                "thread_id": thread_id,
             }
             for place, card in enumerate(list(cards)[:MOST_CARDS_ON_A_BENCH])
         ]
         async with self.engine.begin() as conn:
-            before = await self._surface(conn)
-            await conn.execute(text("DELETE FROM bench_card"))
+            before = await self._surface(conn, thread_id)
+            await conn.execute(
+                text("DELETE FROM bench_card WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
             if rows:
                 await conn.execute(
                     text(
-                        "INSERT INTO bench_card "
-                        "(name, kind, card_id, label, x, y, shown, spent, ord, by_hand) VALUES "
-                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand)"
+                        "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
+                        "ord, by_hand, thread_id) VALUES (:name, :kind, :card_id, :label, :x, :y, "
+                        ":shown, :spent, :ord, :by_hand, :thread_id)"
                     ),
                     rows,
                 )
-            await self._note_change(conn, before, where=moved)
+            await self._note_change(conn, thread_id, before, where=moved)
 
     # --- what the asking has cost (043-spending.sql) -------------------------------------------
     async def note_spend(self, usd: float) -> None:
@@ -2217,26 +2227,41 @@ class Store:
             )
             return float(rows.scalar() or 0.0)
 
-    async def _surface(self, conn: Any) -> dict[str, list[dict[str, Any]]]:
-        """The workbench as it is right now: everything an undo has to put back.
+    async def _surface(self, conn: Any, thread_id: str) -> dict[str, list[dict[str, Any]]]:
+        """One chat's workbench as it is right now: everything an undo has to put back.
 
         Both halves of it — the cards and the lines — because "one undo for everything" is the
         whole design (041-bench-undo.sql), and a history that recorded only one of them would leave
         the other to grow an undo of its own within the year.
+
+        Only the lines this bench can see. A line is a statement about two cards rather than about
+        a surface, so `card_tie` is not scoped to a chat and the same line shows on every bench
+        holding both its ends. But an undo has to put back *what somebody was looking at*: taking
+        every line would let a press on one bench restore a line drawn on another, which is a
+        change appearing on a surface nobody touched.
         """
-        cards = await conn.execute(
-            text(
-                "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
-                "FROM bench_card ORDER BY ord"
+        cards = [
+            dict(row._mapping)
+            for row in await conn.execute(
+                text(
+                    "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
+                    "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
+                ),
+                {"thread_id": thread_id},
             )
-        )
-        ties = await conn.execute(
-            text("SELECT from_name, to_name, kind, says FROM card_tie ORDER BY from_name, to_name")
-        )
-        return {
-            "cards": [dict(row._mapping) for row in cards],
-            "ties": [dict(row._mapping) for row in ties],
-        }
+        ]
+        here = {str(card["name"]) for card in cards}
+        ties = [
+            dict(row._mapping)
+            for row in await conn.execute(
+                text(
+                    "SELECT from_name, to_name, kind, says FROM card_tie "
+                    "ORDER BY from_name, to_name"
+                )
+            )
+            if row._mapping["from_name"] in here and row._mapping["to_name"] in here
+        ]
+        return {"cards": cards, "ties": ties}
 
     @staticmethod
     def _arranged(surface: dict[str, list[dict[str, Any]]], *, where: bool) -> str:
@@ -2282,7 +2307,12 @@ class Store:
         )
 
     async def _note_change(
-        self, conn: Any, before: dict[str, list[dict[str, Any]]], *, where: bool = True
+        self,
+        conn: Any,
+        thread_id: str,
+        before: dict[str, list[dict[str, Any]]],
+        *,
+        where: bool = True,
     ) -> None:
         """Record what the surface was, if this write actually changed it.
 
@@ -2292,23 +2322,30 @@ class Store:
         somebody pressing undo four times to see one card move has been given a broken control
         rather than a slow one.
         """
-        if self._arranged(await self._surface(conn), where=where) == self._arranged(
+        if self._arranged(await self._surface(conn, thread_id), where=where) == self._arranged(
             before, where=where
         ):
             return
         await conn.execute(
-            text("INSERT INTO bench_was (made_at, surface) VALUES (:t, :surface)"),
-            {"t": _now_ms(), "surface": json.dumps(before, sort_keys=True)},
+            text(
+                "INSERT INTO bench_was (made_at, surface, thread_id) "
+                "VALUES (:t, :surface, :thread_id)"
+            ),
+            {"t": _now_ms(), "surface": json.dumps(before, sort_keys=True), "thread_id": thread_id},
         )
+        # The cap is per bench, so a chat somebody hammers all afternoon cannot push another chat's
+        # history off the end — which would be an undo that stopped working because of something
+        # that happened somewhere else.
         await conn.execute(
             text(
-                "DELETE FROM bench_was WHERE at <= "
-                "(SELECT at FROM bench_was ORDER BY at DESC LIMIT 1 OFFSET :keep)"
+                "DELETE FROM bench_was WHERE thread_id = :thread_id AND at <= "
+                "(SELECT at FROM bench_was WHERE thread_id = :thread_id "
+                "ORDER BY at DESC LIMIT 1 OFFSET :keep)"
             ),
-            {"keep": MOST_UNDO_STEPS},
+            {"thread_id": thread_id, "keep": MOST_UNDO_STEPS},
         )
 
-    async def undo_bench(self) -> bool:
+    async def undo_bench(self, thread_id: str = "") -> bool:
         """Put the workbench back the way it was before the last thing that changed it.
 
         False when there is nothing to go back to, which the page says out loud rather than
@@ -2320,23 +2357,44 @@ class Store:
         """
         async with self.engine.begin() as conn:
             rows = await conn.execute(
-                text("SELECT at, surface FROM bench_was ORDER BY at DESC LIMIT 1")
+                text(
+                    "SELECT at, surface FROM bench_was WHERE thread_id = :thread_id "
+                    "ORDER BY at DESC LIMIT 1"
+                ),
+                {"thread_id": thread_id},
             )
             row = rows.first()
             if row is None:
                 return False
             was = json.loads(str(row._mapping["surface"]))
-            await conn.execute(text("DELETE FROM bench_card"))
+            # The lines this bench could see, before and after. A line whose ends are not both on
+            # this surface belongs to somebody else's and is not touched — the same rule that
+            # decided what went into the snapshot.
+            here = {str(card["name"]) for card in was["cards"]} | {
+                str(one[0])
+                for one in await conn.execute(
+                    text("SELECT name FROM bench_card WHERE thread_id = :thread_id"),
+                    {"thread_id": thread_id},
+                )
+            }
+            await conn.execute(
+                text("DELETE FROM bench_card WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
             if was["cards"]:
                 await conn.execute(
                     text(
-                        "INSERT INTO bench_card "
-                        "(name, kind, card_id, label, x, y, shown, spent, ord, by_hand) VALUES "
-                        "(:name, :kind, :card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand)"
+                        "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
+                        "ord, by_hand, thread_id) VALUES (:name, :kind, :card_id, :label, :x, :y, "
+                        ":shown, :spent, :ord, :by_hand, :thread_id)"
                     ),
-                    was["cards"],
+                    [{**card, "thread_id": thread_id} for card in was["cards"]],
                 )
-            await conn.execute(text("DELETE FROM card_tie"))
+            for tie in await conn.execute(text("SELECT id, from_name, to_name FROM card_tie")):
+                if tie._mapping["from_name"] in here and tie._mapping["to_name"] in here:
+                    await conn.execute(
+                        text("DELETE FROM card_tie WHERE id = :id"), {"id": tie._mapping["id"]}
+                    )
             for tie in was["ties"]:
                 await conn.execute(
                     text(
@@ -2350,20 +2408,25 @@ class Store:
             )
             return True
 
-    async def can_undo_bench(self) -> bool:
+    async def can_undo_bench(self, thread_id: str = "") -> bool:
         """Whether there is anything to go back to, for a control that should say so."""
         async with self.engine.connect() as conn:
-            rows = await conn.execute(text("SELECT 1 FROM bench_was LIMIT 1"))
+            rows = await conn.execute(
+                text("SELECT 1 FROM bench_was WHERE thread_id = :thread_id LIMIT 1"),
+                {"thread_id": thread_id},
+            )
             return rows.first() is not None
 
-    async def bench_cards(self) -> list[BenchCard]:
-        """The workbench as it was left, in the order the page had it, so it stacks the same way."""
+    async def bench_cards(self, thread_id: str = "") -> list[BenchCard]:
+        """One chat's workbench as it was left, in the order the page had it, so it stacks the
+        same way."""
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand "
-                    "FROM bench_card ORDER BY ord"
-                )
+                    "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
+                ),
+                {"thread_id": thread_id},
             )
             return [BenchCard(**row._mapping) for row in rows]
 
@@ -2671,7 +2734,9 @@ class Store:
             return found
 
     # --- lines between cards, and what they mean (034-card-ties.sql) --------------------------
-    async def tie_cards(self, *, from_name: str, to_name: str, kind: str, says: str = "") -> None:
+    async def tie_cards(
+        self, *, from_name: str, to_name: str, kind: str, says: str = "", thread_id: str = ""
+    ) -> None:
         """Draw one line, or change the one that is already there.
 
         A card is never tied to itself: a line from a thing to itself says nothing and draws as a
@@ -2681,7 +2746,7 @@ class Store:
         if not from_name or not to_name or from_name == to_name:
             return
         async with self.engine.begin() as conn:
-            before = await self._surface(conn)
+            before = await self._surface(conn, thread_id)
             await conn.execute(
                 text(
                     "INSERT INTO card_tie (id, from_name, to_name, kind, says, created_at) "
@@ -2697,13 +2762,13 @@ class Store:
                     "t": _now_ms(),
                 },
             )
-            await self._note_change(conn, before)
+            await self._note_change(conn, thread_id, before)
 
-    async def untie_cards(self, tie_id: str) -> None:
+    async def untie_cards(self, tie_id: str, *, thread_id: str = "") -> None:
         async with self.engine.begin() as conn:
-            before = await self._surface(conn)
+            before = await self._surface(conn, thread_id)
             await conn.execute(text("DELETE FROM card_tie WHERE id = :id"), {"id": tie_id})
-            await self._note_change(conn, before)
+            await self._note_change(conn, thread_id, before)
 
     async def card_ties(self) -> list[CardTie]:
         """Every line somebody has drawn. Read whole: there are as many as somebody has drawn by

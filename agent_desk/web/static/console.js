@@ -380,9 +380,9 @@ document.addEventListener('click', (event) => {
   const tab = event.target.closest('.tab');
   if (!tab) return;
   for (const other of document.querySelectorAll('.tab')) other.classList.toggle('on', other === tab);
-  // The workbench belongs to the chat: switching to another one starts with its own surface,
-  // and `showActiveThread` puts that chat's conversation back on it.
-  clearBench();
+  // The workbench belongs to the chat: switching to another one brings *its* surface back, and
+  // `showActiveThread` puts that chat's conversation on top of it (044).
+  benchOfThisChat();
   showActiveThread();
   document.getElementById('ask-text').focus();
 });
@@ -396,7 +396,10 @@ function swapped(isTabs) {
     // The chat somebody just created is the one they are looking at, and it is the last one.
     const tabs = [...document.querySelectorAll('.tab')];
     for (const tab of tabs) tab.classList.toggle('on', tab === tabs[tabs.length - 1]);
-    clearBench();
+    // A chat that has just been created has no bench yet, so this is an empty surface either way —
+    // but it is fetched like any other, so that the one path exists rather than two that agree
+    // until somebody changes one of them.
+    benchOfThisChat();
   }
   showActiveThread();
 }
@@ -1191,7 +1194,10 @@ function rememberLayout() {
       // unreadable. A bench that saved itself perfectly as nothing, silently, on every write. So
       // there is one shape and it is this one; the route reads the position where the page keeps
       // it rather than where it would rather have it.
-      body: JSON.stringify({ cards: benchState(), moved: movedByHand }),
+      // Which chat's bench this is. "The workbench belongs to the chat" was already what the page
+      // said when somebody switched tabs; saying it to the store is what makes it true across a
+      // reload, and what stops one chat's clear from being the other chat's deletion (044).
+      body: JSON.stringify({ cards: benchState(), moved: movedByHand, thread: activeThread() }),
     }).catch(() => {
       // A console whose server has gone still lets you move cards about. It will be written the
       // next time one moves and the server answers.
@@ -1239,29 +1245,20 @@ async function undoBench() {
   clearTimeout(writing);
   let said;
   try {
-    said = await (await fetch('/workbench/undo', { method: 'POST' })).json();
+    said = await (
+      await fetch('/workbench/undo', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ thread: activeThread() }),
+      })
+    ).json();
   } catch {
     return say('The console did not answer, so nothing was changed.');
   }
   if (!said.undone) return say('Nothing to go back to — this is how the workbench started.');
   restored = false;
   clearBench();
-  for (const one of said.cards) {
-    if (one.kind === 'block') {
-      // Brought back by the conversation, not by us. Its place is remembered so that `syncBlocks`
-      // puts it where it was rather than stacking it in the corner.
-      placed.set(one.name, { x: one.x, y: one.y });
-      continue;
-    }
-    pin(
-      { kind: one.kind, id: one.card_id, label: one.label },
-      { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
-    );
-    const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
-    if (!node) continue;
-    node.classList.toggle('spent', !!one.spent);
-    if (one.by_hand) node.dataset.moved = 'yes';
-  }
+  layOut(said.cards);
   restored = true;
   syncTargets();
   await loadTies();
@@ -1269,13 +1266,22 @@ async function undoBench() {
   say('Put back the way it was.');
 }
 
-// And the cards themselves, which is the half that was missing. `pin` is not awaited: it puts the
-// card in the document before it goes to fetch the body, so by the time this returns the surface
-// is populated and `syncBlocks` will not draw a second copy of anything.
-function restoreBench() {
-  for (const one of keptBench()) {
-    // Brought back by the conversation, not by us.
-    if (one.kind === 'block') continue;
+// Put a set of stored cards on an empty surface. Shared by the three things that do it — the page
+// opening, switching to another chat, and undoing — because they differ only in where the cards
+// came from, and three copies of this loop is three places for the next card property to be
+// forgotten in.
+//
+// `pin` is not awaited: it puts the card in the document before it goes to fetch the body, so by
+// the time this returns the surface is populated and `syncBlocks` will not draw a second copy of
+// anything.
+function layOut(cards) {
+  for (const one of cards) {
+    // Brought back by the conversation, not by us. Its place is remembered so that `syncBlocks`
+    // puts it where it was rather than stacking it in the corner.
+    if (one.kind === 'block') {
+      placed.set(one.name, { x: one.x, y: one.y });
+      continue;
+    }
     pin(
       { kind: one.kind, id: one.card_id, label: one.label },
       { at: { x: one.x, y: one.y }, quiet: true, shown: one.shown, exact: true }
@@ -1287,6 +1293,35 @@ function restoreBench() {
     // was free to sweep a hand-made arrangement on the first load after it was made.
     if (one.by_hand) node.dataset.moved = 'yes';
   }
+}
+
+// The workbench of the chat somebody has just switched to.
+//
+// The page has always cleared the surface here and said, correctly, that the workbench belongs to
+// the chat — it simply had nowhere to keep the other chat's one, so switching was a clear and
+// switching back showed an empty bench. Worse, once the bench was in the store the clear was
+// *written down*: switching chats deleted the bench you were switching away from.
+async function benchOfThisChat() {
+  const thread = activeThread();
+  restored = false;
+  clearBench();
+  try {
+    const said = await (
+      await fetch(`/workbench/kept?thread=${encodeURIComponent(thread)}`)
+    ).json();
+    // Somebody switching quickly is somebody whose first answer is no longer the right one.
+    if (activeThread() === thread) layOut(said.cards);
+  } catch {
+    // An empty surface, which is what it used to be every time.
+  }
+  restored = true;
+  syncTargets();
+  await loadTies();
+  drawMap();
+}
+
+function restoreBench() {
+  layOut(keptBench());
   restored = true;
   syncTargets();
 }
@@ -2313,7 +2348,7 @@ function processTies() {
 }
 
 async function drawLine(from, to, kind, says = '') {
-  const body = new URLSearchParams({ from, to, kind, says });
+  const body = new URLSearchParams({ from, to, kind, says, thread: activeThread() });
   // On the page first, so the line appears under the hand that drew it.
   drawnTies = drawnTies.filter((line) => !(line.from === from && line.to === to));
   drawnTies.push({ id: `new-${from}-${to}`, from, to, kind, says });
@@ -2330,7 +2365,7 @@ async function rubOutLine(id) {
   drawnTies = drawnTies.filter((line) => line.id !== id);
   drawTies();
   try {
-    await fetch('/workbench/untie', { method: 'POST', headers: FORM, body: new URLSearchParams({ id }) });
+    await fetch('/workbench/untie', { method: 'POST', headers: FORM, body: new URLSearchParams({ id, thread: activeThread() }) });
   } catch {
     // Gone from this page either way.
   }

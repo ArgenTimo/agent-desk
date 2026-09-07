@@ -126,6 +126,7 @@ async def test_joining_two_cards_is_undone_by_the_same_control(desk: Store) -> N
 
 @pytest.mark.unit
 async def test_rubbing_a_line_out_is_undone_too(desk: Store) -> None:
+    await desk.keep_bench([_card("idea:one"), _card("idea:two")])
     await desk.tie_cards(from_name="idea:one", to_name="idea:two", kind="then", says="then")
     (tie,) = await desk.card_ties()
     await desk.untie_cards(tie.id)
@@ -256,11 +257,14 @@ async def test_the_restored_surface_comes_back_with_the_answer(
     state it just undid — the same race, one step further along."""
     from agent_desk.web import routes
 
+    from tests.unit.test_kept_bench import _post_form
+
     monkeypatch.setattr(routes, "store", desk)
     await desk.keep_bench([_card("idea:one")])
     await desk.keep_bench([_card("idea:one"), _card("idea:two")])
 
-    said = json.loads((await routes.undo_bench()).body)
+    _, body = await _post_form("/workbench/undo", {})
+    said = json.loads(body)
 
     assert said["undone"] is True
     assert [card["name"] for card in said["cards"]] == ["idea:one"]
@@ -272,11 +276,57 @@ async def test_the_route_says_when_there_is_nothing_to_undo(
 ) -> None:
     from agent_desk.web import routes
 
+    from tests.unit.test_kept_bench import _post_form
+
     monkeypatch.setattr(routes, "store", desk)
 
-    said = json.loads((await routes.undo_bench()).body)
+    _, body = await _post_form("/workbench/undo", {})
 
-    assert said == {"undone": False, "cards": []}
+    assert json.loads(body) == {"undone": False, "cards": []}
+
+
+@pytest.mark.unit
+async def test_one_chat_s_undo_does_not_reach_into_another(desk: Store) -> None:
+    """Each chat has its own workbench and its own way back through it (044). Sharing a history
+    would make a press here change a surface somebody was looking at over there."""
+    await desk.keep_bench([_card("idea:one")], thread_id="a")
+    await desk.keep_bench([_card("idea:one"), _card("idea:two")], thread_id="a")
+    await desk.keep_bench([_card("idea:three")], thread_id="b")
+
+    assert await desk.undo_bench("a") is True
+
+    assert [card.name for card in await desk.bench_cards("a")] == ["idea:one"]
+    assert [card.name for card in await desk.bench_cards("b")] == ["idea:three"]
+
+
+@pytest.mark.unit
+async def test_a_chat_with_nothing_behind_it_has_nothing_to_undo(desk: Store) -> None:
+    await desk.keep_bench([_card("idea:one")], thread_id="a")
+
+    assert await desk.can_undo_bench("b") is False
+    assert await desk.undo_bench("b") is False
+    assert [card.name for card in await desk.bench_cards("a")] == ["idea:one"]
+
+
+@pytest.mark.unit
+async def test_a_line_on_another_chat_s_bench_is_left_where_it_is(desk: Store) -> None:
+    """A line is a statement about two cards rather than about a surface, so the same line shows on
+    every bench holding both its ends. An undo still has to put back only what somebody was looking
+    at — otherwise a press here makes a line reappear over there."""
+    await desk.keep_bench([_card("idea:one"), _card("idea:two")], thread_id="a")
+    await desk.keep_bench([_card("idea:three"), _card("idea:four")], thread_id="b")
+    await desk.tie_cards(
+        from_name="idea:three", to_name="idea:four", kind="then", says="then", thread_id="b"
+    )
+    await desk.tie_cards(
+        from_name="idea:one", to_name="idea:two", kind="then", says="then", thread_id="a"
+    )
+
+    await desk.undo_bench("a")
+
+    assert [(one.from_name, one.to_name) for one in await desk.card_ties()] == [
+        ("idea:three", "idea:four")
+    ]
 
 
 def _code(script: str) -> str:

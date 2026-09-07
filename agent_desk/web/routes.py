@@ -972,8 +972,12 @@ async def render_page(message: str = "") -> str:
     groups = await store.groups()
     rows, notices = await asyncio.to_thread(board)
     projects = shape(rows, groups)
+    chats = await open_chats()
+    # The chat the page opens on, which `_tabs.html` marks with `loop.first`. Its bench is the one
+    # rendered into the page; every other chat's is fetched when somebody switches to it.
+    opening = chats[0].id if chats else ""
     return env.get_template("board.html").render(
-        threads=await open_chats(),
+        threads=chats,
         ideas=await render_column(),
         blockers=await render_blockers(),
         board=env.get_template("_board.html").render(
@@ -995,7 +999,7 @@ async def render_page(message: str = "") -> str:
         # The workbench as it was left. Rendered into the page rather than fetched by it, because
         # the first thing the script does after the page opens is write the bench back — and a
         # write that overtook a fetch would save an empty surface over a full one (040-bench.sql).
-        kept=[card.model_dump() for card in await store.bench_cards()],
+        kept=[card.model_dump() for card in await store.bench_cards(opening)],
     )
 
 
@@ -1685,7 +1689,11 @@ async def tie_cards(request: Request) -> JSONResponse:
     if not from_name or not to_name or not ties.is_a_kind(kind):
         return JSONResponse({"drawn": False}, status_code=400)
     await store.tie_cards(
-        from_name=from_name, to_name=to_name, kind=kind, says=form.get("says", "").strip()
+        from_name=from_name,
+        to_name=to_name,
+        kind=kind,
+        says=form.get("says", "").strip(),
+        thread_id=form.get("thread", "").strip(),
     )
     return JSONResponse({"drawn": True})
 
@@ -1693,7 +1701,7 @@ async def tie_cards(request: Request) -> JSONResponse:
 @router.post("/workbench/untie", response_class=JSONResponse)
 async def untie_cards(request: Request) -> JSONResponse:
     form = await _form(request)
-    await store.untie_cards(form.get("id", "").strip())
+    await store.untie_cards(form.get("id", "").strip(), thread_id=form.get("thread", "").strip())
     return JSONResponse({"gone": True})
 
 
@@ -1775,6 +1783,7 @@ async def keep_bench(request: Request) -> JSONResponse:
     had opened a browser.
     """
     said = await request.json()
+    thread_id = str(said.get("thread", "")) if isinstance(said, dict) else ""
     cards = []
     for place, one in enumerate(said.get("cards", []) if isinstance(said, dict) else []):
         try:
@@ -1798,12 +1807,23 @@ async def keep_bench(request: Request) -> JSONResponse:
     # itself — the console lays cards out again whenever one grows to fit its body, so a coordinate
     # that changed is not evidence that anybody did anything (041-bench-undo.sql).
     moved = bool(said.get("moved")) if isinstance(said, dict) else False
-    await store.keep_bench(cards, moved=moved)
+    await store.keep_bench(cards, thread_id=thread_id, moved=moved)
     return JSONResponse({"kept": len(cards)})
 
 
+@router.get("/workbench/kept", response_class=JSONResponse)
+async def bench_of(thread: str = "") -> JSONResponse:
+    """One chat's workbench, for the page to put on the surface when somebody switches to it.
+
+    The page has always cleared the surface on a chat switch and said, correctly, that "the
+    workbench belongs to the chat" — it just had nowhere to keep the other chat's one. Now it does,
+    so switching is a switch rather than a clear (044-a-bench-per-chat.sql).
+    """
+    return JSONResponse({"cards": [card.model_dump() for card in await store.bench_cards(thread)]})
+
+
 @router.post("/workbench/undo", response_class=JSONResponse)
-async def undo_bench() -> JSONResponse:
+async def undo_bench(request: Request) -> JSONResponse:
     """Put the workbench back the way it was before the last thing that changed it.
 
     The restored surface comes back with the answer rather than being fetched afterwards, because
@@ -1814,9 +1834,13 @@ async def undo_bench() -> JSONResponse:
     says so. A press that quietly does nothing is the one outcome a control like this cannot have,
     because its whole job is to make somebody confident that trying things is safe.
     """
-    undone = await store.undo_bench()
+    thread = str((await _form(request)).get("thread", ""))
+    undone = await store.undo_bench(thread)
     return JSONResponse(
-        {"undone": undone, "cards": [card.model_dump() for card in await store.bench_cards()]}
+        {
+            "undone": undone,
+            "cards": [card.model_dump() for card in await store.bench_cards(thread)],
+        }
     )
 
 

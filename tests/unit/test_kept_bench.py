@@ -59,9 +59,19 @@ def _card(name: str, **over: object) -> BenchCard:
 
 async def _post_json(path: str, payload: object) -> tuple[int, str]:
     """One JSON POST through the real ASGI stack, the way the page sends it."""
+    return await _post(path, json.dumps(payload).encode(), b"application/json")
+
+
+async def _post_form(path: str, fields: dict[str, str]) -> tuple[int, str]:
+    """One urlencoded POST, for the routes that take a field or two."""
+    from urllib.parse import urlencode
+
+    return await _post(path, urlencode(fields).encode(), b"application/x-www-form-urlencoded")
+
+
+async def _post(path: str, body: bytes, content_type: bytes) -> tuple[int, str]:
     from agent_desk.web.app import asgi
 
-    body = json.dumps(payload).encode()
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -74,7 +84,7 @@ async def _post_json(path: str, payload: object) -> tuple[int, str]:
         "root_path": "",
         "headers": [
             (b"host", b"127.0.0.1:8787"),
-            (b"content-type", b"application/json"),
+            (b"content-type", content_type),
             (b"content-length", str(len(body)).encode()),
         ],
         "client": ("127.0.0.1", 54321),
@@ -221,7 +231,10 @@ async def test_a_body_that_is_not_a_bench_at_all_empties_nothing_it_should_not(d
 async def test_the_page_carries_the_bench_it_was_left(desk: Store) -> None:
     """Rendered into the page, not fetched by it: the script writes the bench back as soon as it
     has drawn it, and a write that overtook a fetch would save an empty surface over a full one."""
-    await desk.keep_bench([_card("idea:one", label="a thought worth keeping", x=99, y=7)])
+    chat = await desk.create_thread("the one the page opens on")
+    await desk.keep_bench(
+        [_card("idea:one", label="a thought worth keeping", x=99, y=7)], thread_id=chat.id
+    )
 
     page = await routes.render_page()
 
@@ -236,7 +249,10 @@ async def test_the_page_carries_the_bench_it_was_left(desk: Store) -> None:
 @pytest.mark.unit
 async def test_a_label_cannot_close_the_script_tag_it_is_written_into(desk: Store) -> None:
     """A card's label is a session title or an idea's summary — text this console did not write."""
-    await desk.keep_bench([_card("idea:one", label="</script><script>alert(1)</script>")])
+    chat = await desk.create_thread("a chat")
+    await desk.keep_bench(
+        [_card("idea:one", label="</script><script>alert(1)</script>")], thread_id=chat.id
+    )
 
     page = await routes.render_page()
 
@@ -272,7 +288,7 @@ def test_the_conversation_is_not_drawn_twice() -> None:
     re-creating it from the store as well would put two of every question on the surface."""
     console = (STATIC / "console.js").read_text(encoding="utf-8")
 
-    restore = console[console.index("function restoreBench(") :]
+    restore = console[console.index("function layOut(") :]
     restore = restore[: restore.index("\n}\n")]
     assert "one.kind === 'block'" in restore and "continue" in restore, (
         "restoring the bench re-creates the block cards the conversation already brings back"
@@ -336,3 +352,113 @@ def test_the_page_sends_its_bench_unreshaped() -> None:
         "the bench is reshaped between being read and being sent, which is where the two shapes "
         "that disagreed came from"
     )
+
+
+# --- a workbench for each chat (044-a-bench-per-chat.sql) -----------------------------------------
+@pytest.mark.unit
+async def test_each_chat_keeps_its_own_bench(desk: Store) -> None:
+    """ "Исследование, харнесс, прототип и пайплайн не помещаются на одну поверхность — а в
+    сценариях они существуют одновременно."""
+    await desk.keep_bench([_card("idea:research")], thread_id="a")
+    await desk.keep_bench([_card("idea:harness")], thread_id="b")
+
+    assert [card.name for card in await desk.bench_cards("a")] == ["idea:research"]
+    assert [card.name for card in await desk.bench_cards("b")] == ["idea:harness"]
+
+
+@pytest.mark.unit
+async def test_switching_chats_no_longer_deletes_the_bench_you_left(desk: Store) -> None:
+    """The bug between 040 and 044, and the reason this could not wait.
+
+    The page has always cleared the surface when somebody switches chats. Once the bench was in the
+    store that clear was *written down*: the empty surface replaced the rows, and the cards of the
+    chat being left were gone for good.
+    """
+    await desk.keep_bench([_card("idea:one"), _card("idea:two")], thread_id="a")
+
+    # Switching to another chat: the page draws an empty surface and writes it.
+    await desk.keep_bench([], thread_id="b")
+
+    assert len(await desk.bench_cards("a")) == 2
+
+
+@pytest.mark.unit
+async def test_the_page_can_ask_for_another_chat_s_bench(desk: Store) -> None:
+    """What makes switching a switch rather than a clear."""
+    from urllib.parse import quote
+
+    from agent_desk.web import routes
+
+    await desk.keep_bench([_card("idea:one")], thread_id="a chat")
+    old_store, routes.store = routes.store, desk
+    try:
+        said = json.loads((await routes.bench_of(thread="a chat")).body)
+    finally:
+        routes.store = old_store
+
+    assert [card["name"] for card in said["cards"]] == ["idea:one"]
+    assert quote("a chat")  # the id is a ULID in practice; the route quotes whatever it is given
+
+
+@pytest.mark.unit
+def test_switching_a_chat_fetches_a_bench_rather_than_clearing_to_nothing() -> None:
+    console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
+
+    assert "async function benchOfThisChat(" in console
+    assert console.count("benchOfThisChat()") == 3, (
+        "there is the definition and two callers — clicking a tab, and the tab bar coming back "
+        "from the server with a new chat on it"
+    )
+    switch = console[console.index("async function benchOfThisChat(") :]
+    switch = switch[: switch.index("\n}\n")]
+    assert "restored = false;" in switch and "restored = true;" in switch, (
+        "the empty surface between the clear and the fetch is written down, which is the deletion "
+        "this replaces"
+    )
+    assert "activeThread() === thread" in switch, (
+        "a second switch while the first is in flight lays the wrong chat's cards out"
+    )
+
+
+@pytest.mark.unit
+def test_every_bench_write_says_which_chat_it_is_for() -> None:
+    """A write that forgot would land on the bench of the chat with no id, and the cards would be
+    somewhere nobody can reach."""
+    console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
+
+    write = console[console.index("function rememberLayout(") :]
+    write = write[: write.index("\n}\n")]
+    assert "thread: activeThread()" in write
+
+
+@pytest.mark.unit
+async def test_the_one_bench_that_existed_before_lands_on_the_chat_somebody_was_last_in(
+    desk: Store,
+) -> None:
+    """044 turns one workbench into many, and the old one has to become one of them or none.
+
+    Left under the empty key it belongs to no chat and is shown on no surface, so an upgrade loses
+    the cards somebody had laid out — silently, which is the worst version of it. Nothing records
+    which chat it was for, because until now there was only one, so this is a placement rather than
+    a recovered fact: being wrong costs a bench on the wrong tab, which is visible and fixable by
+    dragging, and being silent costs the bench.
+    """
+    from sqlalchemy import text as sql
+
+    old = await desk.create_thread("the chat from last week")
+    recent = await desk.create_thread("the one they were in")
+    await desk.keep_bench([_card("idea:laid-out")], thread_id=recent.id)
+    # As 043 left it: one bench, belonging to no chat.
+    async with desk.engine.begin() as conn:
+        await conn.execute(sql("UPDATE bench_card SET thread_id = ''"))
+        await conn.execute(
+            sql(
+                "UPDATE bench_card SET thread_id = (SELECT id FROM thread "
+                "WHERE closed_at IS NULL ORDER BY created_at DESC LIMIT 1) "
+                "WHERE thread_id = '' AND EXISTS (SELECT 1 FROM thread WHERE closed_at IS NULL)"
+            )
+        )
+
+    assert [card.name for card in await desk.bench_cards(recent.id)] == ["idea:laid-out"]
+    assert await desk.bench_cards(old.id) == []
+    assert await desk.bench_cards("") == []

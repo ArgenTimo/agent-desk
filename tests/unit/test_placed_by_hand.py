@@ -89,15 +89,28 @@ def test_the_page_sends_whether_somebody_placed_each_card() -> None:
 @pytest.mark.unit
 def test_restoring_a_bench_puts_the_mark_back_on_the_cards_that_had_it() -> None:
     """Stored and not restored is worse than not stored: the console would keep a fact it never
-    acts on, and the arrangement would still be swept."""
+    acts on, and the arrangement would still be swept.
+
+    Asserted on `layOut` because that is now the one place cards go back onto a surface — the page
+    opening, switching to another chat, and undoing all go through it. Three copies of that loop
+    were three places for the next card property to be forgotten in, which is exactly what this
+    property was.
+    """
     console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
 
-    for where in ("function restoreBench(", "async function undoBench("):
-        block = console[console.index(where) :]
-        block = block[: block.index("\n}\n")]
-        assert "one.by_hand" in block and "dataset.moved = 'yes'" in block, (
-            f"{where.strip()} restores positions but not which of them somebody chose"
-        )
+    block = console[console.index("function layOut(") :]
+    block = block[: block.index("\n}\n")]
+    assert "one.by_hand" in block and "dataset.moved = 'yes'" in block, (
+        "cards are put back on the surface without which of them somebody chose"
+    )
+    for goes_through in (
+        "function restoreBench(",
+        "async function undoBench(",
+        "async function benchOfThisChat(",
+    ):
+        where = console[console.index(goes_through) :]
+        where = where[: where.index("\n}\n")]
+        assert "layOut(" in where, f"{goes_through.strip()} lays cards out its own way again"
 
 
 @pytest.mark.unit
