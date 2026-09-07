@@ -1,0 +1,263 @@
+"""What a request may do to the workbench, and how an answer that does it is read.
+
+"На верстаке лежат разные карточки с информацией, я пишу запрос «подсвети те из них которые с
+наибольшей вероятностью могут принести доход». Или другой запрос — «справа помести все карточки
+идеи которых интересны простым пользователям, а слева те которые более интересны разработчикам»."
+
+The difference from everything before it is one thing: the result of the request is not a new card
+and not a paragraph, it is **a change to what is already there**. The workbench stops being only a
+place things are put and becomes a thing you can arrange by talking.
+
+## A fixed list, for the reason roles have five names and lines have five
+
+"Модель должна отвечать не текстом про карточки, а действиями из фиксированного списка… свободная
+формулировка «расположи покрасивее» не исполнима, и разбор её ответа превратится в угадайку."
+
+Three, and they cover every example in the letter:
+
+    mark   <numbers> <why>       point at some of the cards, and say why each
+    sort   <side> <numbers> <what they have in common>
+    clear                        take the marks off
+
+"Поставить сюда" and "разложить по колонкам" are one action, not two — a column is a place, and
+naming it is how somebody knows a minute later what is on the left. "Надписать" is that name, so it
+arrives with the sort rather than as an action of its own.
+
+What is deliberately absent is anything that *removes* work: nothing here takes a card off the
+bench, joins two cards, or starts anything. This is the cheapest branch in the whole idea pool —
+"ничего не запускается, ничего не пишется, ничего не стоит, кроме одного вызова модели" — and it
+stays cheap by not being able to do the expensive things. An arrangement somebody did not want is
+one press of undo away (041-bench-undo.sql); a card somebody did not want back is not.
+
+## The numbers are the ones the model was shown
+
+A card is named by its number in the digest the question carried (`agent_desk/looking.py`). That is
+what makes "возьми карточку с логами" work at all: the model can see which card is which, and can
+point at one without copying a ULID back.
+
+## Strict, and silent about what it could not read
+
+A line that does not parse is skipped, and a reply where nothing parses produces nothing — which
+the console renders as "it could not read that" rather than as an empty rearrangement. The same
+rule `telling.read_shape` follows, for the same reason: a model asked for actions will sometimes
+answer with a paragraph about the actions, and a reader that accepted anything would rearrange
+somebody's bench from a sentence nobody meant as an instruction.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+# Where a sort may put things. Two sides and a middle, because the examples are all "these here and
+# those there" — and because a model given a free choice of columns produces seven of them, which
+# is a worse answer to "разложи" than three.
+SIDES = ("left", "middle", "right")
+
+# The longest a reason may be. It sits on a card under its label, so it is a line rather than a
+# paragraph: a judgement nobody can read at a glance is a judgement nobody checks.
+WHY_CHARS = 120
+
+
+@dataclass(frozen=True)
+class Marked:
+    """One card the answer pointed at, and why it did.
+
+    The reason is not decoration. "Модель, раскладывающая идеи по «принесёт доход», выносит
+    суждение. По правилам этого проекта суждение показывается как суждение и рядом с основанием" —
+    without it there is an arrangement nobody can trust or argue with.
+    """
+
+    name: str
+    why: str
+
+
+@dataclass(frozen=True)
+class Sorted:
+    """One side of a sort: which cards go there, and what they have in common."""
+
+    side: str
+    names: list[str]
+    what: str
+
+
+@dataclass(frozen=True)
+class Handling:
+    """Everything one answer asked for. Empty means it asked for nothing this could read."""
+
+    marked: list[Marked]
+    sorted_: list[Sorted]
+    clear: bool = False
+
+    @property
+    def empty(self) -> bool:
+        return not self.marked and not self.sorted_ and not self.clear
+
+
+def what_to_do(cards: Sequence[str]) -> str:
+    """The instruction that goes under the workbench digest, when a request is a rearrangement.
+
+    Written here rather than in the prompt builder because it is only true when there are cards to
+    act on, and an instruction to answer in actions that arrives with no cards is an instruction to
+    invent some.
+    """
+    return "\n".join(
+        [
+            "This is a request to change what is on the workbench, not a question about it.",
+            "Answer with actions and nothing else — no preamble, no explanation, no closing line.",
+            "",
+            "One action per line, in one of these three shapes:",
+            "",
+            "  mark 3,7 why these two and not the others",
+            "  sort left 1,4 what the ones on the left have in common",
+            "  clear",
+            "",
+            f"`sort` puts cards on one side: {', '.join(SIDES)}. `clear` takes every mark off.",
+            "",
+            "Two rules matter more than the shape:",
+            f"- Only the numbers above, 1 to {len(cards)}. A number that is not a card is ignored.",
+            "- Every `mark` says why *those* cards, in a few words. A mark with no reason is an",
+            "  opinion with nothing behind it, and it is shown to somebody who will want to argue",
+            "  with it.",
+        ]
+    )
+
+
+# `mark 3, 7 — because…` and `sort left 1,4 the developer ones`. The separator between the numbers
+# and the words is anything or nothing: a model writes a dash, a colon, or neither, and refusing
+# the reason over the punctuation in front of it would throw away the half that matters.
+# The numbers are matched greedily and as a whole list. Written lazily — `[0-9][0-9,\s]*?` — the
+# first digit satisfied it and "mark 1,3 because…" was read as card 1 with the reason ",3 because…".
+_NUMBERS = r"(?:[0-9]+\s*,\s*)*[0-9]+"
+_MARK = re.compile(rf"\Amark\s+({_NUMBERS})\s*[-—:.]?\s*(.*)\Z", re.IGNORECASE | re.DOTALL)
+_SORT = re.compile(
+    rf"\Asort\s+({'|'.join(SIDES)})\s+({_NUMBERS})\s*[-—:.]?\s*(.*)\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_CLEAR = re.compile(r"\Aclear\b", re.IGNORECASE)
+
+
+def _named(said: str, on_bench: Sequence[str]) -> list[str]:
+    """The card names those numbers stand for, in the order given, without repeats.
+
+    A number that is not a card on the bench is dropped rather than raised on: a model that counted
+    past the end has named nothing, and losing that one number is better than losing the line.
+    """
+    names: list[str] = []
+    for part in said.replace(" ", "").split(","):
+        if not part.isdigit():
+            continue
+        at = int(part)
+        if 1 <= at <= len(on_bench) and on_bench[at - 1] not in names:
+            names.append(on_bench[at - 1])
+    return names
+
+
+def read(reply: str, on_bench: Sequence[str]) -> Handling:
+    """What the answer asked to be done, in card names rather than in numbers.
+
+    `on_bench` is the cards in the order they were numbered for the model — the same order
+    `looking.look` gave them.
+    """
+    marked: list[Marked] = []
+    sorted_: list[Sorted] = []
+    clear = False
+    for raw in reply.splitlines():
+        said = raw.strip().lstrip("-*• ").strip()
+        if not said:
+            continue
+        if _CLEAR.match(said):
+            clear = True
+            continue
+        sort = _SORT.match(said)
+        if sort is not None:
+            names = _named(sort.group(2), on_bench)
+            if names:
+                sorted_.append(
+                    Sorted(
+                        side=sort.group(1).lower(),
+                        names=names,
+                        what=sort.group(3).strip()[:WHY_CHARS],
+                    )
+                )
+            continue
+        mark = _MARK.match(said)
+        if mark is not None:
+            why = mark.group(2).strip()[:WHY_CHARS]
+            # One reason for the group, carried onto each card in it: the answer is "these two,
+            # because X", and splitting that into two cards each saying X is what the person then
+            # reads on the bench.
+            marked.extend(Marked(name=name, why=why) for name in _named(mark.group(1), on_bench))
+    return Handling(marked=marked, sorted_=sorted_, clear=clear)
+
+
+# What the block stores, and what the page reads back to apply it.
+#
+# JSON rather than the lines the model wrote, because the lines are numbers and the numbers only
+# mean anything beside the digest that produced them: a bench that has changed since would apply
+# them to the wrong cards. Card names do not go stale that way — a name that is no longer on the
+# bench is simply not found, which is the correct outcome.
+def as_json(asked: Handling) -> str:
+    return json.dumps(
+        {
+            "handling": {
+                "marked": [{"name": one.name, "why": one.why} for one in asked.marked],
+                "sorted": [
+                    {"side": one.side, "names": one.names, "what": one.what}
+                    for one in asked.sorted_
+                ],
+                "clear": asked.clear,
+            }
+        }
+    )
+
+
+def read_json(said: str) -> Handling:
+    """The actions back out of what a block stored, for the page and for anything that renders it.
+
+    This module owns the shape, so this module reads it. `tests/unit/test_structure.py` names the
+    modules allowed to parse JSON that is not one of Claude Code's on-disk formats, and the reason
+    it is a list of paths rather than a rule is exactly this case: a program reading back something
+    it wrote itself, in a shape it defines a dozen lines above.
+    """
+    try:
+        found = json.loads(said).get("handling")
+    except (ValueError, AttributeError):
+        return Handling(marked=[], sorted_=[])
+    # A `handling` key holding null, a number, a list — anything that is not the shape written
+    # above. An older block, a failed run, a row somebody edited by hand: none of them rearrange
+    # anything, and none of them is a reason to fail rendering the conversation.
+    if not isinstance(found, dict):
+        return Handling(marked=[], sorted_=[])
+    return Handling(
+        marked=[Marked(name=one["name"], why=one["why"]) for one in found.get("marked", [])],
+        sorted_=[
+            Sorted(side=one["side"], names=list(one["names"]), what=one["what"])
+            for one in found.get("sorted", [])
+        ],
+        clear=bool(found.get("clear")),
+    )
+
+
+def as_words(asked: Handling) -> str:
+    """What was done, for somebody reading the conversation rather than looking at the bench.
+
+    A block whose answer is a blob of JSON says nothing to a person scrolling back through what
+    they asked — and the point of storing the actions is that they can be applied *and* read.
+    """
+    said: list[str] = []
+    if asked.clear and not asked.marked:
+        said.append("Took the marks off.")
+    # One line per reason rather than per card: the answer is "these two, because X", and a bench
+    # showing X twice is what somebody then has to read twice.
+    for why in dict.fromkeys(one.why for one in asked.marked):
+        many = sum(1 for one in asked.marked if one.why == why)
+        said.append(f"{many} card{'' if many == 1 else 's'}: {why}" if why else f"{many} marked")
+    for side in asked.sorted_:
+        many = len(side.names)
+        said.append(
+            f"{side.side}: {many} card{'' if many == 1 else 's'} — {side.what}".rstrip(" —")
+        )
+    return "\n".join(said)

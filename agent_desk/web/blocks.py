@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch, looking
+from agent_desk import dispatch, handling, looking
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
@@ -593,7 +593,11 @@ async def submit(
     written = await notes(store, targets)
     # Read now rather than when the run reaches the prompt: this is what was in front of the person
     # when they pressed send, and a bench read a minute later is a different bench.
-    surface = looking.as_lines(await on_the_bench(store, rows, targets))
+    look = await on_the_bench(store, rows, targets)
+    surface = looking.as_lines(look)
+    # The same cards in the same order the digest numbered them, so an answer that says "3" and a
+    # card on the bench are the same card (agent_desk/handling.py).
+    on_bench = [card.name for card in look.cards]
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
@@ -607,6 +611,7 @@ async def submit(
             history=list(history),
             written=[*written, notes_.strip()] if notes_.strip() else written,
             surface=surface,
+            on_bench=on_bench,
             # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
             pointed_at=len(targets),
         ),
@@ -743,6 +748,7 @@ async def _work(
     history: Sequence[str] = (),
     written: Sequence[str] = (),
     surface: Sequence[str] = (),
+    on_bench: Sequence[str] = (),
     pointed_at: int = 0,
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
@@ -769,6 +775,9 @@ async def _work(
         if kind == "instruction":
             await _prepare_directive(store, block, rows)
             return
+        if kind == "handling" and surface:
+            await _rearrange(store, block, rows, surface=surface, on_bench=on_bench)
+            return
         await _classify_and_answer(
             store,
             block,
@@ -787,6 +796,52 @@ async def _work(
         # good. Deciding the kind is a full headless run, so this window is seconds wide.
         await asyncio.shield(store.cancel_block(block.id))
         raise
+
+
+async def _rearrange(
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow],
+    *,
+    surface: Sequence[str],
+    on_bench: Sequence[str],
+) -> None:
+    """A request that changes the cards in front of somebody, rather than adding one.
+
+    "Отличие от всего предыдущего в одном: результат запроса — это не новая карточка и не текст, а
+    изменение того, что уже лежит."
+
+    The answer is stored as the actions themselves, because that is what the page applies and what
+    the block has to be able to show afterwards. What it is *not* is a paragraph: this branch is
+    the one where a model's prose would be unusable, and reading it strictly is what keeps a
+    rearrangement from being assembled out of a sentence nobody meant as an instruction
+    (agent_desk/handling.py).
+
+    "Ничего не запускается, ничего не пишется, ничего не стоит, кроме одного вызова модели" — so a
+    reply that cannot be read costs one press of undo and a line saying so, which is why this
+    branch is allowed to guess where others are not.
+    """
+    prompt = session.build_prompt(
+        block.input,
+        board=board_lines(rows),
+        history=[],
+        workbench=[*surface, "", handling.what_to_do(on_bench)],
+    )
+    await store.set_block_kind(block.id, "handling")
+    try:
+        reply = "".join([chunk async for chunk in session.stream_answer(prompt)])
+    except (session.AnswerFailed, OSError) as exc:
+        await store.fail_block(block.id, str(exc))
+        return
+    asked = handling.read(reply, on_bench)
+    if asked.empty:
+        await store.finish_block(
+            block.id,
+            "That looked like a request to rearrange the workbench, but the answer did not name "
+            "any cards. Nothing was changed.",
+        )
+        return
+    await store.finish_block(block.id, handling.as_json(asked))
 
 
 def project_of(rows: Sequence[BoardRow]) -> str:

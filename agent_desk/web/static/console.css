@@ -642,6 +642,18 @@ button[disabled] { opacity: 0.5; cursor: default; }
 /* What today has cost. Three readings, and only the last two are worth a colour: a number that is
    coloured all day is a number people stop seeing, which is the whole failure this counter exists
    to fix (043-spending.sql). */
+/* A card an answer picked out. "Отметка эта — третья по счёту (есть «в контексте» и «выполняется
+   сейчас»), и она обязана отличаться от обеих: это ответ на вопрос, а не состояние карточки."
+   So it is a band down the left edge rather than a change of the card's own colour: the two
+   existing marks say what a card *is*, and this one says a question was asked about it. */
+.pin.marked { border-left: 3px solid var(--attention); }
+.pin-why {
+  margin: 0 0 4px 10px;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--attention);
+}
+
 /* Where a card came from. Under the label, and only once the card is open past a line: a folded
    card is a title and this is not the title (045-where-a-card-came-from.sql). */
 .pin-came { margin: 0 0 4px 10px; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }

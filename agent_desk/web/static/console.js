@@ -3601,6 +3601,18 @@ function syncBlocks() {
       if (window.htmx) htmx.process(body);
       settleOverlaps();
     }
+    // A rearrangement, applied once. `data-handling` is on the answer rather than on the article,
+    // because an article without an answer yet has nothing to apply.
+    const asked = article.querySelector('.answer.arranged[data-handling]');
+    if (asked && !arranged.has(id)) {
+      arranged.add(id);
+      try {
+        applyArrangement(JSON.parse(asked.dataset.handling).handling || {});
+      } catch {
+        // An answer this page cannot read changes nothing, which is what the block already says.
+      }
+    }
+
     const said = article.querySelector('.block-input, .said, h3, p');
     node.querySelector('.pin-label').textContent =
       (said?.textContent || 'a question').trim().slice(0, 60);
@@ -3623,6 +3635,82 @@ function syncBlocks() {
   }
   emptyOrNot();
   loadTies();
+}
+
+/* --- a request that rearranges the workbench ---------------------------------------------------- */
+// "Отличие от всего предыдущего в одном: результат запроса — это не новая карточка и не текст, а
+// изменение того, что уже лежит."
+//
+// The answer arrives on its block as actions (agent_desk/handling.py) and is applied once. Applied
+// once and not again is the whole of the bookkeeping here: `syncBlocks` runs on every push, and a
+// rearrangement re-applied every two seconds would drag a card back from wherever somebody moved
+// it to afterwards.
+const arranged = new Set();
+
+function markCard(pin, why) {
+  pin.classList.add('marked');
+  let line = pin.querySelector('.pin-why');
+  if (!line) {
+    line = document.createElement('p');
+    line.className = 'pin-why';
+    pin.querySelector('.pin-head')?.after(line);
+  }
+  // "У каждой выбранной карточки видно, ПОЧЕМУ она выбрана… суждение показывается как суждение и
+  // рядом с основанием." Without it there is an arrangement nobody can trust or argue with.
+  line.textContent = why || 'picked, with no reason given';
+}
+
+function clearMarks() {
+  for (const pin of surface?.querySelectorAll('.pin.marked') || []) {
+    pin.classList.remove('marked');
+    pin.querySelector('.pin-why')?.remove();
+  }
+}
+
+// Where a side puts its cards. Thirds of the surface as it stands, so "справа" and "слева" mean
+// what they look like rather than what a coordinate says.
+function sideAt(side, index, tall) {
+  const across = { left: 0, middle: 1, right: 2 }[side] ?? 1;
+  return { x: 20 + across * (CARD_WIDTH + GAP * 3), y: 20 + tall };
+}
+
+function applyArrangement(said) {
+  if (said.clear) clearMarks();
+  for (const one of said.marked || []) {
+    const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    if (pin) markCard(pin, one.why);
+  }
+
+  // Every height read before any card moves — placing one changes the layout the next measurement
+  // would be answered from.
+  const columns = (said.sorted || []).filter((one) => one.names.length);
+  if (!columns.length) return;
+  const tall = new Map();
+  for (const one of columns) {
+    for (const name of one.names) {
+      const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+      if (pin) tall.set(pin, pin.offsetHeight || 120);
+    }
+  }
+  const down = new Map();
+  for (const one of columns) {
+    // "Здесь же — колонкам нужны заголовки, иначе через минуту непонятно, что слева, а что справа."
+    down.set(one.side, (down.get(one.side) ?? 0) + 0);
+    for (const [at, name] of one.names.entries()) {
+      const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+      if (!pin) continue;
+      const y = down.get(one.side) ?? 0;
+      place(pin, sideAt(one.side, at, y), { avoid: false });
+      // Sorted by hand in the sense that matters: somebody asked for this arrangement, so the
+      // console's own layout must not sweep it away (042-placed-by-hand.sql).
+      pin.dataset.moved = 'yes';
+      down.set(one.side, y + tall.get(pin) + GAP);
+      markCard(pin, one.what);
+    }
+  }
+  moveWasDeliberate();
+  drawTies();
+  drawMap();
 }
 
 // A copy that has since been collected answers to its collection's name. Before this the line

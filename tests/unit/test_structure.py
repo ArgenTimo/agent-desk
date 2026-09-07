@@ -34,7 +34,10 @@ PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 # formats live behind is docs/adr/0004's, and it is about a format nobody promised is stable
 # changing quietly underneath five call sites. A tracker's HTTP response is somebody else's API
 # with its own versioning, and this program's own database rows are its own.
+#   handling.py         the actions a rearranging answer asked for, in a shape defined in that
+#                       same module twenty lines above where it is read back.
 _NOT_AN_ON_DISK_FORMAT = {
+    "handling.py",
     "store/repo.py",
     "answer/session.py",
     "tracker/jira.py",

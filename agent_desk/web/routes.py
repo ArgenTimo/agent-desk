@@ -41,6 +41,7 @@ from agent_desk import (
     allowed,
     connectors,
     dispatch,
+    handling,
     land,
     peer,
     process,
@@ -680,6 +681,13 @@ async def render_blocks() -> str:
         partial=block_runs.PARTIAL,
         # And what a run that has not said anything yet is doing (agent_desk/web/blocks.py).
         doing=block_runs.DOING,
+        # A rearranging answer, said in words. What it stored is the actions; this is what somebody
+        # scrolling back through the conversation reads instead of a blob (agent_desk/handling.py).
+        arranged={
+            block.id: handling.as_words(handling.read_json(block.answer or ""))
+            for block in rows
+            if block.kind == "handling" and block.answer
+        },
     )
 
 

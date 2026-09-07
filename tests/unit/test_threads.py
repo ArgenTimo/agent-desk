@@ -373,7 +373,11 @@ def test_what_is_on_the_workbench_is_part_of_what_was_said() -> None:
     alone = classifier.kind_prompt("бери в работу")
     pointing = classifier.kind_prompt("бери в работу", pointed_at=2)
 
-    assert "on the workbench" not in alone
+    # The *paragraph* about pointing, not the phrase: `arrange` describes itself in terms of the
+    # workbench and does so whether or not there is anything on it, so a check for those words
+    # stopped being a check for this.
+    assert "That is an addressee" not in alone
+    assert "cards on the workbench when" not in alone
     assert "2 cards on the workbench" in pointing
     assert "That is an addressee" in pointing
     # And the doubtful-case rule is still there, because it is right for a line with nothing

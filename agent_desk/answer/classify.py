@@ -101,13 +101,14 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do|desk)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk|arrange)\Z", re.IGNORECASE)
 
 _KIND_OF = {
     "question": "question",
     "idea": "idea",
     "do": "instruction",
     "desk": "master",
+    "arrange": "handling",
 }
 
 
@@ -147,7 +148,7 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
-            "Say which of four things it is. One token, nothing else:",
+            "Say which of five things it is. One token, nothing else:",
             "",
             "  question — they want something *from you, now*: an answer, or a thing written for",
             "             them. Both are `question`, because both are answered on the spot and",
@@ -168,6 +169,12 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "             ideas, its own data, its own behaviour.",
             '             "разгреби текущие идеи", "tidy up the pool", "убери эту колонку",',
             '             "переосмысли и перегруппируй идеи, удали реализованные"',
+            "  arrange  — they are telling you to change *the cards in front of them*: highlight",
+            "             some, put these here and those there. The answer is a rearrangement of",
+            "             what is already on the workbench, not a paragraph and not a new card.",
+            '             "подсвети те, которые могут принести доход", "справа помести идеи для',
+            '             простых пользователей, слева для разработчиков", "highlight the ones',
+            '             that are blocked", "убери подсветку"',
             "",
             "`desk` is `do` pointed at this program rather than at a project it watches, and it is",
             "the address that decides it. A wish about how this console *should* be one day is",
@@ -178,6 +185,13 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "they want in their hands right now: a plan, a list, a summary, a comparison, a draft.",
             '"Напиши мне план" is a plan they want to read — not a wish that the product should',
             'have plans in it. "Add a plans page" is the idea; "write me a plan" is a question.',
+            "",
+            "**`arrange` against `question` is whether they asked you to *change* the cards or to",
+            '*tell* them something.** "Подсвети те, которые принесут доход" is an arrangement;',
+            '"что из этого принесёт доход?" is a question and wants sentences. Both are about the',
+            "same cards and reach the same judgement — the difference is only what they asked for.",
+            "It is `arrange` only when there are cards on the workbench to arrange; with an empty",
+            "workbench the same words are a question.",
             "",
             "Being phrased as a command decides nothing. Almost every request is.",
             "",
