@@ -191,8 +191,14 @@ def branch_prompt(card: process.Card, ways: list[process.Line]) -> str:
     same reason: free text matched against branch labels is a guess wearing a mechanism.
     """
     lines = [
-        "A process has reached a decision. Answer with the number of the way it should go, and",
-        "nothing else — no words, no punctuation, just the number.",
+        "A process has reached a decision. Answer with the number of the way it should go, then a",
+        "few words saying what decided it. Nothing else: no preamble, no closing line.",
+        "",
+        "  2 the tests came back red, so it cannot go out",
+        "",
+        "The number first and on its own is what makes this readable at all — but a branch with no",
+        "reason beside it is the thing nobody can argue with later, and 'why did it go that way'",
+        "is exactly the question asked when a run goes somewhere unexpected.",
         "",
         f"## What has to be decided\n{(card.said.get('ask') or '').strip()}",
         "",
@@ -202,6 +208,29 @@ def branch_prompt(card: process.Card, ways: list[process.Line]) -> str:
     if card.made.strip():
         lines += ["", "## What is already known", card.made.strip()]
     return "\n".join(lines)
+
+
+def read_why(reply: str) -> str:
+    """What the reply gave as its reason, or an empty string.
+
+    "Сейчас остаётся «пошёл туда-то». Не остаётся, на основании чего — а это ровно тот вопрос,
+    который зададут, когда прогон пойдёт не туда."
+
+    Absent is a real answer and reads as one: a decision recorded with no reason says the model
+    did not give one, which is a different thing from a reason nobody wrote down. Nothing is
+    invented to fill the gap — that is the guess the fifth rule forbids, and it would be the worst
+    possible place for one, because a made-up reason beside a real branch is indistinguishable
+    from a real one.
+    """
+    said = reply.strip().split(maxsplit=1)
+    if len(said) < 2:
+        return ""
+    return " ".join(said[1].split())[:WHY_CHARS].strip(" -—:.")
+
+
+# How much of a reason is kept. It sits on a card and in a run's history, where it is read at a
+# glance beside the branch it explains rather than opened and studied.
+WHY_CHARS = 160
 
 
 def read_branch(reply: str, count: int) -> int:
@@ -388,10 +417,13 @@ async def _decide(
         )
         return 1
     took = ways[picked - 1]
+    why = read_why(reply)
     made = f"went {took.says or 'the unlabelled way'}"
+    if why:
+        made = f"{made} — {why}"
     await store.card_made(card.name, made)
     await store.set_run_step(run_id=run.id, name=card.name, state="done", made=made)
-    log.info("engine.decided", run=run.id, step=card.name, went=took.to_name)
+    log.info("engine.decided", run=run.id, step=card.name, went=took.to_name, why=why)
     return 1
 
 

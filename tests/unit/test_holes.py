@@ -113,3 +113,64 @@ def test_the_cards_that_come_back_say_where_they_came_from() -> None:
     """045: a card on the bench answers "why is this here", and being laid back out of a group is
     one of the ways it can have got there."""
     assert "'laid back out of a group'" in _code()
+
+
+# --- why the engine went that way (01M1XC4Z2F4C…) ------------------------------------------------
+@pytest.mark.unit
+def test_a_decision_records_what_decided_it() -> None:
+    """ "Сейчас остаётся «пошёл туда-то». Не остаётся, на основании чего — а это ровно тот вопрос,
+    который зададут, когда прогон пойдёт не туда.\" """
+    from agent_desk.web import engine
+
+    assert engine.read_branch("2 the tests came back red, so it cannot go out", 3) == 2
+    assert engine.read_why("2 the tests came back red, so it cannot go out") == (
+        "the tests came back red, so it cannot go out"
+    )
+
+
+@pytest.mark.unit
+def test_the_number_still_has_to_come_first_and_alone() -> None:
+    """Asking for a reason must not soften the reading of the branch. A process that took the
+    first way out because the model said something conversational is the failure `read_branch`
+    exists to refuse, and it refuses it exactly as before."""
+    from agent_desk.web import engine
+
+    assert engine.read_branch("I think option two", 3) == 0
+    assert engine.read_branch("2 because", 1) == 0, "a number past the end is not a branch"
+
+
+@pytest.mark.unit
+def test_a_decision_with_no_reason_says_so_rather_than_inventing_one() -> None:
+    """Absent is a real answer: it means the model did not give a reason, which is a different
+    thing from a reason nobody wrote down. A made-up one beside a real branch would be
+    indistinguishable from a real one — the worst possible place for a guess."""
+    from agent_desk.web import engine
+
+    assert engine.read_why("2") == ""
+    assert engine.read_why("") == ""
+
+
+@pytest.mark.unit
+def test_the_reason_is_a_line_rather_than_an_essay() -> None:
+    """It is read at a glance beside the branch it explains, on a card and in a run's history."""
+    from agent_desk.web import engine
+
+    assert len(engine.read_why("2 " + "x" * 500)) == engine.WHY_CHARS
+
+
+@pytest.mark.unit
+def test_the_prompt_asks_for_both_and_says_why_the_number_is_first() -> None:
+    from agent_desk import process
+    from agent_desk.web import engine
+
+    card = process.Card(name="step:1", role="decision", label="ship it?", said={"ask": "ship?"})
+    ways = [
+        process.Line(from_name="step:1", to_name="step:2", kind="if", says="yes"),
+        process.Line(from_name="step:1", to_name="step:3", kind="if", says="no"),
+    ]
+
+    said = engine.branch_prompt(card, ways)
+
+    # The line wraps in the source, so the check is on the halves rather than on the join.
+    assert "then a" in said and "few words saying what decided it" in said
+    assert "why did it go that way" in said
