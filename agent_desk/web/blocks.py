@@ -807,12 +807,20 @@ def desk_key() -> str:
     return f"desk:{own_checkout()}"
 
 
-async def record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+async def record_idea(
+    store: Store, block: Block, rows: Sequence[BoardRow], *, say: str = ""
+) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
     docs/05-ideas.md is explicit that capture ends here. This run has already read the message
     once to decide it was an idea, so it takes it apart itself rather than handing that to another
     task — but the idea is written down first, before anything else can fail.
+
+    `say` is what the block answers with, because a block is settled **once**. The caller that
+    wanted a sentence of its own used to record the idea and then settle the block a second time
+    with its text — and between those two writes the block was answered and saying nothing. A test
+    caught it by reading the block quickly enough; a person would have seen an answer appear blank
+    and then fill in, and a page pushed in that window renders the empty one.
     """
     source_kind, source_ref, context = _capture_context(rows)
     await store.set_block_kind(block.id, "idea")
@@ -825,7 +833,7 @@ async def record_idea(store: Store, block: Block, rows: Sequence[BoardRow]) -> N
         block_id=block.id,
         project_key=project_of(rows),
     )
-    await store.finish_block(block.id, "")
+    await store.finish_block(block.id, say)
     await _write_ideas(store, block, idea, rows)
 
 
@@ -1086,10 +1094,11 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
         ):
             return
 
-    await record_idea(store, block, rows)
-    await store.finish_block(
-        block.id,
-        "This is about the console itself, and its code is not on this machine to change — "
+    await record_idea(
+        store,
+        block,
+        rows,
+        say="This is about the console itself, and its code is not on this machine to change — "
         "written down as a thought about the service instead. We will try to take it into account.",
     )
 

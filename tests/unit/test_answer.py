@@ -19,6 +19,8 @@ from agent_desk.answer import session
 from agent_desk.config import Settings
 from agent_desk.store.repo import Block, Store
 
+from tests.unit.waiting import until
+
 FAKE = """#!/bin/sh
 here=$(dirname "$0")
 printf '%s\\n' "$@" > "$here/argv.txt"
@@ -65,6 +67,22 @@ async def store(tmp_path: pathlib.Path) -> AsyncIterator[Store]:
     await store.open()
     yield store
     await store.close()
+
+
+def _alive(pid: int) -> bool:
+    """Whether that process is still there. Asked rather than waited out: a fixed sleep here is a
+    guess about how fast this machine reaps a process group."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def _has_started(store: Store, block_id: str) -> bool:
+    block = await store.block(block_id)
+    assert block is not None
+    return block.state != "queued"
 
 
 async def _block(store: Store) -> Block:
@@ -218,7 +236,8 @@ async def test_killing_the_process_is_not_enough_and_the_children_go_too(
     await session.answer_block(store, await _block(store), "PLEASE_HANG")
 
     child = int((fake_claude.parent / "child.pid").read_text().strip())
-    await asyncio.sleep(0.2)
+    await until(lambda: not _alive(child), "the grandchild is gone too")
+
     with pytest.raises(ProcessLookupError):
         os.kill(child, 0)
 
@@ -229,7 +248,7 @@ async def test_cancelling_a_block_records_it_and_does_not_leave_a_run_behind(
 ) -> None:
     block = await _block(store)
     task = asyncio.create_task(session.answer_block(store, block, "PLEASE_HANG"))
-    await asyncio.sleep(0.3)
+    await until(lambda: _has_started(store, block.id), "the run has started")
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

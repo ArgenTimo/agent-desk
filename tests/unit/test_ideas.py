@@ -18,6 +18,8 @@ from agent_desk.ideas import inbox
 from agent_desk.store.repo import Store
 from agent_desk.web import blocks, routes
 
+from tests.unit.waiting import until
+
 FAKE = """#!/bin/sh
 prompt=$(cat)
 case "$prompt" in
@@ -60,11 +62,15 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
     await store.close()
 
 
-async def _settle(check: object, tries: int = 60) -> None:
-    for _ in range(tries):
-        if await check():  # type: ignore[operator]
-            return
-        await asyncio.sleep(0.1)
+async def _settle(check: object) -> None:
+    """Wait for a background pass to have done its thing.
+
+    This used to give up silently after six seconds and let the test carry on, so a busy machine
+    produced a failure three lines later about whatever the pass had not written yet — with nothing
+    saying that the waiting was what went wrong. It says so now, and it waits for a fact rather than
+    for a length of time (tests/unit/waiting.py).
+    """
+    await until(check, getattr(check, "__name__", "the background pass finishes"))  # type: ignore[arg-type]
 
 
 # --- capture --------------------------------------------------------------------------------
@@ -353,7 +359,6 @@ async def test_a_generated_summary_never_overwrites_one_a_human_wrote(
         return len(blocks.runs) == 0
 
     await _settle(generated_arrived)
-    await asyncio.sleep(0.3)
 
     stored = await desk.idea(idea.id)
     assert stored is not None

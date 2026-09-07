@@ -19,6 +19,8 @@ from agent_desk.config import Settings
 from agent_desk.store.repo import Store, Thread
 from agent_desk.web import blocks, routes
 
+from tests.unit.waiting import until
+
 # A fake that attaches everything to the first open subject, so the attaching path is exercised.
 ATTACHING = """#!/bin/sh
 here=$(dirname "$0")
@@ -78,13 +80,17 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
 
 
 async def _settled(store: Store, block_id: str) -> str:
-    for _ in range(60):
+    seen = ""
+
+    async def done() -> bool:
+        nonlocal seen
         block = await store.block(block_id)
         assert block is not None
-        if block.state in ("answered", "failed", "cancelled"):
-            return block.state
-        await asyncio.sleep(0.1)
-    raise AssertionError("the block never settled")
+        seen = block.state
+        return seen in ("answered", "failed", "cancelled")
+
+    await until(done, f"block {block_id} settles")
+    return seen
 
 
 async def _answer_changes_from(store: Store, block_id: str, before: str | None) -> str:
@@ -94,13 +100,17 @@ async def _answer_changes_from(store: Store, block_id: str, before: str | None) 
     through it between two polls. The fake numbers its answers instead, so "the block re-ran" is
     observable in the result rather than in a moment that may not be caught.
     """
-    for _ in range(60):
+    seen = ""
+
+    async def answered_again() -> bool:
+        nonlocal seen
         block = await store.block(block_id)
         assert block is not None
-        if block.state == "answered" and block.answer != before:
-            return block.answer or ""
-        await asyncio.sleep(0.05)
-    raise AssertionError("the block never produced a second answer")
+        seen = block.answer or ""
+        return block.state == "answered" and block.answer != before
+
+    await until(answered_again, "the block answers a second time")
+    return seen
 
 
 # --- reading a decision -------------------------------------------------------------------------

@@ -20,6 +20,8 @@ from agent_desk.store.repo import Store
 from agent_desk.web import blocks, routes
 from agent_desk.web.app import app
 
+from tests.unit.waiting import until
+
 FAKE = """#!/bin/sh
 here=$(dirname "$0")
 prompt=$(cat)
@@ -108,6 +110,16 @@ async def _state(store: Store, block_id: str) -> str:
     return block.state
 
 
+# The two facts every wait in this file is actually waiting for. Written as questions rather than
+# as lengths of time — see `tests/unit/waiting.py` for why that is the whole point.
+async def _running(store: Store, block_id: str) -> bool:
+    return await _state(store, block_id) == "running"
+
+
+async def _settled_now(store: Store, block_id: str) -> bool:
+    return await _state(store, block_id) in ("answered", "failed", "cancelled")
+
+
 @pytest.mark.unit
 async def test_submitting_frees_the_field(desk: Store, fake_claude: pathlib.Path) -> None:
     """The field is free before the answer exists, which is the point of a block."""
@@ -126,7 +138,8 @@ async def test_several_questions_run_at_once_and_nothing_waits(
 ) -> None:
     first = await blocks.submit(desk, "PLEASE_HANG one", [])
     second = await blocks.submit(desk, "PLEASE_HANG two", [])
-    await asyncio.sleep(0.4)
+    await until(lambda: _running(desk, first.id), "the first question is running")
+    await until(lambda: _running(desk, second.id), "the second question is running")
 
     assert await _state(desk, first.id) == "running"
     assert await _state(desk, second.id) == "running"
@@ -136,12 +149,7 @@ async def test_several_questions_run_at_once_and_nothing_waits(
 @pytest.mark.unit
 async def test_an_answer_reaches_the_column(desk: Store, fake_claude: pathlib.Path) -> None:
     block = await blocks.submit(desk, "what about timeouts", [])
-    for _ in range(50):
-        if await _state(desk, block.id) == "answered":
-            break
-        await asyncio.sleep(0.1)
-
-    assert await _state(desk, block.id) == "answered"
+    assert await _settled(desk, block.id) == "answered"
     column = await routes.render_blocks()
     assert "what about timeouts" in column
     assert "an answer" in column
@@ -157,10 +165,7 @@ async def test_a_running_block_shows_what_it_has_said_so_far(
     second thing to redact (design/02-data-model.md).
     """
     block = await blocks.submit(desk, "PLEASE_HANG and stream", [])
-    for _ in range(50):
-        if blocks.PARTIAL.get(block.id):
-            break
-        await asyncio.sleep(0.1)
+    await until(lambda: bool(blocks.PARTIAL.get(block.id)), "the answer starts arriving")
 
     assert blocks.PARTIAL[block.id] == "thinking"
     assert "thinking" in await routes.render_blocks()
@@ -171,14 +176,10 @@ async def test_cancelling_a_run_leaves_a_block_that_says_it_was_cancelled(
     desk: Store, fake_claude: pathlib.Path
 ) -> None:
     block = await blocks.submit(desk, "PLEASE_HANG forever", [])
-    await asyncio.sleep(0.3)
+    await until(lambda: _running(desk, block.id), "the question has started")
     assert await blocks.cancel(desk, block.id)
 
-    for _ in range(50):
-        if await _state(desk, block.id) == "cancelled":
-            break
-        await asyncio.sleep(0.1)
-    assert await _state(desk, block.id) == "cancelled"
+    assert await _settled(desk, block.id) == "cancelled"
     assert block.id not in blocks.PARTIAL
 
 
@@ -192,21 +193,13 @@ async def test_a_failed_block_can_be_retried_and_then_answers(
     the question again rather than that the same input happens to succeed.
     """
     block = await blocks.submit(desk, "PLEASE_FAIL_ONCE", [])
-    for _ in range(50):
-        if await _state(desk, block.id) == "failed":
-            break
-        await asyncio.sleep(0.1)
-    assert await _state(desk, block.id) == "failed"
+    assert await _settled(desk, block.id) == "failed"
     assert "retry" in await routes.render_blocks()
 
     stored = await desk.block(block.id)
     assert stored is not None
     await blocks.retry(desk, stored, [])
-    for _ in range(50):
-        if await _state(desk, block.id) == "answered":
-            break
-        await asyncio.sleep(0.1)
-    assert await _state(desk, block.id) == "answered"
+    await _reaches(desk, block.id, "answered")
 
 
 @pytest.mark.unit
@@ -221,8 +214,8 @@ async def test_the_console_stops_even_with_questions_in_the_air(
     monkeypatch.setattr(routes, "store", Store(tmp_path / "lifespan.db"))
     started = time.monotonic()
     async with app.router.lifespan_context(app):
-        await blocks.submit(routes.store, "PLEASE_HANG during shutdown", [])
-        await asyncio.sleep(0.3)
+        block = await blocks.submit(routes.store, "PLEASE_HANG during shutdown", [])
+        await until(lambda: _running(routes.store, block.id), "the run is in flight")
     elapsed = time.monotonic() - started
 
     assert elapsed < 5
@@ -413,13 +406,13 @@ async def test_one_question_going_wrong_does_not_take_the_others_with_it(
     the console with them.
     """
     healthy = await blocks.submit(desk, "PLEASE_HANG while a sibling explodes", [])
-    await asyncio.sleep(0.3)
+    await until(lambda: _running(desk, healthy.id), "the healthy question is running")
 
     async def explode() -> None:
         raise RuntimeError("a run that raises where nobody expected one")
 
     blocks.runs.start("a-broken-run", explode)
-    await asyncio.sleep(0.3)
+    await until(lambda: "a-broken-run" not in blocks.runs._by_block, "the broken run has finished")
 
     # The group is still standing and the other question is still being answered.
     assert await _state(desk, healthy.id) == "running"
@@ -441,7 +434,7 @@ async def test_a_blank_summary_reply_is_not_a_crash(
     monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
 
     block = await blocks.capture_idea(desk, "a thought worth keeping", [])
-    await asyncio.sleep(1.0)
+    await until(lambda: _settled_now(desk, block.id), "the capture has finished")
 
     (idea,) = await desk.ideas()
     assert idea.text == "a thought worth keeping"
@@ -456,13 +449,13 @@ async def test_a_block_never_has_two_runs(desk: Store, fake_claude: pathlib.Path
     that was no longer there — two `claude -p` processes racing to write one row.
     """
     block = await blocks.submit(desk, "PLEASE_HANG one", [])
-    await asyncio.sleep(0.3)
+    await until(lambda: block.id in blocks.runs._by_block, "the first run has started")
     first = blocks.runs._by_block[block.id]
 
     stored = await desk.block(block.id)
     assert stored is not None
     await blocks.retry(desk, stored, [])
-    await asyncio.sleep(0.3)
+    await until(lambda: blocks.runs._by_block.get(block.id) is not first, "the run was replaced")
 
     assert len(blocks.runs) == 1
     assert first.cancelled() or first.done()
@@ -476,15 +469,12 @@ async def test_moving_a_block_to_the_thread_it_is_already_in_is_not_a_correction
     """Submitting the select unchanged used to spend a run and flip `thread_set_by` to `human`,
     quietly corrupting the one number docs/09-roadmap.md says decides the classifier's fate."""
     block = await blocks.submit(desk, "a question", [])
-    for _ in range(50):
-        if await _state(desk, block.id) == "answered":
-            break
-        await asyncio.sleep(0.1)
+    assert await _settled(desk, block.id) == "answered"
 
     stored = await desk.block(block.id)
     assert stored is not None
     await blocks.set_thread(desk, stored, stored.thread_id, [])
-    await asyncio.sleep(0.2)
+    await until(lambda: _settled_now(desk, block.id), "the block has settled")
 
     unchanged = await desk.block(block.id)
     assert unchanged is not None
@@ -504,10 +494,7 @@ async def test_every_write_route_answers_a_browser_as_well_as_htmx(
     is an upgrade; that only means something if it is checked.
     """
     block = await blocks.submit(desk, "a question", [])
-    for _ in range(50):
-        if await _state(desk, block.id) == "answered":
-            break
-        await asyncio.sleep(0.1)
+    assert await _settled(desk, block.id) == "answered"
 
     stored = await desk.block(block.id)
     assert stored is not None
@@ -554,12 +541,12 @@ async def test_a_retry_never_shows_a_cancelled_block_with_a_live_run(
     cancelled the live run and repeated the cycle. Stopping before starting removes the race.
     """
     block = await blocks.submit(desk, "PLEASE_HANG one", [])
-    await asyncio.sleep(0.3)
+    await until(lambda: _running(desk, block.id), "the first run has started")
 
     stored = await desk.block(block.id)
     assert stored is not None
     await blocks.retry(desk, stored, [])
-    await asyncio.sleep(0.4)
+    await until(lambda: _running(desk, block.id), "the replacement run has taken the block")
 
     after = await desk.block(block.id)
     assert after is not None
@@ -592,10 +579,7 @@ async def test_the_partial_answer_is_redacted_while_it_streams(
     )
 
     block = await blocks.submit(desk, "what is in the config", [])
-    for _ in range(50):
-        if blocks.PARTIAL.get(block.id):
-            break
-        await asyncio.sleep(0.1)
+    await until(lambda: bool(blocks.PARTIAL.get(block.id)), "the answer starts arriving")
 
     assert secret not in blocks.PARTIAL[block.id]
     assert "[redacted]" in blocks.PARTIAL[block.id]
@@ -776,21 +760,35 @@ async def test_a_tab_that_no_longer_exists_does_not_lose_the_question(
     assert await desk.block(block.id) is not None
 
 
-# Twenty seconds rather than five. A block settles by way of a subprocess, and the budget has to
-# be for the worst machine this suite runs on rather than for an idle one: this file went red once
-# on a laptop with three test runs and twenty agents on it, which is a gate lying about the code.
-# Polling means a generous budget costs nothing when things are quick.
-SETTLE_SECONDS = 20.0
-_POLL = 0.05
-
-
 async def _settled(store: Store, block_id: str) -> str:
-    for _ in range(int(SETTLE_SECONDS / _POLL)):
-        state = await _state(store, block_id)
-        if state in ("answered", "failed", "cancelled"):
-            return state
-        await asyncio.sleep(_POLL)
-    raise AssertionError("the block never settled")
+    """Wait for the block to reach an end state, and say which one it reached.
+
+    The state is captured by the check rather than read again afterwards. Read again, a block that
+    settled and was then restarted — which is exactly what retry does — reports the state it moved
+    on to, and the test reads "running" where it asked what the block had settled as.
+    """
+    seen = ""
+
+    async def done() -> bool:
+        nonlocal seen
+        seen = await _state(store, block_id)
+        return seen in ("answered", "failed", "cancelled")
+
+    await until(done, f"block {block_id} settles")
+    return seen
+
+
+async def _reaches(store: Store, block_id: str, state: str) -> None:
+    """Wait for one particular end, for the times when "settled" is not the question.
+
+    A retried block is `failed`, then `running`, then `answered`. Waiting for "settled" there is
+    satisfied by the failure it started from, which is the state the test is trying to see it leave.
+    """
+    await until(lambda: _is(store, block_id, state), f"block {block_id} becomes {state}")
+
+
+async def _is(store: Store, block_id: str, state: str) -> bool:
+    return await _state(store, block_id) == state
 
 
 # --- three things arrive through one field ------------------------------------------------------
