@@ -40,6 +40,7 @@ from markupsafe import Markup, escape
 from agent_desk import (
     allowed,
     branching,
+    comparing,
     connectors,
     dispatch,
     handling,
@@ -2374,6 +2375,37 @@ async def workbench_runs() -> JSONResponse:
             }
         )
     return JSONResponse({"runs": found})
+
+
+@router.get("/workbench/compare", response_class=JSONResponse)
+async def compare_two_runs(runs: str = "") -> JSONResponse:
+    """Two runs of one drawing, step by step (agent_desk/comparing.py).
+
+    Named by id rather than "the last two", because which two is a thing the person is looking at
+    and the newest run is not always the interesting one.
+    """
+    wanted = [one for one in runs.split(",") if one][:2]
+    if len(wanted) != 2:
+        return JSONResponse({"rows": [], "said": "two runs are needed to compare two runs"})
+    earlier, later = (await store.run_steps(wanted[0]), await store.run_steps(wanted[1]))
+    labels = {one.name: one.label for one in await store.step_cards()}
+    rows = comparing.against(earlier, later, labels)
+    return JSONResponse(
+        {
+            "said": comparing.in_a_word(rows),
+            "rows": [
+                {
+                    "name": row.name,
+                    "label": row.label,
+                    "before": row.before,
+                    "after": row.after,
+                    "says": row.says,
+                    "changed": row.changed,
+                }
+                for row in rows
+            ],
+        }
+    )
 
 
 @router.post("/cards/step", response_class=JSONResponse)

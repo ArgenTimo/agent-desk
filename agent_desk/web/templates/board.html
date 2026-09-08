@@ -221,6 +221,19 @@
       <li><ul id="bench-saved" class="bench-saved"></ul></li>
     </menu>
 
+    {# Two runs of one drawing, side by side. The history was always kept and nothing showed it
+       (agent_desk/comparing.py). #}
+    <button type="button" id="compare-runs" hidden
+            title="what the last two runs of this produced, step by step">compare the last two runs</button>
+    <aside id="compare-panel" class="compare" hidden>
+      <header>two runs
+        <span class="compare-said"></span>
+        <span class="spacer"></span>
+        <button type="button" data-compare-off aria-label="close">×</button>
+      </header>
+      <ul class="compare-rows"></ul>
+    </aside>
+
     <div class="context-strip">
       <span id="context-count"></span>
       {# Appears the moment an idea lands on the workbench, because at that point there is exactly

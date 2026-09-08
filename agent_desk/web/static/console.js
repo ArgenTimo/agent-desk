@@ -2882,9 +2882,65 @@ function showRuns() {
     mark.title = step.detail || step.made || step.state;
   }
   showRunBar(going);
+  showCompare();
 }
 
 const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', failed: '✕' };
+
+// "Тестировать пайплайн — значит запускать его несколько раз и смотреть, что изменилось."
+//
+// The history was always there — every run keeps what each of its steps produced — and nothing
+// showed it. This is the two most recent runs of what is on the bench, side by side.
+//
+// Offered only when there are two, because comparing one run with nothing is a table of one
+// column, and a control that produces one is a control somebody presses once.
+function runsOfThisBench() {
+  const here = new Set(onBench().map(cardName));
+  return runs.filter((one) => (one.cards || []).some((name) => here.has(name)));
+}
+
+function showCompare() {
+  const button = document.getElementById('compare-runs');
+  if (button) button.hidden = runsOfThisBench().length < 2;
+}
+
+async function compareTheLastTwo() {
+  const mine = runsOfThisBench().slice(0, 2);
+  if (mine.length < 2) return;
+  // Older first, so "before" is before. `/workbench/runs` answers newest first.
+  const wanted = [mine[1].id, mine[0].id].join(',');
+  const panel = document.getElementById('compare-panel');
+  try {
+    const said = await (
+      await fetch(`/workbench/compare?runs=${encodeURIComponent(wanted)}`)
+    ).json();
+    panel.querySelector('.compare-said').textContent = said.said || '';
+    const list = panel.querySelector('.compare-rows');
+    list.replaceChildren();
+    for (const row of said.rows || []) {
+      const item = document.createElement('li');
+      item.className = row.changed ? 'compare-row changed' : 'compare-row';
+      item.innerHTML =
+        '<span class="compare-step"></span><span class="compare-says"></span>' +
+        '<pre class="compare-before"></pre><pre class="compare-after"></pre>';
+      item.querySelector('.compare-step').textContent = row.label;
+      item.querySelector('.compare-says').textContent = row.says;
+      item.querySelector('.compare-before').textContent = row.before;
+      item.querySelector('.compare-after').textContent = row.after;
+      list.appendChild(item);
+    }
+    panel.hidden = false;
+  } catch {
+    say('Could not compare those two.');
+  }
+}
+
+document.getElementById('compare-runs')?.addEventListener('click', compareTheLastTwo);
+document
+  .querySelector('[data-compare-off]')
+  ?.addEventListener('click', () => {
+    document.getElementById('compare-panel').hidden = true;
+  });
 
 function showRunBar(going) {
   const bar = document.getElementById('run-bar');

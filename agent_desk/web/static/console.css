@@ -2813,3 +2813,24 @@ button.go:hover, button.yes:hover {
   color: var(--fg-dim);
   font-size: var(--t-xs);
 }
+
+/* --- two runs of one drawing, side by side ------------------------------------------------------- */
+/* What changed between them, and nothing about whether it got better: a model asked the same
+   question twice answers differently, and a verdict here would be noise wearing a checkmark
+   (agent_desk/comparing.py). */
+.compare {
+  position: absolute; right: 12px; bottom: 64px; z-index: 6;
+  max-width: 62ch; max-height: 60vh; overflow: auto;
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; font-size: var(--t-xs);
+}
+.compare > header { display: flex; gap: 8px; align-items: baseline; color: var(--fg-dim); }
+.compare .compare-rows { list-style: none; margin: 6px 0 0; padding: 0; }
+.compare .compare-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  padding: 6px 0; border-top: 1px solid var(--line);
+}
+.compare .compare-step { grid-column: 1 / -1; font-weight: 600; }
+.compare .compare-says { grid-column: 1 / -1; color: var(--fg-dim); }
+.compare .compare-row.changed .compare-says { color: var(--attention); }
+.compare pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
