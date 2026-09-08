@@ -101,7 +101,7 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do|desk|arrange)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw)\Z", re.IGNORECASE)
 
 _KIND_OF = {
     "question": "question",
@@ -109,6 +109,7 @@ _KIND_OF = {
     "do": "instruction",
     "desk": "master",
     "arrange": "handling",
+    "draw": "drawing",
 }
 
 
@@ -148,7 +149,7 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
-            "Say which of five things it is. One token, nothing else:",
+            "Say which of six things it is. One token, nothing else:",
             "",
             "  question — they want something *from you, now*: an answer, or a thing written for",
             "             them. Both are `question`, because both are answered on the spot and",
@@ -169,6 +170,11 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "             ideas, its own data, its own behaviour.",
             '             "разгреби текущие идеи", "tidy up the pool", "убери эту колонку",',
             '             "переосмысли и перегруппируй идеи, удали реализованные"',
+            "  draw     — they are describing a *process* and asking for it to be drawn: a",
+            "             sequence of steps with decisions in it, to appear on the workbench as",
+            "             cards. Not a question about a process and not a wish that one existed.",
+            '             "нарисуй процесс релиза: сначала тесты, если красные — чиним", "draw me',
+            '             the onboarding flow", "изобрази как это работает по шагам"',
             "  arrange  — they are telling you to change *the cards in front of them*: highlight",
             "             some, put these here and those there. The answer is a rearrangement of",
             "             what is already on the workbench, not a paragraph and not a new card.",
@@ -192,6 +198,13 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "same cards and reach the same judgement — the difference is only what they asked for.",
             "It is `arrange` only when there are cards on the workbench to arrange; with an empty",
             "workbench the same words are a question.",
+            "",
+            "**How sure you have to be depends on what it costs to be wrong.** A misread question",
+            "costs one wasted answer. A misread `do` or `desk` starts agents in worktrees. So for",
+            "those two the bar is high: name them only when there is an addressee or an explicit",
+            "instruction to start now, and answer `question` or `idea` when you are weighing it up.",
+            "`draw` and `arrange` are cheap — one model call, undone in one press — and can be",
+            "answered on the balance of it.",
             "",
             "Being phrased as a command decides nothing. Almost every request is.",
             "",

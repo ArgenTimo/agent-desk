@@ -24,6 +24,7 @@ drawing on the bench that nobody described.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 
@@ -290,3 +291,39 @@ _TAKEN_AS = {
 def taken_as(kind: str) -> str:
     """What this console decided a message was, in words, or nothing when it decided the ordinary."""
     return _TAKEN_AS.get(kind, "")
+
+
+def as_drawn_json(said: str, cards: Sequence[str]) -> str:
+    """What a drawing block stores: the words, and the cards to put on the bench.
+
+    The same shape a rearranging answer stores under, and for the same reason: a block has to be
+    both readable by a person scrolling back and applicable by the page. `agent_desk/handling.py`
+    argues it at length; this is the second thing that needed it, which is what makes the shape
+    worth having rather than a one-off.
+    """
+    return json.dumps({"drawing": {"said": said, "cards": list(cards)}})
+
+
+def read_drawn(said: str) -> tuple[str, list[str]]:
+    """The words and the card names back out, or nothing when a block stored something else."""
+    try:
+        found = json.loads(said).get("drawing")
+    except (ValueError, AttributeError):
+        return "", []
+    if not isinstance(found, dict):
+        return "", []
+    return str(found.get("said", "")), [str(one) for one in found.get("cards", [])]
+
+
+def as_drawn(steps: list[dict[str, str]], lines: list[dict[str, str]]) -> str:
+    """A drawing a message produced, as the words its block shows.
+
+    The steps as they will appear, so somebody can see whether it understood before they look at
+    the bench — the same shape the "in words" panel offers, because a proposal read in two places
+    that disagree is worse than one read in neither.
+    """
+    said = [f"{number}. {one['role']} — {one['label']}" for number, one in enumerate(steps, 1)]
+    for one in lines:
+        word = one["says"] or one["kind"]
+        said.append(f"   {one['from']} → {one['to']} ({word})")
+    return "\n".join(said)

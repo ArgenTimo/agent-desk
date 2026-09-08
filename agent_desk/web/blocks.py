@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch, handling, looking
+from agent_desk import dispatch, handling, looking, roles, telling, ties
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
@@ -775,6 +775,9 @@ async def _work(
         if kind == "instruction":
             await _prepare_directive(store, block, rows)
             return
+        if kind == "drawing":
+            await _draw_it(store, block)
+            return
         if kind == "handling" and surface:
             await _rearrange(store, block, rows, surface=surface, on_bench=on_bench)
             return
@@ -796,6 +799,79 @@ async def _work(
         # good. Deciding the kind is a full headless run, so this window is seconds wide.
         await asyncio.shield(store.cancel_block(block.id))
         raise
+
+
+async def cards_from_shape(
+    store: Store, steps: Sequence[Mapping[str, str]], lines: Sequence[Mapping[str, str]]
+) -> list[str]:
+    """Turn a read shape into step cards and the lines between them. One place, two callers.
+
+    The other is the route behind the "in words" panel, which did this inline. Two copies of it
+    would be two answers to "what does a drawn process become", and the day they differ is the day
+    the same description produces two different benches.
+    """
+    made: dict[int, str] = {}
+    for number, one in enumerate(steps, start=1):
+        role = one["role"].strip()
+        if not roles.is_a_role(role):
+            continue
+        card = await store.add_step_card(one["label"].strip() or "a step")
+        made[number] = card.name
+        await store.set_card_role(card.name, role)
+        field = telling.words_for(role)
+        if field and one.get("words", "").strip():
+            await store.set_card_field(card.name, field, one["words"].strip())
+    for one in lines:
+        if not ties.is_a_kind(one["kind"]):
+            continue
+        first, second = int(one["from"]), int(one["to"])
+        if first in made and second in made:
+            await store.tie_cards(
+                from_name=made[first], to_name=made[second], kind=one["kind"], says=one["says"]
+            )
+    return list(made.values())
+
+
+async def _draw_it(store: Store, block: Block) -> None:
+    """A process described in the input field, drawn as cards on the workbench.
+
+    "Нарисуй процесс релиза: сначала тесты, если красные — чиним."
+
+    Every part of this already existed — `telling.shape_prompt` turns a description into steps and
+    lines, and the workbench has put those on the bench since 038 — behind a panel somebody had to
+    open first. This is the same act asked for in the field, which is where the rest of the console
+    is asked for things.
+
+    The cheapest of the new branches: one model call, cards at the end of it, undone in one press.
+    That is why it may be decided on the balance of it where `do` may not.
+    """
+    await store.set_block_kind(block.id, "drawing")
+    try:
+        reply = "".join(
+            [chunk async for chunk in session.stream_answer(telling.shape_prompt(block.input))]
+        )
+    except (session.AnswerFailed, OSError) as exc:
+        await store.fail_block(block.id, str(exc))
+        return
+    steps, lines = telling.read_shape(reply)
+    if not steps:
+        # A description a model answered with a paragraph about, rather than a shape. Nothing is
+        # put on the bench, and saying so beats putting a guess there (agent_desk/telling.py).
+        await store.finish_block(
+            block.id,
+            "That reads like a process, but I could not turn it into steps. Say it as a sequence "
+            "— first this, then that, and if it fails, this — and I will draw it.",
+        )
+        return
+    names = await cards_from_shape(store, steps, lines)
+    if not names:
+        await store.finish_block(
+            block.id,
+            "That reads like a process, but none of the steps it came back with were a kind of "
+            "card this console has. Nothing was put on the workbench.",
+        )
+        return
+    await store.finish_block(block.id, telling.as_drawn_json(telling.as_drawn(steps, lines), names))
 
 
 async def _rearrange(

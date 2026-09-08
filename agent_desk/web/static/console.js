@@ -3777,6 +3777,18 @@ function syncBlocks() {
 
     // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
     // верстаке появляется её карточка, и далее карточки под-идей."
+    // A process this message drew. Same shape as the idea lines below: the block lists what it
+    // made, and the bench puts each of them on as a card of its own.
+    for (const line of node.querySelectorAll('.drawn-cards li[data-kind]')) {
+      const name = `${line.dataset.kind}:${line.dataset.id}`;
+      if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
+        pin(
+          { kind: line.dataset.kind, id: line.dataset.id, label: '' },
+          { under: id, quiet: true, came: 'drawn from a description' }
+        );
+      }
+    }
+
     for (const line of node.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
       if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {

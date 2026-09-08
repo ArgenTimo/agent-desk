@@ -44,7 +44,9 @@ from agent_desk.store.redact import scrub, scrub_optional
 # names are short and secrets are not.
 _ENV_NAME = re.compile(r"\A[A-Z][A-Z0-9_]{0,47}\Z")
 
-BlockKind = Literal["question", "idea", "observation", "instruction", "master", "handling"]
+BlockKind = Literal[
+    "question", "idea", "observation", "instruction", "master", "handling", "drawing"
+]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
 # and "it is in the product" are different answers to "what happened to my idea"

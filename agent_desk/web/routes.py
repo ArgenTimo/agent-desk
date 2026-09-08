@@ -689,6 +689,12 @@ async def render_blocks() -> str:
         doing=block_runs.DOING,
         # A rearranging answer, said in words. What it stored is the actions; this is what somebody
         # scrolling back through the conversation reads instead of a blob (agent_desk/handling.py).
+        # A process a message described, as the words for it and the cards it made.
+        drawn={
+            block.id: telling.read_drawn(block.answer or "")
+            for block in rows
+            if block.kind == "drawing" and block.answer
+        },
         arranged={
             block.id: handling.as_words(handling.read_json(block.answer or ""))
             for block in rows
@@ -2270,32 +2276,29 @@ async def keep_sketch(request: Request) -> JSONResponse:
     presses between them.
     """
     form = await _form(request)
-    made: dict[int, str] = {}
-    for number, raw in enumerate(form.get("steps", "").split("\n"), start=1):
+    steps = []
+    for raw in form.get("steps", "").split("\n"):
         role, _, rest = raw.partition("|")
         label, _, words = rest.partition("|")
-        role = role.strip()
-        if not roles.is_a_role(role):
-            continue
-        card = await store.add_step_card(label.strip() or "a step")
-        made[number] = card.name
-        await store.set_card_role(card.name, role)
-        field = telling.words_for(role)
-        if field and words.strip():
-            await store.set_card_field(card.name, field, words.strip())
+        steps.append({"role": role.strip(), "label": label.strip(), "words": words.strip()})
+    lines = []
     for raw in form.get("lines", "").split("\n"):
         bits = raw.split("|")
-        if len(bits) < 3:
+        if len(bits) < 3 or not bits[0].strip().isdigit() or not bits[1].strip().isdigit():
             continue
-        one, other, kind = bits[0].strip(), bits[1].strip(), bits[2].strip()
-        says = bits[3].strip() if len(bits) > 3 else ""
-        if not one.isdigit() or not other.isdigit() or not ties.is_a_kind(kind):
-            continue
-        if int(one) in made and int(other) in made:
-            await store.tie_cards(
-                from_name=made[int(one)], to_name=made[int(other)], kind=kind, says=says
-            )
-    return JSONResponse({"made": True, "cards": [{"name": one} for one in made.values()]})
+        lines.append(
+            {
+                "from": bits[0].strip(),
+                "to": bits[1].strip(),
+                "kind": bits[2].strip(),
+                "says": bits[3].strip() if len(bits) > 3 else "",
+            }
+        )
+    # The same function the input field's "draw me a process" uses. Two copies of this were two
+    # answers to "what does a drawn process become", and the day they differ is the day one
+    # description produces two different benches.
+    names = await block_runs.cards_from_shape(store, steps, lines)
+    return JSONResponse({"made": True, "cards": [{"name": one} for one in names]})
 
 
 @router.get("/workbench", response_class=HTMLResponse)
