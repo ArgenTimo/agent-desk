@@ -50,7 +50,7 @@ from collections.abc import Sequence
 
 import structlog
 
-from agent_desk import allowed, dispatch, engines, land, process, roles, slots
+from agent_desk import allowed, checking, dispatch, engines, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.store.repo import Run, RunStep, Store
 from agent_desk.web import autostart, blockers
@@ -461,6 +461,10 @@ async def _do(
             answers.append((which.name if which is not None else "answer", answer))
         answer = as_a_fan(answers)
         await store.card_made(card.name, answer[:MOST_MADE])
+        if broke := await _checked(store, run, card, answer, cards, lines):
+            await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=broke)
+            await store.end_run(run.id, why=f"{card.label or card.name}: {broke}")
+            return 1
         await store.set_run_step(
             run_id=run.id, name=card.name, state="done", made=answer[:MOST_MADE]
         )
@@ -647,9 +651,52 @@ async def _settle(store: Store, run: Run, card: process.Card, step: RunStep) -> 
             await store.end_run(run.id, why=f"{card.label or card.name}: {offered.detail}")
             return 1
     await store.card_made(card.name, made[:MOST_MADE])
+    on_bench = await bench_of(store, run.names)
+    broke = await _checked(store, run, card, made, on_bench, await lines_of(store, run.names))
+    if broke:
+        await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=broke)
+        await store.end_run(run.id, why=f"{card.label or card.name}: {broke}")
+        return 1
     await store.set_run_step(run_id=run.id, name=card.name, state="done", made=made[:MOST_MADE])
     log.info("engine.step_done", run=run.id, step=card.name)
     return 1
+
+
+async def _checked(
+    store: Store,
+    run: Run,
+    card: process.Card,
+    made: str,
+    cards: Sequence[process.Card],
+    lines: Sequence[process.Line],
+) -> str:
+    """Apply every check hanging off this step, and say why it failed, if it did.
+
+    "Карточка-проверка на выходе шага… и понятное «прошло/не прошло» на схеме. Проверка — это Result
+    с зубами." A Result already says what counts as done; it says it to a person and nothing reads
+    it. This is that field read by something that can decide, and only where it is written in one of
+    the four forms `agent_desk/checking.py` has.
+
+    Every check, not the first: two Results on one step are two things somebody wanted to be true,
+    and stopping at the first failure would hide the second until the first was fixed. What is
+    written on each check card is its own verdict, so the diagram says pass or fail per check.
+    """
+    broke: list[str] = []
+    for one in cards:
+        if one.role != "result" or card.name not in {
+            line.from_name for line in lines if line.to_name == one.name
+        }:
+            continue
+        check = checking.read(one.said.get("counts", ""))
+        if check is None:
+            # A sentence for a person, which is what a Result has always been. Turning it into a
+            # failed check would make every drawing older than this one red.
+            continue
+        ok, why = checking.passes(check, made)
+        await store.card_made(one.name, f"{'passed' if ok else 'failed'} — {why}"[:MOST_MADE])
+        if not ok:
+            broke.append(f"{one.label or one.name}: {why}")
+    return "; ".join(broke)
 
 
 async def _what_is_known(store: Store, run: Run) -> list[str]:

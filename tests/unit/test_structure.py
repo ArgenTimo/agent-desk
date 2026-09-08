@@ -38,7 +38,12 @@ PKG = Path(__file__).resolve().parents[2] / "agent_desk"
 #                       same module twenty lines above where it is read back.
 #   telling.py          the same, for a process a message described: the words to read it back and
 #                       the cards it made. Written by `as_drawn_json` in that file.
+#   checking.py         not a format at all: it parses an *answer* in order to decide whether that
+#                       answer is JSON, which is the check "is json" and the whole of what it does
+#                       with the result. Nothing here reads a file, and the parse failing is the
+#                       answer rather than an error.
 _NOT_AN_ON_DISK_FORMAT = {
+    "checking.py",
     "handling.py",
     "telling.py",
     "store/repo.py",
