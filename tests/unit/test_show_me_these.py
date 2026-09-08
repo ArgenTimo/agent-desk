@@ -82,7 +82,9 @@ def test_the_prompt_says_what_show_is_and_what_it_is_not() -> None:
     asked = classify.kind_prompt("покажи открытые PR-ы")
 
     assert "show " in asked
-    assert "seven things" in asked
+    # The list is not counted in the instruction any more — a number that has to be kept in step
+    # with the list below it is a number that will not be.
+    assert "Say which of these it is" in asked
     assert "wants a number" in asked, "the boundary against `question` is not drawn"
 
 

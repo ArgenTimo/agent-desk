@@ -3557,6 +3557,25 @@ async def make_it_an_idea(block_id: str, request: Request) -> Response:
     return RedirectResponse("/", status_code=303)
 
 
+@router.post("/blocks/{block_id}/meant", response_class=HTMLResponse)
+async def say_what_was_meant(block_id: str, request: Request) -> Response:
+    """Which of the readings it was, said by the person the console asked.
+
+    Only for a block that asked. A route that could re-run any block as anything would be a way to
+    start an agent from a question somebody asked yesterday, which is the thing the asking exists
+    to prevent.
+    """
+    block = await store.block(block_id)
+    if block is None or block.kind != "unsure":
+        return HTMLResponse(await render_blocks(), status_code=404)
+    kind = str((await _form(request)).get("kind", "")).strip()
+    rows, _ = await asyncio.to_thread(board)
+    await block_runs.take_it_as(store, block, rows, kind)
+    if _wants_fragment(request):
+        return HTMLResponse(await render_blocks())
+    return RedirectResponse("/", status_code=303)
+
+
 @router.post("/blocks/{block_id}/answer-it", response_class=HTMLResponse)
 async def answer_it_instead(block_id: str, request: Request) -> Response:
     """ "That was not an idea — write it." The correction that was missing.

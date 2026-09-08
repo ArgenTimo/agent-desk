@@ -59,7 +59,11 @@ def test_how_sure_it_has_to_be_depends_on_what_being_wrong_costs() -> None:
 
     assert "what it costs to be wrong" in said
     assert "starts agents in worktrees" in said
-    assert "`draw` and `arrange` are cheap" in said
+    # The cheap branches, whichever they are today. Named one by one rather than as a phrase, so
+    # that adding one to the list is not a test failure and dropping one from it is.
+    for cheap in ("`draw`", "`arrange`"):
+        assert f"{cheap}" in said
+    assert "are cheap" in said
 
 
 # --- and it makes cards --------------------------------------------------------------------------

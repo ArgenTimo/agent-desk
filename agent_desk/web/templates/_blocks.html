@@ -195,6 +195,28 @@
   <p class="failure">{{ block.error }}</p>
   {% endif %}
 
+  {% if block.kind == "unsure" %}
+  {# The one branch that did nothing. "Чем дороже ветка, тем выше должна быть уверенность и тем
+     скорее нужно спросить, а не догадываться" — so the console says it could not tell, offers the
+     readings, and waits. Four choices and not seven: `draw`, `show` and `arrange` are cheap and
+     undone in one press, and asking about one of those costs more attention than getting it wrong
+     (agent_desk/answer/classify.py). #}
+  <div class="about unsure">
+    <span class="dim small">which did you mean?</span>
+    {% for name, says in (
+        ("question", "answer it"),
+        ("idea", "write it down"),
+        ("instruction", "an agent should do it"),
+        ("master", "this console should do it")) %}
+    <form method="post" action="/blocks/{{ block.id }}/meant"
+          hx-post="/blocks/{{ block.id }}/meant" hx-target="#blocks">
+      <input type="hidden" name="kind" value="{{ name }}">
+      <button type="submit">{{ says }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if block.from_repo %}
   {# A repository the message pointed at. The offer, never the act: cloning something because
      somebody typed an address is the automatic queue docs/adr/0007 refuses, and the clone lands

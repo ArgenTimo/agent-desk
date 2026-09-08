@@ -101,7 +101,7 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw|show)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw|show|unsure)\Z", re.IGNORECASE)
 
 _KIND_OF = {
     "question": "question",
@@ -111,6 +111,7 @@ _KIND_OF = {
     "arrange": "handling",
     "draw": "drawing",
     "show": "showing",
+    "unsure": "unsure",
 }
 
 
@@ -150,7 +151,7 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
-            "Say which of seven things it is. One token, nothing else:",
+            "Say which of these it is. One token, nothing else:",
             "",
             "  question — they want something *from you, now*: an answer, or a thing written for",
             "             them. Both are `question`, because both are answered on the spot and",
@@ -215,8 +216,15 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "costs one wasted answer. A misread `do` or `desk` starts agents in worktrees. So for",
             "those two the bar is high: name them only when there is an addressee or an explicit",
             "instruction to start now, and answer `question` or `idea` when you are weighing it up.",
-            "`draw` and `arrange` are cheap — one model call, undone in one press — and can be",
-            "answered on the balance of it.",
+            "`draw`, `show` and `arrange` are cheap — one model call, undone in one press — and can",
+            "be answered on the balance of it.",
+            "",
+            "**There is a seventh answer, and it is only for the expensive ones.** `unsure` — when",
+            "this reads as `do` or `desk` and equally as something cheaper, and choosing would be",
+            "a coin toss that starts agents. It asks the person which they meant and nothing runs",
+            "until they say. Do not answer `unsure` because a line is vague: a vague question is",
+            "still a question, and asking about one costs more attention than answering it badly.",
+            "Answer it only where the expensive reading is genuinely live.",
             "",
             "Being phrased as a command decides nothing. Almost every request is.",
             "",

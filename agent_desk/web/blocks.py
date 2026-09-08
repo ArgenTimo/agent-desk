@@ -813,6 +813,19 @@ async def _work(
                 await rename_if_it_has_moved_on(store, thread)
 
         kind = await classifier.kind(block.input, pointed_at=pointed_at)
+        if kind == "unsure":
+            # "Чем дороже ветка, тем выше должна быть уверенность и тем скорее нужно спросить, а не
+            # догадываться." The one branch that does nothing: the block asks which was meant, and
+            # nothing runs until somebody presses a choice. Cheap for the console and expensive for
+            # the person, which is why it is offered only against the branches that start agents.
+            await store.set_block_kind(block.id, "unsure")
+            await store.finish_block(
+                block.id,
+                "I could not tell whether you were asking me something or telling me to start "
+                "work. Starting work is the expensive way to be wrong about that, so nothing has "
+                "run. Which did you mean?",
+            )
+            return
         if kind == "idea":
             await record_idea(store, block, rows)
             return
@@ -1661,6 +1674,28 @@ async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     prompt = session.build_prompt(block.input, board=board_lines(rows), history=history)
     add_dirs = _add_dirs([row.session for row in rows])
     runs.start(block.id, lambda: _run(store, block, prompt, add_dirs))
+
+
+async def take_it_as(store: Store, block: Block, rows: Sequence[BoardRow], kind: str) -> None:
+    """Somebody has said which of the readings it was, so do that one.
+
+    The choices are the branches this console has, minus the one that is a question about the
+    question: `unsure` cannot be chosen, because choosing it is what the block is already showing.
+    """
+    if kind not in ("question", "idea", "instruction", "master"):
+        return
+    await store.set_block_kind(block.id, kind)  # type: ignore[arg-type]
+    await store.set_block_running(block.id)
+    if kind == "idea":
+        await record_idea(store, block, rows)
+        return
+    if kind == "master":
+        await _master_request(store, block, rows)
+        return
+    if kind == "instruction":
+        await _prepare_directive(store, block, rows)
+        return
+    await _classify_and_answer(store, block, rows, classify=False)
 
 
 async def answer_it_instead(store: Store, block: Block, rows: Sequence[BoardRow]) -> list[str]:
