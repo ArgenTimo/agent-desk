@@ -336,8 +336,12 @@ def about_prompt(text: str, cards: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
-def read_about(reply: str, count: int) -> list[int]:
+def read_which(reply: str, count: int) -> list[int]:
     """The 1-based cards the reply names, in the order it named them, or empty for none of them.
+
+    Shared by every question of the shape "which of these, if any" — which card a question follows
+    on from, which cards somebody asked to be brought over. One reader, because the ways a model
+    can fail to name a card are the same ways whatever it was asked.
 
     "Я могу сразу попросить нарисовать условно 5 частей… и задавать одновременно различные
     вопросы." A question about two of the parts has two cards above it, which makes this a graph
@@ -362,6 +366,40 @@ def read_about(reply: str, count: int) -> list[int]:
     return picked[:MOST_CARDS]
 
 
+def wanted_prompt(text: str, cards: Sequence[str]) -> str:
+    """Which of the things on the board somebody is asking to be brought over.
+
+    "Нужно «принеси сюда сессию, которая чинит парсер» — то есть найти по смыслу и положить, одним
+    предложением." Ctrl+K already matches a label; this is the same act by meaning, which is what
+    a person has when they cannot remember what a session called itself.
+    """
+    lines = [
+        "A developer asked for something on their board to be put on their workbench.",
+        "Decide which of the things below they mean.",
+        "",
+        "Answer with the number, or several numbers separated by commas when they clearly asked",
+        f"for more than one — at most {MOST_CARDS}. Or the word none. One token, nothing else.",
+        "Answer none when nothing here is what they described: bringing the wrong card over is a",
+        "worse answer than bringing none, because they then have to notice it is wrong.",
+        "",
+        "## What is on the board",
+    ]
+    lines += [f"{index}. {card[:CARD_CHARS]}" for index, card in enumerate(cards, start=1)]
+    lines += ["", "## What they asked for", text]
+    return "\n".join(lines)
+
+
+async def wanted(text: str, cards: Sequence[str]) -> list[int]:
+    """The things on the board this asks for, 1-based, or empty."""
+    if not cards:
+        return []
+    try:
+        reply = "".join([chunk async for chunk in stream_answer(wanted_prompt(text, cards))])
+    except (AnswerFailed, OSError):
+        return []
+    return read_which(reply, len(cards))
+
+
 async def about(text: str, cards: Sequence[str]) -> list[int]:
     """The cards this question follows on from, 1-based, or empty.
 
@@ -374,7 +412,7 @@ async def about(text: str, cards: Sequence[str]) -> list[int]:
         reply = "".join([chunk async for chunk in stream_answer(about_prompt(text, cards))])
     except (AnswerFailed, OSError):
         return []
-    return read_about(reply, len(cards))
+    return read_which(reply, len(cards))
 
 
 def related_prompt(text: str, ideas: Sequence[str]) -> str:

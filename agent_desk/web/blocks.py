@@ -965,6 +965,50 @@ async def _run_the_drawing(
     )
 
 
+# How much of the board is offered when somebody asks for something on it by meaning. A board this
+# long is a prompt nobody should pay for twice, and the things past it are reached by their name in
+# Ctrl+K, which is the other half of the same feature.
+MOST_TO_LOOK_THROUGH = 80
+
+
+async def _bring_one_over(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+    """Find what somebody described on the board, and put it on the workbench.
+
+    A cheap branch: nothing is started, and a miss is visible the moment the card lands and is
+    taken off with the × it already has. So this is allowed to guess, on the same terms as the
+    reading of what a question follows on from — and it answers "none" rather than bringing the
+    nearest thing, because a wrong card is a worse answer than no card. They then have to notice
+    it is wrong.
+    """
+    here: list[tuple[str, str]] = []
+    for row in rows:
+        session = getattr(row, "session", None)
+        if session is None:
+            continue
+        tail = getattr(row, "tail", None)
+        title = getattr(tail, "title", "") if tail else ""
+        here.append((f"session:{session.session_id}", f"session · {title or session.name}"))
+    for idea in await store.ideas(limit=200):
+        if idea.state in ("new", "kept"):
+            here.append((f"idea:{idea.id}", f"idea · {idea.summary}"))
+    here = here[:MOST_TO_LOOK_THROUGH]
+    if not here:
+        await store.finish_block(block.id, "There is nothing on the board to bring over yet.")
+        return
+
+    which = await classifier.wanted(block.input, [says for _name, says in here])
+    if not which:
+        await store.finish_block(
+            block.id,
+            "Nothing on the board matched that. Nothing was brought over — the wrong card is a "
+            "worse answer than none, because you would have to notice it was wrong.",
+        )
+        return
+    names = [here[one - 1][0] for one in which]
+    said = "Brought over:\n" + "\n".join(f"- {here[one - 1][1]}" for one in which)
+    await store.finish_block(block.id, telling.as_drawn_json(said, names))
+
+
 async def _where_a_run_goes(
     store: Store, names: Sequence[str], rows: Sequence[BoardRow]
 ) -> tuple[str, str]:
@@ -1004,11 +1048,10 @@ async def _show_them(
     await store.set_block_kind(block.id, "showing")
     what = showing.what_to_show(block.input)
     if not what:
-        await store.finish_block(
-            block.id,
-            "I can put two things on the workbench for you: the tickets on a project's board, and "
-            "its open pull requests. Say which — those are the two this console can read.",
-        )
+        # Not a list to fetch, so it is something already on the board: "принеси сюда сессию,
+        # которая чинит парсер". Found by meaning rather than by label, which is what somebody has
+        # when they cannot remember what a session called itself (01M1Z9ZZTPYYK3ER7SPSHHJJQ2).
+        await _bring_one_over(store, block, rows)
         return
     key = _which_project(rows, on_bench)
     if not key:

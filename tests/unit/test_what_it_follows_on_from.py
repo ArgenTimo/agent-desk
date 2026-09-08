@@ -59,27 +59,27 @@ def _card(name: str, label: str, kind: str = "answer") -> BenchCard:
 
 # --- reading the reply ----------------------------------------------------------------------------
 def test_a_number_names_that_card() -> None:
-    assert classify.read_about("2", 3) == [2]
+    assert classify.read_which("2", 3) == [2]
 
 
 def test_none_is_an_answer_and_not_a_failure() -> None:
-    assert classify.read_about("none", 3) == []
+    assert classify.read_which("none", 3) == []
 
 
 def test_a_number_outside_the_list_chooses_nothing() -> None:
     """A model that answers 7 out of 3 has not chosen a card, and drawing a line to whichever card
     happens to be third would be inventing one."""
-    assert classify.read_about("7", 3) == []
+    assert classify.read_which("7", 3) == []
 
 
 def test_a_sentence_with_a_number_in_it_chooses_nothing() -> None:
     """The same mistake `read_choice` was written to stop: "it follows on from 2 of the three" is
     not an answer, and reading a digit out of it attaches a question to a card nobody named."""
-    assert classify.read_about("it follows on from 2 of the three", 3) == []
+    assert classify.read_which("it follows on from 2 of the three", 3) == []
 
 
 def test_a_trailing_full_stop_is_not_a_different_answer() -> None:
-    assert classify.read_about("1.", 3) == [1]
+    assert classify.read_which("1.", 3) == [1]
 
 
 # --- a question about several cards at once -------------------------------------------------------
@@ -87,27 +87,27 @@ def test_several_numbers_name_several_cards() -> None:
     """ "Я могу сразу попросить нарисовать условно 5 частей… и задавать одновременно различные
     вопросы." A question about two of the parts has two cards above it, which is what makes an
     enquiry a graph rather than a tree."""
-    assert classify.read_about("1,3", 3) == [1, 3]
+    assert classify.read_which("1,3", 3) == [1, 3]
 
 
 def test_they_come_back_in_the_order_they_were_named() -> None:
-    assert classify.read_about("3,1", 3) == [3, 1]
+    assert classify.read_which("3,1", 3) == [3, 1]
 
 
 def test_one_card_named_twice_is_one_card() -> None:
     """Two lines between the same pair is one line drawn twice."""
-    assert classify.read_about("1,1,2", 3) == [1, 2]
+    assert classify.read_which("1,1,2", 3) == [1, 2]
 
 
 def test_the_out_of_range_ones_are_dropped_and_the_rest_kept() -> None:
-    assert classify.read_about("2,9", 3) == [2]
+    assert classify.read_which("2,9", 3) == [2]
 
 
 def test_no_more_cards_than_a_person_can_read_a_diagram_of() -> None:
     """The product here is lines on a diagram, and six lines into one card is a picture nobody
     reads — which is the thing an enquiry bench is for. The instruction says three as well; this
     is enforced because an instruction is not a guarantee."""
-    assert classify.read_about("1,2,3,4,5", 5) == [1, 2, 3]
+    assert classify.read_which("1,2,3,4,5", 5) == [1, 2, 3]
     assert classify.MOST_CARDS == 3
 
 

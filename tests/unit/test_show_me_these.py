@@ -115,7 +115,9 @@ def test_nothing_to_point_at_is_a_real_answer() -> None:
 
 
 # --- what comes back ------------------------------------------------------------------------------
-async def test_a_request_naming_neither_says_what_can_be_asked_for(desk: Store) -> None:
+async def test_a_request_naming_neither_looks_on_the_board_instead(desk: Store) -> None:
+    """The two are told apart before either runs: a list to fetch, or something already here
+    (01M1Z9ZZTPYYK3ER7SPSHHJJQ2)."""
     thread = await desk.create_thread("a chat")
     block = await desk.create_block(
         thread_id=thread.id, kind="question", input="покажи мне что-нибудь", thread_set_by="human"
@@ -125,7 +127,7 @@ async def test_a_request_naming_neither_says_what_can_be_asked_for(desk: Store) 
 
     again = await desk.block(block.id)
     assert again is not None
-    assert "tickets on a project's board" in (again.answer or "")
+    assert "nothing on the board to bring over" in (again.answer or "")
     assert again.kind == "showing"
 
 
