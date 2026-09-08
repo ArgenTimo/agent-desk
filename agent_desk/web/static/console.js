@@ -3712,7 +3712,67 @@ function columnOf(kind) {
   return column.of[kind] ?? column.beside;
 }
 
+// An enquiry is laid out by following its lines; anything else by what each card is.
+//
+// "Наши линии-локти рисуются от карточки к карточке и с этим справятся; чего нет — раскладки,
+// которая не рвёт длинную ветку на куски, когда та начинает ветвиться вширь." A column per kind is
+// right for a pile of sessions and ideas and wrong for an enquiry: every answer in one column and
+// every question in another tears a branch in half the moment it is longer than two steps.
+//
+// Which of the two is decided by whether this chat has said what it is about (050). That is the
+// mark of an enquiry and it is a thing somebody set, rather than a guess made from the shape of
+// the bench — where "there are some lines" is true of almost every bench.
 function tidyUp() {
+  if (surface?.querySelector('.pin.beginning')) return layOutTheEnquiry();
+  layOutInColumns();
+}
+
+async function layOutTheEnquiry() {
+  const loose = [...surface.querySelectorAll('.pin:not([data-moved])')];
+  const kept = surface.querySelectorAll('.pin[data-moved]').length;
+  if (!loose.length) {
+    if (kept) say(`Nothing to lay out — you placed all ${kept} of these yourself.`);
+    return;
+  }
+  // Every measurement before anything moves, for the reason `layOutInColumns` gives below: placing
+  // one card changes the layout the next measurement would be answered from.
+  const cards = loose.map((pin) => ({
+    name: cardName(pin),
+    width: pin.offsetWidth || CARD_WIDTH,
+    height: pin.offsetHeight || 120,
+  }));
+  let spots = {};
+  try {
+    const answer = await fetch('/workbench/arrange', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cards, lines: everyTie() }),
+    });
+    spots = (await answer.json()).spots || {};
+  } catch {
+    // The surface somebody already has, which is what a failed layout should leave them with.
+    return say('Could not work out a layout for this one.');
+  }
+  for (const pin of loose) {
+    const at = spots[cardName(pin)];
+    if (!at) continue;
+    placed.delete(cardName(pin));
+    place(pin, at, { avoid: false });
+  }
+  view.x = 0;
+  view.y = 0;
+  applyView();
+  drawTies();
+  drawRings();
+  moveWasDeliberate();
+  say(
+    kept
+      ? `Followed the lines through ${loose.length}. The ${kept} you placed yourself stayed where they were.`
+      : `Followed the lines through ${loose.length} cards.`
+  );
+}
+
+function layOutInColumns() {
   const loose = [...surface.querySelectorAll('.pin:not([data-moved])')];
   const kept = surface.querySelectorAll('.pin[data-moved]').length;
   // Only the loose ones forget where they were. Emptying the whole map took the placed cards'

@@ -39,6 +39,7 @@ from markupsafe import Markup, escape
 
 from agent_desk import (
     allowed,
+    branching,
     connectors,
     dispatch,
     handling,
@@ -1873,6 +1874,38 @@ async def begin_with(request: Request) -> JSONResponse:
     if name:
         await store.begin_with(thread, name)
     return JSONResponse({"start": await store.began(thread)})
+
+
+@router.post("/workbench/arrange", response_class=JSONResponse)
+async def arrange_the_enquiry(request: Request) -> JSONResponse:
+    """Lay a bench out by following the lines rather than by what each card is.
+
+    The page sends what is on the surface, because it is the only thing that knows — including how
+    tall each card has drawn itself, which nothing on this side can work out and a layout computed
+    against a guessed height overlaps the moment a card says two lines instead of one. The lines go
+    the same way for the same reason: half of them are the page's own (an answer joined to its
+    question, a question to what it follows on from) and were never written down.
+
+    A body that will not parse lays nothing out, which is the surface somebody already has.
+    """
+    try:
+        said = await request.json()
+        cards = [
+            branching.Card(
+                name=str(one["name"]), width=int(one["width"]), height=int(one["height"])
+            )
+            for one in said.get("cards", [])
+        ]
+        lines = [dict(one) for one in said.get("lines", [])]
+    except (TypeError, ValueError, KeyError):
+        return JSONResponse({"spots": {}})
+    return JSONResponse(
+        {
+            "spots": {
+                name: {"x": at.x, "y": at.y} for name, at in branching.lay_out(cards, lines).items()
+            }
+        }
+    )
 
 
 @router.post("/workbench/undo", response_class=JSONResponse)

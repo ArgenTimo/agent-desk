@@ -42,7 +42,7 @@ def test_the_page_is_handed_the_order_rather_than_keeping_a_copy() -> None:
     a layout preference rather than a bug."""
     assert 'id="bench-columns"' in BOARD.read_text(encoding="utf-8")
 
-    laying = _body("tidyUp")
+    laying = _body("layOutInColumns")
     for kind in bench.COLUMN:
         assert f"'{kind}'" not in laying, f"{kind} is named in the script as well as in bench.py"
 
@@ -88,7 +88,7 @@ def test_the_order_reads_left_to_right_as_things_containing_things() -> None:
 # --- and the laying out itself -------------------------------------------------------------------
 @pytest.mark.unit
 def test_a_card_is_placed_by_what_it_is_and_not_by_when_it_arrived() -> None:
-    laying = _body("tidyUp")
+    laying = _body("layOutInColumns")
 
     assert "columnOf(pin.dataset.kind)" in laying
     assert "index % 3" not in laying, "the three columns filled in arrival order are still there"
@@ -98,7 +98,7 @@ def test_a_card_is_placed_by_what_it_is_and_not_by_when_it_arrived() -> None:
 def test_the_positions_are_worked_out_rather_than_swept_into() -> None:
     """Collision avoidance gives up after forty steps down and starts a column of its own, which on
     a hundred cards in one column is exactly the porridge this replaces."""
-    laying = _body("tidyUp")
+    laying = _body("layOutInColumns")
 
     assert "{ avoid: false }" in laying
 
@@ -109,7 +109,8 @@ def test_every_height_is_read_before_any_card_is_moved() -> None:
     mistake that cost a pan 20ms a frame, one function over."""
     from tests.unit.test_bench_speed import _reads_after_writing
 
-    assert not _reads_after_writing(_body("tidyUp"))
+    assert not _reads_after_writing(_body("layOutInColumns"))
+    assert not _reads_after_writing(_body("layOutTheEnquiry"))
 
 
 @pytest.mark.unit
@@ -124,7 +125,8 @@ def test_a_bench_with_no_order_served_still_lays_out() -> None:
 
 @pytest.mark.unit
 def test_a_card_somebody_placed_is_still_left_alone() -> None:
-    """The rule from 042 has to survive the layout being rewritten under it."""
-    laying = _body("tidyUp")
-
-    assert "'.pin:not([data-moved])'" in laying
+    """The rule from 042 has to survive the layout being rewritten under it — and there are two
+    layouts now, so it has to hold in both. A rule that only the older one keeps is a rule the
+    person meets or does not depending on whether their chat has said what it is about."""
+    for laying in ("layOutInColumns", "layOutTheEnquiry"):
+        assert "'.pin:not([data-moved])'" in _body(laying), laying

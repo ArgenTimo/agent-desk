@@ -386,10 +386,11 @@ def test_only_a_deliberate_gesture_calls_a_move_deliberate() -> None:
     static = pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "static"
     console = _code((static / "console.js").read_text(encoding="utf-8"))
 
-    assert console.count("moveWasDeliberate()") == 6, (
+    assert console.count("moveWasDeliberate()") == 7, (
         "the gestures that count as somebody moving a card have changed; there is the definition "
-        "and five callers — a drag, the arrow keys, tidying up, an answer that rearranged the "
-        "bench because somebody asked it to, and a template put down in its saved shape"
+        "and six callers — a drag, the arrow keys, each of the two layouts behind "
+        '"lay it out again", an answer that rearranged the bench because somebody asked it to, '
+        "and a template put down in its saved shape"
     )
     settle = console[console.index("function settleOverlaps(") :]
     settle = settle[: settle.index("\n}\n")]

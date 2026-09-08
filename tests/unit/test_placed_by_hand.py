@@ -113,34 +113,42 @@ def test_restoring_a_bench_puts_the_mark_back_on_the_cards_that_had_it() -> None
         assert "layOut(" in where, f"{goes_through.strip()} lays cards out its own way again"
 
 
+# The two layouts behind one button: cards in columns, and an enquiry followed down its lines. Both
+# are what "lay it out again" does, so the rules below hold of both — one that only the older one
+# keeps is a rule somebody meets or does not depending on whether their chat has a beginning.
+LAYOUTS = ("layOutInColumns", "layOutTheEnquiry")
+
+
+def _laying(name: str) -> str:
+    console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
+    body = console[console.index(f"function {name}(") :]
+    return body[: body.index("\n}\n")]
+
+
 @pytest.mark.unit
-def test_tidying_up_moves_only_what_nobody_placed() -> None:
+@pytest.mark.parametrize("which", LAYOUTS)
+def test_tidying_up_moves_only_what_nobody_placed(which: str) -> None:
     """It used to empty the whole layout and lay every card out in a grid, so a set of cards put on
     the left because they belonged on the left went into column two."""
-    console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
+    laying = _laying(which)
 
-    tidy = console[console.index("function tidyUp(") :]
-    tidy = tidy[: tidy.index("\n}\n")]
-
-    assert "'.pin:not([data-moved])'" in tidy, "it still lays out every card on the bench"
-    assert "placed = new Map()" not in tidy, (
+    assert "'.pin:not([data-moved])'" in laying, "it still lays out every card on the bench"
+    assert "placed = new Map()" not in laying, (
         "it still forgets every position, which takes the placed cards' spots with it"
     )
 
 
 @pytest.mark.unit
-def test_tidying_up_says_when_it_left_things_alone() -> None:
+@pytest.mark.parametrize("which", LAYOUTS)
+def test_tidying_up_says_when_it_left_things_alone(which: str) -> None:
     """A button that did less than everything and did not mention it is a button somebody presses
-    twice, and then a third time, before deciding it is broken."""
-    console = _code((STATIC / "console.js").read_text(encoding="utf-8"))
+    twice, and then a third time, before deciding it is broken. Both cases are covered — some laid
+    out and some left, and nothing to lay out at all — rather than counted, because what matters is
+    that neither silence happens."""
+    laying = _laying(which)
 
-    tidy = console[console.index("function tidyUp(") :]
-    tidy = tidy[: tidy.index("\n}\n")]
-
-    assert tidy.count("say(") == 2, (
-        "there are two things to say — it laid some out and left others, or there was nothing to "
-        "lay out at all — and both are cases somebody would otherwise read as a broken button"
-    )
+    assert "you placed all ${kept} of these yourself" in laying
+    assert "stayed where they were" in laying
 
 
 @pytest.mark.unit
