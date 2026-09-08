@@ -334,6 +334,11 @@ async def _summarise(store: Store, idea: Idea) -> None:
     except (session.AnswerFailed, OSError):
         return
     line = next((one for one in "".join(parts).splitlines() if one.strip()), "").strip()
+    # A generated line does not get to undo the check `capture` made. Held at capture and nowhere
+    # else, "a proposal reads at a glance" would be true of the row for as long as it took a
+    # summary run to finish, which is not a promise — it is a race.
+    if idea.author == "desk" and inbox.unclear(inbox.fallback_summary(line)):
+        return
     if line:
         # Only if the fallback is still there. A human editing the card while this run was in
         # flight has said what they want the line to be, and a generated one arriving afterwards

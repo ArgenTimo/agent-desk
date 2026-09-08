@@ -79,7 +79,12 @@ async def test_nothing_is_built_from_a_proposal_nobody_has_approved(desk: Store)
 
 @pytest.mark.unit
 async def test_an_approved_proposal_can_then_be_built(desk: Store) -> None:
-    theirs = await inbox.capture(desk, "a proposal", project_key=KEY, author="desk")
+    theirs = await inbox.capture(
+        desk,
+        "the desk could keep a card for each folder it has read",
+        project_key=KEY,
+        author="desk",
+    )
     await desk.set_idea_state(theirs.id, "kept")
 
     html = await routes.render_ideas()
@@ -93,7 +98,12 @@ async def test_where_an_idea_came_from_is_marked_without_recolouring_its_state(
 ) -> None:
     """On this page colour means status and nothing else, and that rule is older and worth more
     than this feature. A proposal is marked by its own label and its own ground."""
-    await inbox.capture(desk, "a proposal", project_key=KEY, author="desk")
+    await inbox.capture(
+        desk,
+        "the desk could keep a card for each folder it has read",
+        project_key=KEY,
+        author="desk",
+    )
 
     html = await routes.render_ideas()
     css = (
@@ -115,7 +125,12 @@ async def test_where_an_idea_came_from_is_marked_without_recolouring_its_state(
 async def test_the_pool_can_be_sorted_by_where_an_idea_came_from(desk: Store) -> None:
     """ "По ним можно сортироваться." Finding all of one sort is the first thing anybody does."""
     mine = await inbox.capture(desk, "mine, written first", project_key=KEY)
-    theirs = await inbox.capture(desk, "a proposal, written second", project_key=KEY, author="desk")
+    theirs = await inbox.capture(
+        desk,
+        "written second: a card could remember the folder it was read from",
+        project_key=KEY,
+        author="desk",
+    )
 
     await desk.set_setting(routes.IDEA_SORT_KEY, "proposed")
     html = await routes.render_ideas()
@@ -132,7 +147,12 @@ async def test_what_was_set_aside_can_be_found_again(desk: Store) -> None:
     from."""
     from tests.unit.test_input import _post
 
-    theirs = await inbox.capture(desk, "a proposal", project_key=KEY, author="desk")
+    theirs = await inbox.capture(
+        desk,
+        "the desk could keep a card for each folder it has read",
+        project_key=KEY,
+        author="desk",
+    )
     await desk.set_idea_state(theirs.id, "dropped")
 
     assert theirs.id not in await routes.render_ideas()

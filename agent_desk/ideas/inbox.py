@@ -20,6 +20,7 @@ has removed the review that made the artefact worth reading.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,48 @@ def fallback_summary(text: str) -> str:
     """What the card says before — and instead of, if need be — a generated line."""
     first = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return first if len(first) <= SUMMARY_CHARS else first[: SUMMARY_CHARS - 1].rstrip() + "…"
+
+
+# Below this a line names a subject and leaves the reader to work out what is being proposed about
+# it. "LLM pipelines" is a heading; "run one idea through several models and keep the best answer"
+# is a proposal. Four is where the difference starts to be sayable.
+LEAST_WORDS = 4
+# Endings that hand the sentence to the body. A colon introduces the list that is not on the card;
+# an ellipsis is the line admitting it did not finish — which is also what `fallback_summary` puts
+# there when a first line was too long to fit.
+_HANGING = (":", "…", "...", "-", "–", "—", ",", ";")
+# Lines that point at the body instead of saying the thing.
+_SEE_BELOW = re.compile(
+    r"\b(see below|details below|as below)\b|см\.?\s*(ниже|текст)|подробнее ниже", re.I
+)
+
+
+def unclear(summary: str) -> str:
+    """Why this line cannot be understood without opening the card, or "" if it can.
+
+    The card shows the summary on one line and clips the rest — `.card-name` in console.css is
+    `nowrap` with an ellipsis — so a line that does not finish inside `SUMMARY_CHARS` finishes
+    off-screen, and the half that gets clipped is the end of the sentence, where the reason a
+    proposal is worth doing usually is.
+
+    What this checks is whether the line is *readable* at a glance, not whether it is convincing.
+    "Says what and why" cannot be decided by a regular expression, and the check that looked
+    decidable — require a connective, "so that", "because", "чтобы" — was tried and dropped: it
+    rejects "the folder cards could name their files", which is a complete proposal with no
+    connective in it. A check that fires on good lines teaches people to word their way past it.
+    """
+    line = summary.strip()
+    if not line:
+        return "there is no line to read"
+    if len(line) > SUMMARY_CHARS:
+        return f"the card clips it — {len(line)} characters where {SUMMARY_CHARS} are shown"
+    if line.endswith(_HANGING):
+        return "it trails off, so what it is about is in the body rather than on the card"
+    if _SEE_BELOW.search(line):
+        return "it points at the body instead of saying the thing"
+    if len(line.split()) < LEAST_WORDS:
+        return "it names a subject without saying what is proposed about it"
+    return ""
 
 
 async def capture(
@@ -56,7 +99,18 @@ async def capture(
     moment on it, and `web/later.py` brings it back then (031-deferred.sql). Read here rather than
     asked of a model, because it is a regular expression over a handful of phrases and because
     this function's promise is that it cannot fail on a busy machine.
+
+    One thing can refuse: a proposal the desk wrote, whose first line cannot be read at a glance.
+    That is not the busy-machine failure the promise above is about — it is a fault in the text,
+    and the writer is right here to fix it. The asymmetry with a human's idea is the whole point
+    of 039-idea-author.sql: an idea a person wrote arrives with a person who holds its context, so
+    a bare "билд" on the card is a note to themselves and costs nobody anything. A proposal
+    arrives with nobody, and if it can only be understood by opening the card and reading a
+    paragraph, the work of getting into its context has been handed to the reader — which is the
+    work the proposal was supposed to save.
     """
+    if author == "desk" and (why := unclear(fallback_summary(text))):
+        raise ValueError(f"a proposal has to read at a glance: {why}")
     idea = await store.create_idea(
         text_=text.strip(),
         summary=fallback_summary(text),
