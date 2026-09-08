@@ -202,8 +202,13 @@ async def _ask(prompt: str, engine: str | None = None) -> tuple[str, str]:
 
 def _asked_of(
     card: process.Card, cards: Sequence[process.Card], lines: Sequence[process.Line]
-) -> tuple[str | None, str]:
-    """Which engine this step is to be asked, and why it cannot be, if it cannot.
+) -> tuple[list[engines.Engine | None], str]:
+    """Which engines this step is to be asked, and why it cannot be, if it cannot.
+
+    A list, because of the primitive the harness is built on: *"так как модели 2, то из промпта 2
+    выхода"*. Two model cards on one prompt is one card with two results, not two drawings that
+    agree until the first edit to either. `[None]` — one engine, unnamed — is the ordinary case
+    and means whatever is configured.
 
     A model card is a card leading into the step whose value names an engine. Not a field on the
     step, because "весь смысл харнесса в том, чтобы одну и ту же вещь прогнать через две разные и
@@ -213,21 +218,39 @@ def _asked_of(
     A name this console does not have stops the step. Falling through to the default would compare
     a thing with itself and give no sign that it had.
     """
+    asked: list[engines.Engine | None] = []
     for one in process.feeding(card.name, list(cards), list(lines)):
         value = (one.made or one.said.get("what", "") or "").strip()
         if not value:
             continue
         found = engines.named(value)
         if found is not None:
-            return found.binary, ""
+            if found not in asked:
+                asked.append(found)
+            continue
         if len(value.split()) <= 3 and any(
             word in value.lower() for word in ("model", "gpt", "claude", "модель")
         ):
             # It reads as the name of an engine and is not one of ours. Said rather than ignored:
             # a card that looks like it chose a model and did not is worse than an error.
             offered = ", ".join(what.name for what in engines.available())
-            return None, f"there is no engine called “{value}” here — this console has: {offered}"
-    return None, ""
+            return [], f"there is no engine called “{value}” here — this console has: {offered}"
+    return asked or [None], ""
+
+
+def as_a_fan(answers: Sequence[tuple[str, str]]) -> str:
+    """Several answers to one prompt, as the one thing the step produced.
+
+    Labelled by the engine that gave each, because an unlabelled pair is a comparison nobody can
+    read — and the labels are what the next step and the run comparison both see, so which model
+    said what survives past the moment somebody was looking at it.
+
+    One answer is itself, unlabelled. Every drawing without a model card on it is that, and a
+    heading over a single result would be a heading about nothing.
+    """
+    if len(answers) == 1:
+        return answers[0][1]
+    return "\n\n".join(f"## {name}\n{said}" for name, said in answers)
 
 
 def branch_prompt(
@@ -401,16 +424,23 @@ async def _do(
     if allowed.reads_only(given):
         # No worktree and no agent at all, which is what the `read` permission means rather than
         # describes (agent_desk/allowed.py).
-        engine, why = _asked_of(card, cards, lines)
+        asked, why = _asked_of(card, cards, lines)
         if why:
             await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=why)
             await store.end_run(run.id, why=f"{card.label or card.name}: {why}")
             return 1
-        answer, gone = await _ask(said, engine)
-        if gone:
-            await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
-            await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")
-            return 1
+        # Each engine asked the same prompt. One is the ordinary case; two is the fan, and the
+        # first failure stops the step — half a comparison is not a comparison, and a step that
+        # reported one of two answers as its result would say so nowhere.
+        answers: list[tuple[str, str]] = []
+        for which in asked:
+            answer, gone = await _ask(said, None if which is None else which.binary)
+            if gone:
+                await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
+                await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")
+                return 1
+            answers.append((which.name if which is not None else "answer", answer))
+        answer = as_a_fan(answers)
         await store.card_made(card.name, answer[:MOST_MADE])
         await store.set_run_step(
             run_id=run.id, name=card.name, state="done", made=answer[:MOST_MADE]

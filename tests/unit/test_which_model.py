@@ -71,17 +71,17 @@ def test_a_card_leading_in_chooses_the_engine() -> None:
     two lines on a diagram, and the same prompt with two values in one field is two prompts."""
     model, step = _model("claude"), _step()
 
-    engine_name, why = engine._asked_of(step, [model, step], [_into(model, step)])
+    asked, why = engine._asked_of(step, [model, step], [_into(model, step)])
 
     assert why == ""
-    assert engine_name == ""
+    assert [one.name for one in asked if one] == ["claude"]
 
 
 def test_a_step_with_no_model_card_uses_whatever_is_configured() -> None:
     """`None` means "the ordinary list", which is what every drawing without a model card wants."""
     step = _step()
 
-    assert engine._asked_of(step, [step], []) == (None, "")
+    assert engine._asked_of(step, [step], []) == ([None], "")
 
 
 def test_an_engine_this_console_does_not_have_stops_the_step() -> None:
@@ -89,9 +89,9 @@ def test_an_engine_this_console_does_not_have_stops_the_step() -> None:
     had — which is the one outcome a harness cannot have."""
     model, step = _model("GPT 4.1"), _step()
 
-    engine_name, why = engine._asked_of(step, [model, step], [_into(model, step)])
+    asked, why = engine._asked_of(step, [model, step], [_into(model, step)])
 
-    assert engine_name is None
+    assert asked == []
     assert "no engine called" in why
     assert "claude" in why, "it does not say what it does have"
 
@@ -104,7 +104,7 @@ def test_a_card_that_is_not_about_a_model_is_left_alone() -> None:
     )
     step = _step()
 
-    assert engine._asked_of(step, [article, step], [_into(article, step)]) == (None, "")
+    assert engine._asked_of(step, [article, step], [_into(article, step)]) == ([None], "")
 
 
 def test_the_run_stops_rather_than_asking_the_wrong_model() -> None:
@@ -112,8 +112,8 @@ def test_the_run_stops_rather_than_asking_the_wrong_model() -> None:
         pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "engine.py"
     ).read_text(encoding="utf-8")
 
-    assert "engine, why = _asked_of(card, cards, lines)" in source
-    assert "answer, gone = await _ask(said, engine)" in source
+    assert "asked, why = _asked_of(card, cards, lines)" in source
+    assert "await _ask(said, None if which is None else which.binary)" in source
 
 
 def test_a_named_engine_is_the_only_one_tried() -> None:
