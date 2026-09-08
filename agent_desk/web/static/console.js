@@ -1010,6 +1010,9 @@ document.addEventListener('dragstart', (event) => {
     label: card.dataset.label,
     project: card.closest('.project')?.dataset.project,
     fromPins: !!card.closest('#pins'),
+    // An idea the desk proposed and nobody has looked at yet. Read here rather than after the
+    // drop, because the card it was read from is in a column this drop may well replace.
+    unlooked: card.classList.contains('unlooked'),
   };
   event.dataTransfer.setData('text/plain', card.dataset.label || '');
   event.dataTransfer.effectAllowed = 'copyMove';
@@ -1050,7 +1053,21 @@ document.addEventListener('drop', (event) => {
   dragged.handled = true;
 
   if (zone.id === 'bench-canvas') {
-    if (!dragged.fromPins) pin(dragged, { came: 'dropped on the workbench' });
+    if (!dragged.fromPins) {
+      const { kind, id, unlooked } = dragged;
+      pin(dragged, { came: 'dropped on the workbench' }).then(() => {
+        // "Я перетягиваю твою идею на верстак, начинаю задавать тебе вопросы." A proposal is an
+        // idea nobody holds the context of yet, and the way to come to hold it is to ask about it
+        // — which is what an enquiry is, and an enquiry needs a root. This is that root.
+        //
+        // Only a proposal, and only when the chat has no beginning yet. Every idea becoming the
+        // root of an enquiry would hijack an ordinary bench, and replacing a beginning somebody
+        // set is the console overruling them about what they are working on.
+        if (!unlooked || surface.querySelector('.pin.beginning')) return;
+        beginFrom(`${kind}:${id}`);
+        say('Asking about this one — what you ask next hangs off it.');
+      });
+    }
     document.getElementById('ask-text').focus();
     return;
   }
