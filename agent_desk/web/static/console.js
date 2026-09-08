@@ -628,6 +628,10 @@ function syncTargets() {
   const go = document.getElementById('get-started');
   go.hidden = ideas === 0;
   go.textContent = ideas > 1 ? `Get started on these ${ideas}` : 'Get started on it';
+  // The other end of the same bar: once a chat has said what it is about there is an enquiry
+  // running, and the thing anybody wants at the end of one is to keep what it arrived at.
+  const asIdea = document.getElementById('as-an-idea');
+  if (asIdea) asIdea.hidden = !surface?.querySelector('.pin.beginning');
   showActiveThread();
   // And write the bench down. Here rather than at each of the things that change it — taking a
   // card off, folding one, leaving one out of the message, clearing the lot — because that list
@@ -2851,6 +2855,42 @@ async function addStep(role = 'action') {
     say('Could not add a step.');
   }
 }
+
+// "В финале я должен получить блок, в котором будет кнопка «добавить как идею»."
+//
+// The end of the flow this whole set describes: a proposal is dragged on, asked about until it is
+// understood, and what comes out is an idea with somebody behind it. The route that makes it has
+// been here since the set was started and nothing on the page called it, so an idea could be made
+// out of a bench only by somebody who knew the URL.
+//
+// It asks for the line, and does not offer to write one. The summary is what the card shows in a
+// pool of two hundred, and after a conversation somebody has just driven, the one sentence they
+// would use for it is a thing they have and the console does not.
+async function keepThisAsAnIdea() {
+  const summary = (prompt('What did this come to? One line.', '') || '').trim();
+  if (!summary) return;
+  // Everything on the bench, not just what is charged for the next message: the answers, the cards
+  // they were about and what was dropped in are all how this was arrived at, and leaving out the
+  // ones somebody had switched off would drop half the reasoning without saying so.
+  const cards = onBench('.pin[data-kind]:not(.own)').map(cardName).join(',');
+  try {
+    const answer = await fetch('/ideas/from-bench', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ cards, summary }),
+    });
+    const said = await answer.json();
+    say(
+      said.made
+        ? `Written down as yours, out of ${said.cards} card${said.cards === 1 ? '' : 's'}.`
+        : said.why || 'Could not write it down.'
+    );
+  } catch {
+    say('Could not write it down.');
+  }
+}
+
+document.getElementById('as-an-idea')?.addEventListener('click', keepThisAsAnIdea);
 
 // The card an enquiry starts from. "Создаётся карточка начала, например — описание проекта."
 //
