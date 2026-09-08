@@ -97,25 +97,37 @@ async def lines_of(store: Store, names: list[str]) -> list[process.Line]:
 
 
 async def begin(
-    store: Store, *, names: list[str], repo_key: str, cwd: str
+    store: Store, *, names: list[str], repo_key: str, cwd: str, given: str = ""
 ) -> tuple[Run | None, str]:
     """Start a run of this drawing, or say why not.
 
     The refusal comes from `process.ready_to_run`, which is the same function the panel shows —
     so a button that is offered and a run that is refused cannot disagree about why.
+
+    `given` is what somebody typed to start it, which the steps can then read (057). A pipeline is
+    a shape run more than once with different inputs, so the input belongs to the run.
     """
     cards = await bench_of(store, names)
     why = process.ready_to_run(cards, await lines_of(store, names))
     if why:
         return None, why
-    if not repo_key or not cwd:
+    # A drawing made only of prompts needs no project and no checkout: it does not touch either,
+    # which is what its permission means rather than describes. Asking for one would be asking
+    # where to run something that runs nowhere (01M1X8DA8REGR836D77PPV3W54).
+    if not _all_prompts(cards) and (not repo_key or not cwd):
         return (
             None,
             "there is nowhere to run this: the cards are not about a project with a checkout",
         )
-    run = await store.start_run(cards=names, repo_key=repo_key, cwd=cwd)
+    run = await store.start_run(cards=names, repo_key=repo_key, cwd=cwd, given=given)
     log.info("engine.began", run=run.id, steps=len(names))
     return run, ""
+
+
+def _all_prompts(cards: list[process.Card]) -> bool:
+    """Whether every step of this drawing is a prompt, and it therefore touches nothing."""
+    steps = [card for card in cards if card.role in process.STEPS]
+    return bool(steps) and all(allowed.is_a_prompt(card.said) for card in steps)
 
 
 def _next_step(
@@ -349,7 +361,9 @@ async def _do(
     # briefing exists to turn a drawn process into instructions for an agent; a pipeline step is
     # the prompt somebody is testing, and wrapping it in a paragraph about the diagram would be
     # testing something else (01M1X8DA8REGR836D77PPV3W54).
-    said = _asking(card, await _what_is_known(store, run)) or briefing(card.name, cards, lines)
+    said = _asking(card, run.given, await _what_is_known(store, run)) or briefing(
+        card.name, cards, lines
+    )
 
     if allowed.reads_only(given):
         # No worktree and no agent at all, which is what the `read` permission means rather than
@@ -387,13 +401,15 @@ async def _do(
     return 1
 
 
-def _asking(card: process.Card, known: list[str]) -> str:
+def _asking(card: process.Card, given: str, known: list[str]) -> str:
     """The prompt this step sends, or "" when it is not that kind of step.
 
-    Two parts, in the order they matter. The prompt somebody wrote, verbatim and first, because it
-    is the thing being tested and anything above it is something else being tested. Then what came
-    out of the steps before it, because a pipeline is steps that feed each other and a step that
-    could not see the last answer is a step in a different pipeline.
+    Three parts, in the order they matter. The prompt somebody wrote, verbatim and first, because
+    it is the thing being tested and anything above it is something else being tested. Then what
+    this run was given — the words typed to start it, the same shape run against a different input
+    being the point of building one. Then what came out of the steps before it, because a pipeline
+    is steps that feed each other and a step that could not see the last answer is a step in a
+    different pipeline.
 
     What the answer should look like is deliberately not a field of its own. Anybody writing a
     prompt says "answer with one line" inside it, and a second box for that is a second place for
@@ -403,6 +419,8 @@ def _asking(card: process.Card, known: list[str]) -> str:
     if not asks:
         return ""
     lines = [asks]
+    if given.strip():
+        lines += ["", "## What this run was given", given.strip()]
     if known:
         lines += ["", "## What the steps before this one produced", *known]
     return "\n".join(lines)

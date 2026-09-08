@@ -101,7 +101,7 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw|show|unsure)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw|show|run|unsure)\Z", re.IGNORECASE)
 
 _KIND_OF = {
     "question": "question",
@@ -111,6 +111,7 @@ _KIND_OF = {
     "arrange": "handling",
     "draw": "drawing",
     "show": "showing",
+    "run": "running",
     "unsure": "unsure",
 }
 
@@ -183,6 +184,11 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "             row becomes a card.",
             '             "покажи открытые PR-ы", "покажи тикеты из спринта", "show me the open',
             '             pull requests", "вынеси тикеты на верстак"',
+            "  run      — they are telling you to run the drawing that is on the workbench, and",
+            "             what they typed is what to run it against. Only when there is a drawing",
+            "             there: with an empty workbench the same words are a question.",
+            '             "прогони это", "запусти пайплайн на этом тексте", "run it with this",',
+            '             "прогони на этом входе"',
             "  arrange  — they are telling you to change *the cards in front of them*: highlight",
             "             some, put these here and those there. The answer is a rearrangement of",
             "             what is already on the workbench, not a paragraph and not a new card.",
@@ -217,7 +223,9 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "those two the bar is high: name them only when there is an addressee or an explicit",
             "instruction to start now, and answer `question` or `idea` when you are weighing it up.",
             "`draw`, `show` and `arrange` are cheap — one model call, undone in one press — and can",
-            "be answered on the balance of it.",
+            "be answered on the balance of it. `run` is as expensive as the drawing it runs, and",
+            "its guard is different: it needs a drawing on the workbench to be a possible answer",
+            "at all, and where there is one it is what the person built it for.",
             "",
             "**There is a seventh answer, and it is only for the expensive ones.** `unsure` — when",
             "this reads as `do` or `desk` and equally as something cheaper, and choosing would be",

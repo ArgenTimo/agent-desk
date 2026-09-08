@@ -59,7 +59,7 @@ def test_there_is_no_second_box_for_the_shape_of_the_answer() -> None:
 # --- what gets sent -------------------------------------------------------------------------------
 def test_the_prompt_is_sent_as_it_was_written() -> None:
     """It is the thing being tested, and anything above it is something else being tested."""
-    said = engine._asking(_card(asks="Summarise this in one line."), [])
+    said = engine._asking(_card(asks="Summarise this in one line."), "", [])
 
     assert said.startswith("Summarise this in one line.")
 
@@ -67,13 +67,13 @@ def test_the_prompt_is_sent_as_it_was_written() -> None:
 def test_what_the_steps_before_it_produced_comes_after() -> None:
     """A pipeline is steps that feed each other, and a step that could not see the last answer is
     a step in a different pipeline."""
-    said = engine._asking(_card(asks="Now rewrite it."), ["ask it: the first draft"])
+    said = engine._asking(_card(asks="Now rewrite it."), "", ["ask it: the first draft"])
 
     assert said.index("Now rewrite it.") < said.index("the first draft")
 
 
 def test_a_step_with_no_prompt_is_not_one_of_these() -> None:
-    assert engine._asking(_card(do="write the migration"), []) == ""
+    assert engine._asking(_card(do="write the migration"), "", []) == ""
 
 
 def test_a_prompt_step_is_not_given_the_briefing_about_the_diagram() -> None:
@@ -84,4 +84,13 @@ def test_a_prompt_step_is_not_given_the_briefing_about_the_diagram() -> None:
         pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "engine.py"
     ).read_text(encoding="utf-8")
 
-    assert "_asking(card, await _what_is_known(store, run)) or briefing(" in source
+    assert "_asking(card, run.given, await _what_is_known(store, run)) or briefing(" in source
+
+
+def test_a_step_that_chose_an_alternative_is_missing_nothing() -> None:
+    """The alternative replaces the ordinary work rather than joining it, so asking such a step
+    what work it does is asking it to be two kinds of step at once. Without this every step from
+    049 and every pipeline step reads as half-drawn and `ready_to_run` refuses to start it."""
+    assert roles.missing("action", {"asks": "summarise it"}) == ()
+    assert roles.missing("action", {"runs": "release"}) == ()
+    assert roles.missing("action", {}) == ("what to do",)

@@ -56,6 +56,9 @@ BlockKind = Literal[
     # Not a kind of request: the console saying it could not tell which of the expensive ones this
     # was, and asking. Nothing runs until somebody presses one of the choices.
     "unsure",
+    # "Весь запуск и ввод происходит из одного места, с поля ввода." What was typed starts the
+    # drawing on the workbench and is the input it is run against.
+    "running",
 ]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
@@ -358,6 +361,9 @@ class Run(BaseModel):
     # (049-a-step-that-is-a-process.sql). Null on an ordinary run, which is nearly all of them.
     inside_run: str | None = None
     inside_step: str | None = None
+    # What this run was started with, in the words somebody typed (057). Belongs to the run rather
+    # than to a card, because a pipeline is a shape run more than once with different inputs.
+    given: str = ""
 
     @property
     def going(self) -> bool:
@@ -2907,6 +2913,7 @@ class Store:
         cwd: str,
         inside_run: str = "",
         inside_step: str = "",
+        given: str = "",
     ) -> Run:
         run = Run(
             id=_new_id(),
@@ -2916,14 +2923,15 @@ class Store:
             started_at=_now_ms(),
             inside_run=inside_run or None,
             inside_step=inside_step or None,
+            given=given,
         )
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO run "
-                    "(id, cards, repo_key, cwd, at, started_at, inside_run, inside_step) "
+                    "(id, cards, repo_key, cwd, at, started_at, inside_run, inside_step, given) "
                     "VALUES (:id, :cards, :repo_key, :cwd, '', :started_at, :inside_run, "
-                    ":inside_step)"
+                    ":inside_step, :given)"
                 ),
                 run.model_dump(exclude={"at", "finished_at", "stopped_why", "paused_at"}),
             )
@@ -2934,7 +2942,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why, "
-                    "paused_at, inside_run, inside_step "
+                    "paused_at, inside_run, inside_step, given "
                     "FROM run ORDER BY started_at DESC LIMIT 60"
                 )
             )

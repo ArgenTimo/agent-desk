@@ -157,7 +157,14 @@ def missing(role: str, said: dict[str, str]) -> tuple[str, ...]:
 
     Not an error and not a refusal: a diagram half-drawn is a diagram being thought about. It is
     what an engine would have to stop on, which makes it worth showing on the card first.
+
+    A step that has chosen an alternative — a saved process to run, a prompt to send — is missing
+    nothing. The alternative replaces the ordinary work rather than joining it, so asking such a
+    step what work it does is asking it to be two kinds of step at once. Without this, every step
+    from 049 and every pipeline step reads as half-drawn and `ready_to_run` refuses to start it.
     """
+    if any(field.instead and said.get(field.name, "").strip() for field in fields_of(role)):
+        return ()
     return tuple(
         field.says
         for field in fields_of(role)

@@ -42,6 +42,7 @@ from agent_desk.store.repo import (
     TicketLink,
 )
 from agent_desk.tracker import github, jira
+from agent_desk.web import engine
 
 if TYPE_CHECKING:
     from agent_desk.web.routes import BoardRow
@@ -841,6 +842,9 @@ async def _work(
         if kind == "showing":
             await _show_them(store, block, rows, on_bench)
             return
+        if kind == "running":
+            await _run_the_drawing(store, block, rows, on_bench)
+            return
         if kind == "handling" and surface:
             await _rearrange(store, block, rows, surface=surface, on_bench=on_bench)
             return
@@ -893,6 +897,63 @@ async def cards_from_shape(
                 from_name=made[first], to_name=made[second], kind=one["kind"], says=one["says"]
             )
     return list(made.values())
+
+
+async def _run_the_drawing(
+    store: Store, block: Block, rows: Sequence[BoardRow], on_bench: Sequence[str]
+) -> None:
+    """Run the drawing on the workbench, against what was typed.
+
+    "Весь запуск и ввод происходит из одного места, с поля ввода. То есть пайплайн получает вход
+    не из формы внутри карточки, а из того, что человек написал внизу — и это же поле его
+    запускает."
+
+    Both halves of that sentence are here and the second is the reason for the first. A form inside
+    a card would make the input part of the shape, edited in place; running the same shape against
+    a different input is the whole reason to build one, so the input belongs to the run and arrives
+    the way every other request does.
+
+    The refusal is `engine.begin`'s, which is the function the run button also asks — a button that
+    is offered and a message that is refused must not disagree about why.
+    """
+    await store.set_block_kind(block.id, "running")
+    if not on_bench:
+        await store.finish_block(
+            block.id,
+            "There is nothing on the workbench to run. Draw a process or put one there, and say "
+            "this again with what it should run against.",
+        )
+        return
+    names = list(on_bench)
+    key, cwd = await _where_a_run_goes(store, names, rows)
+    made, why = await engine.begin(store, names=names, repo_key=key, cwd=cwd, given=block.input)
+    if made is None:
+        await store.finish_block(block.id, f"It did not start: {why}")
+        return
+    await store.finish_block(
+        block.id,
+        f"Running the {len(names)} cards on the workbench against what you typed. Each step says "
+        "what it produced as it finishes.",
+    )
+
+
+async def _where_a_run_goes(
+    store: Store, names: Sequence[str], rows: Sequence[BoardRow]
+) -> tuple[str, str]:
+    """Which project a run happens in: the one the cards are about.
+
+    Read from the ideas on the bench, because that is the only card kind carrying a project a
+    person chose. A drawing about nothing in particular has nowhere to run and `engine.begin` says
+    so — except for a drawing made only of prompts, which touches nothing and needs nowhere.
+    """
+    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    keys = [ideas[name].project_key for name in names if name in ideas and ideas[name].project_key]
+    if not keys:
+        return ("", "")
+    where = next(
+        (row.session.cwd for row in rows if getattr(row, "project_key", "") == keys[0]), ""
+    )
+    return (keys[0] or "", where)
 
 
 async def _show_them(

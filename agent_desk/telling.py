@@ -341,6 +341,8 @@ _TAKEN_AS = {
     "master": "taken as a job for this console itself",
     "handling": "taken as a change to the workbench",
     "showing": "taken as a request to fetch these and put them on the workbench",
+    "running": "taken as: run what is on the workbench, against this",
+    "unsure": "",
     "observation": "taken as something noticed",
 }
 
