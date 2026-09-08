@@ -616,9 +616,14 @@ function syncTargets() {
     pin.classList.toggle('left-out', picked > 0 && !pin.classList.contains('chosen'));
   }
   const deep = pins.querySelectorAll('.pin.deep').length;
+  // Built as words rather than patched afterwards: "asking about these 1 card only" is what a
+  // template with a plural hole in it says, and it is the sentence somebody reads first.
+  const many = live === 1 ? 'card' : `${live} cards`;
+  const about = picked
+    ? `asking about ${live === 1 ? 'this card' : many} only`
+    : `carrying ${live === 1 ? 'one card' : many}`;
   document.getElementById('context-count').textContent = carried
-    ? `${picked ? 'asking about these' : 'carrying'} ${live} card${live === 1 ? '' : 's'}` +
-      `${picked ? ' only' : ''}` +
+    ? about +
       `${deep ? ` (${deep} in full)` : ''}` +
       `${attached ? ` and ${attached} earlier answer${attached === 1 ? '' : 's'}` : ''}`
     : '';
@@ -659,7 +664,17 @@ function letGoOfAttached() {
   syncTargets();
 }
 
-document.getElementById('clear-context').addEventListener('click', clearBench);
+// "Carry nothing" stops carrying. It used to call `clearBench`, which takes every card off the
+// workbench — so a person who wanted to ask one question without the bench attached lost the bench.
+// Two controls did the same destructive thing and one of them was labelled as if it were about the
+// message. Taking everything off is still in the menu, where it says what it does.
+document.getElementById('clear-context').addEventListener('click', () => {
+  chooseNone();
+  for (const pin of pins.querySelectorAll('.pin[data-kind]')) pin.classList.add('spent');
+  for (const button of document.querySelectorAll('#blocks .attach.on')) button.click();
+  syncTargets();
+  drawMap();
+});
 
 // It types the words and sends them. The message then reads as what it is — somebody saying to
 // take it on — and there is one path through the console rather than two.
@@ -1739,6 +1754,9 @@ function nextFreeSpot() {
 // touch. Where it actually is on screen is a better answer than the origin.
 let moving = null;
 
+// Set when a drag ends, and read by the click that the browser sends straight after it.
+let justDragged = false;
+
 // What may be grabbed, and what is somebody trying to press or read instead.
 const NOT_A_GRIP =
   'button, a, input, textarea, select, summary, details, option, label, .pin-live, .pin-role, .pin-leave';
@@ -1763,6 +1781,9 @@ canvas?.addEventListener('pointerdown', (event) => {
   const pin = gripOf(event.target);
   if (event.button !== 0) return;
   if (event.target.closest(NOT_A_GRIP)) return;
+  // "Вкл-выкл курсор — не перетягивает карточки, а просто их включает и выключает." A tool whose
+  // whole promise is that a press does one thing has to not also do the other one.
+  if (tool === 'choose' && pin) return;
 
   if (pin) {
     const at = whereIs(pin);
@@ -1787,7 +1808,12 @@ canvas?.addEventListener('pointerdown', (event) => {
 
   // Empty surface, or a part of a card that is not a grip: pan. The same gesture the whole class
   // of tool uses.
-  if (!event.target.closest('.pin')) {
+  //
+  // Except when the same press is about to draw a box. Both handlers are on the canvas and both
+  // used to run: the surface slid away under the band while it was being drawn, so the box was
+  // measured against one frame and the cards against another, and it caught nothing. A gesture
+  // does one thing.
+  if (!event.target.closest('.pin') && !(event.shiftKey || tool === 'area')) {
     moving = {
       pan: true,
       from: { x: view.x, y: view.y },
@@ -1892,6 +1918,9 @@ function endMove() {
   const wasACard = Boolean(moving.pin);
   moving = null;
   if (wasAMove) {
+    // A drag is not a click. Without this, moving a card by its head also chose it — and moving
+    // cards about is what somebody does all day on a surface like this one.
+    justDragged = true;
     drawTies();
     drawRings();
     // Once, here, rather than on every event of the drag. Deliberate: this is the gesture undo
@@ -1955,6 +1984,10 @@ document.addEventListener('keydown', (event) => {
     showChosen();
     return;
   }
+  if (event.key === 'Escape' && tool !== 'move') {
+    useTool('move');
+    return;
+  }
   if (event.key === 'Escape' && chosenCards().length) {
     event.preventDefault();
     event.stopPropagation();
@@ -2009,6 +2042,10 @@ function chooseNone() {
 function showChosen() {
   // The choice is the context, so anything that changes it changes what the next message carries.
   syncTargets();
+  // And the map: on a bench too big for its window, the map is where "what is chosen" is
+  // answerable at all. Redrawn here rather than only when the view moves, because the selection
+  // changes far more often than the view does.
+  drawMap();
   const bar = document.getElementById('chosen-bar');
   if (!bar) return;
   const many = chosenCards();
@@ -2017,8 +2054,57 @@ function showChosen() {
   if (says) says.textContent = `${many.length} chosen`;
 }
 
+/* --- what the pointer does -------------------------------------------------------------------- */
+// "Точка вкл/выкл слишком маленькая и неприметная… давай добавим несколько иконок инструментов, как
+// сделано например в графических редакторах."
+//
+// He is right, and the reason is not the size of the dot. A control that changes what a *click*
+// means has to be visible before the click, and a mark on one card cannot say what the pointer will
+// do on the next one. A tool strip says it once, for everything, and stays said.
+//
+// Three, because there are three things a pointer does on this surface and no more. Each is a mode
+// and each stays chosen until another is — the convention every drawing program has had for thirty
+// years, and people arrive already knowing it. Escape goes back to Move, which is the way out
+// somebody reaches for without being told.
+const TOOLS = { move: 'Move', choose: 'Choose', area: 'Choose an area' };
+const TOOL_KEYS = { v: 'move', c: 'choose', g: 'area', 1: 'move', 2: 'choose', 3: 'area' };
+let tool = 'move';
+
+function useTool(name) {
+  if (!TOOLS[name]) return;
+  tool = name;
+  for (const button of document.querySelectorAll('[data-tool]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.tool === name));
+  }
+  // The cursor is the other half of saying what will happen: a crosshair over a card is a promise
+  // that clicking it will not drag it.
+  canvas?.classList.toggle('choosing', name === 'choose');
+  canvas?.classList.toggle('boxing', name === 'area');
+  const said = document.querySelector('.tool-said');
+  // Named out loud for the moment after a press, because an icon that has just changed meaning is
+  // an icon somebody wants confirmed.
+  if (said) said.textContent = name === 'move' ? '' : TOOLS[name];
+}
+
+document.getElementById('tools')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-tool]');
+  if (button) useTool(button.dataset.tool);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // `closest` on the target, guarded: a key event can arrive with the document itself as its
+  // target, and `document.closest` is not a function — which is a listener that throws on a key
+  // press rather than one that ignores it.
+  if (event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+  const wanted = TOOL_KEYS[event.key.toLowerCase()];
+  if (!wanted) return;
+  event.preventDefault();
+  useTool(wanted);
+});
+
 canvas?.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || !event.shiftKey) return;
+  if (event.button !== 0 || !(event.shiftKey || tool === 'area')) return;
   if (event.target.closest('.pin')) return;
   event.preventDefault();
   const frame = surface.getBoundingClientRect();
@@ -4696,11 +4782,38 @@ function emptyOrNot() {
 document.addEventListener('click', (event) => {
   const holder = event.target.closest('.pin');
   if (!holder) return;
-  // The controls on the head do their own thing; the head itself is the switch.
   if (event.target.closest('button, a, textarea, input, select')) return;
-  if (!event.target.closest('.pin-head')) return;
-  holder.classList.toggle('spent');
-  syncTargets();
+  // A drag that ended on this card is not a press on it.
+  if (justDragged) {
+    justDragged = false;
+    return;
+  }
+  // Shift-clicking is the same act and is handled where the band is, so that adding one card and
+  // sweeping several are one piece of code with one meaning.
+  if (event.shiftKey) return;
+
+  // The dot is the other direction, and it works under every tool: leave *this* one out while the
+  // rest still go. Two different sentences, so two different controls.
+  if (event.target.closest('.pin-live')) {
+    holder.classList.toggle('spent');
+    syncTargets();
+    drawMap();
+    return;
+  }
+
+  // "Если я один раз кликаю на карточку ЛКМ — она начинает светиться и только она будет
+  // участвовать в следующем запросе, повторный клик убирает её из запроса."
+  //
+  // Under the Choose tool, and not under Move. A click that sometimes opens a card and sometimes
+  // changes what the next question is about is a click nobody can predict, and the tool strip is
+  // what makes the difference visible before the press rather than after it.
+  //
+  // The default is everything: a card is on the bench because somebody put it there, and making
+  // them confirm each one would be asking twice. Choosing narrows that to what was chosen, and
+  // choosing nothing is back to everything — so the gesture has no state to get stuck in.
+  if (tool !== 'choose') return;
+  holder.classList.toggle('chosen');
+  showChosen();
 });
 
 /* --- a block of your own on the workbench ----------------------------------------------------- */

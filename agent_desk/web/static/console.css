@@ -2852,3 +2852,86 @@ button.go:hover, button.yes:hover {
   font-size: var(--t-xs);
   color: var(--fg-dim);
 }
+
+/* --- choosing what the next question is about ---------------------------------------------------- */
+/* The bench is the context by default and a click narrows it. Three things say which state you are
+   in, and none of them is only colour: the chosen card is outlined, the rest are dimmed, and the
+   strip under the bench says "asking about these 3 only" in words. */
+/* --- the tool strip --------------------------------------------------------------------------- */
+/* "Давай добавим несколько иконок инструментов, как сделано например в графических редакторах."
+   The arrangement is thirty years old and people arrive knowing it: a short column in the corner,
+   one press each, the one in use held down. What it buys is that "what happens if I click" is
+   answered before the click and stays answered — which no mark on a single card can do. */
+.tools {
+  position: absolute;
+  z-index: 30;
+  left: 10px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+.tools button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-dim);
+  font-size: var(--t-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.tools button:hover { color: var(--fg); border-color: var(--line); }
+.tools button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* The one in use. Pressed, not merely tinted: `aria-pressed` is the fact, and this draws it. */
+.tools button[aria-pressed='true'] {
+  color: var(--focus);
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 14%, transparent);
+}
+/* The name of the tool just chosen, under the strip and gone again once it is Move. An icon that
+   has just changed meaning is an icon somebody wants confirmed in words. */
+.tools .tool-said {
+  max-width: 12ch;
+  padding: 2px 1px 0;
+  font-size: var(--t-xs);
+  color: var(--focus);
+  line-height: 1.15;
+}
+
+/* What the pointer will do, said by the pointer. A crosshair over a card is a promise that
+   clicking it will not drag it. */
+.bench-canvas.choosing .pin,
+.bench-canvas.choosing .pin .pin-head { cursor: pointer; }
+.bench-canvas.boxing { cursor: crosshair; }
+.bench-canvas.boxing .pin { cursor: crosshair; }
+/* A card the next question is about. The outline is the same one `chosen` already used; what is
+   new is that it now arrives from a plain click, so it has to be unmistakable at a glance. */
+.pin.chosen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
+.pin.chosen .pin-kind::before { content: "asking · "; color: var(--focus); }
+/* And on the map, where a bench bigger than its window is read from. */
+.map-dot.chosen { outline: 1px solid var(--focus); }
+
+/* The dot that leaves one card out of the next message. It was four pixels of unlabelled colour
+   and read as decoration — "точка вкл/выкл слишком маленькая и неприметная". Bigger, with a ring
+   when it is on, and a hover state so it reads as something that can be pressed. */
+.pin-live {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--busy);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.pin-live:hover { border-color: var(--focus); color: var(--focus); }
+.pin.spent .pin-live { color: transparent; border-style: dashed; }

@@ -551,24 +551,28 @@ def test_several_cards_can_be_chosen_and_acted_on_together() -> None:
     """On a bench of twelve the alternative is twelve presses, which is how a bench ends up with
     cards nobody switched off because it was not worth the effort.
 
-    Shift and drag, deliberately: a plain drag pans, and taking away a gesture somebody already
-    has in their hands to add this one would be a bad trade.
+    Never on a plain drag: that gesture pans, and taking away one somebody already has in their
+    hands to add this one would be a bad trade. Shift and drag has always done it, and there is now
+    a button that arms it for one sweep — a gesture with no control is one only its author finds.
     """
     console = (STATIC / "console.js").read_text(encoding="utf-8")
     board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
 
     assert "function chosenCards(" in console
     assert 'id="chosen-bar"' in board
+    assert 'data-tool="area"' in board, "the area tool has no control"
     for many in ("out", "fold", "off", "none"):
         assert f'data-many="{many}"' in board, f"the bar cannot {many}"
 
     band = console[
-        console.index(
-            "canvas?.addEventListener('pointerdown', (event) => {\n  if (event.button !== 0 || !event.shiftKey) return;"
-        ) :
+        console.index("if (event.button !== 0 || !(event.shiftKey || tool === 'area'))") :
     ]
     band = band[: band.index("\n});")]
-    assert "event.shiftKey" in band, "the band is on a plain drag, which is the pan gesture"
+    assert "event.target.closest('.pin')" in band, "a drag that began on a card draws a band"
+
+    # And the same press does not also pan: both handlers are on the canvas, and when both ran the
+    # surface slid away under the band while it was being drawn.
+    assert "!(event.shiftKey || tool === 'area')) {" in console
 
 
 @pytest.mark.unit

@@ -110,6 +110,33 @@
       {# Everything at once, too small to read and big enough to point at — which is the other
          answer to a bench bigger than its window, the first being zooming out until nothing can
          be read at all. Off until somebody asks for it. #}
+      {# What the pointer does. A strip of tools in the corner is the arrangement every drawing
+         program has had for thirty years, and the reason it survived is that it answers "what will
+         happen if I click" before you click — which a single unlabelled dot on a card cannot.
+
+         Three, because there are three things a pointer does here and no more: move things, switch
+         one card into the question, switch a boxful. Each says its name and its key on hover, and
+         the one in use is pressed — `aria-pressed`, so it is a fact for a screen reader and not a
+         colour. #}
+      <div id="tools" class="tools" role="toolbar" aria-label="what the pointer does"
+           aria-orientation="vertical">
+        <button type="button" data-tool="move" aria-pressed="true"
+                title="Move — drag cards and pan the workbench (V)">
+          <span class="tool-mark" aria-hidden="true">➚</span>
+          <span class="visually-hidden">Move</span>
+        </button>
+        <button type="button" data-tool="choose" aria-pressed="false"
+                title="Choose — click a card to ask about it, click again to drop it (C)">
+          <span class="tool-mark" aria-hidden="true">◎</span>
+          <span class="visually-hidden">Choose</span>
+        </button>
+        <button type="button" data-tool="area" aria-pressed="false"
+                title="Choose an area — drag a box, everything it touches is asked about (G)">
+          <span class="tool-mark" aria-hidden="true">▦</span>
+          <span class="visually-hidden">Choose an area</span>
+        </button>
+        <span class="tool-said" aria-live="polite"></span>
+      </div>
       <div id="bench-map" class="bench-map" hidden aria-label="a map of the whole workbench"></div>
       {# Where a run has got to, and the two things a person can do about one: say that the thing
          an Event was waiting for has happened, or stop it. #}
