@@ -2753,3 +2753,13 @@ button.go:hover, button.yes:hover {
    (050-what-this-is-about.sql). */
 .pin.beginning { border-color: var(--focus); }
 .pin.beginning .pin-kind::before { content: "start · "; color: var(--focus); }
+
+/* --- the card a question was taken to be about --------------------------------------------------- */
+/* Lit while the console is working out an answer against it, and dark again once the answer is
+   here. Not the same mark as `chosen`, which is somebody having picked a card, nor as `beginning`,
+   which is permanent: this one is the console saying what it understood, and it has to be
+   distinguishable from both or it says nothing (051-what-a-question-follows-on-from.sql). */
+.pin.about-this {
+  box-shadow: 0 0 0 2px var(--busy);
+}
+.pin.about-this .pin-kind::after { content: " · this one"; color: var(--busy); }

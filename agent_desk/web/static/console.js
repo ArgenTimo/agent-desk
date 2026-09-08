@@ -3297,6 +3297,31 @@ function drawTies() {
   for (const [name, one] of pins) markHintCounts(one.pin, joined.get(name) || 0);
 }
 
+// Whether a card is on the screen right now. Arithmetic, not `getBoundingClientRect` — the surface
+// carries one transform, so a card's place on screen is `view.x + at.x * scale`, and asking the
+// browser instead is what cost `markOffEdge` 19ms a frame before it was written this way.
+function onTheScreen(pin) {
+  const at = placed.get(cardName(pin));
+  const frame = canvas?.getBoundingClientRect();
+  if (!at || !frame) return true;
+  const left = view.x + at.x * view.scale;
+  const top = view.y + at.y * view.scale;
+  const right = left + (pin.offsetWidth || CARD_WIDTH) * view.scale;
+  const bottom = top + (pin.offsetHeight || 120) * view.scale;
+  return right > 0 && left < frame.width && bottom > 0 && top < frame.height;
+}
+
+// Put a card in the middle of the window. One copy of the arithmetic, used by the dots that reach
+// a card off the edge and by the console when it says what a question was taken to be about.
+function bringIntoView(pin) {
+  const at = placed.get(cardName(pin));
+  const frame = canvas?.getBoundingClientRect();
+  if (!at || !frame) return;
+  view.x = frame.width / 2 - (at.x + CARD_WIDTH / 2) * view.scale;
+  view.y = frame.height / 2 - (at.y + 40) * view.scale;
+  applyView();
+}
+
 /* --- what is off the screen ------------------------------------------------------------------- */
 // More useful on a surface than it was on a list: a card you moved somewhere and then panned away
 // from is a card that still goes into the next message.
@@ -3337,13 +3362,7 @@ function markOffEdge() {
     dot.className = 'edge-dot';
     dot.title = one.said;
     dot.setAttribute('aria-label', `bring ${one.said} into view`);
-    dot.addEventListener('click', () => {
-      const at = placed.get(cardName(one.pin));
-      if (!at) return;
-      view.x = frame.width / 2 - (at.x + CARD_WIDTH / 2) * view.scale;
-      view.y = frame.height / 2 - (at.y + 40) * view.scale;
-      applyView();
-    });
+    dot.addEventListener('click', () => bringIntoView(one.pin));
     made.appendChild(dot);
   }
   edge.replaceChildren(made);
@@ -3858,6 +3877,22 @@ function answerCard(article, rev) {
   return node;
 }
 
+// "Как только система поймёт, к чему относится вопрос, он центрируется на этот блок, подсвечивает
+// его, рисует связь к карточке вопроса и готовит ответ."
+//
+// The order in that sentence is its content: show what was understood, and only then answer. A
+// person who can see which card their question was taken to be about has time to say "no, not that
+// one" before an answer to the wrong question arrives — after it, the same information is a
+// post-mortem.
+//
+// Centred only when it is not already on the screen. Somebody who has panned to a corner on
+// purpose is looking at something, and a console that drags the surface out from under them every
+// time it works something out is a console they stop asking questions on.
+function sayWhatItIsAbout(pin) {
+  pin.classList.add('about-this');
+  if (!onTheScreen(pin)) bringIntoView(pin);
+}
+
 // Which questions have had their "follows on from" line drawn. The same bookkeeping, and the same
 // reason, as `arranged` below: this runs on every push and the line is drawn once.
 const joined = new Set();
@@ -3944,11 +3979,19 @@ function syncBlocks() {
     // names is here: `syncBlocks` runs on every push, and a line pushed each time is the same line
     // drawn forty deep by the end of a conversation.
     const follows = article.dataset.relates;
-    if (follows && !joined.has(id) && surface.querySelector(`.pin[data-name="${CSS.escape(follows)}"]`)) {
+    const onto = follows && surface.querySelector(`.pin[data-name="${CSS.escape(follows)}"]`);
+    if (onto && !joined.has(id)) {
       joined.add(id);
+      // Only for a question still being worked on. A conversation the page is seeing for the first
+      // time — a reload, a chat switched back to — is all settled blocks, and lighting each of them
+      // in turn would drag the surface across a dozen old answers before it came to rest.
+      if (!article.hasAttribute('data-settled')) sayWhatItIsAbout(onto);
       ownTies.push({ from: follows, to: `block:${id}`, says: 'follows on from' });
       drawTies();
     }
+    // The highlight lasts as long as the not-knowing does. A card still lit under a finished
+    // answer says the console is still working out what the question was about.
+    if (onto && article.hasAttribute('data-settled')) onto.classList.remove('about-this');
 
     // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
     // верстаке появляется её карточка, и далее карточки под-идей."
