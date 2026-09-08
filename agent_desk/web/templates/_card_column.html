@@ -1,0 +1,34 @@
+{# A column of somebody else's board, on this workbench (01M1X8DA5X4ZYN98YK…).
+
+   A column is a status. That is what a Jira board column is, and asking the agile API for the
+   board's own column names would be a second request for a second version of this list — which
+   would then disagree with the tickets, because those come back carrying statuses.
+
+   What this console reads is the *unfinished* part of a board (`jira.WANTED_STATUSES`), and the
+   card says so. A board with a Done column has one here only if something unfinished is standing
+   in it, and letting somebody believe they are looking at the whole board would be the fifth rule
+   of CLAUDE.md in the shape of a diagram. #}
+<div class="card-detail" data-detail="plain" data-label="{{ status }}">
+  <div class="plain-only">
+    <p class="card-said">{{ tickets | length }} ticket{{ "" if tickets | length == 1 else "s" }}
+      standing in <strong>{{ status }}</strong>.</p>
+
+    {% if tickets %}
+    <ul class="held">
+      {% for one in tickets %}
+      {# Draggable, so a column opens out one ticket at a time as well as all at once. #}
+      <li><span class="chip" data-kind="ticket" data-id="{{ repo_key }}::{{ one.key }}"
+                data-label="{{ one.key }} · {{ one.summary }}" draggable="true"
+                title="drag it onto the workbench">{{ one.key }}</span> {{ one.summary }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="small dim">Nothing this console has read is standing here.</p>
+    {% endif %}
+
+    <h4>What this is a column of</h4>
+    <p class="small">This console reads the unfinished part of a board, so the columns it can show
+      are the ones something unfinished is standing in. It is not the whole board, and nothing here
+      moves a ticket between columns (docs/adr/0010).</p>
+  </div>
+</div>

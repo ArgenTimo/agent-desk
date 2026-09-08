@@ -226,7 +226,7 @@ async def test_the_links_are_kept_with_the_tickets_they_came_with(
         ),
     )
 
-    await blocks._read_tickets(desk, KEY)
+    await blocks.read_tickets_now(desk, KEY)
 
     assert await desk.ticket_links(KEY) == [
         TicketLink(repo_key=KEY, key="API-1", says="blocks", other="API-2")

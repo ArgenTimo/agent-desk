@@ -81,6 +81,7 @@ from agent_desk.store.repo import (
     TemplateStep,
     Thread,
 )
+from agent_desk.tracker import jira
 from agent_desk.web import autostart, blockers, engine, plans
 from agent_desk.web import blocks as block_runs
 from agent_desk.web import kicking as nudge
@@ -1189,6 +1190,76 @@ async def folder_card(id: str = "") -> HTMLResponse:
     )
 
 
+@router.get("/cards/{kind}/parts", response_class=JSONResponse)
+async def parts_of_a_card(kind: str, id: str = "") -> JSONResponse:
+    """What is inside a card whose insides are not on the board.
+
+    "Тот же механизм раскрытия, но через сеть: у коннектора спрашивают, что у него внутри, уровень
+    за уровнем." A project's checkouts and sessions are already rendered in the left column, so the
+    page reads them from there; a connector's are behind somebody else's API, and the page has to
+    ask.
+
+    Two levels, and they are the two the idea names. A Jira connector opens into the columns of the
+    board it points at; a column opens into the tickets standing in it. Read-only throughout
+    (docs/adr/0010): opening a column moves nothing and creates nothing.
+
+    A kind with nothing behind it answers with an empty list rather than a 404. "Nothing inside
+    this one" is a true answer about a connector to something this console cannot read, and the
+    page hides the control on it.
+    """
+    if kind == "connector":
+        repo_key, _, name = id.partition("::")
+        return JSONResponse({"parts": await _columns_of(repo_key, name)})
+    if kind == "column":
+        repo_key, sep, status = id.rpartition("::")
+        rows = await store.board_tickets(repo_key) if sep else []
+        return JSONResponse(
+            {
+                "parts": [
+                    {"kind": "ticket", "id": f"{repo_key}::{one.key}", "label": one.summary}
+                    for one in rows
+                    if (one.status or "no column") == status
+                ]
+            }
+        )
+    return JSONResponse({"parts": []})
+
+
+async def _columns_of(repo_key: str, name: str) -> list[dict[str, str]]:
+    """The columns of the board a connector points at, as cards.
+
+    A column is a status: that is what a Jira board column *is*, and reading the agile API for the
+    board's own column names would be a second request for a second version of the same list —
+    which would then disagree with the tickets, because those come back with statuses.
+
+    What this can show is what this console reads, which is the unfinished part of a board
+    (`jira.WANTED_STATUSES`). A board with a Done column has one here only if something unfinished
+    is standing in it, and the card says so rather than implying the board has four columns.
+    """
+    link = next((one for one in await store.links(repo_key) if one.name == name), None)
+    if link is None or jira.destination_of(link.url, link.token_env) is None:
+        return []
+    rows = await store.board_tickets(repo_key)
+    if not rows:
+        # Nothing read yet. Read it now — opening a connector is asking what is in it, and an
+        # empty answer from an unread board is the wrong answer to that question.
+        _, why = await block_runs.read_tickets_now(store, repo_key)
+        if why:
+            return []
+        rows = await store.board_tickets(repo_key)
+    seen: dict[str, int] = {}
+    for one in rows:
+        seen[one.status or "no column"] = seen.get(one.status or "no column", 0) + 1
+    return [
+        {
+            "kind": "column",
+            "id": f"{repo_key}::{status}",
+            "label": f"{status} · {count} ticket{'' if count == 1 else 's'}",
+        }
+        for status, count in sorted(seen.items())
+    ]
+
+
 @router.get("/cards/{kind}/full", response_class=HTMLResponse)
 async def card_in_full(kind: str, id: str = "") -> HTMLResponse:
     """Everything about one card: the console, how long it has been up, what it is carrying.
@@ -1282,6 +1353,19 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
         return HTMLResponse(
             env.get_template("_card_ticket.html").render(card=row),
             status_code=200 if row else 404,
+        )
+    if kind == "column":
+        repo_key, sep, status = id.rpartition("::")
+        rows = [
+            one
+            for one in (await store.board_tickets(repo_key) if sep else [])
+            if (one.status or "no column") == status
+        ]
+        return HTMLResponse(
+            env.get_template("_card_column.html").render(
+                status=status, tickets=rows, repo_key=repo_key
+            ),
+            status_code=200 if sep and status else 404,
         )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and

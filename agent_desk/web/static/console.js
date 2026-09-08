@@ -701,12 +701,34 @@ function partsOf(name) {
   );
 }
 
+// Kinds whose insides are behind somebody else's API rather than in the left column. The page
+// cannot know whether one has parts without asking, and asking on every board push would be a
+// request every two seconds — so these show the control and answer when it is pressed.
+const ASK_FOR_PARTS = new Set(['connector', 'column']);
+
 function showParts(holder) {
   const button = holder.querySelector('.pin-parts');
   if (!button) return;
   // Hidden rather than dead. A control that does nothing when pressed is worse than no control:
   // the first press teaches somebody it is broken, and they stop pressing the ones that work.
-  button.hidden = partsOf(cardName(holder)).length === 0;
+  button.hidden =
+    !ASK_FOR_PARTS.has(holder.dataset.kind) && partsOf(cardName(holder)).length === 0;
+}
+
+// The parts of a card whose insides are not on the page. "Тот же механизм раскрытия, но через
+// сеть: у коннектора спрашивают, что у него внутри, уровень за уровнем."
+async function askForParts(holder) {
+  const kind = holder.dataset.kind;
+  const id = holder.dataset.id;
+  try {
+    const answer = await fetch(
+      `/cards/${encodeURIComponent(kind)}/parts?id=${encodeURIComponent(id)}`
+    );
+    const said = await answer.json();
+    return said.parts || [];
+  } catch {
+    return [];
+  }
 }
 
 // Which cards have been opened out already, so pressing twice does not draw the lines twice.
@@ -717,16 +739,24 @@ const openedOut = new Set();
 // that arrived, which is also the only way anybody ends up with forty of them on purpose.
 async function openItsParts(holder) {
   const name = cardName(holder);
-  const parts = partsOf(name);
-  if (!parts.length) return;
-  const at = placed.get(name) || { x: 20, y: 20 };
   const what = holder.dataset.kind;
+  // Off the page where the page has it, off the network where it does not. One press, one meaning,
+  // whichever side of the wire the answer is on.
+  const parts = ASK_FOR_PARTS.has(what)
+    ? await askForParts(holder)
+    : partsOf(name).map((one) => ({
+        kind: one.dataset.kind,
+        id: one.dataset.id,
+        label: one.dataset.label,
+      }));
+  if (!parts.length) return say(`Nothing inside this ${what} that this console can read.`);
+  const at = placed.get(name) || { x: 20, y: 20 };
   let down = 0;
   for (const part of parts) {
-    const under = `${part.dataset.kind}:${part.dataset.id}`;
+    const under = `${part.kind}:${part.id}`;
     if (!surface.querySelector(`.pin[data-name="${CSS.escape(under)}"]`)) {
       await pin(
-        { kind: part.dataset.kind, id: part.dataset.id, label: part.dataset.label },
+        { kind: part.kind, id: part.id, label: part.label },
         {
           at: { x: at.x + CARD_WIDTH + GAP * 2, y: at.y + down * 140 },
           quiet: true,

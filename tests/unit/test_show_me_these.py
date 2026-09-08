@@ -159,7 +159,7 @@ async def test_what_was_read_becomes_cards_the_page_puts_on_the_bench(
         )
         return [f"ticket:{key}::API-14"], ""
 
-    monkeypatch.setattr(blocks, "_read_tickets", read)
+    monkeypatch.setattr(blocks, "read_tickets_now", read)
 
     await blocks._show_them(desk, block, (), [f"project:{KEY}"])
 
@@ -183,7 +183,7 @@ async def test_an_empty_board_says_it_was_empty(
     async def nothing(_store: Store, _key: str) -> tuple[list[str], str]:
         return [], ""
 
-    monkeypatch.setattr(blocks, "_read_tickets", nothing)
+    monkeypatch.setattr(blocks, "read_tickets_now", nothing)
 
     await blocks._show_them(desk, block, (), [f"project:{KEY}"])
 
@@ -200,7 +200,7 @@ async def test_a_read_that_failed_says_why(desk: Store, monkeypatch: pytest.Monk
     async def broken(_store: Store, _key: str) -> tuple[list[str], str]:
         return [], "I could not read the board: 401"
 
-    monkeypatch.setattr(blocks, "_read_tickets", broken)
+    monkeypatch.setattr(blocks, "read_tickets_now", broken)
 
     await blocks._show_them(desk, block, (), [f"project:{KEY}"])
 
@@ -222,7 +222,7 @@ async def test_showing_tickets_queues_no_work(desk: Store, monkeypatch: pytest.M
         )
         return [f"ticket:{key}::API-14"], ""
 
-    monkeypatch.setattr(blocks, "_read_tickets", read)
+    monkeypatch.setattr(blocks, "read_tickets_now", read)
 
     await blocks._show_them(desk, block, (), [f"project:{KEY}"])
 
@@ -358,7 +358,7 @@ async def test_the_board_is_read_and_kept(desk: Store, monkeypatch: pytest.Monke
 
     monkeypatch.setattr(blocks.jira, "read_board", one_ticket)
 
-    cards, why = await blocks._read_tickets(desk, KEY)
+    cards, why = await blocks.read_tickets_now(desk, KEY)
 
     assert why == ""
     assert cards == [f"ticket:{KEY}::API-14"]
@@ -381,14 +381,14 @@ async def test_a_board_read_that_failed_says_what_it_said(
         blocks.jira, "read_board", lambda where: jira.Read(ok=False, detail="403 forbidden")
     )
 
-    cards, why = await blocks._read_tickets(desk, KEY)
+    cards, why = await blocks.read_tickets_now(desk, KEY)
 
     assert cards == []
     assert "403 forbidden" in why
 
 
 async def test_a_project_with_no_board_says_so(desk: Store) -> None:
-    cards, why = await blocks._read_tickets(desk, KEY)
+    cards, why = await blocks.read_tickets_now(desk, KEY)
 
     assert cards == []
     assert "no board link with a credential" in why

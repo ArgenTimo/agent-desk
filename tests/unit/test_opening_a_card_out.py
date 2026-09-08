@@ -70,7 +70,7 @@ def test_one_level_per_press() -> None:
     opening = _body("openItsParts")
     inside = opening[opening.index("{") :]
 
-    assert "partsOf(name)" in inside
+    assert "partsOf(name)" in inside or "askForParts(holder)" in inside
     assert "openItsParts" not in inside, (
         "it opens its parts' parts too, which is every card at once"
     )
@@ -103,7 +103,11 @@ def test_the_control_is_hidden_rather_than_dead() -> None:
     somebody it is broken, and they stop pressing the ones that work."""
     showing = _body("showParts")
 
-    assert "button.hidden = partsOf(cardName(holder)).length === 0" in showing
+    assert "partsOf(cardName(holder)).length === 0" in showing
+    # Except for the kinds whose insides are behind somebody else's API: the page cannot know
+    # whether one has parts without asking, and asking on every board push would be a request
+    # every two seconds.
+    assert "!ASK_FOR_PARTS.has(holder.dataset.kind) &&" in showing
 
 
 def test_the_control_is_reconsidered_when_the_board_moves() -> None:

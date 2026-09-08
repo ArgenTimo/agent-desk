@@ -169,6 +169,8 @@ NATURALLY = {
     # And a ticket read off a board: a thing somebody wrote down elsewhere. The `task` above is
     # this console's decision to do it, which is an Action; they are two cards on purpose.
     "ticket": "object",
+    # A column of somebody's board. A place things stand in, which is a thing that exists.
+    "column": "object",
     "note": "object",
     "block": "event",
     "group": "result",

@@ -884,7 +884,9 @@ async def _show_them(
             "there is more than one here, and reading the wrong one is worse than asking.",
         )
         return
-    found, why = await (_read_pulls(store, key) if what == "pulls" else _read_tickets(store, key))
+    found, why = await (
+        _read_pulls(store, key) if what == "pulls" else read_tickets_now(store, key)
+    )
     if why:
         await store.finish_block(block.id, why)
         return
@@ -948,7 +950,7 @@ async def _read_pulls(store: Store, key: str) -> tuple[list[str], str]:
     )
 
 
-async def _read_tickets(store: Store, key: str) -> tuple[list[str], str]:
+async def read_tickets_now(store: Store, key: str) -> tuple[list[str], str]:
     """This project's board, read now and kept (053). Card names, or why not."""
     for link in await store.links(key):
         where = jira.destination_of(link.url, link.token_env)
