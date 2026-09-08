@@ -13,6 +13,16 @@
          {% if block.state in ("answered", "failed", "cancelled") %}data-settled{% endif %}
          data-thread="{{ block.thread_id }}">
   <div class="said">{{ block.input }}</div>
+  {# "Если консоль решила, что это «сделай проект», человек должен это увидеть и успеть сказать
+     «нет, это был вопрос»." The decision was already recorded before anything expensive started —
+     what was missing is that nobody was told, because a block carried its kind as a class on this
+     article, which is a fact about the markup. The corrections are in the footer below and were
+     always there; this is the sentence that makes them worth reaching for.
+
+     Nothing is said for a question: it is what an unread line is taken to be and what most lines
+     are, and a line printed on every message is a line people learn to skip. #}
+  {% set taken = block.kind | taken_as %}
+  {% if taken %}<p class="taken-as">{{ taken }}</p>{% endif %}
 
   {% if block.context %}
   {# What this one was sent with. A block that cannot say what it carried is a block whose answer

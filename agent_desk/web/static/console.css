@@ -433,6 +433,11 @@ body.stale main { opacity: 0.55; }
 .block.running .answer, .block.queued .answer { border-left-color: var(--busy); color: var(--fg-soft); }
 .failure { color: var(--flag); font-size: var(--t-sm); border-left-color: var(--flag); }
 
+/* What the console decided a message was. Quiet, because it is right most of the time and a loud
+   label on every message is a label nobody reads by the third one — it is here so that the one
+   time it is wrong, the correction beneath it is worth reaching for. */
+.taken-as { margin: 2px 0 0; font-family: var(--mono); font-size: var(--t-xs); color: var(--fg-dim); }
+
 /* A refusal, said so it cannot be read as an ordinary answer. Filled rather than outlined: every
    other state on this page is a line down the left edge, and one more of those is one more thing
    to look for. This is the only block that changes colour all the way through, which is the whole
@@ -2471,8 +2476,10 @@ button.go:hover, button.yes:hover {
 .pin[data-step="held"] .pin-step { color: var(--attention); }
 .pin[data-step="done"] { opacity: 0.8; }
 /* Where the run *is*, as opposed to what is running: a solid edge on the current step, so a
-   held run still says where it stopped. */
-.pin.at-now { box-shadow: 0 0 0 2px var(--focus); }
+   held run still says where it stopped. Amber rather than `--focus`, because `--focus` is already
+   what a card somebody chose is outlined in, and a run reaching a card that happens to be chosen
+   drew two marks of the same colour in the same place. */
+.pin.at-now { box-shadow: 0 0 0 2px var(--attention); }
 
 .run-bar {
   position: absolute;
@@ -2696,6 +2703,13 @@ button.go:hover, button.yes:hover {
    outside the card rather than on it, because a choice is something you did and not something the
    card is. */
 .pin.chosen { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* And the ones that are *not* going, because somebody chose others. "Когда выбрал три карточки из
+   тридцати, остальные двадцать семь в запрос не идут, и это видно" — the mechanism was already
+   there and the seeing was not, so a bench of thirty looked identical whether three of them were
+   chosen or none were. Dimmed like a card left out of the message, because that is what it is;
+   the difference is that this one is temporary and undone by choosing nothing. */
+.pin.left-out { opacity: 0.4; }
 
 /* "Only these" said in the strip, so the difference between the two ways of carrying context is
    readable rather than inferred from a number. */

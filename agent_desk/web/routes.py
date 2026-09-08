@@ -247,6 +247,8 @@ env.filters["at"] = _at
 # prepared for the template, because a failure can appear on a block, on a task and on a card, and
 # three places preparing the same pair is three places for one of them to drift.
 env.filters["stopped"] = telling.stopped
+# What this console decided a message was, in words rather than as a class on the article.
+env.filters["taken_as"] = telling.taken_as
 
 
 @dataclass(frozen=True)

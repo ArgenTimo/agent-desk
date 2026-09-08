@@ -266,3 +266,27 @@ def stopped(error: str) -> tuple[str, str]:
         if shape in said:
             return what, act
     return error.strip() or "The run stopped without saying why.", ""
+
+
+# --- what the console decided a message was ------------------------------------------------------
+# "Если консоль решила, что это «сделай проект», человек должен это увидеть и успеть сказать «нет,
+# это был вопрос» — до того, как поднялись агенты."
+#
+# The decision was already recorded before anything expensive started; what was missing is that
+# nobody was told. A block carried its kind as a CSS class, which is a fact about the markup.
+#
+# `question` is deliberately absent. It is what an unread line is taken to be and what most lines
+# are, so saying it on every message would be a sentence people learn to skip — and this line only
+# earns its place by appearing when something less obvious was decided.
+_TAKEN_AS = {
+    "idea": "taken as a thought, and written down",
+    "instruction": "taken as an instruction for an agent",
+    "master": "taken as a job for this console itself",
+    "handling": "taken as a change to the workbench",
+    "observation": "taken as something noticed",
+}
+
+
+def taken_as(kind: str) -> str:
+    """What this console decided a message was, in words, or nothing when it decided the ordinary."""
+    return _TAKEN_AS.get(kind, "")

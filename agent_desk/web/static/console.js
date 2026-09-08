@@ -598,6 +598,12 @@ function syncTargets() {
   // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
   // sentence somebody reads twice; "asking about these 3 only" is one they read once.
   document.querySelector('.context-strip')?.classList.toggle('only-these', picked > 0);
+  // And on the cards themselves. The mechanism for "only these" was already here — `pinnedTargets`
+  // sends the chosen ones when there are any — but nothing on the bench showed it, so thirty cards
+  // looked the same whether three of them were chosen or none were.
+  for (const pin of pins.querySelectorAll('.pin[data-kind]')) {
+    pin.classList.toggle('left-out', picked > 0 && !pin.classList.contains('chosen'));
+  }
   const deep = pins.querySelectorAll('.pin.deep').length;
   document.getElementById('context-count').textContent = carried
     ? `${picked ? 'asking about these' : 'carrying'} ${live} card${live === 1 ? '' : 's'}` +
