@@ -433,9 +433,9 @@ async def on_the_bench(
     A card with nothing behind it contributes its label and no invented sentence, which is what
     "nobody has looked at this yet" is supposed to look like (CLAUDE.md, rule five).
 
-    A block card is left out. It is the question and its answer, already in the prompt twice over
-    as the thread's history — listing it again as a card would have the model reason about the
-    conversation as a thing on the bench.
+    A block card is left out, and so is an answer card — the two halves of one exchange, which is
+    already in the prompt twice over as the thread's history. Listing either again as a card would
+    have the model reason about the conversation as a thing on the bench.
     """
     names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
     said = await store.cards_said(names)
@@ -447,7 +447,7 @@ async def on_the_bench(
     for target in dropped:
         kind, ident, _ = _card(target)
         name = f"{kind}:{ident}"
-        if kind == "block" or not ident or name in seen:
+        if kind in ("block", "answer") or not ident or name in seen:
             continue
         seen.add(name)
         idea = ideas.get(name)

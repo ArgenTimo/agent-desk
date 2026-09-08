@@ -89,11 +89,15 @@ COLUMN = {
     "blocker": 3,
     "connector": 3,
     "block": 4,
-    "idea": 5,
-    "step": 6,
-    "folder": 7,
-    "file": 7,
-    "note": 7,
+    # What came back, in its own column beside what was asked. The two are one exchange and the
+    # question is the wider of them, so sharing a column would put every answer under a question
+    # it did not belong to.
+    "answer": 5,
+    "idea": 6,
+    "step": 7,
+    "folder": 8,
+    "file": 8,
+    "note": 8,
 }
 
 # Where a kind nobody has placed goes. One past the last of them, so a new kind appears in a column

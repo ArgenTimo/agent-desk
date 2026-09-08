@@ -571,7 +571,7 @@ function pinnedTargets() {
       // sending a hundred and twenty-three targets with every message. Silently, because the
       // count beside the field was measuring something else. The same mistake `pin()` made once
       // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
-      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.spent):not(.ringed):not(.put-away)')];
+      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.spent):not(.ringed):not(.put-away)')];
   return carried
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
@@ -593,7 +593,11 @@ function syncTargets() {
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
   const picked = chosenCards().filter((pin) => pin.dataset.kind).length;
-  const live = picked || pins.querySelectorAll('.pin:not(.spent):not(.ringed):not(.put-away)').length;
+  // An answer card is not one of them. What it says travels with the next message already, as the
+  // thread it belongs to, and `on_the_bench` drops it from the prompt for that reason — so
+  // counting it here would tell somebody their message carries twice what it carries.
+  const live =
+    picked || pins.querySelectorAll('.pin:not(.answer-card):not(.spent):not(.ringed):not(.put-away)').length;
   const carried = live + attached;
   // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
   // sentence somebody reads twice; "asking about these 3 only" is one they read once.
@@ -756,11 +760,11 @@ async function pin(card, how) {
   // avoidance again, so a bench came back close to where it was left rather than where it was left
   // and drifted a little further on each load. `bringItsKin` does want avoidance: it asks for a
   // spot beside another card and does not mind which side of it ends up free.
-  place(holder, how?.under ? spotUnder([`block:${how.under}`]) : how?.at || null, {
+  place(holder, how?.under ? spotUnder([how.under]) : how?.at || null, {
     avoid: !how?.exact,
   });
   if (how?.under) {
-    ownTies.push({ from: `block:${how.under}`, to: cardName(holder), says: 'wrote' });
+    ownTies.push({ from: how.under, to: cardName(holder), says: 'wrote' });
     // Brought by the conversation rather than dropped by a person, which is what decides whether
     // it goes away when the conversation is folded.
     holder.dataset.brought = 'yes';
@@ -1340,8 +1344,9 @@ async function undoBench() {
 function layOut(cards) {
   for (const one of cards) {
     // Brought back by the conversation, not by us. Its place is remembered so that `syncBlocks`
-    // puts it where it was rather than stacking it in the corner.
-    if (one.kind === 'block') {
+    // puts it where it was rather than stacking it in the corner. Both halves of an exchange: the
+    // answer is drawn from the same source as the question and is restored the same way.
+    if (one.kind === 'block' || one.kind === 'answer') {
       placed.set(one.name, { x: one.x, y: one.y });
       continue;
     }
@@ -3699,6 +3704,78 @@ const ringsWaiting = [];
 // And what each of those questions went out with, waiting for the block that answers it.
 const awaitingBlock = [];
 
+// What belongs to the question rather than to what came back. Three parts, listed — not "everything
+// above the answer": a block whose run has produced nothing yet has no answer element for the rest
+// to be above, and a rule that leant on one would put the whole exchange on the wrong card at
+// exactly the moment somebody is watching it happen.
+const ASKED_PARTS = '.said, .taken-as, .carried';
+
+// One exchange, cut in two. Everything that is not the question is the answer's, so a part nobody
+// thought about here lands with what came back rather than disappearing.
+function halfOf(article, which) {
+  const copy = article.cloneNode(true);
+  copy.hidden = false;
+  for (const part of [...copy.children]) {
+    if (part.matches(ASKED_PARTS) !== (which === 'question')) part.remove();
+  }
+  return copy;
+}
+
+// The answer as a card of its own, joined to the question that produced it.
+//
+// "Сегодня вопрос и ответ — это один блок. Для исследования их надо разнять: к вопросу крепится
+// ответ, к ответу крепится следующий вопрос, и каждое из этого — точка ветвления."
+//
+// One card cannot be two branch points. Following up on what was asked and following up on what
+// came back are different questions, and on a single card they are the same line from the same
+// box — which is how a research thread flattens back into the feed it was supposed to stop being.
+function answerCard(article, rev) {
+  const id = article.dataset.block;
+  const name = `answer:${id}`;
+  const half = halfOf(article, 'answer');
+  // Nothing has come back yet. An empty card under every question is a bench of half-cards, and
+  // the moment there is something to read is the moment it has earned the room.
+  if (!half.children.length) return null;
+  let node = surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+  if (!node) {
+    node = document.createElement('div');
+    node.className = 'pin answer-card';
+    node.tabIndex = 0;
+    node.dataset.kind = 'answer';
+    node.dataset.id = id;
+    node.dataset.name = name;
+    node.dataset.view = 'hint';
+    // No live dot: this one is not carried into the next message. What it says is already in the
+    // thread the next message is sent with, and a card that says it is being carried when it
+    // changes nothing is the guessed status of CLAUDE.md's fifth rule, in the shape of a control.
+    node.innerHTML = `<div class="pin-head">
+      <button type="button" class="pin-role" title="what this is in the process"></button>
+      <span class="pin-kind">answered</span>
+      <span class="pin-label"></span>
+      <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
+      <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
+      <div class="pin-body"></div>`;
+    pins.appendChild(node);
+    place(node, spotUnder([`block:${id}`]));
+    ownTies.push({ from: `block:${id}`, to: name, says: 'answered' });
+  }
+  const body = node.querySelector('.pin-body');
+  const shown = body.firstElementChild;
+  if (!shown || shown.dataset.rev !== rev) {
+    half.dataset.rev = rev;
+    body.replaceChildren(half);
+    if (window.htmx) htmx.process(body);
+    settleOverlaps();
+  }
+  const said = node.querySelector('.answer, .stopped-what, .failure');
+  node.querySelector('.pin-label').textContent =
+    (said?.textContent || '').trim().slice(0, 60) || 'an answer';
+  node.classList.toggle('settled', article.hasAttribute('data-settled'));
+  showRole(node);
+  writeHint(node);
+  return node;
+}
+
 function syncBlocks() {
   if (!blocksSource || !surface) return;
   const current = activeThread();
@@ -3709,8 +3786,8 @@ function syncBlocks() {
     (article) => !current || article.dataset.thread === current
   );
   const wanted = new Set(mine.map((article) => `block:${article.dataset.block}`));
-  for (const node of surface.querySelectorAll('.pin.block-card')) {
-    if (!wanted.has(node.dataset.name)) {
+  for (const node of surface.querySelectorAll('.pin.block-card, .pin.answer-card')) {
+    if (!wanted.has(`block:${node.dataset.id}`)) {
       placed.delete(node.dataset.name);
       node.remove();
     }
@@ -3745,16 +3822,18 @@ function syncBlocks() {
     }
     // A *copy*, not the article itself. Moving it would empty `#blocks`, and `#blocks` is the
     // source this reads on every update — the surface would clear itself on the next pass.
+    // Half a copy, now: what was asked stays here and what came back is a card of its own.
     const body = node.querySelector('.pin-body');
     const shown = body.firstElementChild;
-    if (!shown || shown.dataset.rev !== article.outerHTML.length.toString()) {
-      const copy = article.cloneNode(true);
-      copy.hidden = false;
-      copy.dataset.rev = article.outerHTML.length.toString();
-      body.replaceChildren(copy);
+    const rev = article.outerHTML.length.toString();
+    if (!shown || shown.dataset.rev !== rev) {
+      const half = halfOf(article, 'question');
+      half.dataset.rev = rev;
+      body.replaceChildren(half);
       if (window.htmx) htmx.process(body);
       settleOverlaps();
     }
+    answerCard(article, rev);
     // A rearrangement, applied once. `data-handling` is on the answer rather than on the article,
     // because an article without an answer yet has nothing to apply.
     const asked = article.querySelector('.answer.arranged[data-handling]');
@@ -3779,22 +3858,27 @@ function syncBlocks() {
     // верстаке появляется её карточка, и далее карточки под-идей."
     // A process this message drew. Same shape as the idea lines below: the block lists what it
     // made, and the bench puts each of them on as a card of its own.
-    for (const line of node.querySelectorAll('.drawn-cards li[data-kind]')) {
+    // Off the answer rather than off the question, because the answer is what wrote them. On the
+    // question they read as things somebody asked about, which is the opposite claim.
+    const from = surface.querySelector(`.pin[data-name="answer:${CSS.escape(id)}"]`)
+      ? `answer:${id}`
+      : `block:${id}`;
+    for (const line of article.querySelectorAll('.drawn-cards li[data-kind]')) {
       const name = `${line.dataset.kind}:${line.dataset.id}`;
       if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
         pin(
           { kind: line.dataset.kind, id: line.dataset.id, label: '' },
-          { under: id, quiet: true, came: 'drawn from a description' }
+          { under: from, quiet: true, came: 'drawn from a description' }
         );
       }
     }
 
-    for (const line of node.querySelectorAll('[data-kind="idea"][data-id]')) {
+    for (const line of article.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
       if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
         pin(
           { kind: 'idea', id: line.dataset.id, label: line.dataset.label },
-          { under: id, came: 'written down by an answer' }
+          { under: from, came: 'written down by an answer' }
         );
       }
     }
