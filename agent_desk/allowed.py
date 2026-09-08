@@ -88,6 +88,35 @@ ALLOWED: dict[str, Leave] = {
 NATURALLY: tuple[str, ...] = ("work",)
 
 
+# What a step is allowed when its work is a prompt (01M1X8DA8XDSQ16N5DVDVZGM5X). Reading, and
+# nothing else, and not as a default: *"Шаг-промпт по определению имеет право только читать: ни
+# ветки, ни гейта, ни пуша… нужно, чтобы для этой роли оно было не настройкой по умолчанию, а тем,
+# что нельзя выключить."*
+#
+# The difference between a default and a rule is the whole of that sentence. A default is the
+# switch's starting position and somebody can move it; this is what the step *is*. A prompt that
+# could be given a worktree and a push is not a pipeline step that happens to be configured
+# safely — it is an agent with a prompt in its briefing, which the console already has and calls
+# something else.
+ISOLATED: tuple[str, ...] = ("read",)
+
+
+def leave_for_a_prompt() -> tuple[str, ...]:
+    """What a step whose work is a prompt may do. Not read from anywhere, because there is nowhere
+    it could be written down that somebody could not then edit."""
+    return ISOLATED
+
+
+def is_a_prompt(said: object) -> bool:
+    """Whether this card's work is a prompt, from what it says about itself.
+
+    One reader, so that "is this a pipeline step" has one answer. Two would eventually disagree,
+    and the direction they would disagree in is a prompt step running with a worktree.
+    """
+    asks = getattr(said, "get", lambda _name, _default="": "")("asks", "")
+    return bool(str(asks or "").strip())
+
+
 def is_allowed(name: str) -> bool:
     return name in ALLOWED
 

@@ -337,7 +337,14 @@ async def _do(
     inside = (card.said.get("runs") or "").strip()
     if inside:
         return await _run_a_process(store, run, card, inside)
-    given = allowed.leave_for((await store.card_leaves()).get(card.name))
+    # A step whose work is a prompt may only read, and that is not the default it starts at — it
+    # is what the step is. Read here rather than trusted from the switches, because a switch is a
+    # thing somebody can move and this one may not be moved (agent_desk/allowed.py).
+    given = (
+        allowed.leave_for_a_prompt()
+        if allowed.is_a_prompt(card.said)
+        else allowed.leave_for((await store.card_leaves()).get(card.name))
+    )
     # A step whose work is a prompt sends that prompt, not a briefing written about it. The
     # briefing exists to turn a drawn process into instructions for an agent; a pipeline step is
     # the prompt somebody is testing, and wrapping it in a paragraph about the diagram would be

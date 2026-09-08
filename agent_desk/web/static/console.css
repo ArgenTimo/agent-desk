@@ -2804,3 +2804,12 @@ button.go:hover, button.yes:hover {
 .room > summary { cursor: pointer; color: var(--fg-dim); }
 .room .room-lines { margin: 4px 0 0; padding-left: 16px; color: var(--fg-dim); }
 .room .room-lines li { padding: 1px 0; }
+
+/* What a step that sends a prompt is allowed, said instead of offered. Switches that would be
+   ignored are worse than none (01M1X8DA8XDSQ16N5DVDVZGM5X). */
+.role-menu .leave-fixed {
+  padding: 8px 10px;
+  max-width: 34ch;
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}

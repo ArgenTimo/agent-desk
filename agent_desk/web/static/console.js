@@ -2745,6 +2745,21 @@ function showLeaveMenu(pin, x, y) {
   const menu = document.createElement('menu');
   menu.id = 'role-menu';
   menu.className = 'role-menu wide';
+  // A step whose work is a prompt may only read, and that is what it is rather than how it is
+  // set. Saying so and showing no switches beats showing switches that would be ignored — a
+  // control that can be moved and then disregarded is a promise the console does not keep.
+  if ((processSaid.fixed || []).includes(name)) {
+    const said = document.createElement('li');
+    said.className = 'leave-fixed';
+    said.textContent =
+      'This step sends a prompt, so it may only read: no worktree, no branch, no gate, no push. ' +
+      'That is what the step is, not a setting on it.';
+    menu.appendChild(said);
+    document.body.appendChild(menu);
+    menu.style.left = `${Math.min(x, window.innerWidth - menu.offsetWidth - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - menu.offsetHeight - 8)}px`;
+    return;
+  }
   for (const [key, one] of Object.entries(processSaid.allowed || {})) {
     const row = document.createElement('li');
     const button = document.createElement('button');

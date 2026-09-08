@@ -2220,11 +2220,26 @@ async def workbench_process(cards: str = "") -> JSONResponse:
                 for card in on_bench
                 if card.role in process.STEPS
             },
+            # What each step may do, as the engine will read it — not as the switches stand. A
+            # step whose work is a prompt may only read, and it is the same one function that
+            # decides here and there, so the page cannot show a permission the run will not use.
             "leave": {
-                card.name: list(allowed.leave_for(leaves.get(card.name)))
+                card.name: list(
+                    allowed.leave_for_a_prompt()
+                    if allowed.is_a_prompt(card.said)
+                    else allowed.leave_for(leaves.get(card.name))
+                )
                 for card in on_bench
                 if card.role in process.STEPS
             },
+            # And which of those cannot be changed. A switch that can be moved and then ignored is
+            # worse than no switch: it is a promise the console does not keep
+            # (01M1X8DA8XDSQ16N5DVDVZGM5X).
+            "fixed": [
+                card.name
+                for card in on_bench
+                if card.role in process.STEPS and allowed.is_a_prompt(card.said)
+            ],
             "allowed": {
                 name: {
                     "says": one.says,
