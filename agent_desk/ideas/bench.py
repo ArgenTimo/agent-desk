@@ -124,6 +124,73 @@ def _label(kind: str, card_id: str, rows: Sequence[object], ideas: dict[str, Ide
     return card_id.split("/")[-1][:40]
 
 
+def recorded_ties(
+    cards: Sequence[str],
+    *,
+    ticket_links: Sequence[object] = (),
+    tasks: Sequence[object] = (),
+    filings: Sequence[object] = (),
+) -> list[dict[str, str]]:
+    """Lines between cards that came from different places, named the way whoever recorded them
+    named it.
+
+    "Если тикеты связаны с github — связь показана, название связей — PRs и так далее… Правило то
+    же, что и везде: линию рисуем только если её кто-то записал — там или здесь. Связь по
+    совпадению названий рисовать нельзя, это догадка."
+
+    Three kinds of record, and each supplies its own words:
+
+    - a board's own issue links, in the board's wording — "blocks", "relates to" (054);
+    - a task this console queued off a ticket, which wrote the ticket's key down (`source_ref`);
+    - an idea this console filed as a ticket, which wrote the key down too (`filing`).
+
+    The last two are recorded *here*, and their wording is ours because we are the source: saying
+    "read from the board" is a claim this program can stand behind. What is nowhere is a line
+    drawn because two cards mention the same string — a ticket key in a pull request title is a
+    coincidence until somebody records that it is not.
+
+    Both ends must be on the bench. A line to a card that is not here explains nothing and cannot
+    be drawn anyway.
+
+    Pure, and typed loosely on purpose: it needs four attributes off three row types that live in
+    the store, and importing the store into the module that lays out a diagram would be the first
+    time this file knew a database existed.
+    """
+    here = set(cards)
+    found: list[dict[str, str]] = []
+
+    def join(one: str, other: str, says: str) -> None:
+        if one in here and other in here and one != other:
+            found.append({"from": one, "to": other, "says": says})
+
+    for link in ticket_links:
+        key = str(getattr(link, "repo_key", ""))
+        join(
+            f"ticket:{key}::{getattr(link, 'key', '')}",
+            f"ticket:{key}::{getattr(link, 'other', '')}",
+            str(getattr(link, "says", "")),
+        )
+
+    for task in tasks:
+        ref = str(getattr(task, "source_ref", "") or "")
+        if getattr(task, "source_kind", "") == "tracker" and ref:
+            join(
+                f"ticket:{getattr(task, 'repo_key', '')}::{ref}",
+                f"task:{getattr(task, 'id', '')}",
+                "read from the board",
+            )
+
+    for filing in filings:
+        key = str(getattr(filing, "issue_key", "") or "")
+        if not key:
+            continue
+        for card in cards:
+            if card.startswith("ticket:") and card.endswith(f"::{key}"):
+                join(f"idea:{getattr(filing, 'idea_id', '')}", card, "filed as")
+
+    return found
+
+
 def lay_out(
     cards: Sequence[str],
     rows: Sequence[object],

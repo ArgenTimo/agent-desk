@@ -1732,6 +1732,15 @@ async def workbench_ties(cards: str = "") -> HTMLResponse:
     stamped = [row for project in projects for one in project.instances for row in one.rows]
     drawn = bench.lay_out(picked, stamped, await store.ideas(limit=400), await store.idea_links())
     ties = [{"from": tie.from_id, "to": tie.to_id, "says": tie.says} for tie in drawn.ties]
+    # And the lines between cards that came from different places, named the way whoever recorded
+    # them named it — a board's own "blocks", this console's own "filed as" (054). Never a line
+    # drawn because two cards mention the same string.
+    ties += bench.recorded_ties(
+        picked,
+        ticket_links=await store.ticket_links(),
+        tasks=await store.tasks(limit=400),
+        filings=await store.filings(),
+    )
     return HTMLResponse(json.dumps(ties), media_type="application/json")
 
 

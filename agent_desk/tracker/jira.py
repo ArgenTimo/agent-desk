@@ -191,6 +191,19 @@ def file_issue(destination: Destination, summary: str, description: str) -> File
 
 
 @dataclass(frozen=True)
+class Link:
+    """One link a ticket has to another, in the words the board uses for it.
+
+    `says` is Jira's own `outward`/`inward` wording — "blocks", "is blocked by", "relates to" — and
+    it is kept verbatim because that is the whole point: *"название связей — PRs и так далее…
+    подпись связи для таких линий — не одно из наших пяти слов, а то, что сказал источник."*
+    """
+
+    says: str
+    key: str
+
+
+@dataclass(frozen=True)
 class Ticket:
     """One issue read back from a tracker (docs/adr/0010).
 
@@ -206,6 +219,9 @@ class Ticket:
     # What the ticket says about being stuck, in its own words, or empty. A quotation rather than
     # a judgement: "the ticket says it is blocked" is a fact with a source (CLAUDE.md, rule five).
     blocked_by: str = ""
+    # What the board says this one is joined to. Recorded there, read here, never inferred: two
+    # tickets whose keys appear in each other's titles are not linked, they are two tickets.
+    links: tuple[Link, ...] = ()
 
     @property
     def blocked(self) -> bool:
@@ -287,6 +303,34 @@ def _blocked_by(fields: dict[str, object]) -> str:
     return said[:300]
 
 
+def _links_of(fields: dict[str, object]) -> tuple[Link, ...]:
+    """The links a board recorded on this issue, with the board's own name for each.
+
+    A link Jira holds has one side or the other filled in — `outwardIssue` with the type's
+    `outward` wording, or `inwardIssue` with its `inward` — and reading the wrong one produces a
+    line that says "blocks" pointing at the ticket doing the blocking. Both are read, each with
+    its own words, and anything shaped differently is skipped rather than guessed at.
+    """
+    raw = fields.get("issuelinks")
+    if not isinstance(raw, list):
+        return ()
+    found: list[Link] = []
+    for one in raw:
+        if not isinstance(one, dict):
+            continue
+        kind = one.get("type")
+        kind = kind if isinstance(kind, dict) else {}
+        for side, word in (("outwardIssue", "outward"), ("inwardIssue", "inward")):
+            other = one.get(side)
+            if not isinstance(other, dict):
+                continue
+            key = str(other.get("key", "")).strip()
+            says = str(kind.get(word, "") or kind.get("name", "")).strip()
+            if key and says:
+                found.append(Link(says=says[:60], key=key[:60]))
+    return tuple(found)
+
+
 def read_tickets(raw: bytes) -> tuple[Ticket, ...]:
     """The issues in one search response. A shape it does not recognise yields none.
 
@@ -318,6 +362,7 @@ def read_tickets(raw: bytes) -> tuple[Ticket, ...]:
                 summary=summary[:200],
                 status=str(status.get("name", "")) if isinstance(status, dict) else "",
                 blocked_by=_blocked_by(fields),
+                links=_links_of(fields),
             )
         )
     return tuple(tickets)
@@ -364,7 +409,10 @@ def read_board(destination: Destination) -> Read:
         {
             "jql": search_jql(destination),
             "maxResults": str(MOST_TICKETS),
-            "fields": "summary,status,description",
+            # `issuelinks` is what the board itself says is related to what. Asked for by name
+            # rather than taking every field: a `fields` list is the difference between a response
+            # that is read and one that is a whole issue including its attachments.
+            "fields": "summary,status,description,issuelinks",
         }
     )
     try:

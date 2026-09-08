@@ -29,7 +29,16 @@ from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
-from agent_desk.store.repo import Block, BoardTicket, DraftKind, Idea, Pull, Store, Thread
+from agent_desk.store.repo import (
+    Block,
+    BoardTicket,
+    DraftKind,
+    Idea,
+    Pull,
+    Store,
+    Thread,
+    TicketLink,
+)
 from agent_desk.tracker import github, jira
 
 if TYPE_CHECKING:
@@ -960,6 +969,15 @@ async def _read_tickets(store: Store, key: str) -> tuple[list[str], str]:
                     seen_at=0,
                 )
                 for one in read.tickets
+            ],
+        )
+        # What the board says is related to what, kept with the tickets it belongs to (054).
+        await store.replace_ticket_links(
+            key,
+            [
+                TicketLink(repo_key=key, key=one.key, says=link.says, other=link.key)
+                for one in read.tickets
+                for link in one.links
             ],
         )
         return [f"ticket:{key}::{one.key}" for one in read.tickets], ""

@@ -221,6 +221,17 @@ class BoardTicket(BaseModel):
         return bool(self.blocked_by)
 
 
+class TicketLink(BaseModel):
+    """One link a board recorded between two of its tickets, in the board's own words (054)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    key: str
+    says: str
+    other: str
+
+
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
@@ -2126,6 +2137,36 @@ class Store:
                         "t": _now_ms(),
                     },
                 )
+
+    async def replace_ticket_links(self, repo_key: str, found: Sequence[TicketLink]) -> None:
+        """What this board says is related to what, replacing what was there. Part of the same
+        read as the tickets, so replaced with them."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM ticket_link WHERE repo_key = :repo_key"), {"repo_key": repo_key}
+            )
+            for one in found:
+                await conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO ticket_link (repo_key, key, says, other) "
+                        "VALUES (:repo_key, :key, :says, :other)"
+                    ),
+                    {
+                        "repo_key": repo_key,
+                        "key": one.key[:60],
+                        "says": one.says[:60],
+                        "other": one.other[:60],
+                    },
+                )
+
+    async def ticket_links(self, repo_key: str = "") -> list[TicketLink]:
+        one = "SELECT * FROM ticket_link WHERE repo_key = :repo_key ORDER BY key, other"
+        every = "SELECT * FROM ticket_link ORDER BY repo_key, key, other"
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(one if repo_key else every), {"repo_key": repo_key} if repo_key else {}
+            )
+            return [TicketLink(**row._mapping) for row in rows]
 
     async def board_tickets(self, repo_key: str = "") -> list[BoardTicket]:
         one = "SELECT * FROM ticket WHERE repo_key = :repo_key ORDER BY key"
