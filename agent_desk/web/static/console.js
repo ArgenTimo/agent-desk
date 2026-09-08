@@ -1869,6 +1869,18 @@ function gripOf(target) {
   return pin.dataset.view === 'hint' ? pin : null;
 }
 
+// The strip of tools, the map and the run bar float over the canvas rather than beside it, so
+// every canvas gesture used to see them as bare bench: a press on a tool button began a band, the
+// band's `preventDefault` then ate the click that would have chosen the tool, and the area tool
+// could be entered and not left. One list, read by all three gestures — pan, band, and the click
+// that clears the choice — because "is this the bench itself" is one question, and three copies of
+// the answer is how the next control added here goes wrong the same way.
+const FURNITURE = '.pin, .ring, #tools, #bench-map, #run-bar, #bench-menu, #chosen-bar';
+
+function onBareBench(target) {
+  return !target.closest(FURNITURE);
+}
+
 // Where a card is now, from the layout if it is known and from the page if it is not.
 function whereIs(pin) {
   const at = placed.get(cardName(pin));
@@ -1912,7 +1924,7 @@ canvas?.addEventListener('pointerdown', (event) => {
   // used to run: the surface slid away under the band while it was being drawn, so the box was
   // measured against one frame and the cards against another, and it caught nothing. A gesture
   // does one thing.
-  if (!event.target.closest('.pin') && !(event.shiftKey || tool === 'area')) {
+  if (onBareBench(event.target) && !(event.shiftKey || tool === 'area')) {
     moving = {
       pan: true,
       from: { x: view.x, y: view.y },
@@ -2204,12 +2216,17 @@ document.addEventListener('keydown', (event) => {
 
 canvas?.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || !(event.shiftKey || tool === 'area')) return;
-  if (event.target.closest('.pin')) return;
+  if (!onBareBench(event.target)) return;
   event.preventDefault();
   const frame = surface.getBoundingClientRect();
   band = {
     from: { x: (event.clientX - frame.left) / view.scale, y: (event.clientY - frame.top) / view.scale },
     box: document.createElement('div'),
+    // Held down: add to what is already chosen. Otherwise the box says what the question is about,
+    // and what it does not touch is not part of it — the same rule as clicking a single card, which
+    // has never meant "and keep the last one too". A box that only ever adds cannot take anything
+    // back, so the only way out of a wrong selection would be to clear it and start over.
+    adds: event.shiftKey,
   };
   band.box.className = 'band';
   surface.appendChild(band.box);
@@ -2235,9 +2252,11 @@ canvas?.addEventListener('pointermove', (event) => {
 function endBand() {
   if (!band) return;
   const at = band.at;
+  const adds = band.adds;
   band.box.remove();
   band = null;
   if (!at) return;
+  if (!adds) for (const pin of surface.querySelectorAll('.pin.chosen')) pin.classList.remove('chosen');
   for (const pin of surface.querySelectorAll('.pin')) {
     const spot = placed.get(cardName(pin));
     if (!spot) continue;
@@ -2259,7 +2278,7 @@ window.addEventListener('pointercancel', endBand);
 // A press on bare surface that did not become a pan is somebody clearing the selection, which is
 // what clicking away means everywhere else.
 canvas?.addEventListener('click', (event) => {
-  if (event.target.closest('.pin, .ring, #bench-menu, #chosen-bar')) return;
+  if (!onBareBench(event.target)) return;
   if (event.shiftKey) return;
   chooseNone();
 });

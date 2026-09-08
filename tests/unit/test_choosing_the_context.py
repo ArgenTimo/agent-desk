@@ -13,6 +13,7 @@ is chosen, and choosing nothing is back to everything. The gesture has no state 
 
 from __future__ import annotations
 
+import html.parser
 import pathlib
 
 import pytest
@@ -200,3 +201,104 @@ def test_carry_nothing_stops_carrying_rather_than_emptying_the_workbench() -> No
 def test_taking_everything_off_is_still_offered_where_it_says_so() -> None:
     assert 'data-add="clear"' in BOARD.read_text(encoding="utf-8")
     assert "Take everything off" in BOARD.read_text(encoding="utf-8")
+
+
+# --- the strip is furniture floating over the bench --------------------------------------------
+def _tool_buttons() -> dict[str, list[tuple[str, dict[str, str]]]]:
+    """Each tool button by name, and the elements inside it. Parsed rather than matched, because
+    what matters is that the three buttons hold the same shape — which a substring cannot say."""
+
+    class Read(html.parser.HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.found: dict[str, list[tuple[str, dict[str, str]]]] = {}
+            self.inside: str | None = None
+            self.depth = 0
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            got = {name: value or "" for name, value in attrs}
+            if tag == "button" and "data-tool" in got:
+                self.inside = got["data-tool"]
+                self.found[self.inside] = []
+                self.depth = 0
+                return
+            if self.inside is None:
+                return
+            self.depth += 1
+            if self.depth == 1:
+                self.found[self.inside].append((tag, got))
+
+        def handle_endtag(self, tag: str) -> None:
+            if self.inside is None:
+                return
+            if tag == "button" and self.depth == 0:
+                self.inside = None
+            else:
+                self.depth -= 1
+
+    read = Read()
+    read.feed(BOARD.read_text(encoding="utf-8"))
+    return read.found
+
+
+def test_every_tool_icon_is_drawn_in_the_same_box() -> None:
+    """Three glyphs from three Unicode blocks are three fallback fonts with three sets of metrics,
+    and the column came out visibly bent. A drawn icon has one box and one baseline."""
+    buttons = _tool_buttons()
+
+    assert set(buttons) == {"move", "choose", "area"}
+    boxes = set()
+    for name, inside in buttons.items():
+        icons = [got for tag, got in inside if tag == "svg"]
+        assert len(icons) == 1, f"{name} has no drawn icon"
+        boxes.add(icons[0].get("viewBox"))
+    assert len(boxes) == 1, f"the icons are drawn in different boxes: {boxes}"
+
+
+def test_a_tool_button_is_all_icon_and_no_padding() -> None:
+    """The shared `button` rule sets 11px at the sides. With `box-sizing: border-box` a 30px button
+    then had six pixels of room for a sixteen-pixel icon, and an icon does not shrink: every one of
+    them sat twelve pixels from the left edge and one from the right."""
+    css = CSS.read_text(encoding="utf-8")
+    start = css.index(".tools button {")
+    rule = css[start : css.index("}", start)]
+
+    assert "padding: 0" in rule, "the icons are pushed off centre by the padding buttons inherit"
+
+
+def test_the_strip_does_not_change_width_when_a_tool_is_pressed() -> None:
+    """The name of the tool used to sit in the flow under the icons, so pressing a tool widened the
+    box and every icon slid sideways — crooked exactly when somebody was looking at it."""
+    css = CSS.read_text(encoding="utf-8")
+    start = css.index(".tools .tool-said {")
+    rule = css[start : css.index("}", start)]
+
+    assert "position: absolute" in rule, "the name is still in the flow and still widens the strip"
+    assert "width" not in css[css.index(".tools {") : css.index("}", css.index(".tools {"))], (
+        "a width in pixels is what put the icons 4px from one edge and 2px from the other"
+    )
+
+
+def test_a_press_on_the_floating_controls_is_not_a_press_on_the_bench() -> None:
+    """The bug the user hit: pressing the area tool began a band, the band's `preventDefault` ate
+    the click that would have chosen a different tool, and the strip could be entered and not left.
+    Three gestures asked "is this bare bench" and each had its own wrong answer; now there is one."""
+    source = _code()
+    listed = source[
+        source.index("const FURNITURE") : source.index("\n", source.index("const FURNITURE"))
+    ]
+
+    for floating in ("#tools", "#bench-map", "#run-bar"):
+        assert floating in listed, f"{floating} floats over the canvas and is not excluded"
+    # The pan, the band, and the click that clears the choice.
+    assert source.count("onBareBench(event.target)") == 3
+
+
+def test_a_box_says_what_the_question_is_about_rather_than_adding_to_it() -> None:
+    """ "Опция выбора в области не отключает активные карточки при выделении, хотя должна." A box
+    that only ever adds cannot take anything back: the only way out of a wrong selection would be
+    to clear it and draw again. Holding shift is how you add — the same modifier that adds one card."""
+    body = _body("endBand")
+
+    assert "if (!adds)" in body and "classList.remove('chosen')" in body
+    assert "adds: event.shiftKey," in _code(), "nothing records whether the box was meant to add"

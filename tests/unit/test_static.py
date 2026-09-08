@@ -568,7 +568,7 @@ def test_several_cards_can_be_chosen_and_acted_on_together() -> None:
         console.index("if (event.button !== 0 || !(event.shiftKey || tool === 'area'))") :
     ]
     band = band[: band.index("\n});")]
-    assert "event.target.closest('.pin')" in band, "a drag that began on a card draws a band"
+    assert "onBareBench(event.target)" in band, "a drag that began on a card draws a band"
 
     # And the same press does not also pan: both handlers are on the canvas, and when both ran the
     # surface slid away under the band while it was being drawn.

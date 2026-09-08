@@ -2875,9 +2875,21 @@ button.go:hover, button.yes:hover {
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
+/* The strip is one button wide, always. It used to be as wide as the name under it, so pressing a
+   tool widened the box and every icon in it slid sideways — the column was crooked exactly when
+   somebody was looking at it. The name is out of the flow now, so the strip is as wide as a
+   button and no wider — a width in pixels was the first try and it was worse: `box-sizing` is
+   `border-box` here, so 36px minus the padding left 28px of room for a 30px button and every icon
+   sat 4px from one edge and 2px from the other. A box that fits its contents cannot be off by two. */
+.tools { align-items: center; }
 .tools button {
   width: 30px;
   height: 30px;
+  /* Zero, and said out loud: the shared `button` rule sets 11px at the sides, and with
+     `box-sizing: border-box` that left six pixels of room for a sixteen-pixel icon — which does not
+     shrink, so every icon sat twelve pixels from the left edge and one from the right. Measured in
+     the browser, not guessed: this is the whole of what made the column look bent. */
+  padding: 0;
   display: grid;
   place-items: center;
   border: 1px solid transparent;
@@ -2888,6 +2900,9 @@ button.go:hover, button.yes:hover {
   line-height: 1;
   cursor: pointer;
 }
+/* One box for all three, drawn rather than typed. Three glyphs from three Unicode blocks are
+   three fallback fonts with three sets of metrics, which is what made the column look bent. */
+.tools .tool-mark { display: block; width: 16px; height: 16px; }
 .tools button:hover { color: var(--fg); border-color: var(--line); }
 .tools button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 /* The one in use. Pressed, not merely tinted: `aria-pressed` is the fact, and this draws it. */
@@ -2899,8 +2914,11 @@ button.go:hover, button.yes:hover {
 /* The name of the tool just chosen, under the strip and gone again once it is Move. An icon that
    has just changed meaning is an icon somebody wants confirmed in words. */
 .tools .tool-said {
-  max-width: 12ch;
-  padding: 2px 1px 0;
+  position: absolute;
+  top: 100%;
+  left: 1px;
+  width: 12ch;
+  padding: 2px 0 0;
   font-size: var(--t-xs);
   color: var(--focus);
   line-height: 1.15;
