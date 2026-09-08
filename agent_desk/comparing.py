@@ -21,6 +21,8 @@ reading it decide what that means. A verdict here would be a guess wearing a che
 
 from __future__ import annotations
 
+import difflib
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -43,6 +45,11 @@ class Row:
         return self.before.strip() != self.after.strip()
 
     @property
+    def marks(self) -> list[tuple[str, str]]:
+        """The two, word by word, with what changed marked."""
+        return differences(self.before, self.after)
+
+    @property
     def says(self) -> str:
         """What happened to this step between the two, in the words the panel uses."""
         if not self.before and not self.after:
@@ -52,6 +59,38 @@ class Row:
         if not self.after:
             return "only the first run got here"
         return "different" if self.changed else "the same"
+
+
+# Words, and the spaces between them kept as their own pieces. Splitting on whitespace and
+# rejoining with a single space would rewrite the indentation of a code block into one line and
+# call the result a difference.
+_WORDS = re.compile(r"\s+|\S+")
+
+
+def differences(before: str, after: str) -> list[tuple[str, str]]:
+    """The two texts as one sequence of pieces, each marked with where it belongs.
+
+    "Два ответа, показанные друг под другом с отличиями." Two answers side by side are readable;
+    two answers side by side with the changed words marked are *comparable*, which is the thing the
+    whole harness is assembled to reach.
+
+    Word by word rather than line by line. Two answers to one prompt are usually the same shape
+    with different words in it, and a line diff of those marks every line as changed — which says
+    "it is all different" about two texts that differ in three words.
+
+    Three marks: `same`, `before`, `after`. A caller renders the first in both columns and the
+    other two in one each; nothing here decides how it looks.
+    """
+    first, second = _WORDS.findall(before), _WORDS.findall(after)
+    found: list[tuple[str, str]] = []
+    for what, i, j, k, m in difflib.SequenceMatcher(None, first, second).get_opcodes():
+        if what in ("replace", "delete"):
+            found.append(("before", "".join(first[i:j])))
+        if what in ("replace", "insert"):
+            found.append(("after", "".join(second[k:m])))
+        if what == "equal":
+            found.append(("same", "".join(first[i:j])))
+    return [(mark, text) for mark, text in found if text]
 
 
 def _said(steps: Iterable[object]) -> dict[str, str]:

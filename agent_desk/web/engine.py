@@ -45,6 +45,7 @@ rule the failed-task blocker follows.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 
 import structlog
@@ -251,6 +252,24 @@ def as_a_fan(answers: Sequence[tuple[str, str]]) -> str:
     if len(answers) == 1:
         return answers[0][1]
     return "\n\n".join(f"## {name}\n{said}" for name, said in answers)
+
+
+def read_a_fan(made: str) -> list[tuple[str, str]]:
+    """The answers back out of what a step produced, or nothing when it produced one answer.
+
+    Read from the headings `as_a_fan` writes and from nothing else — a step whose single answer
+    happens to begin with a Markdown heading is not a fan, and a reader that thought so would show
+    somebody a comparison of one thing against the rest of its own prose.
+    """
+    parts = re.split(r"^## (.+)$", made, flags=re.M)
+    if len(parts) < 3:
+        return []
+    found: list[tuple[str, str]] = []
+    for index in range(1, len(parts) - 1, 2):
+        name, said = parts[index].strip(), parts[index + 1].strip()
+        if name:
+            found.append((name, said))
+    return found if len(found) > 1 else []
 
 
 def branch_prompt(

@@ -2834,3 +2834,12 @@ button.go:hover, button.yes:hover {
 .compare .compare-says { grid-column: 1 / -1; color: var(--fg-dim); }
 .compare .compare-row.changed .compare-says { color: var(--attention); }
 .compare pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The words that changed, in a comparison. Marked rather than coloured alone: the two sides are
+   read one under the other and a person has to be able to see *what* differs, not only that
+   something does (agent_desk/comparing.py). */
+.compare pre .same { color: var(--fg-dim); }
+.compare pre .only {
+  background: color-mix(in srgb, var(--attention) 22%, transparent);
+  border-radius: 2px;
+}

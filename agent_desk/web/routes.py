@@ -2421,6 +2421,50 @@ async def compare_two_runs(runs: str = "") -> JSONResponse:
                     "after": row.after,
                     "says": row.says,
                     "changed": row.changed,
+                    # Word by word, with what changed marked. Two answers side by side are
+                    # readable; two with the changed words marked are comparable, which is the
+                    # thing the harness is assembled to reach.
+                    "marks": [{"mark": mark, "text": text} for mark, text in row.marks],
+                }
+                for row in rows
+            ],
+        }
+    )
+
+
+@router.get("/cards/answers", response_class=JSONResponse)
+async def answers_on_a_card(name: str = "") -> JSONResponse:
+    """The several answers one card produced, side by side (01M1XA1V906B3KRJ84G4KHRE33).
+
+    "Два ответа, показанные друг под другом с отличиями — это то, ради чего собирают такую схему."
+
+    The same rows and the same panel as two runs compared, because it is the same question asked of
+    different things: here are two texts, what is different about them. A second panel would be a
+    second answer to "how is a difference shown", and they would drift.
+    """
+    made = (await store.cards_made()).get(name, "")
+    answers = engine.read_a_fan(made)
+    if len(answers) < 2:
+        return JSONResponse({"rows": [], "said": "that card produced one answer, not several"})
+    # Every answer against the first, which is the reading a fan invites: one model is the one you
+    # had, and the others are what the rest said instead.
+    first = answers[0]
+    rows = [
+        comparing.Row(name=other, label=f"{first[0]} → {other}", before=first[1], after=said)
+        for other, said in answers[1:]
+    ]
+    return JSONResponse(
+        {
+            "said": comparing.in_a_word(rows),
+            "rows": [
+                {
+                    "name": row.name,
+                    "label": row.label,
+                    "before": row.before,
+                    "after": row.after,
+                    "says": row.says,
+                    "changed": row.changed,
+                    "marks": [{"mark": mark, "text": text} for mark, text in row.marks],
                 }
                 for row in rows
             ],

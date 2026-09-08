@@ -883,6 +883,7 @@ async function pin(card, how) {
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
+    <button type="button" class="pin-answers" title="what each model answered, side by side" hidden>answers</button>
     <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
@@ -1100,6 +1101,11 @@ document.addEventListener('click', (event) => {
   // "Карточка с кнопкой пуск… Отдельная карточка, а не кнопка на панели." The complaint is about
   // the *panel*: one button that runs everything cannot start the branch somebody is thinking
   // about. This is that button, on the card it starts from.
+  if (event.target.classList.contains('pin-answers')) {
+    showAnswersOn(event.target.closest('.pin'));
+    return;
+  }
+
   if (event.target.classList.contains('pin-run')) {
     runFromHere(event.target.closest('.pin'));
     return;
@@ -2915,6 +2921,11 @@ function showRuns() {
     }
     mark.textContent = STEP_MARK[step.state] || '';
     mark.title = step.detail || step.made || step.state;
+    // Only on a card that produced several answers. Decided from the run this page already has,
+    // rather than by asking per card: a request every two seconds for a control most cards will
+    // never show is a request nobody asked for (01M1XA1V906B3KRJ84G4KHRE33).
+    const answers = pin.querySelector('.pin-answers');
+    if (answers) answers.hidden = ((step.made || '').match(/^## /gm) || []).length < 2;
   }
   showRunBar(going);
   showCompare();
@@ -2944,11 +2955,23 @@ async function compareTheLastTwo() {
   if (mine.length < 2) return;
   // Older first, so "before" is before. `/workbench/runs` answers newest first.
   const wanted = [mine[1].id, mine[0].id].join(',');
+  await showComparison(`/workbench/compare?runs=${encodeURIComponent(wanted)}`);
+}
+
+// "Два ответа, показанные друг под другом с отличиями — это то, ради чего собирают такую схему."
+//
+// The same panel and the same rows as two runs compared, because it is the same question asked of
+// different things: here are two texts, what is different about them. A second panel would be a
+// second answer to "how is a difference shown", and the two would drift.
+async function showAnswersOn(holder) {
+  await showComparison(`/cards/answers?name=${encodeURIComponent(cardName(holder))}`);
+}
+
+async function showComparison(where) {
   const panel = document.getElementById('compare-panel');
+  if (!panel) return;
   try {
-    const said = await (
-      await fetch(`/workbench/compare?runs=${encodeURIComponent(wanted)}`)
-    ).json();
+    const said = await (await fetch(where)).json();
     panel.querySelector('.compare-said').textContent = said.said || '';
     const list = panel.querySelector('.compare-rows');
     list.replaceChildren();
@@ -2960,13 +2983,31 @@ async function compareTheLastTwo() {
         '<pre class="compare-before"></pre><pre class="compare-after"></pre>';
       item.querySelector('.compare-step').textContent = row.label;
       item.querySelector('.compare-says').textContent = row.says;
-      item.querySelector('.compare-before').textContent = row.before;
-      item.querySelector('.compare-after').textContent = row.after;
+      // The words that changed, marked. `textContent` on every piece: these are two answers a
+      // model wrote, and a model writes angle brackets.
+      writeMarks(item.querySelector('.compare-before'), row.marks, 'before', row.before);
+      writeMarks(item.querySelector('.compare-after'), row.marks, 'after', row.after);
       list.appendChild(item);
     }
     panel.hidden = false;
   } catch {
-    say('Could not compare those two.');
+    say('Could not compare those.');
+  }
+}
+
+// One side of a comparison: everything that is in it, with the pieces that are only in it marked.
+function writeMarks(into, marks, side, whole) {
+  if (!marks || !marks.length) {
+    into.textContent = whole || '';
+    return;
+  }
+  into.replaceChildren();
+  for (const one of marks) {
+    if (one.mark !== 'same' && one.mark !== side) continue;
+    const piece = document.createElement('span');
+    piece.className = one.mark === 'same' ? 'same' : 'only';
+    piece.textContent = one.text;
+    into.appendChild(piece);
   }
 }
 
