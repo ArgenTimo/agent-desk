@@ -2820,7 +2820,7 @@ async function keepTemplate() {
   const answer = await fetch('/workbench/template', {
     method: 'POST',
     headers: FORM,
-    body: new URLSearchParams({ name, cards: names.join(',') }),
+    body: new URLSearchParams({ name, cards: names.join(','), thread: activeThread() }),
   });
   const said = await answer.json();
   say(said.kept ? `Saved “${name}” — ${said.steps} steps.` : said.why || 'Could not save it.');
@@ -2847,16 +2847,39 @@ async function useTemplate(name) {
         said.lost.join(', ')
     );
   }
+  // "Позиции — часть того, что человек собрал, и терять их не нужно." A template that remembers
+  // where its cards sat is put down in that shape; one saved before it did is laid out the way it
+  // always was. The offsets are the drawing's own geometry, so the corner it goes in is decided
+  // here — below whatever is already on the bench, rather than on top of it.
+  const remembers = said.cards.every((one) => Number.isInteger(one.dx));
+  const corner = remembers ? belowEverything() : null;
   for (const one of said.cards) {
     const [kind, ...rest] = one.name.split(':');
     await pin(
       { kind, id: rest.join(':'), label: '' },
-      { quiet: true, came: `made from the template “${name}”` }
+      {
+        quiet: true,
+        came: `made from the template “${name}”`,
+        ...(corner
+          ? { at: { x: corner.x + one.dx, y: corner.y + one.dy }, exact: true }
+          : {}),
+      }
     );
   }
   await readRoles();
   await readLines();
-  tidyUp();
+  if (!remembers) tidyUp();
+  else {
+    // Placed on purpose, so the console's own layout leaves them where the drawing put them
+    // (042-placed-by-hand.sql) — otherwise the first card to grow sweeps the shape away.
+    for (const one of said.cards) {
+      const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+      if (node) node.dataset.moved = 'yes';
+    }
+    moveWasDeliberate();
+    drawTies();
+    drawMap();
+  }
 }
 
 async function showTemplates() {

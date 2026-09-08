@@ -371,6 +371,11 @@ class TemplateStep(BaseModel):
     label: str
     fields: dict[str, str] = {}
     leave: tuple[str, ...] = ()
+    # Where this step sat in the drawing, measured from its top-left corner rather than from the
+    # bench (048-a-template-remembers-where.sql). None on a template saved before this, which means
+    # "lay it out the way you always did" rather than "at the origin".
+    dx: int | None = None
+    dy: int | None = None
 
 
 class TemplateLine(BaseModel):
@@ -2484,8 +2489,9 @@ class Store:
             for step in made.steps:
                 await conn.execute(
                     text(
-                        "INSERT INTO template_step (template_id, ord, role, label, fields, leave) "
-                        "VALUES (:t, :ord, :role, :label, :fields, :leave)"
+                        "INSERT INTO template_step "
+                        "(template_id, ord, role, label, fields, leave, dx, dy) "
+                        "VALUES (:t, :ord, :role, :label, :fields, :leave, :dx, :dy)"
                     ),
                     {
                         "t": made.id,
@@ -2494,6 +2500,8 @@ class Store:
                         "label": step.label[:200],
                         "fields": json.dumps(step.fields),
                         "leave": ",".join(step.leave),
+                        "dx": step.dx,
+                        "dy": step.dy,
                     },
                 )
             for line in made.lines:
@@ -2519,8 +2527,8 @@ class Store:
             found = [dict(row._mapping) for row in rows]
             steps = await conn.execute(
                 text(
-                    "SELECT template_id, ord, role, label, fields, leave FROM template_step "
-                    "ORDER BY template_id, ord"
+                    "SELECT template_id, ord, role, label, fields, leave, dx, dy "
+                    "FROM template_step ORDER BY template_id, ord"
                 )
             )
             by_template: dict[str, list[TemplateStep]] = {}
@@ -2533,6 +2541,8 @@ class Store:
                         label=str(said["label"]),
                         fields=json.loads(said["fields"] or "{}"),
                         leave=tuple(one for one in str(said["leave"]).split(",") if one),
+                        dx=said["dx"],
+                        dy=said["dy"],
                     )
                 )
             lines = await conn.execute(

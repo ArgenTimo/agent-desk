@@ -370,25 +370,26 @@ def test_the_page_writes_nothing_while_it_rebuilds_the_surface() -> None:
 
 @pytest.mark.unit
 def test_only_a_deliberate_gesture_calls_a_move_deliberate() -> None:
-    """Four gestures move a card because somebody said so — a drag, the arrow keys, laying the
-    bench out again, and an answer asked to rearrange it. Everything else that moves one is the
-    console fitting cards around each other as their bodies arrive.
+    """Five gestures move a card because somebody said so — a drag, the arrow keys, laying the
+    bench out again, an answer asked to rearrange it, and a template put down in the shape it was
+    saved in. Everything else that moves one is the console fitting cards around each other as
+    their bodies arrive.
 
-    The fourth arrived with the card manipulator and is the same kind of thing as the other three:
-    somebody asked for that arrangement, in words instead of with a mouse, and "верстак вернуть как
-    было — одним нажатием" is named in that idea's own children.
+    The last two are the same kind of thing as the first three: somebody asked for that
+    arrangement, in words or by choosing a saved drawing rather than with a mouse, and both have to
+    be one press of undo away.
 
-    Asserted by counting the callers rather than by naming them, so that a fifth is a decision
+    Asserted by counting the callers rather than by naming them, so that a sixth is a decision
     somebody makes on purpose rather than a line that slips in: the failure this rule exists to
     stop was invisible from the outside, and it will be invisible again.
     """
     static = pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "static"
     console = _code((static / "console.js").read_text(encoding="utf-8"))
 
-    assert console.count("moveWasDeliberate()") == 5, (
+    assert console.count("moveWasDeliberate()") == 6, (
         "the gestures that count as somebody moving a card have changed; there is the definition "
-        "and four callers — a drag, the arrow keys, tidying up, and an answer that rearranged the "
-        "bench because somebody asked it to"
+        "and five callers — a drag, the arrow keys, tidying up, an answer that rearranged the "
+        "bench because somebody asked it to, and a template put down in its saved shape"
     )
     settle = console[console.index("function settleOverlaps(") :]
     settle = settle[: settle.index("\n}\n")]

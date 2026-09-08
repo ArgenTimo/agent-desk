@@ -2100,6 +2100,13 @@ async def keep_template(request: Request) -> JSONResponse:
     cards = await _bench_cards(names)
     here = {one: number for number, one in enumerate(names, start=1)}
     leaves = await store.card_leaves()
+    # Where each card sat, measured from the top-left of the saved set rather than from the bench
+    # (048-a-template-remembers-where.sql). Offsets, so a template used on a bench that already has
+    # cards on it keeps its shape without landing on top of them.
+    where = {one.name: one for one in await store.bench_cards(form.get("thread", "").strip())}
+    placed = [where[one] for one in names if one in where]
+    left = min((one.x for one in placed), default=0)
+    top = min((one.y for one in placed), default=0)
     steps = [
         TemplateStep(
             ord=here[card.name],
@@ -2107,6 +2114,8 @@ async def keep_template(request: Request) -> JSONResponse:
             label=card.label,
             fields=dict(card.said),
             leave=tuple(leaves.get(card.name, ())),
+            dx=where[card.name].x - left if card.name in where else None,
+            dy=where[card.name].y - top if card.name in where else None,
         )
         for card in cards
     ]
@@ -2187,7 +2196,13 @@ async def use_template(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "made": True,
-            "cards": [{"name": one} for one in fresh.values()],
+            # Each card with where it sat in the drawing, when the template remembers. A template
+            # saved before 048 says nothing, and the page lays those out the way it always did.
+            "cards": [
+                {"name": fresh[step.ord], "dx": step.dx, "dy": step.dy}
+                for step in made.steps
+                if step.ord in fresh
+            ],
             "lost": sorted(lost),
         }
     )
