@@ -162,15 +162,30 @@ def test_only_the_three_that_do_something_are_steps() -> None:
 @pytest.mark.unit
 def test_a_permission_and_a_step_are_the_same_idea_of_step() -> None:
     """The chip on a card and the reader that orders them must agree about what a step is, or a
-    card gets permissions it is never asked about — or is run with none."""
+    card gets permissions it is never asked about — or is run with none.
+
+    They used to agree by both listing the five roles, and this test compared the two lists. They
+    now agree by construction: the page asks whether the server said anything about *this card's*
+    permissions, and the server answers that for `process.STEPS` and nothing else. One list, and
+    the page has none — which is what `test_roles` asks of every other vocabulary here.
+    """
     console = (
         pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "static" / "console.js"
     ).read_text(encoding="utf-8")
 
     shown = console[console.index("function showLeave(") :]
     shown = shown[: shown.index("\n}\n")]
-    for role in process.STEPS:
-        assert f"'{role}'" in shown, f"the permissions chip does not treat {role} as a step"
-    assert "'object'" not in shown and "'result'" not in shown, (
-        "a permission is offered on something that does not do anything"
-    )
+    assert "isAStep(pin)" in shown, "the permissions chip decides for itself what a step is"
+    for role in (*process.STEPS, "object", "result"):
+        assert f"'{role}'" not in shown, f"{role} is named in the page as well"
+
+    asking = console[console.index("function isAStep(") :]
+    asking = asking[: asking.index("\n}\n")]
+    assert "processSaid.leave" in asking, "it does not ask what the server said about steps"
+
+    # And the server answers it for the steps and for nothing else, which is the other half.
+    routes = (
+        pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "routes.py"
+    ).read_text(encoding="utf-8")
+    served = routes[routes.index('"leave": {') :]
+    assert "card.role in process.STEPS" in served[: served.index("},")]

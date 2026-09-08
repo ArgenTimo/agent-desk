@@ -712,11 +712,16 @@ const ASK_FOR_PARTS = new Set(['connector', 'column']);
 
 // Only on a card that is a step. An Object does not do anything, so a run starting at one would
 // begin by doing nothing, and a control that starts a branch has to be on something that runs.
+// Whether this card is a step, asked of the server's own answer rather than of a list here. The
+// process panel says what each *step* may do, so a card with an entry in it is a step — and the
+// five roles stay in one place, which is the rule `agent_desk/roles.py` is served under.
+function isAStep(holder) {
+  return Object.hasOwn(processSaid.leave || {}, cardName(holder));
+}
+
 function showRunFrom(holder) {
   const button = holder.querySelector('.pin-run');
-  if (!button) return;
-  const role = roleOf(holder);
-  button.hidden = !(role === 'action' || role === 'decision' || role === 'event');
+  if (button) button.hidden = !isAStep(holder);
 }
 
 async function runFromHere(holder) {
@@ -2848,10 +2853,8 @@ async function keepLeave(name, given) {
 // The chip on a step, saying how far it is allowed to go. Only on the roles that are steps: an
 // Object does not do anything, so a permission on it would be a control with nothing behind it.
 function showLeave(pin) {
-  const role = roleOf(pin);
-  const isStep = role === 'action' || role === 'decision' || role === 'event';
   let chip = pin.querySelector('.pin-leave');
-  if (!isStep) {
+  if (!isAStep(pin)) {
     chip?.remove();
     return;
   }
@@ -2972,6 +2975,18 @@ function runsOfThisBench() {
 function showCompare() {
   const button = document.getElementById('compare-runs');
   if (button) button.hidden = runsOfThisBench().length < 2;
+  // The spread wants two runs as well: one run has no spread, and a table of one column is what a
+  // person presses once and never again.
+  const spread = document.getElementById('spread-runs');
+  if (spread) spread.hidden = runsOfThisBench().length < 2;
+  // Repeating is offered only for a drawing of prompts, which is the same rule the route holds —
+  // ten runs of a drawing with work in it is ten agents in ten worktrees.
+  const again = document.getElementById('repeat-runs');
+  if (again) {
+    const steps = onBench().filter(isAStep);
+    again.hidden =
+      !steps.length || steps.some((pin) => !(processSaid.fixed || []).includes(cardName(pin)));
+  }
 }
 
 async function compareTheLastTwo() {
@@ -2990,6 +3005,44 @@ async function compareTheLastTwo() {
 async function showAnswersOn(holder) {
   await showComparison(`/cards/answers?name=${encodeURIComponent(cardName(holder))}`);
 }
+
+// "Прогон N раз с показом разброса и доли прошедших проверок" — and the same control for a set of
+// examples, because running twenty times with one input and once per line of twenty are the same
+// act with a different list (agent_desk/spread.py).
+async function repeatIt() {
+  const said = (
+    prompt(
+      'Run it how many times? Or paste one input per line to run it once per line.',
+      '5'
+    ) || ''
+  ).trim();
+  if (!said) return;
+  const lines = said.split('\n').filter((one) => one.trim());
+  const body = new URLSearchParams({ cards: onBench().map(cardName).join(',') });
+  if (lines.length > 1 || Number.isNaN(Number(said))) body.set('each', said);
+  else body.set('times', said);
+  try {
+    const answer = await fetch('/workbench/repeat', {
+      method: 'POST',
+      headers: FORM,
+      body,
+    });
+    const back = await answer.json();
+    say(back.started ? `Started ${back.started}.` : back.why || 'Nothing was started.');
+    readRuns();
+  } catch {
+    say('Nothing was started.');
+  }
+}
+
+async function showSpread() {
+  await showComparison(
+    `/workbench/spread?cards=${encodeURIComponent(onBench().map(cardName).join(','))}`
+  );
+}
+
+document.getElementById('repeat-runs')?.addEventListener('click', repeatIt);
+document.getElementById('spread-runs')?.addEventListener('click', showSpread);
 
 async function showComparison(where) {
   const panel = document.getElementById('compare-panel');

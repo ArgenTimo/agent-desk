@@ -223,6 +223,12 @@
 
     {# Two runs of one drawing, side by side. The history was always kept and nothing showed it
        (agent_desk/comparing.py). #}
+    {# Several runs of one drawing, and what they disagreed about. "Решение по одной выдаче — это
+       решение по шуму" (agent_desk/spread.py). #}
+    <button type="button" id="repeat-runs" hidden
+            title="run it several times, or once per line of a set">run it again and again</button>
+    <button type="button" id="spread-runs" hidden
+            title="what every run of this produced, step by step">the spread</button>
     <button type="button" id="compare-runs" hidden
             title="what the last two runs of this produced, step by step">compare the last two runs</button>
     <aside id="compare-panel" class="compare" hidden>

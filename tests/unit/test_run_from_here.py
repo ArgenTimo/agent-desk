@@ -157,12 +157,22 @@ def test_the_control_is_on_the_card_and_not_on_the_panel() -> None:
 
 
 def test_it_is_offered_only_on_a_card_that_runs() -> None:
-    """An Object does not do anything, so a run starting at one would begin by doing nothing."""
+    """An Object does not do anything, so a run starting at one would begin by doing nothing.
+
+    What counts as a step is asked of the server's own answer rather than of a list on the page:
+    the process panel says what each *step* may do, so a card with an entry in it is a step. A
+    second list of the five roles is a second place to be wrong, which `test_roles` refuses.
+    """
     source = _code()
     start = source.index("function showRunFrom(")
     body = source[start : source.index("\n}\n", start)]
 
-    assert "role === 'action' || role === 'decision' || role === 'event'" in body
+    assert "isAStep(holder)" in body
+    where = source.index("function isAStep(")
+    assert (
+        "Object.hasOwn(processSaid.leave || {}, cardName(holder))"
+        in source[where : source.index("\n}\n", where)]
+    )
 
 
 def test_the_branch_is_worked_out_on_the_server() -> None:

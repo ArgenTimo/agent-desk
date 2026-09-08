@@ -50,6 +50,7 @@ from agent_desk import (
     process,
     roles,
     room,
+    spread,
     starting,
     telling,
     ties,
@@ -2399,6 +2400,74 @@ async def workbench_runs() -> JSONResponse:
             }
         )
     return JSONResponse({"runs": found})
+
+
+# How many times one drawing may be started at once. A spread needs a handful, not a hundred: ten
+# runs of a five-step pipeline is fifty model calls, which is a number somebody should be able to
+# picture before pressing (01M1XA1V9T96HECGYPGVGJ230Q).
+MOST_TIMES = 10
+
+
+@router.post("/workbench/repeat", response_class=JSONResponse)
+async def repeat_a_run(request: Request) -> JSONResponse:
+    """Run this drawing several times — the same input over, or one run per line of a set.
+
+    "Модель отвечает по-разному… решение по одной выдаче — это решение по шуму." And the same
+    machinery from the other end: one run per example is how "поиграться" becomes "померить".
+
+    Only a drawing made entirely of prompts. Ten runs of a drawing with work in it is ten agents in
+    ten worktrees, which is not a thing to start from a text box — and a harness is prompts by
+    definition, so nothing that this is for is refused (agent_desk/spread.py).
+    """
+    form = await _form(request)
+    names = [one for one in form.get("cards", "").split(",") if one]
+    on_bench = await _bench_cards(names)
+    if not engine.all_prompts(on_bench):
+        return JSONResponse(
+            {
+                "started": 0,
+                "why": "this drawing does work in a checkout, so it is run once and on purpose",
+            },
+            status_code=409,
+        )
+    # Either N of the same, or one per line. One list, so the two ideas are one mechanism.
+    lines = [one.strip() for one in str(form.get("each", "")).splitlines() if one.strip()]
+    given = str(form.get("given", ""))
+    wanted = lines or [given] * max(1, min(int(str(form.get("times", "1")) or 1), MOST_TIMES))
+    wanted = wanted[:MOST_TIMES]
+    made: list[str] = []
+    for one in wanted:
+        run, why = await engine.begin(store, names=names, repo_key="", cwd="", given=one)
+        if run is None:
+            return JSONResponse({"started": len(made), "why": why}, status_code=409)
+        made.append(run.id)
+    return JSONResponse({"started": len(made), "runs": made})
+
+
+@router.get("/workbench/spread", response_class=JSONResponse)
+async def spread_of_runs(cards: str = "") -> JSONResponse:
+    """What every run of this drawing produced, step by step (agent_desk/spread.py)."""
+    here = {one for one in cards.split(",") if one}
+    mine = [one for one in await store.runs() if here & set(one.names)]
+    labels = {one.name: one.label for one in await store.step_cards()}
+    found = spread.over([await store.run_steps(one.id) for one in mine], labels)
+    return JSONResponse(
+        {
+            "said": found.said,
+            "rows": [
+                {
+                    "name": step.name,
+                    "label": step.label,
+                    "says": step.says,
+                    "changed": len(step.answers) > 1 or bool(step.failed),
+                    "before": step.answers[0][0] if step.answers else "",
+                    "after": step.answers[1][0] if len(step.answers) > 1 else "",
+                    "marks": [],
+                }
+                for step in found.steps
+            ],
+        }
+    )
 
 
 @router.get("/workbench/compare", response_class=JSONResponse)
