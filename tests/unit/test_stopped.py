@@ -129,3 +129,28 @@ async def test_a_blocker_for_a_failed_question_reads_like_a_sentence() -> None:
     (only,) = found
     assert only.why.startswith("The day's budget for asking is spent.")
     assert "AGENT_DESK_DAILY_USD" in only.why
+
+
+# --- a block is settled once, when everything about it is written --------------------------------
+@pytest.mark.unit
+def test_a_dispatched_message_is_marked_before_the_block_says_answered() -> None:
+    """Marked afterwards there is a window where the block reads "answered" and the message beside
+    it still says nobody has taken it — and a page rendered in that window shows exactly that.
+
+    Found as a test that failed once in a full run and passed alone: the suite polls ten times
+    faster since it stopped sleeping, so the window went from unlikely to ordinary. The same rule
+    `record_idea` was fixed under, in the other branch that starts work.
+    """
+    said = (WEB / "blocks.py").read_text(encoding="utf-8")
+
+    starting = said[said.index("async def _start_work(") :]
+    starting = starting[: starting.index("\nasync def ", 10)]
+
+    assert "mark_directive_dispatched" in starting, (
+        "the message is marked outside the function that settles the block again"
+    )
+    # Against the settle on the *success* path. There is an earlier `finish_block` in the branch
+    # where no agent could be started, and comparing with that one would pass whatever the order.
+    assert starting.index("mark_directive_dispatched") < starting.index('"On it —'), (
+        "the block is settled before the message beside it is marked"
+    )

@@ -947,6 +947,7 @@ async def _take_it_on(
     *,
     row: BoardRow | None = None,
     message: str = "",
+    directive_id: str = "",
 ) -> bool:
     """Say what should happen, and it happens (docs/adr/0006).
 
@@ -971,6 +972,7 @@ async def _take_it_on(
         cwd=row.session.cwd,
         project=row.project_name or row.session.project,
         branch=(row.tail.git_branch if row.tail else "") or "",
+        directive_id=directive_id,
     )
 
 
@@ -987,12 +989,19 @@ async def _start_work(
     extra: Sequence[str] = (),
     env: Mapping[str, str] | None = None,
     given: Sequence[str] = (),
+    directive_id: str = "",
 ) -> bool:
     """Queue the work and start it, or say why it is waiting. One place, two callers.
 
     The second caller is a request about this console itself, whose checkout is not a row on the
     board: the desk watches other people's repositories, and its own is simply where it is
     installed (docs/04-threads-and-blocks.md).
+
+    `directive_id` is the message this work was started from, marked as dispatched *before* the
+    block settles. Marked afterwards, by the caller, there was a window in which the block said
+    "answered" and the message beside it still said nobody had taken it — and a page rendered in
+    that window shows exactly that. A block is settled once everything about it is written down,
+    which is the same rule `record_idea` was fixed under.
     """
     parts = [message.strip() or block.input]
     if ideas:
@@ -1051,6 +1060,8 @@ async def _start_work(
         return True
 
     await store.task_started(task.id, result.agent_id)
+    if directive_id and result.agent_id:
+        await store.mark_directive_dispatched(directive_id, result.agent_id)
     about = f"{len(ideas)} idea{'' if len(ideas) == 1 else 's'}" if ideas else "it"
     handed = f" It was given {', '.join(given)}." if given else ""
     await store.finish_block(
@@ -1207,13 +1218,14 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
 
     # And then it happens. An instruction that ends in a message somebody has to carry by hand is
     # a console that did not do the thing it was asked (docs/adr/0006).
-    if await _take_it_on(store, block, rows, row=row, message=message.strip()):
-        if directive is not None:
-            started = next(
-                (task for task in await store.tasks() if task.block_id == block.id), None
-            )
-            if started is not None and started.agent_id:
-                await store.mark_directive_dispatched(directive.id, started.agent_id)
+    if await _take_it_on(
+        store,
+        block,
+        rows,
+        row=row,
+        message=message.strip(),
+        directive_id=directive.id if directive is not None else "",
+    ):
         return
 
     await store.finish_block(
