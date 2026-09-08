@@ -118,6 +118,9 @@ class Block(BaseModel):
     # line. More than one because a question may be about two parts of a thing at once, which is
     # what makes an enquiry a graph rather than a tree.
     relates_to: str = ""
+    # The repository address this message pointed at, where it held one (056). Kept so the offer to
+    # start a project from it is a control rather than a template reading a URL out of a paragraph.
+    from_repo: str = ""
 
 
 class Directive(BaseModel):
@@ -1024,6 +1027,14 @@ class Store:
                 {"name": name, "id": block_id},
             )
 
+    async def set_block_repo(self, block_id: str, url: str) -> None:
+        """The repository a message pointed at (056)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET from_repo = :url WHERE id = :id"),
+                {"url": url, "id": block_id},
+            )
+
     async def set_block_running(self, block_id: str) -> None:
         """Starting a run clears the last one's failure, which is no longer true of this block."""
         async with self.engine.begin() as conn:
@@ -1095,7 +1106,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context, relates_to, from_repo FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -1107,7 +1118,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context, relates_to, from_repo FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -1118,7 +1129,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to FROM block WHERE id = :id"
+                    "created_at, finished_at, context, relates_to, from_repo FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )

@@ -44,10 +44,12 @@ from agent_desk import (
     dispatch,
     handling,
     land,
+    pasted,
     peer,
     process,
     roles,
     room,
+    starting,
     telling,
     ties,
     tracker,
@@ -1208,6 +1210,46 @@ async def let_a_file_be_read(request: Request) -> Response:
         return HTMLResponse("", status_code=400)
     await store.let_it_be_read(path)
     return HTMLResponse("", status_code=204)
+
+
+@router.post("/blocks/{block_id}/project", response_class=HTMLResponse)
+async def start_a_project(block_id: str, request: Request) -> Response:
+    """Bring the repository this message pointed at onto this machine, and queue the first task.
+
+    Two acts and this is the first of them: the work is queued, not started. Cloning a repository
+    because somebody typed an address would be the automatic queue docs/adr/0007 exists to refuse,
+    and starting an agent on it would be that twice.
+
+    The clone goes under `data_dir`, the one tree this program writes to. A checkout this console
+    made is not one of the repositories it reads over somebody's shoulder — the second of the five
+    rules stays exactly as strict as it was (agent_desk/starting.py).
+    """
+    block = await store.block(block_id)
+    if block is None or not block.from_repo:
+        return HTMLResponse(_a_sentence("There is no repository in that message."), status_code=404)
+
+    into = starting.where(settings.data_dir, block.from_repo)
+    token = kept.get(pasted.name_for((block.from_repo,)))
+    made = await asyncio.to_thread(starting.clone, block.from_repo, into, token=token)
+    if not made.ok:
+        return HTMLResponse(_a_sentence(f"Nothing was started: {made.detail}"))
+
+    await store.queue_task(
+        repo_key=made.repo_key,
+        cwd=made.cwd,
+        title=f"first work in {made.name}",
+        instruction=starting.first_task(block.input, block.from_repo),
+        source_kind="block",
+        block_id=block.id,
+    )
+    # Its own settings panel, which is where the queue and the button that starts it are. Landing
+    # somebody on the project they just made beats telling them it exists.
+    return HTMLResponse(await render_project(made.repo_key))
+
+
+def _a_sentence(said: str) -> str:
+    """One line into the panel every control answers into. A refusal is a sentence, not a page."""
+    return f'<p class="small">{escape(said)}</p>'
 
 
 @router.get("/room", response_class=JSONResponse)

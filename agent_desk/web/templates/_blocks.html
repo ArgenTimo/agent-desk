@@ -195,6 +195,23 @@
   <p class="failure">{{ block.error }}</p>
   {% endif %}
 
+  {% if block.from_repo %}
+  {# A repository the message pointed at. The offer, never the act: cloning something because
+     somebody typed an address is the automatic queue docs/adr/0007 refuses, and the clone lands
+     under this program's own data directory rather than anywhere it observes
+     (056-a-project-this-console-started.sql). #}
+  <div class="about">
+    <span class="dim small">this message names a repository</span>
+    <span class="chip mono">{{ block.from_repo }}</span>
+    <form method="post" action="/blocks/{{ block.id }}/project"
+          hx-post="/blocks/{{ block.id }}/project" hx-target="#message">
+      <button type="submit" class="send"
+              title="clone it into this console's own directory and queue the first piece of work">start
+        a project from it</button>
+    </form>
+  </div>
+  {% endif %}
+
   {% if block.id in about and about[block.id] %}
   {# The ideas this request is about, joined to it: dropped in by a person, or found by a short
      run against what is written down. Where an agent has them, the request and the thoughts are

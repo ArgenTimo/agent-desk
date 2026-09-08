@@ -608,6 +608,10 @@ async def submit(
     # What the message turned out to hold, said rather than assumed: somebody who pasted four
     # things and got an answer about two needs to see which two, and a secret that was moved has
     # to say where it went.
+    if found.repos:
+        # The address, where a control can reach it (056). The offer to start a project from it is
+        # a button; nothing here clones anything.
+        await store.set_block_repo(block.id, found.repos[0])
     carried = pasted.as_lines(found) + await _context_lines(store, rows, targets, history)
     if notes_.strip():
         # Blocks somebody wrote on the workbench themselves — a link, a paragraph of a document, a
