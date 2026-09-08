@@ -2935,3 +2935,22 @@ button.go:hover, button.yes:hover {
 }
 .pin-live:hover { border-color: var(--focus); color: var(--focus); }
 .pin.spent .pin-live { color: transparent; border-style: dashed; }
+
+/* --- a card that is a button --------------------------------------------------------------------- */
+/* Its request is on the card and editable there: a button whose request you cannot read is a button
+   you press once (059-a-card-that-is-a-button.sql). */
+.pin[data-kind='button'] { border-left-color: var(--go, var(--focus)); }
+.pin-press {
+  border: 1px solid var(--focus);
+  border-radius: 4px;
+  padding: 0 6px;
+  color: var(--focus);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.pin-press:hover { background: color-mix(in srgb, var(--focus) 16%, transparent); }
+.button-card { display: grid; gap: 4px; }
+.button-card textarea { width: 100%; resize: vertical; }
+/* What it will reach, said before it is pressed. A control that reaches for something different
+   depending on the state of the bench has to say which. */
+.button-scope { margin: 4px 0 0; }

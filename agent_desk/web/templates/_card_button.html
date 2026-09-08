@@ -1,0 +1,30 @@
+{# A card that holds a request and sends it when pressed (059-a-card-that-is-a-button.sql).
+
+   "По умолчанию при нажатии просто отправляет указанный в ней запрос, как будто бы мы его вписали
+   в поле ввода, только без создания карточки запроса."
+
+   The prompt is editable on the card, because a button whose request you cannot read is a button
+   you press once. And what it will act on is said before it is pressed, not after: a control that
+   reaches for something different depending on the state of the bench has to say which. #}
+{% if not card %}
+<p class="empty small">that button is not here any more</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ card.label }}">
+  <div class="plain-only">
+    <form class="button-card" method="post" action="/cards/button/edit"
+          hx-post="/cards/button/edit" hx-swap="none">
+      <input type="hidden" name="id" value="{{ card.id }}">
+      <label class="visually-hidden" for="button-name-{{ card.id }}">what to call it</label>
+      <input id="button-name-{{ card.id }}" name="label" value="{{ card.label }}"
+             placeholder="what to call it">
+      <label class="visually-hidden" for="button-asks-{{ card.id }}">what it asks</label>
+      <textarea id="button-asks-{{ card.id }}" name="prompt" rows="3"
+                placeholder="what to ask — “combine these”, “decompose this”, anything you would type below">{{ card.prompt }}</textarea>
+      <button type="submit">keep it</button>
+    </form>
+    {# What it will reach. Written by the page, which is the only thing that knows what is joined
+       to what and what is chosen right now. #}
+    <p class="button-scope small dim"></p>
+  </div>
+</div>
+{% endif %}

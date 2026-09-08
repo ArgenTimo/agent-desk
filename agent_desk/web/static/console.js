@@ -755,6 +755,98 @@ async function runFromHere(holder) {
   }
 }
 
+async function addButton() {
+  const label = (prompt('What is the button called?', '') || '').trim();
+  if (!label) return;
+  const asks = (prompt('And what does it ask?', '') || '').trim();
+  try {
+    const answer = await fetch('/cards/button', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ label, prompt: asks }),
+    });
+    const said = await answer.json();
+    await pin({ kind: 'button', id: said.id, label: said.label }, { came: 'made as a button' });
+  } catch {
+    say('Could not add a button.');
+  }
+}
+
+/* --- a card that is a button ------------------------------------------------------------------ */
+// "Карточка-кнопка… по умолчанию при нажатии просто отправляет указанный в ней запрос, как будто бы
+// мы его вписали в поле ввода, только без создания карточки запроса."
+//
+// The rule that makes it more than a shortcut is the second half:
+//
+//   "Если кнопка ни к чему не подключена связью — она работает со всем, что выделено; если
+//    подключена к чему-то — работает с тем, с чем подключена."
+//
+// A line on this bench has always been a statement about two cards. From a button it is scope —
+// the first time the drawing *does* something rather than describing something. So a button that
+// is joined to three cards asks about those three however the selection stands, and one that is
+// joined to nothing asks about what is chosen, and about the whole bench when nothing is.
+function reaches(holder) {
+  const name = cardName(holder);
+  const joined = everyTie()
+    .flatMap((line) => (line.from === name ? [line.to] : line.to === name ? [line.from] : []))
+    .filter((other) => surface?.querySelector(`.pin[data-name="${CSS.escape(other)}"]`));
+  if (joined.length) return [...new Set(joined)];
+  // Nothing joined: whatever is chosen, and the ordinary default when nothing is — which is what
+  // the input field would have sent, because that is what the button is standing in for.
+  return null;
+}
+
+function saysWhatItReaches(holder) {
+  const line = holder.querySelector('.button-scope');
+  if (!line) return;
+  const joined = reaches(holder);
+  line.textContent = joined
+    ? `Joined to ${joined.length} card${joined.length === 1 ? '' : 's'}, and asks about ${
+        joined.length === 1 ? 'it' : 'those'
+      }.`
+    : 'Joined to nothing, so it asks about whatever is chosen — or the whole workbench.';
+}
+
+async function pressTheButton(holder) {
+  const asks = holder.querySelector('textarea[name="prompt"]')?.value?.trim() || '';
+  if (!asks) {
+    say('That button has nothing to ask yet. Write it on the card.');
+    return;
+  }
+  const joined = reaches(holder);
+  const body = new URLSearchParams({
+    text: asks,
+    thread: activeThread(),
+    // Sent by a button, so the bench draws no card for the question — only for what comes back.
+    button: 'yes',
+    targets: (joined || pinnedTargets().split(',').filter(Boolean)).join(','),
+    history: attachedBlocks(),
+    notes: ownBlockText(),
+  });
+  try {
+    const answer = await fetch('/blocks', {
+      method: 'POST',
+      headers: { ...FORM, 'HX-Request': 'true' },
+      body,
+    });
+    if (answer.ok) {
+      document.getElementById('blocks').innerHTML = await answer.text();
+      if (window.htmx) htmx.process(document.getElementById('blocks'));
+      syncBlocks();
+      showActiveThread();
+    }
+  } catch {
+    say('It did not send.');
+  }
+}
+
+function showPress(holder) {
+  const button = holder.querySelector('.pin-press');
+  if (!button) return;
+  button.hidden = holder.dataset.kind !== 'button';
+  if (!button.hidden) saysWhatItReaches(holder);
+}
+
 function showParts(holder) {
   const button = holder.querySelector('.pin-parts');
   if (!button) return;
@@ -902,6 +994,7 @@ async function pin(card, how) {
     <span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
+    <button type="button" class="pin-press" title="send what this button asks" hidden>press</button>
     <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
     <button type="button" class="pin-answers" title="what each model answered, side by side" hidden>answers</button>
     <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
@@ -942,6 +1035,7 @@ async function pin(card, how) {
     writeHint(holder);
     showParts(holder);
     showRunFrom(holder);
+    showPress(holder);
     // Folded or open, as it was left. After the body rather than before it: `full` fetches the
     // technical half *into* the body, and the body is replaced by the line above.
     if (how?.shown && how.shown !== holder.dataset.view) setView(holder, how.shown);
@@ -1121,6 +1215,11 @@ document.addEventListener('click', (event) => {
   // "Карточка с кнопкой пуск… Отдельная карточка, а не кнопка на панели." The complaint is about
   // the *panel*: one button that runs everything cannot start the branch somebody is thinking
   // about. This is that button, on the card it starts from.
+  if (event.target.classList.contains('pin-press')) {
+    pressTheButton(event.target.closest('.pin'));
+    return;
+  }
+
   if (event.target.classList.contains('pin-answers')) {
     showAnswersOn(event.target.closest('.pin'));
     return;
@@ -3705,6 +3804,12 @@ function showing(name) {
 // built into a fragment that goes in in one go. 17ms on 35 cards, and the same shape of curve as
 // `markOffEdge` above.
 function drawTies() {
+  // What a button reaches is decided by the lines, so it is said again whenever they are drawn.
+  // Said once when the card arrived, it went on claiming "joined to nothing" after somebody joined
+  // it to something — a control describing a scope it no longer has (059).
+  for (const one of surface?.querySelectorAll('.pin[data-kind="button"]') || []) {
+    saysWhatItReaches(one);
+  }
   if (!ties) return;
 
   // Read. One pass over the cards, and every measurement taken before a single write.
@@ -3988,6 +4093,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'keep') keepBench();
   else if (what === 'step') addStep();
   else if (what === 'about') beginWith();
+  else if (what === 'button') addButton();
   else if (what === 'template') keepTemplate();
 });
 
@@ -4426,8 +4532,12 @@ function answerCard(article, rev) {
       <button type="button" class="pin-off" title="take it off the workbench">×</button></div>
       <div class="pin-body"></div>`;
     pins.appendChild(node);
-    place(node, spotUnder([`block:${id}`]));
-    ownTies.push({ from: `block:${id}`, to: name, says: 'answered' });
+    // Under the question where there is one. A button's answer has no question card, so it is
+    // placed like any other new card — and joined to nothing, because there is nothing to join it
+    // to and a line to a card that is not there explains nothing.
+    const asked = surface.querySelector(`.pin[data-name="block:${CSS.escape(id)}"]`);
+    place(node, asked ? spotUnder([`block:${id}`]) : null);
+    if (asked) ownTies.push({ from: `block:${id}`, to: name, says: 'answered' });
   }
   const body = node.querySelector('.pin-body');
   const shown = body.firstElementChild;
@@ -4535,6 +4645,13 @@ function syncBlocks() {
 
   for (const article of mine) {
     const id = article.dataset.block;
+    // A question a button sent has no card of its own: "как будто бы мы его вписали в поле ввода,
+    // только без создания карточки запроса". The conversation shows the question like any other
+    // message, and the bench shows what came back — which is the thing that was wanted.
+    if (article.hasAttribute('data-by-button')) {
+      answerCard(article, article.outerHTML.length.toString());
+      continue;
+    }
     let node = surface.querySelector(`.pin[data-name="block:${CSS.escape(id)}"]`);
     if (!node) {
       node = document.createElement('div');

@@ -134,6 +134,9 @@ class Block(BaseModel):
     # The repository address this message pointed at, where it held one (056). Kept so the offer to
     # start a project from it is a control rather than a template reading a URL out of a paragraph.
     from_repo: str = ""
+    # Sent by a button on the workbench rather than typed (059). The bench draws no card for the
+    # question — "как будто бы мы его вписали в поле ввода, только без создания карточки запроса".
+    by_button: bool = False
 
 
 class Directive(BaseModel):
@@ -246,6 +249,21 @@ class TicketLink(BaseModel):
     key: str
     says: str
     other: str
+
+
+class ButtonCard(BaseModel):
+    """A card that holds a request and sends it when pressed (059)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    label: str
+    prompt: str = ""
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"button:{self.id}"
 
 
 class Autostart(BaseModel):
@@ -1126,7 +1144,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -1138,7 +1156,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -1149,7 +1167,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo FROM block WHERE id = :id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )
@@ -2243,6 +2261,50 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(text("SELECT path FROM readable ORDER BY path"))
             return [str(row[0]) for row in rows]
+
+    async def add_button_card(self, label: str, prompt: str) -> ButtonCard:
+        made = ButtonCard(id=_new_id(), label=label[:80], prompt=prompt[:2000], made_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO button_card (id, label, prompt, made_at) "
+                    "VALUES (:id, :label, :prompt, :made_at)"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def set_button_card(self, card_id: str, *, label: str, prompt: str) -> None:
+        """What the button is called and what it asks. Both at once, because they are one edit:
+        renaming a button whose prompt still says something else is how a bench fills with controls
+        nobody dares press."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE button_card SET label = :label, prompt = :prompt WHERE id = :id"),
+                {"label": label[:80], "prompt": prompt[:2000], "id": card_id},
+            )
+
+    async def button_card(self, card_id: str) -> ButtonCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, label, prompt, made_at FROM button_card WHERE id = :id"),
+                {"id": card_id},
+            )
+            row = rows.first()
+            return None if row is None else ButtonCard(**row._mapping)
+
+    async def button_cards(self) -> list[ButtonCard]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT id, label, prompt, made_at FROM button_card ORDER BY made_at DESC")
+            )
+            return [ButtonCard(**row._mapping) for row in rows]
+
+    async def sent_by_a_button(self, block_id: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET by_button = 1 WHERE id = :id"), {"id": block_id}
+            )
 
     async def tracker_blockers(self) -> list[TrackerBlocker]:
         async with self.engine.connect() as conn:

@@ -69,7 +69,11 @@ def test_the_two_are_joined_by_a_line() -> None:
 
 
 def test_the_answer_is_placed_under_its_question() -> None:
-    assert "place(node, spotUnder([`block:${id}`]))" in _body("answerCard")
+    """Where there is one. A button's answer has no question card — the question was sent without
+    one — so it is placed like any other new card (059-a-card-that-is-a-button.sql)."""
+    making = _body("answerCard")
+
+    assert "place(node, asked ? spotUnder([`block:${id}`]) : null)" in making
 
 
 def test_what_an_answer_wrote_hangs_off_the_answer() -> None:

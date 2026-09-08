@@ -1480,6 +1480,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             ),
             status_code=200,
         )
+    if kind == "button":
+        # A card that is a request. Its prompt is on the card and editable there, because a button
+        # whose request you cannot read is a button you press once (059).
+        made = await store.button_card(id)
+        return HTMLResponse(
+            env.get_template("_card_button.html").render(card=made),
+            status_code=200 if made else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
@@ -1880,6 +1888,10 @@ async def ask(request: Request) -> Response:
     """
     form = await _form(request)
     typed = form.get("text", "").strip()
+    # Sent by a button on the workbench rather than typed. The bench draws no card for the question
+    # then: pressing a button is "как будто бы мы его вписали в поле ввода, только без создания
+    # карточки запроса" (059-a-card-that-is-a-button.sql).
+    by_button = str(form.get("button", "")).strip() == "yes"
     if typed:
         rows, _ = await asyncio.to_thread(board)
         # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
@@ -1887,7 +1899,7 @@ async def ask(request: Request) -> Response:
         # knows which card it is under.
         projects = shape(rows, await store.groups())
         stamped = [row for p in projects for i in p.instances for row in i.rows]
-        await block_runs.submit(
+        made = await block_runs.submit(
             store,
             typed,
             stamped,
@@ -1903,6 +1915,8 @@ async def ask(request: Request) -> Response:
             # Blocks somebody wrote on the bench themselves: text, not a card to look up.
             notes_=form.get("notes", ""),
         )
+        if by_button:
+            await store.sent_by_a_button(made.id)
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     # Post/redirect/get: a refresh after asking must not ask again.
@@ -2543,6 +2557,31 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
             ],
         }
     )
+
+
+@router.post("/cards/button", response_class=JSONResponse)
+async def add_button_card(request: Request) -> JSONResponse:
+    """A new button, with a name and the request it sends (059)."""
+    form = await _form(request)
+    made = await store.add_button_card(
+        form.get("label", "").strip() or "a button", form.get("prompt", "").strip()
+    )
+    return JSONResponse({"id": made.id, "name": made.name, "label": made.label})
+
+
+@router.post("/cards/button/edit", response_class=HTMLResponse)
+async def edit_button_card(request: Request) -> Response:
+    """What it is called and what it asks. One edit: a button renamed while its request still says
+    something else is how a bench fills with controls nobody dares press."""
+    form = await _form(request)
+    card_id = form.get("id", "").strip()
+    if card_id:
+        await store.set_button_card(
+            card_id,
+            label=form.get("label", "").strip() or "a button",
+            prompt=form.get("prompt", ""),
+        )
+    return HTMLResponse("", status_code=204)
 
 
 @router.post("/cards/step", response_class=JSONResponse)
