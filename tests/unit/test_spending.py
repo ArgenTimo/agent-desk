@@ -12,6 +12,7 @@ fifth rule of CLAUDE.md with a currency symbol on it.
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
@@ -382,3 +383,43 @@ async def test_an_engine_that_exits_while_its_pipe_is_read_still_answers(
 
     for _ in range(12):
         assert [chunk async for chunk in session.stream_answer("q")] == ["an answer"]
+
+
+@pytest.mark.unit
+async def test_an_engine_that_exits_without_reading_the_prompt_still_answers(
+    tallying: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other end of the same pipe. The read side has been caught since the test above; the
+    write raises `ConnectionResetError` out of `drain()` when the run has already exited, and that
+    one reached the `OSError` branch and failed a run whose answer was already printed. Seen once
+    as a red `make gate` on a tree that changed nothing near it.
+
+    The run is real and only `drain` is replaced, because the race that produces this — a run that
+    exits between the spawn and the write — cannot be aimed at from here. Twelve tries and hope,
+    which is what the test above does, is how a suite gets a failure nobody believes.
+    """
+    fake = tmp_path / "claude"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"an answer"}]}}\\n\'\n'
+        'printf \'{"type":"result","total_cost_usd":0.02,"result":"an answer"}\\n\'\n'
+        "exit 0\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(fake), daily_usd=25.0))
+
+    spawn = asyncio.create_subprocess_exec
+
+    async def broken_pipe(*argv: str, **how: object) -> asyncio.subprocess.Process:
+        process = await spawn(*argv, **how)
+
+        async def lost() -> None:
+            raise ConnectionResetError("Connection lost")
+
+        assert process.stdin is not None
+        monkeypatch.setattr(process.stdin, "drain", lost)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", broken_pipe)
+
+    assert [chunk async for chunk in session.stream_answer("q")] == ["an answer"]

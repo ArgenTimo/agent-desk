@@ -359,9 +359,17 @@ async def _run(
 
         # docs/07-security.md: transcript text never goes into a subprocess argument, and this
         # prompt is made of transcript tails. /proc/<pid>/cmdline is world-readable; stdin is not.
-        stdin.write(prompt.encode())
-        await stdin.drain()
-        stdin.close()
+        #
+        # A run that exits before it has read the prompt breaks this pipe, and the write end raises
+        # the same `ConnectionResetError` the read end does. It is suppressed for the same reason:
+        # a failed write is not evidence of a failed run. What the run said on stdout and what it
+        # exited with decide that, and both are still ahead of us — an engine that really did die
+        # early prints nothing, and the ordinary "no answer" path already says so. Left uncaught it
+        # reached the `OSError` branch and threw away an answer that was sitting in the pipe.
+        with contextlib.suppress(ConnectionResetError, BrokenPipeError):
+            stdin.write(prompt.encode())
+            await stdin.drain()
+            stdin.close()
 
         async with asyncio.timeout(settings.answer_timeout_seconds):
             # A run that exits the moment it has finished printing can close the pipe while it is
