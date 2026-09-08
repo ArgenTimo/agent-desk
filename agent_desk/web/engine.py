@@ -49,7 +49,7 @@ from collections.abc import Sequence
 
 import structlog
 
-from agent_desk import allowed, dispatch, land, process, roles
+from agent_desk import allowed, dispatch, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.store.repo import Run, RunStep, Store
 from agent_desk.web import autostart, blockers
@@ -361,7 +361,7 @@ async def _do(
     # briefing exists to turn a drawn process into instructions for an agent; a pipeline step is
     # the prompt somebody is testing, and wrapping it in a paragraph about the diagram would be
     # testing something else (01M1X8DA8REGR836D77PPV3W54).
-    said = _asking(card, run.given, await _what_is_known(store, run)) or briefing(
+    said = _asking(card, run.given, await _what_is_known(store, run), cards, lines) or briefing(
         card.name, cards, lines
     )
 
@@ -401,7 +401,13 @@ async def _do(
     return 1
 
 
-def _asking(card: process.Card, given: str, known: list[str]) -> str:
+def _asking(
+    card: process.Card,
+    given: str,
+    known: list[str],
+    cards: Sequence[process.Card] = (),
+    lines: Sequence[process.Line] = (),
+) -> str:
     """The prompt this step sends, or "" when it is not that kind of step.
 
     Three parts, in the order they matter. The prompt somebody wrote, verbatim and first, because
@@ -418,12 +424,25 @@ def _asking(card: process.Card, given: str, known: list[str]) -> str:
     asks = (card.said.get("asks") or "").strip()
     if not asks:
         return ""
-    lines = [asks]
+    # The slots first, because everything below is written about the prompt and the prompt is not
+    # finished until what came in along the lines is in it (agent_desk/slots.py).
+    filled = slots.fill(
+        asks, slots.values_from(process.feeding(card.name, list(cards), list(lines)))
+    )
+    said = [filled.said]
+    if filled.left:
+        # Left standing rather than emptied. A prompt that quietly lost `{the article}` ran against
+        # nothing and answered confidently; one that still says it is visibly about the wrong thing.
+        said.append(
+            "\n(Nothing on this workbench is called "
+            + ", ".join(f"“{one}”" for one in filled.left)
+            + ", so those places are still empty.)"
+        )
     if given.strip():
-        lines += ["", "## What this run was given", given.strip()]
+        said += ["", "## What this run was given", given.strip()]
     if known:
-        lines += ["", "## What the steps before this one produced", *known]
-    return "\n".join(lines)
+        said += ["", "## What the steps before this one produced", *known]
+    return "\n".join(said)
 
 
 async def _run_a_process(store: Store, run: Run, card: process.Card, name: str) -> int:

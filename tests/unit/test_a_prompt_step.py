@@ -84,7 +84,7 @@ def test_a_prompt_step_is_not_given_the_briefing_about_the_diagram() -> None:
         pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "engine.py"
     ).read_text(encoding="utf-8")
 
-    assert "_asking(card, run.given, await _what_is_known(store, run)) or briefing(" in source
+    assert "_asking(card, run.given, await _what_is_known(store, run), cards, lines)" in source
 
 
 def test_a_step_that_chose_an_alternative_is_missing_nothing() -> None:
