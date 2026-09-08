@@ -341,3 +341,44 @@ async def test_what_is_known_is_about_this_project_and_bounded() -> None:
     assert known, "a decision is told nothing at all"
     assert not [one for one in known if "not this project" in one]
     assert len([one for one in known if "work that failed" in one]) <= engine.THINGS_KNOWN
+
+
+# --- redrawing the drawing that is there (01M1XC4Z2SCT…) -----------------------------------------
+@pytest.mark.unit
+def test_a_description_can_redraw_the_process_on_the_bench() -> None:
+    """ "«Слова → схема» умеет создавать новое и не умеет менять. Значит, поправить процесс словами
+    нельзя — только собрать рядом второй и удалить первый.\" """
+    console = _code()
+
+    assert "data-redraw-sketch" in console
+    assert "redrawSketch" in console
+
+    board = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "agent_desk"
+        / "web"
+        / "templates"
+        / "board.html"
+    ).read_text(encoding="utf-8")
+    assert "data-redraw-sketch" in board
+
+
+@pytest.mark.unit
+def test_redrawing_takes_off_the_steps_and_nothing_else() -> None:
+    """Everything else on a workbench stands for something outside it — a session, an idea, a
+    project — and taking one of those off because somebody rewrote a description would be losing
+    something the description was never about."""
+    steps = _body("stepsOnTheBench")
+
+    assert "'.pin[data-kind=\"step\"]'" in steps
+
+
+@pytest.mark.unit
+def test_redrawing_is_offered_only_when_there_is_a_drawing_to_redraw() -> None:
+    """On an empty bench the two buttons do the same thing under different words, which is a
+    choice nobody can make."""
+    console = _code()
+    sketching = console[console.index("async function sketchFromWords(") :]
+    sketching = sketching[: sketching.index("\n}\n")]
+
+    assert "hidden = !stepsOnTheBench().length" in sketching

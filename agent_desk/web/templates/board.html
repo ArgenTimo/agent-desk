@@ -134,6 +134,11 @@
         <div class="words-do">
           <button type="button" data-sketch>Draw it</button>
           <button type="button" data-keep-sketch hidden>Put it on the workbench</button>
+          {# "«Слова → схема» умеет создавать новое и не умеет менять. Значит, поправить процесс
+             словами нельзя — только собрать рядом второй и удалить первый." Offered only when
+             there is a drawing to redraw, and one press of undo away either way. #}
+          <button type="button" data-redraw-sketch hidden
+                  title="take the steps now on the workbench off, and put this in their place">Redraw the one here</button>
         </div>
         <pre class="words-offer"></pre>
       </aside>

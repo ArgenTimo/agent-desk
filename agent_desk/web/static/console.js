@@ -2953,6 +2953,14 @@ async function tellInWords() {
 
 let sketched = null;
 
+// The step cards on the bench: the ones a drawing is made of, and the only ones a redraw touches.
+// Everything else on a workbench stands for something that exists outside it — a session, an idea,
+// a project — and taking one of those off because somebody rewrote a description would be losing
+// something the description was never about.
+function stepsOnTheBench() {
+  return onBench('.pin[data-kind="step"]');
+}
+
 async function sketchFromWords() {
   const panel = document.getElementById('words-panel');
   const field = panel?.querySelector('.words-in');
@@ -2978,6 +2986,9 @@ async function sketchFromWords() {
       .concat(said.lines.map((one) => `   ${one.from} → ${one.to} (${one.kind}${one.says ? `: ${one.says}` : ''})`))
       .join('\n');
     panel.querySelector('[data-keep-sketch]').hidden = false;
+    // Redrawing is offered only when there is something to redraw. On an empty bench the two
+    // buttons would do the same thing under different words, which is a choice nobody can make.
+    panel.querySelector('[data-redraw-sketch]').hidden = !stepsOnTheBench().length;
   } catch {
     shown.textContent = 'Could not read that.';
   }
@@ -2991,7 +3002,19 @@ document.getElementById('words-panel')?.addEventListener('click', async (event) 
     document.getElementById('words-panel').hidden = true;
     return;
   }
-  if (button.dataset.keepSketch === undefined || !sketched) return;
+  const redrawing = button.dataset.redrawSketch !== undefined;
+  if ((button.dataset.keepSketch === undefined && !redrawing) || !sketched) return;
+  // "Поправить процесс словами нельзя — только собрать рядом второй и удалить первый." Taking the
+  // old steps off first is the whole difference, and it is one press of undo away — the cards are
+  // step cards, which stand for nothing outside this drawing, so nothing else loses anything.
+  if (redrawing) {
+    const going = stepsOnTheBench();
+    for (const pin of going) {
+      placed.delete(cardName(pin));
+      pin.remove();
+    }
+    if (going.length) say(`Took ${going.length} step${going.length === 1 ? '' : 's'} off.`);
+  }
   const answer = await fetch('/workbench/sketch/keep', {
     method: 'POST',
     headers: FORM,
