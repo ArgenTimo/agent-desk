@@ -1,0 +1,48 @@
+{# A pull request on the workbench (052-a-pull-request-is-a-thing.sql).
+
+   The blockers column already says one true thing about a pull request: it has stopped on a
+   person. This card says the other one — what it is — because that is what somebody puts beside
+   the session that wrote the branch in order to ask a question about it.
+
+   Read-only, and the card says so: nothing here reviews, comments on, approves or merges
+   (docs/adr/0010). The link goes to the place where those things are done. #}
+{% if not card %}
+<p class="empty small">that pull request is not open any more, or has not been read since it was</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ card.key }} · {{ card.title }}">
+  <div class="plain-only">
+    <p class="card-said">{{ card.title }}</p>
+
+    <h4>What it is waiting for</h4>
+    {# Quoted from what GitHub said, not worked out here. An empty answer is a real one — the pull
+       request is open and nothing about it says who is next — and it is said in those words rather
+       than as "nobody", which would be a claim (CLAUDE.md, rule five). #}
+    {% if card.waiting_for %}
+    <p class="small">{{ card.waiting_for }}</p>
+    {% else %}
+    <p class="small dim">Open, and nothing about it says who is next.</p>
+    {% endif %}
+
+    {% if card.draft %}
+    <p class="small">It is a draft, so it is not asking for a review yet.</p>
+    {% endif %}
+
+    <h4>Which project</h4>
+    <p class="small mono">{{ card.repo_key }}</p>
+
+    {% if card.url %}
+    <p class="small"><a href="{{ card.url }}" target="_blank" rel="noreferrer noopener">open it on
+      GitHub…</a> — this console reads pull requests and does nothing else with them.</p>
+    {% endif %}
+  </div>
+
+  {# --- and the technical half, behind the same toggle as every other card ------------------- #}
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>number</dt><dd class="mono">{{ card.key }}</dd>
+      <dt>read</dt><dd>{{ card.seen_at | ago }}</dd>
+      {% if card.url %}<dt>at</dt><dd class="mono">{{ card.url }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+{% endif %}

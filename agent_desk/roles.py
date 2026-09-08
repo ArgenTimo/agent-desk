@@ -162,6 +162,10 @@ NATURALLY = {
     "folder": "object",
     "file": "object",
     "connector": "object",
+    # A pull request is a thing that exists, not a step in anybody's process. It appears in the
+    # blockers as an Event — "this stopped on a person" — and that is a different card saying a
+    # different thing about the same pull request (052-a-pull-request-is-a-thing.sql).
+    "pull": "object",
     "note": "object",
     "block": "event",
     "group": "result",

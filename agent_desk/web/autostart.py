@@ -20,7 +20,7 @@ import structlog
 from agent_desk import dispatch, land
 from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd
-from agent_desk.store.repo import Autostart, Store, Task
+from agent_desk.store.repo import Autostart, Pull, Store, Task
 from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
 
@@ -319,6 +319,25 @@ async def pull_requests(store: Store, arming: Autostart) -> int:
         await store.replace_pull_blockers(
             arming.repo_key,
             [(one.key, one.title, one.waiting_for, one.url) for one in read.pulls],
+        )
+        # And as themselves. A pull request waiting on a review is work that has stopped on a
+        # person, which is the line above; a pull request is also a thing somebody puts on a
+        # workbench beside the session that wrote it and asks a question about. Two readings of one
+        # fact, and they are different rows (052-a-pull-request-is-a-thing.sql).
+        await store.replace_pulls(
+            arming.repo_key,
+            [
+                Pull(
+                    repo_key=arming.repo_key,
+                    number=one.number,
+                    title=one.title,
+                    url=one.url,
+                    waiting_for=one.waiting_for,
+                    draft=one.draft,
+                    seen_at=0,
+                )
+                for one in read.pulls
+            ],
         )
         return len(read.pulls)
     return 0

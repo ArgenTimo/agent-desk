@@ -45,6 +45,16 @@
       {% endif %}
     </p>
 
+    {% if one.kind == "pull" %}
+    {# The pull request itself, to drag out onto the bench. This card says it has stopped; that one
+       says what it is, and beside the session that wrote the branch it is the one worth asking a
+       question with (052-a-pull-request-is-a-thing.sql). #}
+    <h4>The pull request</h4>
+    <span class="chip" data-kind="pull" data-id="{{ one.repo_key }}::{{ one.ref }}"
+          data-label="{{ one.what }}" draggable="true"
+          title="drag it onto the workbench">{{ one.ref }} · what it is</span>
+    {% endif %}
+
     <h4>What is waiting on it</h4>
     {% if one.holding_up %}
     <ul class="held">

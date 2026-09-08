@@ -1260,6 +1260,20 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_task.html").render(card=ticket),
             status_code=200 if ticket else 404,
         )
+    if kind == "pull":
+        # `<project key>::#12`. The project key is half of it because a pull request number means
+        # nothing outside the repository it belongs to, and `::` is the separator the connector
+        # cards already use for exactly this (052-a-pull-request-is-a-thing.sql).
+        repo_key, _, number = id.rpartition("::")
+        found = (
+            await store.pull(repo_key, int(number.lstrip("#")))
+            if repo_key and number.lstrip("#").isdigit()
+            else None
+        )
+        return HTMLResponse(
+            env.get_template("_card_pull.html").render(card=found),
+            status_code=200 if found else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.

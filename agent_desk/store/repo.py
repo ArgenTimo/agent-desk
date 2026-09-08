@@ -171,6 +171,32 @@ class Task(BaseModel):
         return self.started_at is None and self.failed_at is None
 
 
+class Pull(BaseModel):
+    """One pull request, as this console last saw it (052-a-pull-request-is-a-thing.sql).
+
+    A copy of what GitHub said, kept so that a card can be drawn without a network call every time
+    somebody looks at it, and refreshed whole on every read. Not a model of a pull request: there
+    is no state here this program maintains, because there is nothing it is allowed to change.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    number: int
+    title: str
+    url: str = ""
+    # Who it has stopped on, in the words `github.waiting_for` chose. Empty means it is open and
+    # nothing about it says who is next — which is a real answer and not "nobody".
+    waiting_for: str = ""
+    draft: bool = False
+    seen_at: int
+
+    @property
+    def key(self) -> str:
+        """The `#12` a pull request is called by, and the half of its card name that is its own."""
+        return f"#{self.number}"
+
+
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
@@ -2003,6 +2029,57 @@ class Store:
                         "t": _now_ms(),
                     },
                 )
+
+    async def replace_pulls(self, repo_key: str, found: Sequence[Pull]) -> None:
+        """This project's open pull requests, as of now, replacing what was there.
+
+        Whole rather than a diff, for the same reason the bench is written whole: this is a copy of
+        somebody else's list, and the smallest message that can say "that one was merged" is the
+        list without it.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM pull WHERE repo_key = :repo_key"), {"repo_key": repo_key}
+            )
+            for one in found:
+                await conn.execute(
+                    text(
+                        "INSERT INTO pull (repo_key, number, title, url, waiting_for, draft, "
+                        "seen_at) VALUES (:repo_key, :number, :title, :url, :waiting_for, "
+                        ":draft, :t)"
+                    ),
+                    {
+                        "repo_key": repo_key,
+                        "number": one.number,
+                        "title": one.title[:200],
+                        "url": one.url[:500],
+                        "waiting_for": one.waiting_for[:200],
+                        "draft": 1 if one.draft else 0,
+                        "t": _now_ms(),
+                    },
+                )
+
+    async def pulls(self, repo_key: str = "") -> list[Pull]:
+        """The pull requests this console has read, newest number first — which is the order a
+        person thinks of them in."""
+        one = "SELECT * FROM pull WHERE repo_key = :repo_key ORDER BY number DESC"
+        every = "SELECT * FROM pull ORDER BY repo_key, number DESC"
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(one if repo_key else every), {"repo_key": repo_key} if repo_key else {}
+            )
+            return [Pull(**{**row._mapping, "draft": bool(row._mapping["draft"])}) for row in rows]
+
+    async def pull(self, repo_key: str, number: int) -> Pull | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT * FROM pull WHERE repo_key = :repo_key AND number = :number"),
+                {"repo_key": repo_key, "number": number},
+            )
+            row = rows.first()
+            if row is None:
+                return None
+            return Pull(**{**row._mapping, "draft": bool(row._mapping["draft"])})
 
     async def tracker_blockers(self) -> list[TrackerBlocker]:
         async with self.engine.connect() as conn:
