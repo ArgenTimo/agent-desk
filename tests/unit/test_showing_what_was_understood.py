@@ -35,17 +35,24 @@ def _body(name: str) -> str:
     return source[start : source.index("\n}\n", start)]
 
 
-def test_it_lights_the_card_and_brings_it_into_view() -> None:
+def test_it_lights_the_cards_and_brings_one_into_view() -> None:
     saying = _body("sayWhatItIsAbout")
-    assert "classList.add('about-this')" in saying
-    assert "bringIntoView(pin)" in saying
+    assert "card.classList.add('about-this')" in saying
+    assert "bringIntoView(cards[0])" in saying
 
 
 def test_a_card_already_on_the_screen_is_not_chased() -> None:
     """Somebody who has panned to a corner on purpose is looking at something, and a console that
     drags the surface out from under them every time it works something out is one they stop
     asking questions on."""
-    assert "if (!onTheScreen(pin)) bringIntoView(pin)" in _body("sayWhatItIsAbout")
+    assert "if (!cards.some(onTheScreen)) bringIntoView(cards[0])" in _body("sayWhatItIsAbout")
+
+
+def test_several_cards_do_not_zoom_the_surface_out_to_hold_them_all() -> None:
+    """Two cards a long way apart, fitted, is a view of two specks — a worse answer to "where am
+    I" than moving to the first of them."""
+    saying = _body("sayWhatItIsAbout")
+    assert "fitEverything" not in saying
 
 
 def test_the_understanding_is_shown_before_the_line_is_drawn() -> None:
@@ -65,9 +72,9 @@ def test_a_settled_question_is_neither_lit_nor_chased() -> None:
 
 def test_the_light_goes_out_when_the_answer_arrives() -> None:
     """A card still lit under a finished answer says the console is still working out what the
-    question was about."""
+    question was about. Every one of them, not the first: a question about two cards lit two."""
     syncing = _body("syncBlocks")
-    assert "article.hasAttribute('data-settled')) onto.classList.remove('about-this')" in syncing
+    assert "for (const card of onto) card.classList.remove('about-this')" in syncing
 
 
 def test_the_line_is_still_drawn_for_a_question_that_is_already_answered() -> None:
@@ -77,7 +84,7 @@ def test_the_line_is_still_drawn_for_a_question_that_is_already_answered() -> No
     guard = syncing.index("if (!article.hasAttribute('data-settled')) sayWhatItIsAbout(onto)")
     # The guard covers one statement, and the line is pushed after it rather than inside it.
     assert guard < tie
-    assert "sayWhatItIsAbout(onto);\n      ownTies.push(" in syncing
+    assert "sayWhatItIsAbout(onto);\n      for (const card of onto) {" in syncing
 
 
 def test_being_on_the_screen_is_worked_out_and_not_measured() -> None:

@@ -270,10 +270,16 @@ _NUMBERS = re.compile(r"\A[0-9, ]+\Z")
 # nobody watching can follow.
 CARD_CHARS = 80
 
-# Same shape as `_CHOICE` and for the same reason: one token, read whole. "It follows on from 2 of
-# the three" is not an answer, and reading a digit out of it would attach a question to a card
-# nobody named.
-_WHICH = re.compile(r"\A([0-9]{1,2}|none)\Z", re.IGNORECASE)
+# One token, read whole — the same shape as `_CHOICE` and for the same reason. "It follows on from
+# 2 of the three" is not an answer, and reading a digit out of it would attach a question to a card
+# nobody named. Several numbers are a token too: "1,3" is one answer naming two cards, and the
+# comma is the only thing allowed between them.
+_WHICH = re.compile(r"\A((?:[0-9]{1,2},)*[0-9]{1,2}|none)\Z", re.IGNORECASE)
+
+# How many cards one question is allowed to follow on from. The product here is lines on a diagram,
+# and six lines into one card is a picture nobody reads — which is the thing an enquiry bench is
+# for. The instruction says three as well; this is here because an instruction is not a guarantee.
+MOST_CARDS = 3
 
 
 def about_prompt(text: str, cards: Sequence[str]) -> str:
@@ -288,11 +294,12 @@ def about_prompt(text: str, cards: Sequence[str]) -> str:
     """
     lines = [
         "A developer is thinking on a workbench of cards. They have just typed a question.",
-        "Decide which card it follows on from, if any.",
+        "Decide which cards it follows on from, if any.",
         "",
-        "Answer with the number of that card, or the word none. One token, nothing else. Answer",
-        "none whenever it is not clearly about one of them — a question is allowed to open a",
-        "subject of its own, and that is more common than it looks.",
+        "Answer with the number of that card, or several numbers separated by commas when the",
+        f"question is about more than one of them — at most {MOST_CARDS}. Or the word none. One",
+        "token, nothing else. Answer none whenever it is not clearly about any of them: a question",
+        "is allowed to open a subject of its own, and that is more common than it looks.",
         "",
         "## The cards",
     ]
@@ -301,32 +308,44 @@ def about_prompt(text: str, cards: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
-def read_about(reply: str, count: int) -> int:
-    """The 1-based card the reply names, or 0 for none of them.
+def read_about(reply: str, count: int) -> list[int]:
+    """The 1-based cards the reply names, in the order it named them, or empty for none of them.
 
-    Out of range is none rather than an error: a model that answers 7 out of 3 has not chosen a
-    card, and drawing a line to whichever card happens to be third would be inventing one.
+    "Я могу сразу попросить нарисовать условно 5 частей… и задавать одновременно различные
+    вопросы." A question about two of the parts has two cards above it, which makes this a graph
+    rather than a tree — and a reader that could only ever say one number is what would have kept
+    it a tree whatever the person asked.
+
+    Out of range is dropped rather than an error: a model that answers 7 out of 3 has not chosen a
+    card, and drawing a line to whichever card happens to be third would be inventing one. A reply
+    that is entirely out of range is therefore none, which is the safe answer anyway.
     """
     said = reply.strip().strip(".").strip()
     found = _WHICH.match(said)
     if found is None or said.lower() == "none":
-        return 0
-    which = int(found.group(1))
-    return which if 1 <= which <= count else 0
+        return []
+    named = [int(one) for one in found.group(1).split(",")]
+    # Deduplicated, because "1,1" names one card twice and two lines between the same pair of cards
+    # are one line drawn twice.
+    picked: list[int] = []
+    for which in named:
+        if 1 <= which <= count and which not in picked:
+            picked.append(which)
+    return picked[:MOST_CARDS]
 
 
-async def about(text: str, cards: Sequence[str]) -> int:
-    """The card this question follows on from, 1-based, or 0.
+async def about(text: str, cards: Sequence[str]) -> list[int]:
+    """The cards this question follows on from, 1-based, or empty.
 
     A failure is none, like everywhere else in this module: no line drawn is a bench somebody
     joins up themselves, and a line drawn from a failed reading is one they have to notice first.
     """
     if not cards:
-        return 0
+        return []
     try:
         reply = "".join([chunk async for chunk in stream_answer(about_prompt(text, cards))])
     except (AnswerFailed, OSError):
-        return 0
+        return []
     return read_about(reply, len(cards))
 
 

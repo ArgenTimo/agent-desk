@@ -1430,7 +1430,10 @@ async def _joins_on_to(store: Store, block: Block) -> None:
         return
     which = await classifier.about(block.input, [card.label for card in cards])
     if which:
-        await store.set_block_relates_to(block.id, cards[which - 1].name)
+        # Several names in one column, comma-separated, because a card name is `kind:id` and can
+        # hold no comma. A table would be the tidier shape and would buy nothing: this is a reading
+        # that is rewritten whole every time it is made, never joined against, and never counted.
+        await store.set_block_relates_to(block.id, ",".join(cards[one - 1].name for one in which))
 
 
 async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) -> None:

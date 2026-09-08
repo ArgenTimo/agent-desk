@@ -113,8 +113,10 @@ class Block(BaseModel):
     finished_at: int | None = None
     # What this one was built from, one line a thing, as the console described it at the time.
     context: str | None = None
-    # Which card on the workbench this question follows on from, as a reading rather than a fact
-    # (051). Empty is "nothing here, or nothing that was clear", and draws no line.
+    # Which cards on the workbench this question follows on from, as a reading rather than a fact
+    # (051), comma-separated. Empty is "nothing here, or nothing that was clear", and draws no
+    # line. More than one because a question may be about two parts of a thing at once, which is
+    # what makes an enquiry a graph rather than a tree.
     relates_to: str = ""
 
 
@@ -952,9 +954,9 @@ class Store:
             )
 
     async def set_block_relates_to(self, block_id: str, name: str) -> None:
-        """Which card this question follows on from, as read (051). Written before the answer is
-        asked for, because the point of the reading is that somebody sees it in time to disagree
-        with it."""
+        """Which cards this question follows on from, as read (051), comma-separated. Written
+        before the answer is asked for, because the point of the reading is that somebody sees it
+        in time to disagree with it."""
         async with self.engine.begin() as conn:
             await conn.execute(
                 text("UPDATE block SET relates_to = :name WHERE id = :id"),

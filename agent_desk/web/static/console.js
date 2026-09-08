@@ -3888,9 +3888,12 @@ function answerCard(article, rev) {
 // Centred only when it is not already on the screen. Somebody who has panned to a corner on
 // purpose is looking at something, and a console that drags the surface out from under them every
 // time it works something out is a console they stop asking questions on.
-function sayWhatItIsAbout(pin) {
-  pin.classList.add('about-this');
-  if (!onTheScreen(pin)) bringIntoView(pin);
+function sayWhatItIsAbout(cards) {
+  for (const card of cards) card.classList.add('about-this');
+  // One of them brought into view, and only when none of them is already there. Fitting all of
+  // them on screen would zoom the surface out to hold two cards that may be a long way apart,
+  // which is a worse answer to "where am I" than moving to the first of them.
+  if (!cards.some(onTheScreen)) bringIntoView(cards[0]);
 }
 
 // Which questions have had their "follows on from" line drawn. The same bookkeeping, and the same
@@ -3978,20 +3981,29 @@ function syncBlocks() {
     // What the console read this question as following on from. Once, and only while the card it
     // names is here: `syncBlocks` runs on every push, and a line pushed each time is the same line
     // drawn forty deep by the end of a conversation.
-    const follows = article.dataset.relates;
-    const onto = follows && surface.querySelector(`.pin[data-name="${CSS.escape(follows)}"]`);
-    if (onto && !joined.has(id)) {
+    // One question can follow on from several cards — two parts of a thing asked about at once —
+    // which is what makes an enquiry a graph rather than a tree.
+    const onto = (article.dataset.relates || '')
+      .split(',')
+      .filter(Boolean)
+      .map((name) => surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`))
+      .filter(Boolean);
+    if (onto.length && !joined.has(id)) {
       joined.add(id);
       // Only for a question still being worked on. A conversation the page is seeing for the first
       // time — a reload, a chat switched back to — is all settled blocks, and lighting each of them
       // in turn would drag the surface across a dozen old answers before it came to rest.
       if (!article.hasAttribute('data-settled')) sayWhatItIsAbout(onto);
-      ownTies.push({ from: follows, to: `block:${id}`, says: 'follows on from' });
+      for (const card of onto) {
+        ownTies.push({ from: cardName(card), to: `block:${id}`, says: 'follows on from' });
+      }
       drawTies();
     }
     // The highlight lasts as long as the not-knowing does. A card still lit under a finished
     // answer says the console is still working out what the question was about.
-    if (onto && article.hasAttribute('data-settled')) onto.classList.remove('about-this');
+    if (article.hasAttribute('data-settled')) {
+      for (const card of onto) card.classList.remove('about-this');
+    }
 
     // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
     // верстаке появляется её карточка, и далее карточки под-идей."

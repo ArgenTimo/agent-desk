@@ -59,27 +59,56 @@ def _card(name: str, label: str, kind: str = "answer") -> BenchCard:
 
 # --- reading the reply ----------------------------------------------------------------------------
 def test_a_number_names_that_card() -> None:
-    assert classify.read_about("2", 3) == 2
+    assert classify.read_about("2", 3) == [2]
 
 
 def test_none_is_an_answer_and_not_a_failure() -> None:
-    assert classify.read_about("none", 3) == 0
+    assert classify.read_about("none", 3) == []
 
 
 def test_a_number_outside_the_list_chooses_nothing() -> None:
     """A model that answers 7 out of 3 has not chosen a card, and drawing a line to whichever card
     happens to be third would be inventing one."""
-    assert classify.read_about("7", 3) == 0
+    assert classify.read_about("7", 3) == []
 
 
 def test_a_sentence_with_a_number_in_it_chooses_nothing() -> None:
     """The same mistake `read_choice` was written to stop: "it follows on from 2 of the three" is
     not an answer, and reading a digit out of it attaches a question to a card nobody named."""
-    assert classify.read_about("it follows on from 2 of the three", 3) == 0
+    assert classify.read_about("it follows on from 2 of the three", 3) == []
 
 
 def test_a_trailing_full_stop_is_not_a_different_answer() -> None:
-    assert classify.read_about("1.", 3) == 1
+    assert classify.read_about("1.", 3) == [1]
+
+
+# --- a question about several cards at once -------------------------------------------------------
+def test_several_numbers_name_several_cards() -> None:
+    """ "Я могу сразу попросить нарисовать условно 5 частей… и задавать одновременно различные
+    вопросы." A question about two of the parts has two cards above it, which is what makes an
+    enquiry a graph rather than a tree."""
+    assert classify.read_about("1,3", 3) == [1, 3]
+
+
+def test_they_come_back_in_the_order_they_were_named() -> None:
+    assert classify.read_about("3,1", 3) == [3, 1]
+
+
+def test_one_card_named_twice_is_one_card() -> None:
+    """Two lines between the same pair is one line drawn twice."""
+    assert classify.read_about("1,1,2", 3) == [1, 2]
+
+
+def test_the_out_of_range_ones_are_dropped_and_the_rest_kept() -> None:
+    assert classify.read_about("2,9", 3) == [2]
+
+
+def test_no_more_cards_than_a_person_can_read_a_diagram_of() -> None:
+    """The product here is lines on a diagram, and six lines into one card is a picture nobody
+    reads — which is the thing an enquiry bench is for. The instruction says three as well; this
+    is enforced because an instruction is not a guarantee."""
+    assert classify.read_about("1,2,3,4,5", 5) == [1, 2, 3]
+    assert classify.MOST_CARDS == 3
 
 
 async def test_a_reading_that_could_not_be_had_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,13 +120,13 @@ async def test_a_reading_that_could_not_be_had_is_none(monkeypatch: pytest.Monke
         yield ""  # pragma: no cover - unreachable, and the signature needs it
 
     monkeypatch.setattr(classify, "stream_answer", broken)
-    assert await classify.about("why", ["a card", "another"]) == 0
+    assert await classify.about("why", ["a card", "another"]) == []
 
 
 async def test_nothing_to_choose_between_costs_no_model_call() -> None:
     """Every ordinary bench is this one. A call per question for a choice with no candidates is a
     cost nobody asked for."""
-    assert await classify.about("why", []) == 0
+    assert await classify.about("why", []) == []
 
 
 # --- what is offered ------------------------------------------------------------------------------
@@ -134,9 +163,9 @@ async def test_the_candidates_are_the_enquiry_and_not_the_whole_bench(store: Sto
 
     offered: list[list[str]] = []
 
-    async def watch(_text: str, cards: list[str]) -> int:
+    async def watch(_text: str, cards: list[str]) -> list[int]:
         offered.append(cards)
-        return 0
+        return []
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(blocks.classifier, "about", watch)
@@ -160,10 +189,10 @@ async def test_one_candidate_is_not_a_choice(store: Store) -> None:
 
     called = False
 
-    async def watch(_text: str, _cards: list[str]) -> int:
+    async def watch(_text: str, _cards: list[str]) -> list[int]:
         nonlocal called
         called = True
-        return 1
+        return [1]
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(blocks.classifier, "about", watch)
@@ -191,8 +220,8 @@ async def test_what_was_read_is_written_down(store: Store) -> None:
     )
     await store.begin_with(thread.id, "step:root")
 
-    async def picks_the_answer(_text: str, _cards: list[str]) -> int:
-        return 2
+    async def picks_the_answer(_text: str, _cards: list[str]) -> list[int]:
+        return [2]
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(blocks.classifier, "about", picks_the_answer)
@@ -219,8 +248,8 @@ async def test_nothing_read_leaves_no_line(store: Store) -> None:
     )
     await store.begin_with(thread.id, "step:root")
 
-    async def picks_nothing(_text: str, _cards: list[str]) -> int:
-        return 0
+    async def picks_nothing(_text: str, _cards: list[str]) -> list[int]:
+        return []
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(blocks.classifier, "about", picks_nothing)
@@ -261,8 +290,13 @@ def test_the_line_is_drawn_once() -> None:
 
 
 def test_no_line_is_drawn_to_a_card_that_is_not_here() -> None:
+    """A name read from the store is a name, not a card: the card it meant may have been taken off
+    the bench since. Every named card is looked for and the ones that are not there fall out."""
     source = CONSOLE.read_text(encoding="utf-8")
-    assert 'surface.querySelector(`.pin[data-name="${CSS.escape(follows)}"]`)' in source
+    assert (
+        '.map((name) => surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`))' in source
+    )
+    assert ".filter(Boolean);" in source
 
 
 def test_a_cleared_bench_forgets_that_it_drew_them() -> None:
@@ -275,3 +309,46 @@ def test_a_cleared_bench_forgets_that_it_drew_them() -> None:
 
 def test_the_reading_reaches_the_page_on_the_block() -> None:
     assert 'data-relates="{{ block.relates_to }}"' in BLOCKS_HTML.read_text(encoding="utf-8")
+
+
+async def test_a_question_about_two_cards_is_joined_to_both(store: Store) -> None:
+    """The whole of what makes this a graph. A tree would have had to pick one of them and say
+    nothing about the other, which is the answer being wrong rather than being partial."""
+    from agent_desk.web import blocks
+
+    thread = await store.create_thread("an enquiry")
+    await store.keep_bench(
+        [
+            _card("step:root", "the project", kind="step"),
+            _card("answer:one", "the reader is cached"),
+            _card("answer:two", "the writer is not"),
+        ],
+        thread_id=thread.id,
+    )
+    await store.begin_with(thread.id, "step:root")
+
+    async def picks_both(_text: str, _cards: list[str]) -> list[int]:
+        return [2, 3]
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(blocks.classifier, "about", picks_both)
+    try:
+        block = await _asked(store, thread.id, "how do those two fit together")
+        await blocks._joins_on_to(store, block)
+    finally:
+        monkeypatch.undo()
+
+    again = await store.block(block.id)
+    assert again is not None and again.relates_to == "answer:one,answer:two"
+
+
+def test_the_page_draws_a_line_from_each_of_them() -> None:
+    source = "\n".join(
+        line
+        for line in CONSOLE.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("//")
+    )
+    start = source.index("function syncBlocks(")
+    body = source[start : source.index("\n}\n", start)]
+    assert "for (const card of onto) {" in body
+    assert "from: cardName(card), to: `block:${id}`" in body
