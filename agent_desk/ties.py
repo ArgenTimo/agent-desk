@@ -23,6 +23,22 @@ anybody.
   lines somebody draws are this, and forcing a process meaning onto them would make the other four
   mean less.
 
+## And the sixth, which is not a process word at all
+
+- **named** — the relation is whatever is written on the line: "foreign key", "deploys to",
+  "blocks". Its words are its meaning, and without them it says nothing at all.
+
+The five above are the vocabulary of *process*, and they are enough for a process and useless for
+anything else: *"таблица — не Action, «внешний ключ» — не «then»"*. A workbench meant for drawing
+whatever somebody is looking at needs a second vocabulary — thing and relation — and the honest
+shape of it is one more word whose meaning is "read the label".
+
+That is not the free-text label this module argues against. A line whose *kind* is free text is a
+note with an arrow on it: nothing can reason about it, `natural` cannot suggest it, `odd_pair`
+cannot question it, and the route that draws lines would have to accept any string anybody sent.
+A line whose kind is `named` is still one of a closed set — the console knows what it is and knows
+that what it means is on it — and the label is data the way a branch's condition already is.
+
 ## Suggested, never enforced
 
 `natural` reads the roles at both ends and says which of the five that line probably is: out of a
@@ -63,6 +79,9 @@ KINDS: dict[str, Kind] = {
     "when": Kind("when", "when", "this happened, so do that"),
     "makes": Kind("makes", "makes", "and this is what comes out of it"),
     "with": Kind("with", "with", "related, in no particular order", one_way=False),
+    # The label is the meaning, so a `named` line with nothing on it is the one case where the
+    # console knows a line says nothing — the same claim `if` makes, for the same reason.
+    "named": Kind("named", "", "whatever the label says", wants_words=True),
 }
 
 # The line a pair of roles is probably meant to be. Read from the end it leaves, because that is

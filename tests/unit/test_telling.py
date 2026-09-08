@@ -148,13 +148,25 @@ def test_a_line_pointing_at_a_step_that_is_not_there_is_dropped() -> None:
 
 
 @pytest.mark.unit
-def test_a_line_of_a_kind_this_program_does_not_have_is_dropped() -> None:
+def test_a_line_of_a_kind_this_program_does_not_have_is_a_named_relation() -> None:
+    """It used to be dropped, when five process words were the whole vocabulary. A workbench that
+    draws whatever somebody is looking at needs the other kind of line — "foreign key" is not a
+    `then` — and the honest place to put it is the label, on a line whose kind says "read the
+    label" (agent_desk/ties.py)."""
     steps, lines = telling.read_shape(
-        "action | one | do one\naction | two | do two\n1 -> 2 : leads-towards : \n"
+        "object | one | a table\nobject | two | another\n1 -> 2 : foreign key\n"
     )
 
     assert len(steps) == 2
-    assert lines == []
+    assert lines == [{"from": "1", "to": "2", "kind": "named", "says": "foreign key"}]
+
+
+@pytest.mark.unit
+def test_a_process_word_is_still_a_process_line() -> None:
+    """Read after the five and not before, or "1 -> 2 : then" would be a relation called "then"."""
+    _, lines = telling.read_shape("action | one | do\naction | two | do\n1 -> 2 : then\n")
+
+    assert lines == [{"from": "1", "to": "2", "kind": "then", "says": ""}]
 
 
 @pytest.mark.unit
@@ -170,7 +182,7 @@ def test_the_prompt_says_not_to_invent_steps() -> None:
     a person accepting the proposal would be accepting work they never described."""
     asked = telling.shape_prompt("read the logs, then write it up")
 
-    assert "Do not invent steps" in asked
+    assert "Do not invent cards" in asked
     assert "read the logs, then write it up" in asked
     for role in ("object", "action", "decision", "event", "result"):
         assert role in asked

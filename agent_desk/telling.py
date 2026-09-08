@@ -110,37 +110,66 @@ def _what_it_is(card: process.Card) -> str:
 _STEP = re.compile(r"\A(object|action|decision|event|result)\s*\|\s*([^|]{1,120})\|?(.*)\Z", re.I)
 # `1 -> 2 : kind : words`, where the numbers are the steps above.
 _LINE = re.compile(r"\A(\d+)\s*->\s*(\d+)\s*:\s*(\w+)\s*:?(.*)\Z")
+# `1 -> 2 : whatever it is called`. Tried only after the form above has failed to name one of the
+# process kinds, so "1 -> 2 : then" is still a `then` and not a relation called "then".
+_NAMED = re.compile(r"\A(\d+)\s*->\s*(\d+)\s*:\s*(.+)\Z")
+# The one-line refusal: `cannot: <why>`. It exists so that "I have not been shown that" has a way
+# of arriving that is not an empty answer — see `draw_prompt`.
+_CANNOT = re.compile(r"\Acannot\s*:\s*(.+)\Z", re.I)
 
 
-def shape_prompt(text: str) -> str:
-    """Ask for a shape, in a form that can be read rather than interpreted.
+def shape_prompt(text: str, seen: Sequence[str] = ()) -> str:
+    """Ask for a drawing, in a form that can be read rather than interpreted.
 
-    The instruction against inventing steps is not decoration. A model asked to draw a process
-    will happily add the two steps everybody's process has, and a person accepting the proposal
-    would be accepting work they never described.
+    Two vocabularies, and the model picks the one that fits what was asked. Five process words
+    draw a process and are useless for anything else — *"таблица — не Action, «внешний ключ» — не
+    «then»"* — so a request to draw a database schema, a set of services, or anything else somebody
+    is looking at gets things and named relations instead, where the label on the line is what the
+    relation is called (agent_desk/ties.py).
+
+    The instruction against inventing is not decoration, and it is now two instructions. A model
+    asked to draw a process will happily add the two steps everybody's process has, and a person
+    accepting the proposal would be accepting work they never described. A model asked to draw "our
+    database" will draw a database — a plausible one, from memory, of a schema it has never seen —
+    and that one is worse, because it is not a wrong summary of something true but a picture of
+    something that does not exist. So `cannot:` is offered as an answer, and what can be seen is
+    listed under it: everything else is off limits.
     """
-    return "\n".join(
-        [
-            "Turn the description below into a process, using only what it actually says.",
-            "",
-            "Answer with lines and nothing else — no prose, no preamble, no explanation.",
-            "",
-            "First the steps, one per line, numbered by their order in your answer:",
-            "  <role> | <short name> | <what it does>",
-            "where <role> is one of: object, action, decision, event, result.",
-            "",
-            "Then the lines between them:",
-            "  <from number> -> <to number> : <kind> : <words on the line>",
-            "where <kind> is one of: then, if, when, makes, with.",
-            "Use `if` for a way out of a decision and put the condition in the words.",
-            "",
-            "Do not invent steps the description does not mention. If it describes three things,",
-            "answer with three steps. A step nobody asked for is worse than a short answer.",
-            "",
-            "## The description",
-            text,
-        ]
-    )
+    lines = [
+        "Draw what is described below, using only what it actually says and what you are shown.",
+        "",
+        "Answer with lines and nothing else — no prose, no preamble, no explanation.",
+        "",
+        "First the cards, one per line, numbered by their order in your answer:",
+        "  <role> | <short name> | <what it is or does>",
+        "where <role> is one of: object, action, decision, event, result.",
+        "Anything that is a thing rather than a step is an object.",
+        "",
+        "Then the lines between them, in one of two forms.",
+        "",
+        "For a process — work happening in an order:",
+        "  <from number> -> <to number> : <kind> : <words on the line>",
+        "where <kind> is one of: then, if, when, makes, with.",
+        "Use `if` for a way out of a decision and put the condition in the words.",
+        "",
+        "For anything else — things and how they relate:",
+        "  <from number> -> <to number> : <what the relation is called>",
+        "such as `foreign key`, `deploys to`, `owned by`. Use the name the thing itself uses.",
+        "",
+        "Do not invent cards the description does not mention. If it describes three things,",
+        "answer with three cards. A card nobody asked for is worse than a short answer.",
+        "",
+        "Never draw from memory. If you are asked for something you have not been shown — a",
+        "schema, a set of services, a file you cannot see — answer with one line:",
+        "  cannot: <what you would need to be shown>",
+        "A plausible drawing of something you have not seen is a lie that looks like an answer.",
+        "",
+        "## The description",
+        text,
+    ]
+    if seen:
+        lines += ["", "## What you can see", *seen]
+    return "\n".join(lines)
 
 
 def read_shape(reply: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
@@ -162,17 +191,28 @@ def read_shape(reply: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
         # list of steps turned every single line into unparseable rubbish — silently, because a
         # line that does not parse is skipped by design.
         line = _LINE.match(said)
-        if line is not None:
-            kind = line.group(3).lower()
-            if ties.is_a_kind(kind):
-                lines.append(
-                    {
-                        "from": line.group(1),
-                        "to": line.group(2),
-                        "kind": kind,
-                        "says": line.group(4).strip()[:200],
-                    }
-                )
+        if line is not None and ties.is_a_kind(line.group(3).lower()):
+            lines.append(
+                {
+                    "from": line.group(1),
+                    "to": line.group(2),
+                    "kind": line.group(3).lower(),
+                    "says": line.group(4).strip()[:200],
+                }
+            )
+            continue
+        # Not one of the process words, so the whole of it is the relation's name. Read after the
+        # five and not before, or "1 -> 2 : then" would be a relation called "then".
+        named = _NAMED.match(said)
+        if named is not None:
+            lines.append(
+                {
+                    "from": named.group(1),
+                    "to": named.group(2),
+                    "kind": "named",
+                    "says": named.group(3).strip()[:200],
+                }
+            )
             continue
         # A step may arrive with the numbering a list usually has on it.
         said = said.lstrip("0123456789.） )").strip()
@@ -191,6 +231,22 @@ def read_shape(reply: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     within = range(1, len(steps) + 1)
     lines = [one for one in lines if int(one["from"]) in within and int(one["to"]) in within]
     return steps, lines
+
+
+def read_cannot(reply: str) -> str:
+    """What the drawing would have needed to be shown, or "" when it drew something.
+
+    The one thing a model is allowed to answer instead of a drawing, and the reason it exists is
+    the one constraint this branch cannot enforce any other way: *"рисовать по тому, что модель
+    ВИДИТ… Схема, нарисованная по памяти, выглядит правдоподобно и является выдумкой."* Nothing
+    downstream can tell a drawing of a real schema from a drawing of a plausible one, so the only
+    place the distinction can be made is where the drawing is not made.
+    """
+    for raw in reply.splitlines():
+        found = _CANNOT.match(raw.strip())
+        if found is not None:
+            return found.group(1).strip()[:200]
+    return ""
 
 
 def words_for(role: str) -> str:

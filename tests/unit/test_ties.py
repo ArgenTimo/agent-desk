@@ -28,18 +28,24 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
 
 
 @pytest.mark.unit
-def test_the_five_kinds_of_line() -> None:
-    assert set(ties.KINDS) == {"then", "if", "when", "makes", "with"}
+def test_the_kinds_of_line() -> None:
+    """Five process words, and one that is not a process word at all. `named` is what a workbench
+    that draws whatever somebody is looking at needs — a table is not an Action and a foreign key
+    is not a `then` — and it is still a closed set: the *kind* is one of six, and what the relation
+    is called is the label, the way a branch's condition already is."""
+    assert set(ties.KINDS) == {"then", "if", "when", "makes", "with", "named"}
 
 
 @pytest.mark.unit
-def test_only_a_branch_is_meaningless_without_words_on_it() -> None:
+def test_only_a_branch_and_a_named_relation_are_meaningless_without_words() -> None:
     """ "If" with no condition is a fork nobody can follow. "Then" with nothing written on it is
     exactly as clear as it needs to be, and asking for a note on every line is how people stop
     drawing them."""
     wants = {name for name, one in ties.KINDS.items() if one.wants_words}
 
-    assert wants == {"if"}
+    # And `named`, whose label *is* its meaning — the same claim as a branch's, for the same
+    # reason: without the words the line says nothing at all.
+    assert wants == {"if", "named"}
 
 
 @pytest.mark.unit

@@ -781,7 +781,7 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         if kind == "drawing":
-            await _draw_it(store, block)
+            await _draw_it(store, block, surface=surface)
             return
         if kind == "handling" and surface:
             await _rearrange(store, block, rows, surface=surface, on_bench=on_bench)
@@ -837,7 +837,7 @@ async def cards_from_shape(
     return list(made.values())
 
 
-async def _draw_it(store: Store, block: Block) -> None:
+async def _draw_it(store: Store, block: Block, *, surface: Sequence[str] = ()) -> None:
     """A process described in the input field, drawn as cards on the workbench.
 
     "Нарисуй процесс релиза: сначала тесты, если красные — чиним."
@@ -853,10 +853,22 @@ async def _draw_it(store: Store, block: Block) -> None:
     await store.set_block_kind(block.id, "drawing")
     try:
         reply = "".join(
-            [chunk async for chunk in session.stream_answer(telling.shape_prompt(block.input))]
+            [
+                chunk
+                async for chunk in session.stream_answer(telling.shape_prompt(block.input, surface))
+            ]
         )
     except (session.AnswerFailed, OSError) as exc:
         await store.fail_block(block.id, str(exc))
+        return
+    # "Рисовать по тому, что модель ВИДИТ… а не по тому, что она помнит про типичные БД." Read
+    # before the shape, because a reply that says both is a reply that drew from memory anyway.
+    if (needed := telling.read_cannot(reply)) and not telling.read_shape(reply)[0]:
+        await store.finish_block(
+            block.id,
+            f"I can only draw what is in front of me, and that is not: {needed}. Put it on the "
+            "workbench — a file, a folder, an answer that describes it — and ask again.",
+        )
         return
     steps, lines = telling.read_shape(reply)
     if not steps:
