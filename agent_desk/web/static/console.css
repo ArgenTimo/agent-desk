@@ -2763,3 +2763,7 @@ button.go:hover, button.yes:hover {
   box-shadow: 0 0 0 2px var(--busy);
 }
 .pin.about-this .pin-kind::after { content: " · this one"; color: var(--busy); }
+
+/* The control that opens a card out into its parts. Quiet like the other head controls: it is one
+   of five things you can do to a card, not the point of the card (01M1X8DA5RSWKY…). */
+.pin-parts { font-size: var(--t-xs); }

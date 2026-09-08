@@ -307,6 +307,9 @@ stream.addEventListener('board', (event) => {
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
   applyFolded();
+  // A session that has started its first subagent has parts it did not have a moment ago, and a
+  // checkout whose last session ended has none any more.
+  for (const card of surface?.querySelectorAll('.pin[data-kind]') || []) showParts(card);
   const waiting = document.querySelectorAll('.node.session.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 });
@@ -672,6 +675,75 @@ document.getElementById('get-started').addEventListener('click', () => {
 // nobody can use.
 const MOST_KIN = 12;
 
+// "Помещая проект на экран я хочу видеть карточки связанных инстансов, сессий, агентов."
+//
+// The board is already this tree — a project holds its checkouts, a checkout its sessions, a
+// session the agents it started — so the parts of a card are read from `#board` rather than asked
+// of the server. The same argument `syncBlocks` reads `#blocks` under: the answer is already on
+// the page, and a second source is a second thing to keep in step.
+function boardCard(name) {
+  const at = name.indexOf(':');
+  if (at < 0) return null;
+  const kind = name.slice(0, at);
+  const id = name.slice(at + 1);
+  return document.querySelector(
+    `#board [data-kind="${CSS.escape(kind)}"][data-id="${CSS.escape(id)}"]`
+  );
+}
+
+// The parts of a card: the nearest cards under it, and not their parts. One rule rather than one
+// per kind, so a card kind added to the board later opens out without anybody coming back here.
+function partsOf(name) {
+  const holder = boardCard(name);
+  if (!holder) return [];
+  return [...holder.querySelectorAll('[data-kind][data-id]')].filter(
+    (one) => one.parentElement.closest('[data-kind][data-id]') === holder
+  );
+}
+
+function showParts(holder) {
+  const button = holder.querySelector('.pin-parts');
+  if (!button) return;
+  // Hidden rather than dead. A control that does nothing when pressed is worse than no control:
+  // the first press teaches somebody it is broken, and they stop pressing the ones that work.
+  button.hidden = partsOf(cardName(holder)).length === 0;
+}
+
+// Which cards have been opened out already, so pressing twice does not draw the lines twice.
+const openedOut = new Set();
+
+// One level per press. "Раскрытие ленивое: проект с пятью инстансами и сорока сессиями, раскрытый
+// целиком и сразу, это сорок карточек, которые никто не просил." The way down is to press the card
+// that arrived, which is also the only way anybody ends up with forty of them on purpose.
+async function openItsParts(holder) {
+  const name = cardName(holder);
+  const parts = partsOf(name);
+  if (!parts.length) return;
+  const at = placed.get(name) || { x: 20, y: 20 };
+  const what = holder.dataset.kind;
+  let down = 0;
+  for (const part of parts) {
+    const under = `${part.dataset.kind}:${part.dataset.id}`;
+    if (!surface.querySelector(`.pin[data-name="${CSS.escape(under)}"]`)) {
+      await pin(
+        { kind: part.dataset.kind, id: part.dataset.id, label: part.dataset.label },
+        {
+          at: { x: at.x + CARD_WIDTH + GAP * 2, y: at.y + down * 140 },
+          quiet: true,
+          came: `opened out of the ${what}`,
+        }
+      );
+    }
+    if (!openedOut.has(`${name} ${under}`)) {
+      openedOut.add(`${name} ${under}`);
+      ownTies.push({ from: name, to: under, says: 'part of' });
+    }
+    down += 1;
+  }
+  drawTies();
+  syncTargets();
+}
+
 async function bringItsKin(card, at) {
   if (card.kind !== 'idea') return;
   let brought = 0;
@@ -751,6 +823,7 @@ async function pin(card, how) {
     <span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
+    <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
     <p class="pin-came"></p>
@@ -786,6 +859,7 @@ async function pin(card, how) {
       : '<p class="empty small">could not read this one</p>';
     nameItProperly(holder, card);
     writeHint(holder);
+    showParts(holder);
     // Folded or open, as it was left. After the body rather than before it: `full` fetches the
     // technical half *into* the body, and the body is replaced by the line above.
     if (how?.shown && how.shown !== holder.dataset.view) setView(holder, how.shown);
@@ -959,6 +1033,11 @@ document.addEventListener('click', (event) => {
     const holder = event.target.closest('.pin');
     const at = VIEWS.indexOf(holder.dataset.view || 'metadata');
     setView(holder, VIEWS[(at + 1) % VIEWS.length]);
+    return;
+  }
+
+  if (event.target.classList.contains('pin-parts')) {
+    openItsParts(event.target.closest('.pin'));
     return;
   }
 
