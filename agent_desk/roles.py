@@ -68,6 +68,22 @@ class Field:
     # is the normal state of a diagram somebody is thinking in — but the thing an engine would
     # have to stop on, and therefore the thing worth showing before it does.
     needed: bool = False
+    # Whether this field is filled in *instead of* the role's ordinary ones rather than alongside
+    # them. An Action is work in a repository, or a saved process, or a prompt — never two of
+    # those — so the form somebody faces is the size it always was, and the count that keeps it
+    # that size counts what is filled together rather than what exists.
+    instead: bool = False
+
+
+def asked_together(role: str) -> tuple[Field, ...]:
+    """The fields somebody fills in for one card. The alternatives are not among them: choosing one
+    of those is choosing what kind of step this is, and it replaces the rest."""
+    return tuple(field for field in fields_of(role) if not field.instead)
+
+
+def alternatives(role: str) -> tuple[Field, ...]:
+    """The ways this role's work can be something other than itself."""
+    return tuple(field for field in fields_of(role) if field.instead)
 
 
 # What each role is asked. Small on purpose: three fields is a form somebody fills in, six is a
@@ -89,6 +105,22 @@ FIELDS: dict[str, tuple[Field, ...]] = {
             "runs",
             "a process it runs",
             "the name of a saved process, when this one step is a whole process of its own",
+            instead=True,
+        ),
+        # A step whose work is a prompt (01M1X8DA8REGR836D77PPV3W54). Not a sixth role, for the
+        # reason 049 gives about `runs`: an Action is "something to do", and asking a model is
+        # something to do — what differs is what it does the work with.
+        #
+        # Nor a fourth thing to fill in. A step is work, or a saved process, or a prompt, and no
+        # card is ever more than one of them — which is what `instead` says and what keeps the
+        # form the size it was.
+        Field(
+            "asks",
+            "a prompt it sends",
+            "the prompt itself, as you would type it — when this step is a model call rather than"
+            " work in a repository",
+            4,
+            instead=True,
         ),
     ),
     "decision": (

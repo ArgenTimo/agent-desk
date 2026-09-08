@@ -148,8 +148,23 @@ def test_every_role_asks_a_small_fixed_set_and_no_role_asks_nothing() -> None:
     for name in roles.ROLES:
         asked = roles.fields_of(name)
         assert asked, f"{name} asks nothing about itself"
-        assert len(asked) <= 3, f"{name} asks {len(asked)} things, which is a form nobody fills in"
+        # What is filled in *together*. An Action is work, or a saved process, or a prompt, and
+        # never two of those — so the alternatives do not add to the form somebody faces, and the
+        # count that keeps it small counts what appears at once (`Field.instead`).
+        together = roles.asked_together(name)
+        assert len(together) <= 3, (
+            f"{name} asks {len(together)} things at once, which is a form nobody fills in"
+        )
         assert len({field.name for field in asked}) == len(asked), f"{name} asks the same twice"
+
+
+@pytest.mark.unit
+def test_an_alternative_is_never_something_a_step_needs() -> None:
+    """It replaces the ordinary fields rather than joining them, so a card that has not chosen one
+    is complete without it — and `missing` must not flag a step for not being a pipeline."""
+    for name in roles.ROLES:
+        for field in roles.alternatives(name):
+            assert not field.needed, f"{name}.{field.name}"
 
 
 @pytest.mark.unit

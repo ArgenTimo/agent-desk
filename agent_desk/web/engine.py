@@ -338,7 +338,11 @@ async def _do(
     if inside:
         return await _run_a_process(store, run, card, inside)
     given = allowed.leave_for((await store.card_leaves()).get(card.name))
-    said = briefing(card.name, cards, lines)
+    # A step whose work is a prompt sends that prompt, not a briefing written about it. The
+    # briefing exists to turn a drawn process into instructions for an agent; a pipeline step is
+    # the prompt somebody is testing, and wrapping it in a paragraph about the diagram would be
+    # testing something else (01M1X8DA8REGR836D77PPV3W54).
+    said = _asking(card, await _what_is_known(store, run)) or briefing(card.name, cards, lines)
 
     if allowed.reads_only(given):
         # No worktree and no agent at all, which is what the `read` permission means rather than
@@ -374,6 +378,27 @@ async def _do(
     )
     log.info("engine.queued", run=run.id, step=card.name, task=task.id)
     return 1
+
+
+def _asking(card: process.Card, known: list[str]) -> str:
+    """The prompt this step sends, or "" when it is not that kind of step.
+
+    Two parts, in the order they matter. The prompt somebody wrote, verbatim and first, because it
+    is the thing being tested and anything above it is something else being tested. Then what came
+    out of the steps before it, because a pipeline is steps that feed each other and a step that
+    could not see the last answer is a step in a different pipeline.
+
+    What the answer should look like is deliberately not a field of its own. Anybody writing a
+    prompt says "answer with one line" inside it, and a second box for that is a second place for
+    the same sentence to be — wrong the first time they disagree.
+    """
+    asks = (card.said.get("asks") or "").strip()
+    if not asks:
+        return ""
+    lines = [asks]
+    if known:
+        lines += ["", "## What the steps before this one produced", *known]
+    return "\n".join(lines)
 
 
 async def _run_a_process(store: Store, run: Run, card: process.Card, name: str) -> int:
