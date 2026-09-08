@@ -2270,8 +2270,28 @@ async def start_run(request: Request) -> JSONResponse:
     """
     form = await _form(request)
     names = [one for one in form.get("cards", "").split(",") if one]
+    # "В схеме может быть несколько независимых веток, и запускать хочется ту, над которой сейчас
+    # думаешь, а не всё сразу." `from` names the card somebody pressed, and what runs is that card
+    # and everything downstream of it — worked out here rather than on the page, because the order
+    # a branch runs in is `process.order`'s answer and a second one would be a second answer.
+    start = str(form.get("from", "")).strip()
+    if start:
+        on_bench = await _bench_cards(names)
+        here = set(names)
+        lines = [
+            process.Line(from_name=tie.from_name, to_name=tie.to_name, kind=tie.kind, says=tie.says)
+            for tie in await store.card_ties()
+            if tie.from_name in here and tie.to_name in here
+        ]
+        names = list(process.from_here(start, on_bench, lines))
+        if not names:
+            return JSONResponse(
+                {"started": False, "why": "that card is not on the workbench"}, status_code=409
+            )
     where = await _where_for(names)
-    made, why = await engine.begin(store, names=names, repo_key=where[0], cwd=where[1])
+    made, why = await engine.begin(
+        store, names=names, repo_key=where[0], cwd=where[1], given=str(form.get("given", ""))
+    )
     if made is None:
         return JSONResponse({"started": False, "why": why}, status_code=409)
     return JSONResponse({"started": True, "run": made.id})

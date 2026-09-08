@@ -710,6 +710,31 @@ function partsOf(name) {
 // request every two seconds — so these show the control and answer when it is pressed.
 const ASK_FOR_PARTS = new Set(['connector', 'column']);
 
+// Only on a card that is a step. An Object does not do anything, so a run starting at one would
+// begin by doing nothing, and a control that starts a branch has to be on something that runs.
+function showRunFrom(holder) {
+  const button = holder.querySelector('.pin-run');
+  if (!button) return;
+  const role = roleOf(holder);
+  button.hidden = !(role === 'action' || role === 'decision' || role === 'event');
+}
+
+async function runFromHere(holder) {
+  const name = cardName(holder);
+  try {
+    const answer = await fetch('/workbench/run', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ cards: onBench().map(cardName).join(','), from: name }),
+    });
+    const said = await answer.json();
+    say(said.started ? 'Running from this card.' : said.why || 'It did not start.');
+    readRuns();
+  } catch {
+    say('It did not start.');
+  }
+}
+
 function showParts(holder) {
   const button = holder.querySelector('.pin-parts');
   if (!button) return;
@@ -857,6 +882,7 @@ async function pin(card, how) {
     <span class="pin-kind">${card.kind}</span>
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
+    <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
     <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
     <button type="button" class="pin-deep" title="send its whole transcript, not just the summary">brief</button>
     <button type="button" class="pin-off" title="stop talking about this">×</button></div>
@@ -894,6 +920,7 @@ async function pin(card, how) {
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
+    showRunFrom(holder);
     // Folded or open, as it was left. After the body rather than before it: `full` fetches the
     // technical half *into* the body, and the body is replaced by the line above.
     if (how?.shown && how.shown !== holder.dataset.view) setView(holder, how.shown);
@@ -1067,6 +1094,14 @@ document.addEventListener('click', (event) => {
     const holder = event.target.closest('.pin');
     const at = VIEWS.indexOf(holder.dataset.view || 'metadata');
     setView(holder, VIEWS[(at + 1) % VIEWS.length]);
+    return;
+  }
+
+  // "Карточка с кнопкой пуск… Отдельная карточка, а не кнопка на панели." The complaint is about
+  // the *panel*: one button that runs everything cannot start the branch somebody is thinking
+  // about. This is that button, on the card it starts from.
+  if (event.target.classList.contains('pin-run')) {
+    runFromHere(event.target.closest('.pin'));
     return;
   }
 

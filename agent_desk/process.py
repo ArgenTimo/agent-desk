@@ -149,6 +149,35 @@ def feeding(name: str, cards: Sequence[Card], lines: Sequence[Line]) -> tuple[Ca
     return tuple(card for card in cards if card.name in into)
 
 
+def from_here(name: str, cards: Sequence[Card], lines: Sequence[Line]) -> tuple[str, ...]:
+    """This card and everything downstream of it, in the order they would run.
+
+    "В схеме может быть несколько независимых веток, и запускать хочется ту, над которой сейчас
+    думаешь, а не всё сразу."
+
+    Downstream and not upstream. What feeds a step has already happened as far as this branch is
+    concerned — its result is on the card — and running it again would be re-doing work in order to
+    reach the part somebody actually pressed. A branch that needs its input re-made is started from
+    the card that makes it.
+
+    A card nobody has drawn a line from is itself, which is the right answer and not a special
+    case: a lone step is a branch of one.
+    """
+    by_name = {card.name: card for card in cards}
+    if name not in by_name:
+        return ()
+    seen = {name}
+    edge = [name]
+    while edge:
+        here = edge.pop()
+        for line in _carrying(lines):
+            if line.from_name == here and line.to_name in by_name and line.to_name not in seen:
+                seen.add(line.to_name)
+                edge.append(line.to_name)
+    # In the order the whole drawing runs in, so a branch runs the way it would have as part of it.
+    return tuple(one for one in order(cards, lines).steps if one in seen)
+
+
 def memory_for(name: str, cards: Sequence[Card], lines: Sequence[Line]) -> str:
     """What this step is told about what came before it.
 
