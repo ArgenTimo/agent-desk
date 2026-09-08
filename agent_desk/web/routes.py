@@ -705,6 +705,13 @@ async def render_blocks() -> str:
             for block in rows
             if block.kind == "handling" and block.answer
         },
+        # A run that was understood and is waiting to be pressed. Empty for one that started, which
+        # is every run of a drawing made only of prompts.
+        will_run={
+            block.id: telling.read_will_run(block.answer or "")
+            for block in rows
+            if block.kind == "running" and block.answer
+        },
     )
 
 
@@ -3570,6 +3577,31 @@ async def make_it_an_idea(block_id: str, request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     return RedirectResponse("/", status_code=303)
+
+
+@router.post("/blocks/{block_id}/run", response_class=HTMLResponse)
+async def run_what_was_understood(block_id: str, request: Request) -> Response:
+    """Start the run a message asked for, now that somebody has pressed it.
+
+    The press is the whole point: the drawing puts agents in worktrees, and that is not something
+    to be started by a sentence the console had to interpret (01M1Z9ZZTR1MBEXBWZNXMQCHJ7).
+
+    The cards are the ones the block named, not what is on the bench now. Between the asking and
+    the pressing somebody may have dragged one off, and running a different drawing from the one
+    that was shown would make the showing worthless.
+    """
+    block = await store.block(block_id)
+    said, names = telling.read_will_run(block.answer or "") if block else ("", [])
+    if block is None or block.kind != "running" or not names:
+        return HTMLResponse(_a_sentence("There is nothing waiting to be run there."), 404)
+    where = await _where_for(names)
+    made, why = await engine.begin(
+        store, names=names, repo_key=where[0], cwd=where[1], given=block.input
+    )
+    if made is None:
+        return HTMLResponse(_a_sentence(f"It did not start: {why}"))
+    await store.finish_block(block.id, f"{said}\n\nStarted.")
+    return HTMLResponse(_a_sentence(f"Running {len(names)} cards against what you typed."))
 
 
 @router.post("/blocks/{block_id}/meant", response_class=HTMLResponse)

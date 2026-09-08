@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import AsyncIterator
+from typing import ClassVar
 
 import pytest
 from agent_desk import process, telling
@@ -148,10 +149,13 @@ async def test_the_message_starts_it_with_what_was_typed(desk: Store) -> None:
     assert again is not None and "Running the 2 cards" in (again.answer or "")
 
 
-async def test_a_refusal_is_the_engine_s_own_words(desk: Store) -> None:
-    """A button that is offered and a message that is refused must not disagree about why."""
+async def test_a_drawing_that_would_raise_agents_waits_to_be_pressed(desk: Store) -> None:
+    """ "Эта ветка дорогая: она поднимает агентов… показать, что будет запущено, и дождаться
+    нажатия." A pipeline of prompts is model calls and starts on the spot; work in a checkout is
+    not something to be started by a sentence the console had to interpret."""
     card = await desk.add_step_card("write it")
     await desk.set_card_role(card.name, "action")
+    await desk.set_card_field(card.name, "do", "write the migration")
     thread = await desk.create_thread("a chat")
     block = await desk.create_block(
         thread_id=thread.id, kind="question", input="run it", thread_set_by="human"
@@ -159,7 +163,81 @@ async def test_a_refusal_is_the_engine_s_own_words(desk: Store) -> None:
 
     await blocks._run_the_drawing(desk, block, [], [card.name])
 
+    assert await desk.runs() == []
     again = await desk.block(block.id)
     assert again is not None
-    assert "did not start" in (again.answer or "")
+    said, names = telling.read_will_run(again.answer or "")
+    assert "Nothing has started" in said
+    assert names == [card.name]
+
+
+async def test_what_would_run_is_named_before_it_runs(desk: Store) -> None:
+    """Readable before it happens, or the showing is worth nothing."""
+    said, names = telling.read_will_run(telling.as_will_run("this would", ["step:1", "step:2"]))
+
+    assert said == "this would"
+    assert names == ["step:1", "step:2"]
+
+
+def test_a_waiting_run_is_not_the_same_shape_as_a_drawing() -> None:
+    """A page that treated the two alike would pin a card somebody had taken off the bench while
+    the console was asking."""
+    assert telling.read_drawn(telling.as_will_run("x", ["step:1"])) == ("", [])
+    assert telling.read_will_run(telling.as_drawn_json("x", ["step:1"])) == ("", [])
+
+
+async def test_pressing_it_runs_what_was_named(desk: Store) -> None:
+    """The cards the block named, not what is on the bench now: between the asking and the pressing
+    somebody may have dragged one off, and running a different drawing from the one that was shown
+    would make the showing worthless."""
+    names = await _a_pipeline(desk)
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="running", input="the input", thread_set_by="human"
+    )
+    await desk.finish_block(block.id, telling.as_will_run("it would run these", names))
+
+    answer = await routes.run_what_was_understood(block.id, _a_request())
+
+    assert answer.status_code == 200
+    (run,) = await desk.runs()
+    assert run.given == "the input"
+    assert run.cards == ",".join(names)
+
+
+async def test_pressing_a_block_with_nothing_waiting_runs_nothing(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="hello", thread_set_by="human"
+    )
+
+    answer = await routes.run_what_was_understood(block.id, _a_request())
+
+    assert answer.status_code == 404
     assert await desk.runs() == []
+
+
+async def test_a_press_that_could_not_start_says_why(desk: Store) -> None:
+    card = await desk.add_step_card("write it")
+    await desk.set_card_role(card.name, "action")
+    await desk.set_card_field(card.name, "do", "write the migration")
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="running", input="x", thread_set_by="human"
+    )
+    await desk.finish_block(block.id, telling.as_will_run("it would", [card.name]))
+
+    answer = await routes.run_what_was_understood(block.id, _a_request())
+
+    assert "did not start" in bytes(answer.body).decode()
+    assert await desk.runs() == []
+
+
+def _a_request() -> object:
+    class Empty:
+        async def body(self) -> bytes:
+            return b""
+
+        headers: ClassVar[dict[str, str]] = {}
+
+    return Empty()

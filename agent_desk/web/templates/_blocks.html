@@ -131,6 +131,21 @@
     <li data-kind="{{ name.split(':')[0] }}" data-id="{{ name.split(':', 1)[1] }}"></li>
     {% endfor %}
   </ul>
+  {% elif block.kind == "running" and will_run.get(block.id) %}
+  {# A run that was understood and not started. "Эта ветка дорогая: она поднимает агентов… показать,
+     что будет запущено, и дождаться нажатия." The cards are named so that what would happen is
+     readable before it happens, and the button is the only thing that makes it happen. #}
+  <div class="answer">{{ will_run[block.id][0] | prose }}</div>
+  <div class="about">
+    <span class="dim small">it would run</span>
+    {% for name in will_run[block.id][1] %}
+    <span class="chip mono">{{ name }}</span>
+    {% endfor %}
+    <form method="post" action="/blocks/{{ block.id }}/run"
+          hx-post="/blocks/{{ block.id }}/run" hx-target="#message">
+      <button type="submit" class="send" title="start it, against what you typed">run it</button>
+    </form>
+  </div>
   {% elif block.kind == "handling" and arranged.get(block.id) %}
   {# A request that changed the cards rather than said anything about them. The block carries what
      was done twice over: as words for somebody reading the conversation back, and as the actions

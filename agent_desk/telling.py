@@ -363,6 +363,29 @@ def as_drawn_json(said: str, cards: Sequence[str]) -> str:
     return json.dumps({"drawing": {"said": said, "cards": list(cards)}})
 
 
+def as_will_run(said: str, cards: Sequence[str]) -> str:
+    """What a block stores when a run was understood but not started.
+
+    The same two-halves shape as a drawing and a rearrangement, and for the third time the same
+    reason: a person scrolling back has to be able to read what happened, and the page has to be
+    able to act on it. Kept apart from `as_drawn_json` because these cards are not being *put* on
+    the bench — they are already there, and a page that treated the two alike would pin a card that
+    somebody had taken off while the console was asking.
+    """
+    return json.dumps({"willrun": {"said": said, "cards": list(cards)}})
+
+
+def read_will_run(said: str) -> tuple[str, list[str]]:
+    """The words and the cards a waiting run would use, or nothing for any other block."""
+    try:
+        found = json.loads(said).get("willrun")
+    except (ValueError, AttributeError):
+        return "", []
+    if not isinstance(found, dict):
+        return "", []
+    return str(found.get("said", "")), [str(one) for one in found.get("cards", [])]
+
+
 def read_drawn(said: str) -> tuple[str, list[str]]:
     """The words and the card names back out, or nothing when a block stored something else."""
     try:

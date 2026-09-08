@@ -23,7 +23,17 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch, handling, looking, pasted, roles, showing, telling, ties
+from agent_desk import (
+    dispatch,
+    handling,
+    looking,
+    pasted,
+    process,
+    roles,
+    showing,
+    telling,
+    ties,
+)
 from agent_desk import secrets as kept
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
@@ -925,6 +935,24 @@ async def _run_the_drawing(
         )
         return
     names = list(on_bench)
+    cards = await engine.bench_of(store, names)
+    if not engine.all_prompts(cards):
+        # "Эта ветка дорогая: она поднимает агентов. Значит здесь и нужно правило «чем дороже
+        # ветка, тем скорее спросить»: показать, что будет запущено, и дождаться нажатия."
+        #
+        # A pipeline of prompts is model calls and starts on the spot; a drawing with work in it
+        # puts agents in worktrees, and that is not a thing to be started by a sentence the console
+        # had to interpret.
+        steps = [one for one in cards if one.role in process.STEPS]
+        await store.finish_block(
+            block.id,
+            telling.as_will_run(
+                f"This would start {len(steps)} step{'' if len(steps) == 1 else 's'} that do work "
+                "in a checkout, not just ask questions. Nothing has started.",
+                names,
+            ),
+        )
+        return
     key, cwd = await _where_a_run_goes(store, names, rows)
     made, why = await engine.begin(store, names=names, repo_key=key, cwd=cwd, given=block.input)
     if made is None:

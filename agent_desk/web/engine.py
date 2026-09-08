@@ -114,7 +114,7 @@ async def begin(
     # A drawing made only of prompts needs no project and no checkout: it does not touch either,
     # which is what its permission means rather than describes. Asking for one would be asking
     # where to run something that runs nowhere (01M1X8DA8REGR836D77PPV3W54).
-    if not _all_prompts(cards) and (not repo_key or not cwd):
+    if not all_prompts(cards) and (not repo_key or not cwd):
         return (
             None,
             "there is nowhere to run this: the cards are not about a project with a checkout",
@@ -124,7 +124,7 @@ async def begin(
     return run, ""
 
 
-def _all_prompts(cards: list[process.Card]) -> bool:
+def all_prompts(cards: list[process.Card]) -> bool:
     """Whether every step of this drawing is a prompt, and it therefore touches nothing."""
     steps = [card for card in cards if card.role in process.STEPS]
     return bool(steps) and all(allowed.is_a_prompt(card.said) for card in steps)
