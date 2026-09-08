@@ -16,7 +16,13 @@
     {% endif %}
     <ul class="folder-list">
       {% for one in folder.entries %}
-      <li class="folder-entry{{ ' is-folder' if one.is_folder else '' }}">
+      {# Draggable, so one file out of a folder becomes a card of its own. Still a link: dragging
+         it opens nothing, and what it says is read only after somebody says it may be
+         (055-a-file-somebody-let-me-read.sql). #}
+      <li class="folder-entry{{ ' is-folder' if one.is_folder else '' }}"
+          data-kind="{{ 'folder' if one.is_folder else 'file' }}"
+          data-id="{{ folder.path }}/{{ one.name }}" data-label="{{ one.name }}"
+          draggable="true" title="drag it onto the workbench">
         <span class="folder-name">{{ one.name }}{{ "/" if one.is_folder }}</span>
         <span class="folder-kind">{{ one.kind }}</span>
       </li>

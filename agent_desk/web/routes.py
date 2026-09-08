@@ -55,7 +55,7 @@ from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, inbox, meeting, waking
-from agent_desk.observe import attach, folder, registry, transcript
+from agent_desk.observe import attach, folder, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -1190,6 +1190,25 @@ async def folder_card(id: str = "") -> HTMLResponse:
     )
 
 
+@router.post("/cards/file/read", response_class=HTMLResponse)
+async def let_a_file_be_read(request: Request) -> Response:
+    """One click, one file, recorded (055).
+
+    "Это отдельное разрешение, которое человек даёт явно, а не побочный эффект просьбы." The
+    request that would use the contents does not grant this and cannot: the grant is a button
+    somebody pressed, on a card naming the file, saying what pressing it does.
+
+    A credential is refused here as well as in the reader. Two checks for one rule on purpose —
+    this one keeps the row out of the table, so "which files may this console open" never has a
+    wrong answer in it, and the reader's holds even if a row appeared by another route.
+    """
+    path = str((await _form(request)).get("path", "")).strip()
+    if not path or reading.is_a_credential(Path(path).expanduser()):
+        return HTMLResponse("", status_code=400)
+    await store.let_it_be_read(path)
+    return HTMLResponse("", status_code=204)
+
+
 @router.get("/cards/{kind}/parts", response_class=JSONResponse)
 async def parts_of_a_card(kind: str, id: str = "") -> JSONResponse:
     """What is inside a card whose insides are not on the board.
@@ -1366,6 +1385,19 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 status=status, tickets=rows, repo_key=repo_key
             ),
             status_code=200 if sep and status else 404,
+        )
+    if kind == "file":
+        # A file is a path, so the id is a path — which is why the id travels as a query parameter
+        # for every card and not as a path segment.
+        allowed = await store.may_be_read(id)
+        return HTMLResponse(
+            env.get_template("_card_file.html").render(
+                path=id,
+                name=id.rsplit("/", 1)[-1],
+                allowed=allowed,
+                said=reading.read_file(id) if allowed else reading.Said(False),
+            ),
+            status_code=200,
         )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and

@@ -284,11 +284,40 @@ def test_no_code_names_a_credential_path() -> None:
     offenders = [
         f"{path.relative_to(PKG)}: {literal!r}"
         for path in _modules()
+        if path.name != "reading.py"
         for literal in _string_literals(path)
         for token in forbidden
         if token in literal
     ]
     assert not offenders, f"no string literal may name a credential path: {offenders}"
+
+
+@pytest.mark.unit
+def test_the_one_module_that_names_them_names_them_to_refuse_them() -> None:
+    """`observe/reading.py` is the exception above, and the exception is narrow on purpose.
+
+    It opens a file, so it is the one place that has to know what a credential looks like — and it
+    knows in order to say no. The exception is worth having only while that stays true, so this
+    asserts it: every forbidden literal in that module is inside `is_a_credential`, the function
+    whose entire body is a refusal. A literal anywhere else in it is the rule being widened by
+    somebody who found the allowlist first.
+    """
+    where = PKG / "observe" / "reading.py"
+    tree = ast.parse(where.read_text(encoding="utf-8"))
+    refusing = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "is_a_credential"
+    )
+    inside = {node.value for node in ast.walk(refusing) if isinstance(node, ast.Constant)}
+
+    outside = [
+        literal
+        for literal in _string_literals(where)
+        if any(token in literal for token in (".credentials.json", ".key", "cc-socks"))
+        and literal not in inside
+    ]
+    assert not outside, f"a credential path outside the refusal: {outside}"
 
 
 @pytest.mark.unit

@@ -27,6 +27,7 @@ from agent_desk import dispatch, handling, looking, roles, showing, telling, tie
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
+from agent_desk.observe import reading
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import (
@@ -635,20 +636,32 @@ async def submit(
 
 
 async def notes(store: Store, dropped: Sequence[str]) -> list[str]:
-    """The ideas carried into a question, as text rather than as sessions.
+    """What the cards carried into a question say, as text.
 
-    An idea has no board row and no transcript: what it contributes is what somebody wrote down
-    and why it was written down then. Dropping one into the output is how "does this still make
-    sense given what these two sessions did" gets asked.
+    Two kinds of card say anything here. An idea has no board row and no transcript: what it
+    contributes is what somebody wrote down and why. A file contributes its contents, and only when
+    somebody has said that it may — the rest of the time a file on the bench is a name, which is
+    what a folder card is and why dropping a directory here is safe.
+
+    Dropping an idea in is how "does this still make sense given what these two sessions did" gets
+    asked; dropping three files in and allowing them is how "make me something out of these" does.
     """
     lines: list[str] = []
     for target in dropped:
         kind, ident, _ = _card(target)
-        if kind != "idea":
+        if kind == "idea":
+            idea = await store.idea(ident)
+            if idea is not None:
+                lines.append(f"- {idea.summary}: {idea.text}")
             continue
-        idea = await store.idea(ident)
-        if idea is not None:
-            lines.append(f"- {idea.summary}: {idea.text}")
+        # A file says nothing until somebody said it may (055). Not a check that can be forgotten
+        # into an accident: the default is silence, and the permission is a row somebody made.
+        if kind == "file" and await store.may_be_read(ident):
+            said = reading.read_file(ident)
+            if said.ok:
+                # Scrubbed like everything else that leaves this program. They asked for the file
+                # to be read, not for the token in line 40 of it to be sent (docs/07-security.md).
+                lines.append(f"- {ident}:\n{scrub(said.text)}")
     return lines
 
 

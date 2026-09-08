@@ -1,0 +1,49 @@
+{# One file from somebody's machine, on the workbench (055-a-file-somebody-let-me-read.sql).
+
+   A link, like the folder it came out of. What is different is that a file can be *allowed* — one
+   click, per file — and until it is, this card carries its name and nothing else. That is the
+   whole of the safety argument for dropping a directory that may hold anything onto this bench:
+   listing a filename and opening it are different acts, and the second one is asked for.
+
+   The control says what it does before it is pressed, because a permission somebody clicked
+   without reading is not a permission. #}
+{# No "is it there" branch before the permission: finding out whether a path exists is already
+   looking, and this card's promise is that it has not looked. What it says about a file nobody has
+   allowed is what it knows, which is the path somebody dragged. #}
+<div class="card-detail" data-detail="plain" data-label="{{ name }}">
+  <div class="plain-only">
+    <p class="plain-doing mono">{{ path }}</p>
+
+    {% if allowed and said.ok %}
+    <p class="card-said">This one may be read, so what it says goes with the next message.</p>
+    <pre class="full">{{ said.text[:1200] }}{% if said.text | length > 1200 %}
+…{% endif %}</pre>
+    {% if said.left_out %}
+    <p class="small dim">{{ said.left_out }} more characters are in the file and not in this — a
+      question asked against four hundred kilobytes is a question nobody can afford twice.</p>
+    {% endif %}
+
+    {% elif allowed %}
+    <p class="card-said">You allowed this one, and it still cannot be read: {{ said.detail }}</p>
+
+    {% else %}
+    <p class="card-said">Nothing in this file has been read. Its name is on the workbench and that
+      is all.</p>
+    <form method="post" action="/cards/file/read" hx-post="/cards/file/read" hx-swap="none">
+      <input type="hidden" name="path" value="{{ path }}">
+      <button type="submit" title="what is in this file goes with your next message">Let it be
+        read</button>
+    </form>
+    <p class="fineprint">Pressing that lets this console open this file and send what it says with
+      your questions.</p>
+    <p class="fineprint">Nothing else is opened, and a credential is refused whatever you press.</p>
+    {% endif %}
+  </div>
+
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>where</dt><dd class="mono">{{ path }}</dd>
+      <dt>may be read</dt><dd>{{ "yes, you said so" if allowed else "no" }}</dd>
+    </dl>
+  </div>
+</div>

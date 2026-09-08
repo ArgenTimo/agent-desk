@@ -2186,6 +2186,33 @@ class Store:
             row = rows.first()
             return None if row is None else BoardTicket(**row._mapping)
 
+    async def let_it_be_read(self, path: str) -> None:
+        """Record that somebody said this file may be opened (055). One click, one row.
+
+        Nothing here decides whether it *should* be — that is the person's, which is the point of
+        the table — and nothing here can unlock a credential: `observe/folder.py` refuses those
+        whatever this says, and the route that writes here refuses to write one.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("INSERT OR REPLACE INTO readable (path, at) VALUES (:path, :at)"),
+                {"path": path, "at": _now_ms()},
+            )
+
+    async def may_be_read(self, path: str) -> bool:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT 1 FROM readable WHERE path = :path"), {"path": path}
+            )
+            return rows.first() is not None
+
+    async def readable(self) -> list[str]:
+        """Every file this console has been allowed to open, which is a question worth being able
+        to answer."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT path FROM readable ORDER BY path"))
+            return [str(row[0]) for row in rows]
+
     async def tracker_blockers(self) -> list[TrackerBlocker]:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
