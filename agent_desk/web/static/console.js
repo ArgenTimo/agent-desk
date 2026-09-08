@@ -3657,6 +3657,9 @@ function clearBench() {
   for (const node of surface?.querySelectorAll('.pin, .ring') || []) node.remove();
   placed = new Map();
   ownTies.length = 0;
+  // The lines went with them, so the record of having drawn them has to go too — otherwise a
+  // conversation put back on a cleared bench comes back with no lines between its cards.
+  joined.clear();
   wentWith.clear();
   letGoOfAttached();
   rememberLayout();
@@ -3855,6 +3858,10 @@ function answerCard(article, rev) {
   return node;
 }
 
+// Which questions have had their "follows on from" line drawn. The same bookkeeping, and the same
+// reason, as `arranged` below: this runs on every push and the line is drawn once.
+const joined = new Set();
+
 function syncBlocks() {
   if (!blocksSource || !surface) return;
   const current = activeThread();
@@ -3932,6 +3939,16 @@ function syncBlocks() {
     showRole(node);
     // A block's hint is what came back, not the question again — the question is already its title.
     writeHint(node);
+
+    // What the console read this question as following on from. Once, and only while the card it
+    // names is here: `syncBlocks` runs on every push, and a line pushed each time is the same line
+    // drawn forty deep by the end of a conversation.
+    const follows = article.dataset.relates;
+    if (follows && !joined.has(id) && surface.querySelector(`.pin[data-name="${CSS.escape(follows)}"]`)) {
+      joined.add(id);
+      ownTies.push({ from: follows, to: `block:${id}`, says: 'follows on from' });
+      drawTies();
+    }
 
     // Every idea this block recorded is a card of its own, joined to it. "Если я пишу идею — на
     // верстаке появляется её карточка, и далее карточки под-идей."

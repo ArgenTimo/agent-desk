@@ -11,6 +11,10 @@
    question has been answered, without this template knowing that rings exist. #}
 <article class="block {{ block.state }} {{ block.kind }}" data-block="{{ block.id }}"
          {% if block.state in ("answered", "failed", "cancelled") %}data-settled{% endif %}
+         {# Which card on the workbench this question was read as following on from. A reading and
+            drawn as one: a line the page can rub out, never something the answer is built from
+            (051-what-a-question-follows-on-from.sql). #}
+         {% if block.relates_to %}data-relates="{{ block.relates_to }}"{% endif %}
          data-thread="{{ block.thread_id }}">
   <div class="said">{{ block.input }}</div>
   {# "Если консоль решила, что это «сделай проект», человек должен это увидеть и успеть сказать

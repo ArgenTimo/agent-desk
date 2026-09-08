@@ -1395,7 +1395,42 @@ async def _classify_and_answer(
         notes=written,
         workbench=surface,
     )
+    # Before the answer, not after it. "Как только система поймёт, к чему относится вопрос, он
+    # центрируется на этот блок… и готовит ответ" — the order is the content of that sentence: a
+    # person who can see what the question was taken to be about has time to say "no, not that
+    # one" before an answer to the wrong question arrives.
+    await _joins_on_to(store, block)
     await _run(store, block, prompt, _add_dirs([row.session for row in rows]))
+
+
+async def _joins_on_to(store: Store, block: Block) -> None:
+    """Read which card on this bench the question follows on from, and write it down (051).
+
+    The candidates are the cards of the enquiry itself — what it started from and every answer so
+    far — and not everything on the bench. A question follows on from something that was *said*;
+    the sessions and ideas lying beside it are what it is being asked *with*, which the bench
+    already draws as its own kind of line.
+
+    Each candidate is offered as the line the card shows, so the reading is made from what the
+    person can see. Anything else and a line appears between two cards for a reason nobody
+    watching could have worked out.
+
+    It costs a model call, so it is skipped where there is nothing to choose between — which is
+    every ordinary bench, and every question asked before an enquiry has been started.
+    """
+    start = await store.began(block.thread_id)
+    cards = [
+        card
+        for card in await store.bench_cards(block.thread_id)
+        if card.kind == "answer" or (card.name == start and card.name)
+    ]
+    if len(cards) < 2:
+        # One card is not a choice: with only the beginning there, everything follows on from it
+        # and a model is being asked to agree. With nothing there, there is no enquiry yet.
+        return
+    which = await classifier.about(block.input, [card.label for card in cards])
+    if which:
+        await store.set_block_relates_to(block.id, cards[which - 1].name)
 
 
 async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) -> None:

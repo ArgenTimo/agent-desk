@@ -113,6 +113,9 @@ class Block(BaseModel):
     finished_at: int | None = None
     # What this one was built from, one line a thing, as the console described it at the time.
     context: str | None = None
+    # Which card on the workbench this question follows on from, as a reading rather than a fact
+    # (051). Empty is "nothing here, or nothing that was clear", and draws no line.
+    relates_to: str = ""
 
 
 class Directive(BaseModel):
@@ -948,6 +951,16 @@ class Store:
                 {"kind": kind, "id": block_id},
             )
 
+    async def set_block_relates_to(self, block_id: str, name: str) -> None:
+        """Which card this question follows on from, as read (051). Written before the answer is
+        asked for, because the point of the reading is that somebody sees it in time to disagree
+        with it."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET relates_to = :name WHERE id = :id"),
+                {"name": name, "id": block_id},
+            )
+
     async def set_block_running(self, block_id: str) -> None:
         """Starting a run clears the last one's failure, which is no longer true of this block."""
         async with self.engine.begin() as conn:
@@ -1019,7 +1032,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context, relates_to FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -1031,7 +1044,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context, relates_to FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -1042,7 +1055,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context FROM block WHERE id = :id"
+                    "created_at, finished_at, context, relates_to FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )

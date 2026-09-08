@@ -1,0 +1,24 @@
+-- Which card on the workbench a question follows on from.
+--
+-- "В зависимости от моего следующего вопроса он крепится либо к предыдущему ответу, либо к
+-- описанию, либо вообще имеет другую область."
+--
+-- Three outcomes, and the third is the one that matters: "this is about something else" has to be
+-- a possible answer, or every enquiry slides into one long branch — which is the feed the
+-- workbench is trying to stop being. Empty is that third answer, and it is also what a failed
+-- reading produces: no line drawn, and the question stands on its own until somebody joins it up.
+--
+-- ## Why a guess is allowed here
+--
+-- Everywhere else in this program a guessed status is refused (CLAUDE.md, rule five), because the
+-- cost of being wrong is somebody trusting the board. Here the cost is one line on a diagram that
+-- can be dragged, and it is drawn as a line rather than written into anything the answer is
+-- reasoned from. The reading is stored so the page can draw it and so it can be corrected — not
+-- so anything downstream can believe it.
+--
+-- ## Why a name and not a foreign key
+--
+-- The same as 050. It names a card on a surface, and a surface is rearranged constantly; a name
+-- that matches nothing draws nothing, which is exactly right and costs no cleanup.
+
+ALTER TABLE block ADD COLUMN relates_to TEXT NOT NULL DEFAULT '';

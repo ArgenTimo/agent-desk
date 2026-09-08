@@ -265,6 +265,71 @@ async def kind(text: str, *, pointed_at: int = 0) -> BlockKind:
 _NUMBERS = re.compile(r"\A[0-9, ]+\Z")
 
 
+# How much of a card's own line the reader is shown. The card says this much on the bench, so the
+# choice is made from what the person can see — a reading made from more than is on screen is one
+# nobody watching can follow.
+CARD_CHARS = 80
+
+# Same shape as `_CHOICE` and for the same reason: one token, read whole. "It follows on from 2 of
+# the three" is not an answer, and reading a digit out of it would attach a question to a card
+# nobody named.
+_WHICH = re.compile(r"\A([0-9]{1,2}|none)\Z", re.IGNORECASE)
+
+
+def about_prompt(text: str, cards: Sequence[str]) -> str:
+    """Which card on the bench this question follows on from.
+
+    "В зависимости от моего следующего вопроса он крепится либо к предыдущему ответу, либо к
+    описанию, либо вообще имеет другую область."
+
+    The third outcome is the one the instruction spends its words on. Without it every enquiry
+    collapses into one long branch — each question read as following the last, because the last is
+    always *something* — and that is the feed the workbench exists to stop being.
+    """
+    lines = [
+        "A developer is thinking on a workbench of cards. They have just typed a question.",
+        "Decide which card it follows on from, if any.",
+        "",
+        "Answer with the number of that card, or the word none. One token, nothing else. Answer",
+        "none whenever it is not clearly about one of them — a question is allowed to open a",
+        "subject of its own, and that is more common than it looks.",
+        "",
+        "## The cards",
+    ]
+    lines += [f"{index}. {card[:CARD_CHARS]}" for index, card in enumerate(cards, start=1)]
+    lines += ["", "## The question", text]
+    return "\n".join(lines)
+
+
+def read_about(reply: str, count: int) -> int:
+    """The 1-based card the reply names, or 0 for none of them.
+
+    Out of range is none rather than an error: a model that answers 7 out of 3 has not chosen a
+    card, and drawing a line to whichever card happens to be third would be inventing one.
+    """
+    said = reply.strip().strip(".").strip()
+    found = _WHICH.match(said)
+    if found is None or said.lower() == "none":
+        return 0
+    which = int(found.group(1))
+    return which if 1 <= which <= count else 0
+
+
+async def about(text: str, cards: Sequence[str]) -> int:
+    """The card this question follows on from, 1-based, or 0.
+
+    A failure is none, like everywhere else in this module: no line drawn is a bench somebody
+    joins up themselves, and a line drawn from a failed reading is one they have to notice first.
+    """
+    if not cards:
+        return 0
+    try:
+        reply = "".join([chunk async for chunk in stream_answer(about_prompt(text, cards))])
+    except (AnswerFailed, OSError):
+        return 0
+    return read_about(reply, len(cards))
+
+
 def related_prompt(text: str, ideas: Sequence[str]) -> str:
     lines = [
         "A developer asked for some work to be done. Below are ideas they wrote down earlier.",
