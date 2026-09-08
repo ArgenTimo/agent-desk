@@ -340,6 +340,7 @@ _TAKEN_AS = {
     "instruction": "taken as an instruction for an agent",
     "master": "taken as a job for this console itself",
     "handling": "taken as a change to the workbench",
+    "showing": "taken as a request to fetch these and put them on the workbench",
     "observation": "taken as something noticed",
 }
 

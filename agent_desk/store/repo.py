@@ -45,7 +45,7 @@ from agent_desk.store.redact import scrub, scrub_optional
 _ENV_NAME = re.compile(r"\A[A-Z][A-Z0-9_]{0,47}\Z")
 
 BlockKind = Literal[
-    "question", "idea", "observation", "instruction", "master", "handling", "drawing"
+    "question", "idea", "observation", "instruction", "master", "handling", "drawing", "showing"
 ]
 BlockState = Literal["queued", "running", "answered", "failed", "cancelled"]
 # Five, and the fifth was added for the one thing the other four cannot say. "We decided not to"
@@ -195,6 +195,30 @@ class Pull(BaseModel):
     def key(self) -> str:
         """The `#12` a pull request is called by, and the half of its card name that is its own."""
         return f"#{self.number}"
+
+
+class BoardTicket(BaseModel):
+    """One ticket on somebody else's board, as this console last read it (053).
+
+    Named `BoardTicket` and not `Ticket` because `tracker/jira.py` already has a `Ticket` — that
+    one is what a read returned, this one is what was kept. Two names for two things beats one
+    name imported under an alias in half the files that use it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    key: str
+    summary: str
+    status: str = ""
+    # What the ticket says about being stuck, in its own words. A quotation, never a judgement:
+    # this program does not decide a ticket is blocked, it repeats that the ticket says so.
+    blocked_by: str = ""
+    seen_at: int
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.blocked_by)
 
 
 class Autostart(BaseModel):
@@ -2080,6 +2104,46 @@ class Store:
             if row is None:
                 return None
             return Pull(**{**row._mapping, "draft": bool(row._mapping["draft"])})
+
+    async def replace_tickets(self, repo_key: str, found: Sequence[BoardTicket]) -> None:
+        """This project's board as of now, replacing what was there. Whole, like the pulls."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM ticket WHERE repo_key = :repo_key"), {"repo_key": repo_key}
+            )
+            for one in found:
+                await conn.execute(
+                    text(
+                        "INSERT INTO ticket (repo_key, key, summary, status, blocked_by, seen_at) "
+                        "VALUES (:repo_key, :key, :summary, :status, :blocked_by, :t)"
+                    ),
+                    {
+                        "repo_key": repo_key,
+                        "key": one.key[:60],
+                        "summary": one.summary[:200],
+                        "status": one.status[:60],
+                        "blocked_by": one.blocked_by[:300],
+                        "t": _now_ms(),
+                    },
+                )
+
+    async def board_tickets(self, repo_key: str = "") -> list[BoardTicket]:
+        one = "SELECT * FROM ticket WHERE repo_key = :repo_key ORDER BY key"
+        every = "SELECT * FROM ticket ORDER BY repo_key, key"
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(one if repo_key else every), {"repo_key": repo_key} if repo_key else {}
+            )
+            return [BoardTicket(**row._mapping) for row in rows]
+
+    async def board_ticket(self, repo_key: str, key: str) -> BoardTicket | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT * FROM ticket WHERE repo_key = :repo_key AND key = :key"),
+                {"repo_key": repo_key, "key": key},
+            )
+            row = rows.first()
+            return None if row is None else BoardTicket(**row._mapping)
 
     async def tracker_blockers(self) -> list[TrackerBlocker]:
         async with self.engine.connect() as conn:

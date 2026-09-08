@@ -1274,6 +1274,15 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_pull.html").render(card=found),
             status_code=200 if found else 404,
         )
+    if kind == "ticket":
+        # `<project key>::API-14`, split from the right for the reason the pull cards are: a
+        # project key contains colons (053-a-ticket-is-a-thing-too.sql).
+        repo_key, sep, key = id.rpartition("::")
+        row = await store.board_ticket(repo_key, key) if sep and repo_key and key else None
+        return HTMLResponse(
+            env.get_template("_card_ticket.html").render(card=row),
+            status_code=200 if row else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.

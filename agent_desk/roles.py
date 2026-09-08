@@ -166,6 +166,9 @@ NATURALLY = {
     # blockers as an Event — "this stopped on a person" — and that is a different card saying a
     # different thing about the same pull request (052-a-pull-request-is-a-thing.sql).
     "pull": "object",
+    # And a ticket read off a board: a thing somebody wrote down elsewhere. The `task` above is
+    # this console's decision to do it, which is an Action; they are two cards on purpose.
+    "ticket": "object",
     "note": "object",
     "block": "event",
     "group": "result",

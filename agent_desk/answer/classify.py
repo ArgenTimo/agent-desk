@@ -101,7 +101,7 @@ async def classify(text: str, threads: Sequence[Thread]) -> str | None:
 # `question` is the safe answer here, the way `new` is the safe answer above. A thought answered as
 # a question costs one run and loses nothing: the text is in the block, verbatim, and recording it
 # is one click away. An instruction read as a question prepares nothing and sends nothing.
-_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw)\Z", re.IGNORECASE)
+_KIND = re.compile(r"\A(question|idea|do|desk|arrange|draw|show)\Z", re.IGNORECASE)
 
 _KIND_OF = {
     "question": "question",
@@ -110,6 +110,7 @@ _KIND_OF = {
     "desk": "master",
     "arrange": "handling",
     "draw": "drawing",
+    "show": "showing",
 }
 
 
@@ -149,7 +150,7 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
     return "\n".join(
         [
             "A developer typed one line into a console that watches their Claude Code sessions.",
-            "Say which of six things it is. One token, nothing else:",
+            "Say which of seven things it is. One token, nothing else:",
             "",
             "  question — they want something *from you, now*: an answer, or a thing written for",
             "             them. Both are `question`, because both are answered on the spot and",
@@ -175,6 +176,12 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "             cards. Not a question about a process and not a wish that one existed.",
             '             "нарисуй процесс релиза: сначала тесты, если красные — чиним", "draw me',
             '             the onboarding flow", "изобрази как это работает по шагам"',
+            "  show     — they are asking for things that already exist somewhere to be put on",
+            "             the workbench as cards: the tickets on a board, the open pull requests.",
+            "             Nothing is composed and nothing is decided — a list is fetched and each",
+            "             row becomes a card.",
+            '             "покажи открытые PR-ы", "покажи тикеты из спринта", "show me the open',
+            '             pull requests", "вынеси тикеты на верстак"',
             "  arrange  — they are telling you to change *the cards in front of them*: highlight",
             "             some, put these here and those there. The answer is a rearrangement of",
             "             what is already on the workbench, not a paragraph and not a new card.",
@@ -191,6 +198,11 @@ def kind_prompt(text: str, *, pointed_at: int = 0) -> str:
             "they want in their hands right now: a plan, a list, a summary, a comparison, a draft.",
             '"Напиши мне план" is a plan they want to read — not a wish that the product should',
             'have plans in it. "Add a plans page" is the idea; "write me a plan" is a question.',
+            "",
+            "**`show` against `question` is whether they asked for the things or for a sentence",
+            'about them.** "Покажи открытые PR-ы" wants the pull requests on the workbench;',
+            '"сколько у нас открытых PR-ов?" wants a number. `show` is also cheap and undone in one',
+            "press, so it can be answered on the balance of it.",
             "",
             "**`arrange` against `question` is whether they asked you to *change* the cards or to",
             '*tell* them something.** "Подсвети те, которые принесут доход" is an arrangement;',

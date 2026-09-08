@@ -23,13 +23,14 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch, handling, looking, roles, telling, ties
+from agent_desk import dispatch, handling, looking, roles, showing, telling, ties
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
-from agent_desk.store.repo import Block, DraftKind, Idea, Store, Thread
+from agent_desk.store.repo import Block, BoardTicket, DraftKind, Idea, Pull, Store, Thread
+from agent_desk.tracker import github, jira
 
 if TYPE_CHECKING:
     from agent_desk.web.routes import BoardRow
@@ -783,6 +784,9 @@ async def _work(
         if kind == "drawing":
             await _draw_it(store, block, surface=surface)
             return
+        if kind == "showing":
+            await _show_them(store, block, rows, on_bench)
+            return
         if kind == "handling" and surface:
             await _rearrange(store, block, rows, surface=surface, on_bench=on_bench)
             return
@@ -835,6 +839,134 @@ async def cards_from_shape(
                 from_name=made[first], to_name=made[second], kind=one["kind"], says=one["says"]
             )
     return list(made.values())
+
+
+async def _show_them(
+    store: Store, block: Block, rows: Sequence[BoardRow], on_bench: Sequence[str]
+) -> None:
+    """Put things that already exist somewhere on the workbench, because somebody asked for them.
+
+    "И способ попросить: «покажи тикеты из спринта», «покажи открытые PR-ы»."
+
+    Everything else that reaches the bench got there by being dragged or by an answer that drew it.
+    This composes nothing and decides nothing: a list is read from the place that has it, each row
+    becomes a card, and the block says which list it read and how many rows it found.
+
+    Read fresh rather than shown from the store, because "покажи" is asked when somebody wants to
+    know what is there *now*, and a cache with nothing saying how old it is answers a different
+    question. Nothing is queued and nothing is written back — the tickets that arrive here are not
+    put in this console's queue, which is a decision `autostart.pull_tickets` makes deliberately
+    and not a side effect of looking (docs/adr/0010).
+    """
+    await store.set_block_kind(block.id, "showing")
+    what = showing.what_to_show(block.input)
+    if not what:
+        await store.finish_block(
+            block.id,
+            "I can put two things on the workbench for you: the tickets on a project's board, and "
+            "its open pull requests. Say which — those are the two this console can read.",
+        )
+        return
+    key = _which_project(rows, on_bench)
+    if not key:
+        await store.finish_block(
+            block.id,
+            "I do not know whose board to read. Put the project on the workbench and ask again — "
+            "there is more than one here, and reading the wrong one is worse than asking.",
+        )
+        return
+    found, why = await (_read_pulls(store, key) if what == "pulls" else _read_tickets(store, key))
+    if why:
+        await store.finish_block(block.id, why)
+        return
+    if not found:
+        await store.finish_block(block.id, f"Nothing there: {showing.says(what)} came back empty.")
+        return
+    said = f"{len(found)} of {showing.says(what)}, read just now:\n" + "\n".join(
+        f"- {name.rpartition('::')[2]}" for name in found
+    )
+    await store.finish_block(block.id, telling.as_drawn_json(said, found))
+
+
+def _which_project(rows: Sequence[BoardRow], on_bench: Sequence[str]) -> str:
+    """Whose board to read: the project on the workbench, or the only one there is.
+
+    A card on the bench is what somebody is pointing at, and pointing is how everything else in
+    this console says which thing it means. Deliberately not "the project whose name appears in the
+    sentence": a project key is a URL, nobody types one, and matching a name out of a line is a
+    guess that reads somebody else's board with somebody else's credential.
+
+    Nothing is a real answer. Reading the wrong board is worse than asking which one.
+    """
+    for name in on_bench:
+        kind, _, key = name.partition(":")
+        if kind == "project" and key:
+            return key
+    keys = {row.project_key for row in rows if row.project_key}
+    return keys.pop() if len(keys) == 1 else ""
+
+
+async def _read_pulls(store: Store, key: str) -> tuple[list[str], str]:
+    """This project's open pull requests, read now and kept (052). Card names, or why not."""
+    for link in await store.links(key):
+        if not link.token_env:
+            continue
+        repo = github.repo_of(link.url)
+        if not repo:
+            continue
+        read = await asyncio.to_thread(github.open_pulls, repo, link.token_env)
+        if not read.ok:
+            return [], f"I could not read the pull requests: {read.detail}"
+        await store.replace_pulls(
+            key,
+            [
+                Pull(
+                    repo_key=key,
+                    number=one.number,
+                    title=one.title,
+                    url=one.url,
+                    waiting_for=one.waiting_for,
+                    draft=one.draft,
+                    seen_at=0,
+                )
+                for one in read.pulls
+            ],
+        )
+        return [f"pull:{key}::{one.key}" for one in read.pulls], ""
+    return [], (
+        "That project has no GitHub link with a credential named on it, so there is nothing here "
+        "to read pull requests with. Its settings page is where that is said."
+    )
+
+
+async def _read_tickets(store: Store, key: str) -> tuple[list[str], str]:
+    """This project's board, read now and kept (053). Card names, or why not."""
+    for link in await store.links(key):
+        where = jira.destination_of(link.url, link.token_env)
+        if where is None:
+            continue
+        read = await asyncio.to_thread(jira.read_board, where)
+        if not read.ok:
+            return [], f"I could not read the board: {read.detail}"
+        await store.replace_tickets(
+            key,
+            [
+                BoardTicket(
+                    repo_key=key,
+                    key=one.key,
+                    summary=one.summary,
+                    status=one.status,
+                    blocked_by=one.blocked_by,
+                    seen_at=0,
+                )
+                for one in read.tickets
+            ],
+        )
+        return [f"ticket:{key}::{one.key}" for one in read.tickets], ""
+    return [], (
+        "That project has no board link with a credential named on it, so there is nothing here "
+        "to read tickets from. Its settings page is where that is said."
+    )
 
 
 async def _draw_it(store: Store, block: Block, *, surface: Sequence[str] = ()) -> None:

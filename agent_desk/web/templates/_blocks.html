@@ -120,10 +120,11 @@
   {% if doing.get(block.id) %}
   <p class="doing small" aria-live="polite">{{ doing[block.id] }}</p>
   {% endif %}
-  {% elif block.kind == "drawing" and drawn.get(block.id) %}
-  {# A process this message described, drawn as cards. The words are for reading it back; the list
-     under them is how the workbench finds the cards — the same two halves a rearranging answer
-     carries, and the page picks them up the same way (agent_desk/telling.py). #}
+  {% elif block.kind in ("drawing", "showing") and drawn.get(block.id) %}
+  {# Cards a message produced: a process it described and drew, or things it was asked to fetch and
+     put on the bench. The words are for reading it back; the list under them is how the workbench
+     finds the cards — the same two halves a rearranging answer carries, and the page picks them up
+     the same way (agent_desk/telling.py, agent_desk/showing.py). #}
   <div class="answer drawn">{{ drawn[block.id][0] | prose }}</div>
   <ul class="drawn-cards" hidden>
     {% for name in drawn[block.id][1] %}

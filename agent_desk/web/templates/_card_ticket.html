@@ -1,0 +1,39 @@
+{# A ticket on somebody else's board, on this workbench (053-a-ticket-is-a-thing-too.sql).
+
+   Not the same card as the task beside it in the queue. A task is this console's decision to do
+   the work; this is somebody else's decision that the work exists, and the two are kept apart
+   everywhere else in this program (docs/adr/0005, docs/adr/0010). #}
+{% if not card %}
+<p class="empty small">that ticket was not on the board the last time it was read</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ card.key }} · {{ card.summary }}">
+  <div class="plain-only">
+    <p class="card-said">{{ card.summary }}</p>
+
+    {% if card.blocked %}
+    <h4>What it says about being stuck</h4>
+    {# The ticket's own words, quoted. This program does not decide that a ticket is blocked; it
+       repeats that the ticket says so (CLAUDE.md, rule five). #}
+    <p class="last-line">{{ card.blocked_by }}</p>
+    {% endif %}
+
+    <h4>Where it is</h4>
+    <p class="small">
+      <span class="mono">{{ card.key }}</span>{% if card.status %}, and the board has it in
+      <strong>{{ card.status }}</strong>{% endif %}. Nothing here transitions it, comments on it,
+      assigns it or closes it — this console reads (docs/adr/0010).
+    </p>
+
+    <h4>Which project</h4>
+    <p class="small mono">{{ card.repo_key }}</p>
+  </div>
+
+  {# --- and the technical half, behind the same toggle as every other card ------------------- #}
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>key</dt><dd class="mono">{{ card.key }}</dd>
+      <dt>read</dt><dd>{{ card.seen_at | ago }}</dd>
+    </dl>
+  </div>
+</div>
+{% endif %}
