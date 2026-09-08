@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from agent_desk import dispatch, handling, looking, roles, showing, telling, ties
+from agent_desk import dispatch, handling, looking, pasted, roles, showing, telling, ties
+from agent_desk import secrets as kept
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
 from agent_desk.ideas import inbox, kin
@@ -586,6 +587,17 @@ async def submit(
     if forced_new:
         text = text[len(NEW_PREFIX) :].strip()
 
+    # What the message is made of, and — before anything else touches it — any credential out of
+    # it. A block's input goes into the database, onto the page, into the thread that travels with
+    # the next question and into the prompt; a token left in it is in all four, and deleting the
+    # message afterwards does not take it out of the two that already left (agent_desk/pasted.py).
+    found = pasted.read(text)
+    if found.token:
+        # The store built for this, on this machine, mode 0600, never read back to a screen. The
+        # value is dropped here and nothing else in this function has seen it.
+        kept.keep(found.kept_as, found.token)
+    text = found.said
+
     # The block exists before anything is classified or answered, and the field is free the moment
     # it does. It starts as a question because that is the safe reading of an unread line, and the
     # run corrects it in a second if it was something else.
@@ -593,7 +605,10 @@ async def submit(
     block = await store.create_block(
         thread_id=thread.id, kind="question", input=text, thread_set_by="human"
     )
-    carried = await _context_lines(store, rows, targets, history)
+    # What the message turned out to hold, said rather than assumed: somebody who pasted four
+    # things and got an answer about two needs to see which two, and a secret that was moved has
+    # to say where it went.
+    carried = pasted.as_lines(found) + await _context_lines(store, rows, targets, history)
     if notes_.strip():
         # Blocks somebody wrote on the workbench themselves — a link, a paragraph of a document, a
         # snippet of code. They are text rather than a card this console read, so they are carried
