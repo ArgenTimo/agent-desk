@@ -273,6 +273,10 @@ class Run(BaseModel):
     # Set aside for now, rather than finished (047-a-run-can-wait.sql). A limit, a person who has
     # not answered, a step being fixed — none of those means the run is over.
     paused_at: int | None = None
+    # Where to report back to, when this run is one step of another one
+    # (049-a-step-that-is-a-process.sql). Null on an ordinary run, which is nearly all of them.
+    inside_run: str | None = None
+    inside_step: str | None = None
 
     @property
     def going(self) -> bool:
@@ -2589,19 +2593,46 @@ class Store:
                 await conn.execute(text("DELETE FROM template WHERE id = :id"), {"id": one})
 
     # --- a drawing being run (037-runs.sql) ---------------------------------------------------
-    async def start_run(self, *, cards: Sequence[str], repo_key: str, cwd: str) -> Run:
+    async def run_inside(self, run_id: str, step: str) -> Run | None:
+        """The run that is doing this step's work, if one was started for it."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why, "
+                    "paused_at, inside_run, inside_step FROM run "
+                    "WHERE inside_run = :run AND inside_step = :step "
+                    "ORDER BY started_at DESC LIMIT 1"
+                ),
+                {"run": run_id, "step": step},
+            )
+            row = rows.first()
+            return None if row is None else Run(**row._mapping)
+
+    async def start_run(
+        self,
+        *,
+        cards: Sequence[str],
+        repo_key: str,
+        cwd: str,
+        inside_run: str = "",
+        inside_step: str = "",
+    ) -> Run:
         run = Run(
             id=_new_id(),
             cards=",".join(cards),
             repo_key=repo_key,
             cwd=cwd,
             started_at=_now_ms(),
+            inside_run=inside_run or None,
+            inside_step=inside_step or None,
         )
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO run (id, cards, repo_key, cwd, at, started_at) "
-                    "VALUES (:id, :cards, :repo_key, :cwd, '', :started_at)"
+                    "INSERT INTO run "
+                    "(id, cards, repo_key, cwd, at, started_at, inside_run, inside_step) "
+                    "VALUES (:id, :cards, :repo_key, :cwd, '', :started_at, :inside_run, "
+                    ":inside_step)"
                 ),
                 run.model_dump(exclude={"at", "finished_at", "stopped_why", "paused_at"}),
             )
@@ -2611,8 +2642,9 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, "
-                    "stopped_why, paused_at FROM run ORDER BY started_at DESC LIMIT 60"
+                    "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why, "
+                    "paused_at, inside_run, inside_step "
+                    "FROM run ORDER BY started_at DESC LIMIT 60"
                 )
             )
             found = [Run(**row._mapping) for row in rows]

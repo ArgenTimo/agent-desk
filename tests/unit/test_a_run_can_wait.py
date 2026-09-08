@@ -185,3 +185,24 @@ async def test_the_run_says_whether_it_can_carry_on(desk: Store) -> None:
 
     assert stopped["canCarryOn"] is True and stopped["going"] is False
     assert over["canCarryOn"] is False and over["going"] is False
+
+
+@pytest.mark.unit
+async def test_the_buttons_reach_the_store(desk: Store) -> None:
+    """The two routes behind them, through the real stack: a button wired to nothing is the
+    failure this whole idea is about, one layer up."""
+    from agent_desk.web import routes
+
+    from tests.unit.test_kept_bench import _post_form
+
+    old, routes.store = routes.store, desk
+    try:
+        run_id = await _run(desk)
+
+        await _post_form("/workbench/pause", {"run": run_id})
+        assert (await _one(desk, run_id)).waiting is True
+
+        await _post_form("/workbench/carry-on", {"run": run_id})
+        assert (await _one(desk, run_id)).going is True
+    finally:
+        routes.store = old

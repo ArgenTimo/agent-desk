@@ -82,6 +82,14 @@ FIELDS: dict[str, tuple[Field, ...]] = {
     "action": (
         Field("do", "what to do", "the work itself, as you would say it to somebody", 3, True),
         Field("using", "what it may use", "the project, the tools, what it is allowed to touch", 2),
+        # A step whose work is a whole drawing of its own (049-a-step-that-is-a-process.sql). Not a
+        # sixth role: an Action is "something to do", and running a saved process is something to
+        # do — what differs is what it does the work with, which is a field.
+        Field(
+            "runs",
+            "a process it runs",
+            "the name of a saved process, when this one step is a whole process of its own",
+        ),
     ),
     "decision": (
         Field(
