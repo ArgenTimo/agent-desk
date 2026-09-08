@@ -49,7 +49,7 @@ from collections.abc import Sequence
 
 import structlog
 
-from agent_desk import allowed, dispatch, land, process, roles, slots
+from agent_desk import allowed, dispatch, engines, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.store.repo import Run, RunStep, Store
 from agent_desk.web import autostart, blockers
@@ -188,13 +188,46 @@ def _permission_words(given: tuple[str, ...]) -> list[str]:
     return said
 
 
-async def _ask(prompt: str) -> tuple[str, str]:
+async def _ask(prompt: str, engine: str | None = None) -> tuple[str, str]:
     """Ask, and give back what came back. Never raises: a step that could not be asked is a step
     that failed, and the run says so rather than the loop falling over."""
     try:
-        return "".join([chunk async for chunk in stream_answer(prompt)]).strip(), ""
+        return (
+            "".join([chunk async for chunk in stream_answer(prompt, engine=engine)]).strip(),
+            "",
+        )
     except (AnswerFailed, OSError) as gone:
         return "", str(gone)[:300]
+
+
+def _asked_of(
+    card: process.Card, cards: Sequence[process.Card], lines: Sequence[process.Line]
+) -> tuple[str | None, str]:
+    """Which engine this step is to be asked, and why it cannot be, if it cannot.
+
+    A model card is a card leading into the step whose value names an engine. Not a field on the
+    step, because "весь смысл харнесса в том, чтобы одну и ту же вещь прогнать через две разные и
+    сравнить" — the same prompt with two model cards on it is two lines on a diagram, and the same
+    prompt with two values in one field is two prompts.
+
+    A name this console does not have stops the step. Falling through to the default would compare
+    a thing with itself and give no sign that it had.
+    """
+    for one in process.feeding(card.name, list(cards), list(lines)):
+        value = (one.made or one.said.get("what", "") or "").strip()
+        if not value:
+            continue
+        found = engines.named(value)
+        if found is not None:
+            return found.binary, ""
+        if len(value.split()) <= 3 and any(
+            word in value.lower() for word in ("model", "gpt", "claude", "модель")
+        ):
+            # It reads as the name of an engine and is not one of ours. Said rather than ignored:
+            # a card that looks like it chose a model and did not is worse than an error.
+            offered = ", ".join(what.name for what in engines.available())
+            return None, f"there is no engine called “{value}” here — this console has: {offered}"
+    return None, ""
 
 
 def branch_prompt(
@@ -368,7 +401,12 @@ async def _do(
     if allowed.reads_only(given):
         # No worktree and no agent at all, which is what the `read` permission means rather than
         # describes (agent_desk/allowed.py).
-        answer, gone = await _ask(said)
+        engine, why = _asked_of(card, cards, lines)
+        if why:
+            await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=why)
+            await store.end_run(run.id, why=f"{card.label or card.name}: {why}")
+            return 1
+        answer, gone = await _ask(said, engine)
         if gone:
             await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
             await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")

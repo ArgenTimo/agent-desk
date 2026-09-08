@@ -466,6 +466,7 @@ async def stream_answer(
     *,
     add_dirs: Sequence[Path] = (),
     on_step: Callable[[str], None] | None = None,
+    engine: str | None = None,
 ) -> AsyncIterator[str]:
     """Yield the answer as it arrives, or raise `AnswerFailed`.
 
@@ -478,9 +479,15 @@ async def stream_answer(
     With no second engine configured — which is every install until somebody sets one — this is
     exactly what it was before.
     """
-    engines = [""]
-    if settings.local_model_bin:
-        engines.append(settings.local_model_bin)
+    # One engine, named, when a card asked for one: a harness that quietly fell back to the other
+    # would compare a thing with itself and give no sign that it had (agent_desk/engines.py).
+    # Otherwise the ordinary list, which is the primary and the fallback where one is configured.
+    if engine is not None:
+        engines = [engine]
+    else:
+        engines = [""]
+        if settings.local_model_bin:
+            engines.append(settings.local_model_bin)
 
     for index, binary in enumerate(engines):
         last = index == len(engines) - 1
