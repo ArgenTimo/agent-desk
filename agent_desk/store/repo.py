@@ -2459,6 +2459,31 @@ class Store:
             )
             return [BenchCard(**row._mapping) for row in rows]
 
+    async def begin_with(self, thread_id: str, name: str) -> None:
+        """Say what this enquiry is about (050).
+
+        Pointing somewhere else replaces it rather than adding a second, which is the primary key
+        doing the work: "one beginning per chat" is the whole meaning of the word.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO began (thread_id, name, at) VALUES (:thread_id, :name, :at) "
+                    "ON CONFLICT (thread_id) DO UPDATE SET name = :name, at = :at"
+                ),
+                {"thread_id": thread_id, "name": name, "at": _now_ms()},
+            )
+
+    async def began(self, thread_id: str = "") -> str:
+        """The card this enquiry starts from, or "" where nobody has said."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT name FROM began WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
+            found = rows.first()
+            return str(found[0]) if found else ""
+
     async def keep_template(
         self,
         *,

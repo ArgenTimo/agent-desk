@@ -143,16 +143,18 @@ async def test_it_survives_an_undo(desk: Store) -> None:
 # --- every way of making a card says which one it is ---------------------------------------------
 @pytest.mark.unit
 def test_every_way_of_putting_a_card_on_the_bench_says_which_one_it_was() -> None:
-    """Ten ways in, and the phrase is written where the card is made because that is the only
-    place that knows. Counted rather than listed, so an eleventh is a decision somebody makes on
-    purpose instead of a card that arrives saying nothing."""
+    """The phrase is written where the card is made, because that is the only place that knows.
+
+    Counted rather than listed: the number is here so that adding a way onto the bench is a
+    decision somebody makes on purpose — they have to come and change this line — rather than a
+    card that quietly arrives with no answer to "why is this here". The count going up in the same
+    commit as a new way in is the test working, not the test being in the way."""
     console = _code()
 
     said = console.count("came: '") + console.count("came: `")
-    assert said == 13, (
-        f"{said} places name where a card came from; there are twelve ways in — a collection laid "
-        "back out, and a process a message drew — plus the one that puts a stored bench back, and "
-        "a new one that says nothing renders a card with no answer to 'why is this here'"
+    assert said == 14, (
+        f"{said} places name where a card came from, and there are fourteen ways in. A new one "
+        "renders a card that cannot say why it is on the bench"
     )
 
 

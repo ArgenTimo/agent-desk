@@ -1022,6 +1022,9 @@ async def render_page(message: str = "") -> str:
         # the first thing the script does after the page opens is write the bench back — and a
         # write that overtook a fetch would save an empty surface over a full one (040-bench.sql).
         kept=[card.model_dump() for card in await store.bench_cards(opening)],
+        # And which of them the enquiry starts from, on the same terms and for the same reason:
+        # the mark belongs to a card that is already on the surface (050).
+        began=await store.began(opening),
         # Which column each kind of card belongs in when the bench is laid out again. From
         # `ideas/bench.py`, which is where the workbench diagram reads the same order — a copy in
         # the script would be a second place to be wrong, silently.
@@ -1847,7 +1850,29 @@ async def bench_of(thread: str = "") -> JSONResponse:
     workbench belongs to the chat" — it just had nowhere to keep the other chat's one. Now it does,
     so switching is a switch rather than a clear (044-a-bench-per-chat.sql).
     """
-    return JSONResponse({"cards": [card.model_dump() for card in await store.bench_cards(thread)]})
+    return JSONResponse(
+        {
+            "cards": [card.model_dump() for card in await store.bench_cards(thread)],
+            # What this chat's enquiry is about, so the page can mark it when the surface comes
+            # back rather than losing which card everything else hangs from (050).
+            "start": await store.began(thread),
+        }
+    )
+
+
+@router.post("/workbench/start", response_class=JSONResponse)
+async def begin_with(request: Request) -> JSONResponse:
+    """Say which card this enquiry starts from.
+
+    Named rather than made: the card already exists on the bench, and a route that made one would
+    be a second way of adding a card that has to stay in step with the first.
+    """
+    form = await _form(request)
+    thread = str(form.get("thread", ""))
+    name = str(form.get("name", "")).strip()
+    if name:
+        await store.begin_with(thread, name)
+    return JSONResponse({"start": await store.began(thread)})
 
 
 @router.post("/workbench/undo", response_class=JSONResponse)

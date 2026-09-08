@@ -164,6 +164,9 @@
          the bench back as soon as it has drawn it, and a write that overtook a fetch would save
          an empty surface over a full one (040-bench.sql). #}
       <script type="application/json" id="bench-kept">{{ kept | tojson }}</script>
+      {# Which of those cards this chat's enquiry starts from — the thing every question that
+         relates to nothing said yet relates to instead (050-what-this-is-about.sql). #}
+      <script type="application/json" id="bench-began">{{ began | tojson }}</script>
       {# Which column each kind of card is laid out in, from agent_desk/ideas/bench.py — the same
          order the workbench diagram uses, served rather than copied. #}
       <script type="application/json" id="bench-columns">{{ columns | tojson }}</script>
@@ -198,6 +201,10 @@
       {# A card that is only a card: the one you draw before the thing exists, which is what
          describing a process requires. #}
       <li class="sep"><button type="button" data-add="step">Add a step</button></li>
+      {# The root of an enquiry: not a question and not an answer, but what all of it is about.
+         Choose a card first to point at that one; choose none and it is typed. #}
+      <li><button type="button" data-add="about"
+                  title="the card this enquiry starts from — chosen, or typed">What this is about…</button></li>
       <li><button type="button" data-add="template">Save this as a process…</button></li>
       <li class="saved-head">saved processes</li>
       <li><ul id="bench-templates" class="bench-saved"></ul></li>

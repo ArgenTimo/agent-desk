@@ -1387,7 +1387,11 @@ async function benchOfThisChat() {
       await fetch(`/workbench/kept?thread=${encodeURIComponent(thread)}`)
     ).json();
     // Somebody switching quickly is somebody whose first answer is no longer the right one.
-    if (activeThread() === thread) layOut(said.cards);
+    if (activeThread() === thread) {
+      layOut(said.cards);
+      // After the cards, because the mark goes on one of them.
+      markBeginning(said.start || '');
+    }
   } catch {
     // An empty surface, which is what it used to be every time.
   }
@@ -1397,8 +1401,17 @@ async function benchOfThisChat() {
   drawMap();
 }
 
+function beganWith() {
+  try {
+    return JSON.parse(document.getElementById('bench-began')?.textContent || '""');
+  } catch {
+    return '';
+  }
+}
+
 function restoreBench() {
   layOut(keptBench());
+  markBeginning(beganWith());
   restored = true;
   syncTargets();
 }
@@ -2822,6 +2835,71 @@ async function addStep(role = 'action') {
   }
 }
 
+// The card an enquiry starts from. "Создаётся карточка начала, например — описание проекта."
+//
+// A question relates to something, and the first one relates to nothing that has been said yet.
+// Without a card to start from, the only thing a first question can hang off is the question
+// before it — which is a feed, and a feed is what this is trying to stop being.
+//
+// Two ways in, because there are two ways somebody arrives at what this is about: a card that is
+// already here — a project dragged in is exactly the "описание проекта" of the example — or a
+// description they have in their head and no card for yet. Choosing one card first says the
+// first; choosing none says the second, and it is typed.
+async function beginWith() {
+  const chosen = chosenCards();
+  let name = chosen.length === 1 ? cardName(chosen[0]) : '';
+  if (!name) {
+    const what = (prompt('What is this about?', '') || '').trim();
+    if (!what) return;
+    try {
+      const answer = await fetch('/cards/step', {
+        method: 'POST',
+        headers: FORM,
+        // An Object — "something that exists". Not a role invented for this: what an enquiry is
+        // about is a thing, and the five are closed (adr/0011).
+        body: new URLSearchParams({ label: what.slice(0, 60), role: 'object' }),
+      });
+      const said = await answer.json();
+      name = said.name;
+      // The whole of it in the field the role asks for, so the card says what it is rather than
+      // only what it is called. The label is a name and names are short; this is the description.
+      await fetch('/cards/field', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ name, role: 'object', field: 'what', value: what }),
+      });
+      await pin({ kind: 'step', id: said.id, label: said.label }, { came: 'what this is about' });
+      await readRoles();
+    } catch {
+      return say('Could not make a card for it.');
+    }
+  }
+  await beginFrom(name);
+}
+
+// Written down, then marked. In that order: a beginning that is only on the page is one somebody
+// loses by reloading, and this is the card a long branch hangs from.
+async function beginFrom(name) {
+  try {
+    await fetch('/workbench/start', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ name, thread: activeThread() }),
+    });
+  } catch {
+    return say('Could not write down what this is about.');
+  }
+  markBeginning(name);
+}
+
+// One card wears the mark, so pointing at another takes it off the first without a second call.
+function markBeginning(name) {
+  for (const card of surface?.querySelectorAll('.pin') || []) {
+    card.classList.toggle('beginning', cardName(card) === name);
+  }
+  drawTies();
+}
+
 // "Процесс, который собрали один раз, должен запускаться второй раз с другими входами."
 async function keepTemplate() {
   const names = onBench().map(cardName);
@@ -3381,6 +3459,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'clear') clearBench();
   else if (what === 'keep') keepBench();
   else if (what === 'step') addStep();
+  else if (what === 'about') beginWith();
   else if (what === 'template') keepTemplate();
 });
 

@@ -2745,3 +2745,11 @@ button.go:hover, button.yes:hover {
 .idea-card.unlooked .from-desk { border-color: var(--attention); color: var(--attention); }
 .aside-filter { display: inline-flex; }
 .aside-filter .chip.on { border-color: var(--focus); color: var(--focus); }
+
+/* --- the card an enquiry starts from ------------------------------------------------------------ */
+/* "Создаётся карточка начала, например — описание проекта." Said in a word and not only in a
+   colour: a border somebody has to learn the meaning of is a border nobody reads, and on a bench
+   of thirty cards "what is all of this about" is the question this mark exists to answer
+   (050-what-this-is-about.sql). */
+.pin.beginning { border-color: var(--focus); }
+.pin.beginning .pin-kind::before { content: "start · "; color: var(--focus); }
