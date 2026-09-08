@@ -45,13 +45,14 @@ rule the failed-task blocker follows.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 import structlog
 
 from agent_desk import allowed, dispatch, land, process, roles
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.store.repo import Run, RunStep, Store
-from agent_desk.web import autostart
+from agent_desk.web import autostart, blockers
 
 log = structlog.get_logger()
 
@@ -184,11 +185,30 @@ async def _ask(prompt: str) -> tuple[str, str]:
         return "", str(gone)[:300]
 
 
-def branch_prompt(card: process.Card, ways: list[process.Line]) -> str:
+def branch_prompt(
+    card: process.Card,
+    ways: list[process.Line],
+    *,
+    memory: str = "",
+    known: Sequence[str] = (),
+) -> str:
     """The question a Decision is asked, as a numbered list with one token back.
 
     The same shape as every other model call here (`agent_desk/answer/classify.py`), and for the
     same reason: free text matched against branch labels is a guess wearing a mechanism.
+
+    "Развилка «прошёл ли гейт» сегодня отвечает по тому, что написано на карточке, — то есть по
+    описанию, а не по факту… Иначе развилки в схеме — это развилки по мнению модели о том, что,
+    вероятно, произошло."
+
+    So two things arrive that did not before. `memory` is what the steps leading into this one
+    actually produced — the branch after "run the tests" could not see what the tests said, which
+    is the whole of what it was being asked about. `known` is what this console has *read*: which
+    of this project's work is running, what failed, what is blocking it.
+
+    Both are labelled as read rather than reasoned, and the prompt says outright that a decision
+    contradicting them is wrong. That instruction is the difference between giving a model facts
+    and giving it atmosphere.
     """
     lines = [
         "A process has reached a decision. Answer with the number of the way it should go, then a",
@@ -206,7 +226,18 @@ def branch_prompt(card: process.Card, ways: list[process.Line]) -> str:
     ]
     lines += [f"{index}. {one.says or 'unlabelled'}" for index, one in enumerate(ways, start=1)]
     if card.made.strip():
-        lines += ["", "## What is already known", card.made.strip()]
+        lines += ["", "## What this step itself produced", card.made.strip()]
+    if memory.strip():
+        lines += ["", "## What the steps before it produced", memory.strip()]
+    if known:
+        lines += [
+            "",
+            "## What this console has read off disk",
+            "Facts, not opinions: this is the state of the work itself. Where one of these settles",
+            "the question, it settles it — a decision that contradicts what is written here is",
+            "wrong however reasonable it sounds.",
+            *known,
+        ]
     return "\n".join(lines)
 
 
@@ -383,6 +414,35 @@ async def _settle(store: Store, run: Run, card: process.Card, step: RunStep) -> 
     return 1
 
 
+async def _what_is_known(store: Store, run: Run) -> list[str]:
+    """What this console has read that bears on a decision in this project.
+
+    Only things it already computes, and only about this project — a decision about a release does
+    not need to hear that another repository is stuck. Each line is a reading of the store, so the
+    prompt can honestly call them facts.
+
+    Bounded, because a decision drowned in context is a decision made on the first line of it.
+    """
+    said: list[str] = []
+    tasks = [one for one in await store.tasks(repo_key=run.repo_key) if one.started_at]
+    failed = [one for one in tasks if one.failed_at]
+    going = [one for one in tasks if not one.finished_at and not one.failed_at]
+    if going:
+        said.append(f"- {len(going)} piece(s) of work in this project are running right now")
+    for one in failed[:THINGS_KNOWN]:
+        said.append(f"- work that failed here: {one.instruction.splitlines()[0][:80]}")
+    for stuck in (await blockers.blockers(store))[:THINGS_KNOWN]:
+        if stuck.repo_key in ("", run.repo_key):
+            said.append(f"- stopped: {stuck.what} — {stuck.why}"[:200])
+    return said
+
+
+# How much the console tells a decision about the world. A decision drowned in context is a
+# decision made on the first line of it, and the point of these is that each one can settle the
+# question on its own.
+THINGS_KNOWN = 5
+
+
 async def _decide(
     store: Store,
     run: Run,
@@ -399,7 +459,14 @@ async def _decide(
             run_id=run.id, name=card.name, state="held", detail="no ways out are drawn from it yet"
         )
         return 1
-    reply, gone = await _ask(branch_prompt(card, ways))
+    reply, gone = await _ask(
+        branch_prompt(
+            card,
+            ways,
+            memory=process.memory_for(card.name, cards, lines),
+            known=await _what_is_known(store, run),
+        )
+    )
     if gone:
         await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
         await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")

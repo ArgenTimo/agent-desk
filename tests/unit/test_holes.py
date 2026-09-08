@@ -258,3 +258,86 @@ def test_the_page_says_it_rather_than_keeping_it() -> None:
     """A count returned and never shown is the same silence with extra steps."""
     assert "said.lost?.length" in _code()
     assert "no longer ask for" in _code()
+
+
+# --- a decision can look at the world (01M1XC4Z2ADB…) --------------------------------------------
+@pytest.mark.unit
+def test_a_decision_is_told_what_the_steps_before_it_produced() -> None:
+    """ "Развилка «прошёл ли гейт» сегодня отвечает по тому, что написано на карточке, — то есть по
+    описанию, а не по факту."
+
+    The branch after "run the tests" could not see what the tests said, which is the whole of what
+    it was being asked about.
+    """
+    from agent_desk import process
+    from agent_desk.web import engine
+
+    card = process.Card(name="step:2", role="decision", label="did it pass?", said={"ask": "pass?"})
+    ways = [process.Line(from_name="step:2", to_name="step:3", kind="if", says="yes")]
+
+    said = engine.branch_prompt(card, ways, memory="What leads into this step:\n- Action: ran them")
+
+    assert "What the steps before it produced" in said
+    assert "ran them" in said
+
+
+@pytest.mark.unit
+def test_a_decision_is_told_what_the_console_has_read() -> None:
+    """ "Решению нужен доступ к тому, что консоль и так знает: состояние задач, блокеры, результат
+    прошлого шага." And told that these are readings rather than opinions — that instruction is
+    the difference between giving a model facts and giving it atmosphere."""
+    from agent_desk import process
+    from agent_desk.web import engine
+
+    card = process.Card(name="step:2", role="decision", label="ship?", said={"ask": "ship?"})
+    ways = [process.Line(from_name="step:2", to_name="step:3", kind="if", says="yes")]
+
+    said = engine.branch_prompt(card, ways, known=["- stopped: the gate said no"])
+
+    assert "read off disk" in said
+    assert "Facts, not opinions" in said
+    assert "a decision that contradicts what is written here is" in said
+    assert "the gate said no" in said
+
+
+@pytest.mark.unit
+async def test_what_is_known_is_about_this_project_and_bounded() -> None:
+    """A decision about a release does not need to hear that another repository is stuck, and one
+    drowned in context is one made on the first line of it."""
+    import tempfile
+
+    from agent_desk.store.repo import Store
+    from agent_desk.web import engine
+
+    with tempfile.TemporaryDirectory() as where:
+        store = Store(pathlib.Path(where) / "agent-desk.db")
+        await store.open()
+        try:
+            run = await store.start_run(cards=["step:1"], repo_key="mine", cwd="/tmp")
+            for n in range(engine.THINGS_KNOWN + 4):
+                task = await store.queue_task(
+                    repo_key="mine",
+                    instruction=f"a failure {n}",
+                    cwd="/tmp",
+                    title=f"a failure {n}",
+                    source_kind="idea",
+                )
+                await store.task_started(task.id, f"agent{n}")
+                await store.task_failed(task.id, "it broke")
+            elsewhere = await store.queue_task(
+                repo_key="somebody-else",
+                instruction="not this project",
+                cwd="/tmp",
+                title="not this project",
+                source_kind="idea",
+            )
+            await store.task_started(elsewhere.id, "other")
+            await store.task_failed(elsewhere.id, "it broke")
+
+            known = await engine._what_is_known(store, run)
+        finally:
+            await store.close()
+
+    assert known, "a decision is told nothing at all"
+    assert not [one for one in known if "not this project" in one]
+    assert len([one for one in known if "work that failed" in one]) <= engine.THINGS_KNOWN
