@@ -392,6 +392,10 @@ class RunStep(BaseModel):
     made: str = ""
     detail: str = ""
     at: int = 0
+    # What this step cost and how long it took (058). Zero is "not measured" rather than "free":
+    # an agent's work is not priced here, and a step run before this existed has no number.
+    usd: float = 0.0
+    ms: int = 0
 
 
 class StepCard(BaseModel):
@@ -3019,15 +3023,23 @@ class Store:
         task_id: str | None = None,
         made: str = "",
         detail: str = "",
+        usd: float = 0.0,
+        ms: int = 0,
     ) -> None:
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO run_step (run_id, name, task_id, state, made, detail, at) "
-                    "VALUES (:run_id, :name, :task_id, :state, :made, :detail, :t) "
+                    "INSERT INTO run_step (run_id, name, task_id, state, made, detail, at, "
+                    "usd, ms) "
+                    "VALUES (:run_id, :name, :task_id, :state, :made, :detail, :t, :usd, :ms) "
                     "ON CONFLICT (run_id, name) DO UPDATE SET state = :state, "
                     "task_id = COALESCE(:task_id, run_step.task_id), "
                     "made = CASE WHEN :made = '' THEN run_step.made ELSE :made END, "
+                    # Kept where it was measured. A step is written several times as it goes —
+                    # queued, then done — and a later write with no measurement in it must not
+                    # erase the one that had it (058).
+                    "usd = CASE WHEN :usd = 0 THEN run_step.usd ELSE :usd END, "
+                    "ms = CASE WHEN :ms = 0 THEN run_step.ms ELSE :ms END, "
                     "detail = :detail, at = :t"
                 ),
                 {
@@ -3037,6 +3049,8 @@ class Store:
                     "state": state,
                     "made": made[:8000],
                     "detail": detail[:500],
+                    "usd": usd,
+                    "ms": ms,
                     "t": _now_ms(),
                 },
             )
@@ -3045,7 +3059,7 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT run_id, name, task_id, state, made, detail, at FROM run_step "
+                    "SELECT run_id, name, task_id, state, made, detail, at, usd, ms FROM run_step "
                     "WHERE run_id = :run_id ORDER BY at"
                 ),
                 {"run_id": run_id},

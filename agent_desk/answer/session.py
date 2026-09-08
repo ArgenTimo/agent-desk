@@ -311,6 +311,7 @@ async def _run(
     *,
     add_dirs: Sequence[Path] = (),
     binary: str = "",
+    on_cost: Callable[[float], None] | None = None,
     on_step: Callable[[str], None] | None = None,
 ) -> AsyncIterator[str]:
     """One engine, one question. Yields the answer as it arrives, or raises `AnswerFailed`.
@@ -409,7 +410,12 @@ async def _run(
                         # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
                         # cannot be read is recorded as nothing rather than as a guess.
                         with contextlib.suppress(TypeError, ValueError):
-                            await tally.note(float(event.get("total_cost_usd") or 0))
+                            spent = float(event.get("total_cost_usd") or 0)
+                            await tally.note(spent)
+                            # And to whoever asked, so a step can say what it cost rather than only
+                            # the day's total being able to (058-what-a-step-cost.sql).
+                            if on_cost is not None:
+                                on_cost(spent)
                         if event.get("is_error"):
                             raise AnswerFailed(
                                 str(event.get("subtype") or "the run reported an error")
@@ -467,6 +473,7 @@ async def stream_answer(
     add_dirs: Sequence[Path] = (),
     on_step: Callable[[str], None] | None = None,
     engine: str | None = None,
+    on_cost: Callable[[float], None] | None = None,
 ) -> AsyncIterator[str]:
     """Yield the answer as it arrives, or raise `AnswerFailed`.
 
@@ -493,7 +500,9 @@ async def stream_answer(
         last = index == len(engines) - 1
         said_anything = False
         try:
-            async for text in _run(prompt, add_dirs=add_dirs, binary=binary, on_step=on_step):
+            async for text in _run(
+                prompt, add_dirs=add_dirs, binary=binary, on_step=on_step, on_cost=on_cost
+            ):
                 said_anything = True
                 yield text
         except AnswerFailed as exc:

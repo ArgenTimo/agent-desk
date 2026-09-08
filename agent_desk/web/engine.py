@@ -46,7 +46,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import structlog
 
@@ -189,16 +191,40 @@ def _permission_words(given: tuple[str, ...]) -> list[str]:
     return said
 
 
-async def _ask(prompt: str, engine: str | None = None) -> tuple[str, str]:
+@dataclass(frozen=True)
+class Answered:
+    """What one model call produced, and what it cost to produce it."""
+
+    said: str = ""
+    gone: str = ""
+    usd: float = 0.0
+    ms: int = 0
+
+
+async def _ask(prompt: str, engine: str | None = None) -> Answered:
     """Ask, and give back what came back. Never raises: a step that could not be asked is a step
-    that failed, and the run says so rather than the loop falling over."""
+    that failed, and the run says so rather than the loop falling over.
+
+    The cost and the clock come back with the answer, because a prompt that is better by three per
+    cent and twice the price is a bad prompt — and that is only visible beside the answer, not in a
+    bill at the end of the month (058-what-a-step-cost.sql).
+    """
+    spent = 0.0
+    began = time.monotonic()
+
+    def note(usd: float) -> None:
+        nonlocal spent
+        spent += usd
+
     try:
-        return (
-            "".join([chunk async for chunk in stream_answer(prompt, engine=engine)]).strip(),
-            "",
-        )
+        said = "".join(
+            [chunk async for chunk in stream_answer(prompt, engine=engine, on_cost=note)]
+        ).strip()
     except (AnswerFailed, OSError) as gone:
-        return "", str(gone)[:300]
+        return Answered(
+            gone=str(gone)[:300], usd=spent, ms=round((time.monotonic() - began) * 1000)
+        )
+    return Answered(said=said, usd=spent, ms=round((time.monotonic() - began) * 1000))
 
 
 def _asked_of(
@@ -452,21 +478,37 @@ async def _do(
         # first failure stops the step — half a comparison is not a comparison, and a step that
         # reported one of two answers as its result would say so nowhere.
         answers: list[tuple[str, str]] = []
+        spent, took = 0.0, 0
         for which in asked:
-            answer, gone = await _ask(said, None if which is None else which.binary)
-            if gone:
-                await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
-                await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")
+            came = await _ask(said, None if which is None else which.binary)
+            spent, took = spent + came.usd, took + came.ms
+            if came.gone:
+                await store.set_run_step(
+                    run_id=run.id,
+                    name=card.name,
+                    state="failed",
+                    detail=came.gone,
+                    usd=spent,
+                    ms=took,
+                )
+                await store.end_run(run.id, why=f"{card.label or card.name}: {came.gone}")
                 return 1
-            answers.append((which.name if which is not None else "answer", answer))
+            answers.append((which.name if which is not None else "answer", came.said))
         answer = as_a_fan(answers)
         await store.card_made(card.name, answer[:MOST_MADE])
         if broke := await _checked(store, run, card, answer, cards, lines):
-            await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=broke)
+            await store.set_run_step(
+                run_id=run.id, name=card.name, state="failed", detail=broke, usd=spent, ms=took
+            )
             await store.end_run(run.id, why=f"{card.label or card.name}: {broke}")
             return 1
         await store.set_run_step(
-            run_id=run.id, name=card.name, state="done", made=answer[:MOST_MADE]
+            run_id=run.id,
+            name=card.name,
+            state="done",
+            made=answer[:MOST_MADE],
+            usd=spent,
+            ms=took,
         )
         return 1
 
@@ -749,7 +791,7 @@ async def _decide(
             run_id=run.id, name=card.name, state="held", detail="no ways out are drawn from it yet"
         )
         return 1
-    reply, gone = await _ask(
+    came = await _ask(
         branch_prompt(
             card,
             ways,
@@ -757,11 +799,20 @@ async def _decide(
             known=await _what_is_known(store, run),
         )
     )
-    if gone:
-        await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=gone)
-        await store.end_run(run.id, why=f"{card.label or card.name}: {gone}")
+    if came.gone:
+        await store.set_run_step(
+            run_id=run.id,
+            name=card.name,
+            state="failed",
+            detail=came.gone,
+            usd=came.usd,
+            ms=came.ms,
+        )
+        await store.end_run(run.id, why=f"{card.label or card.name}: {came.gone}")
         return 1
-    picked = read_branch(reply, len(ways))
+    # A decision costs a model call like any other step, and a harness that priced the answers and
+    # not the branching would understate every drawing with a fork in it.
+    picked = read_branch(came.said, len(ways))
     if not picked:
         # It did not decide. Held rather than a branch taken at random, which is the failure this
         # refuses: a process going the first way out because the model said something
@@ -773,14 +824,16 @@ async def _decide(
             detail="it did not come back with one of the ways out",
         )
         return 1
-    took = ways[picked - 1]
-    why = read_why(reply)
-    made = f"went {took.says or 'the unlabelled way'}"
+    went = ways[picked - 1]
+    why = read_why(came.said)
+    made = f"went {went.says or 'the unlabelled way'}"
     if why:
         made = f"{made} — {why}"
     await store.card_made(card.name, made)
-    await store.set_run_step(run_id=run.id, name=card.name, state="done", made=made)
-    log.info("engine.decided", run=run.id, step=card.name, went=took.to_name, why=why)
+    await store.set_run_step(
+        run_id=run.id, name=card.name, state="done", made=made, usd=came.usd, ms=came.ms
+    )
+    log.info("engine.decided", run=run.id, step=card.name, went=went.to_name, why=why)
     return 1
 
 

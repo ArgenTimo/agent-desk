@@ -2389,6 +2389,10 @@ async def workbench_runs() -> JSONResponse:
                         "state": step.state,
                         "made": step.made,
                         "detail": step.detail,
+                        # What it cost and how long it took, so the answer to "is this prompt
+                        # worth it" is beside the answer rather than in a bill (058).
+                        "usd": step.usd,
+                        "ms": step.ms,
                     }
                     for step in await store.run_steps(one.id)
                 ],

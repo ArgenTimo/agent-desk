@@ -156,8 +156,8 @@ async def test_a_read_only_step_is_asked_rather_than_given_an_agent(
 ) -> None:
     """The `read` permission enforced rather than described: no worktree and no agent at all."""
 
-    async def answered(prompt: str, engine: str | None = None) -> tuple[str, str]:
-        return ("the logs say six sessions died", "")
+    async def answered(prompt: str, which: str | None = None) -> engine.Answered:
+        return engine.Answered(said="the logs say six sessions died")
 
     monkeypatch.setattr(engine, "_ask", answered)
     await desk.set_card_role("idea:one", "action")
@@ -240,9 +240,9 @@ async def test_a_decision_is_asked_and_never_given_an_agent(
     """A decision does not write anything, so there is nothing for an agent to do."""
     asked = []
 
-    async def answered(prompt: str, engine: str | None = None) -> tuple[str, str]:
+    async def answered(prompt: str, which: str | None = None) -> engine.Answered:
         asked.append(prompt)
-        return ("2", "")
+        return engine.Answered(said="2")
 
     monkeypatch.setattr(engine, "_ask", answered)
     await desk.set_card_role("idea:one", "decision")
@@ -526,8 +526,8 @@ async def test_a_step_that_could_not_be_asked_stops_the_run(
     """A model that is out of budget is a run that stops and says so, not a loop that retries the
     same wall every twenty seconds."""
 
-    async def refused(prompt: str, engine: str | None = None) -> tuple[str, str]:
-        return ("", "the account is out of budget")
+    async def refused(prompt: str, which: str | None = None) -> engine.Answered:
+        return engine.Answered(gone="the account is out of budget")
 
     monkeypatch.setattr(engine, "_ask", refused)
     await desk.set_card_role("idea:one", "action")
@@ -547,8 +547,8 @@ async def test_a_step_that_could_not_be_asked_stops_the_run(
 async def test_a_decision_that_would_not_decide_holds_the_run(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def waffled(prompt: str, engine: str | None = None) -> tuple[str, str]:
-        return ("it depends really", "")
+    async def waffled(prompt: str, which: str | None = None) -> engine.Answered:
+        return engine.Answered(said="it depends really")
 
     monkeypatch.setattr(engine, "_ask", waffled)
     await desk.set_card_role("idea:one", "decision")
@@ -656,8 +656,8 @@ async def test_a_run_that_cannot_be_advanced_is_stopped_rather_than_retried_for_
 async def test_a_decision_that_could_not_be_asked_stops_the_run(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def refused(prompt: str, engine: str | None = None) -> tuple[str, str]:
-        return ("", "no answer engine is configured")
+    async def refused(prompt: str, which: str | None = None) -> engine.Answered:
+        return engine.Answered(gone="no answer engine is configured")
 
     monkeypatch.setattr(engine, "_ask", refused)
     await desk.set_card_role("idea:one", "decision")
@@ -684,16 +684,22 @@ async def test_asking_never_raises_however_the_answer_engine_fails(
     """A step that could not be asked is a step that failed, and the run says so — rather than the
     loop falling over and taking every other run with it."""
 
-    async def blows_up(prompt: str, *, add_dirs: object = (), engine: object = None) -> object:
+    async def blows_up(
+        prompt: str,
+        *,
+        add_dirs: object = (),
+        engine: object = None,
+        on_cost: object = None,
+    ) -> object:
         raise OSError("no such binary")
         yield ""  # pragma: no cover - unreachable, but this has to be a generator
 
     monkeypatch.setattr(engine, "stream_answer", blows_up)
 
-    said, gone = await engine._ask("anything")
+    came = await engine._ask("anything")
 
-    assert said == ""
-    assert "no such binary" in gone
+    assert came.said == ""
+    assert "no such binary" in came.gone
 
 
 @pytest.mark.unit

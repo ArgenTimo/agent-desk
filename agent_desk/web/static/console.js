@@ -2926,9 +2926,33 @@ function showRuns() {
     // never show is a request nobody asked for (01M1XA1V906B3KRJ84G4KHRE33).
     const answers = pin.querySelector('.pin-answers');
     if (answers) answers.hidden = ((step.made || '').match(/^## /gm) || []).length < 2;
+    writeCost(pin, step);
   }
   showRunBar(going);
   showCompare();
+}
+
+// "Промпт, который лучше на 3% и дороже вдвое, — это плохой промпт, и увидеть это надо на схеме,
+// а не в счёте в конце месяца." So it is on the card, next to what the step produced.
+//
+// Zero is not shown, and that is the honest reading rather than tidiness: nothing was measured.
+// An agent's work is not priced here, and a step that ran before this existed has no number — a
+// line saying "$0.00" would be this console claiming a step was free (058-what-a-step-cost.sql).
+function writeCost(pin, step) {
+  let line = pin.querySelector('.pin-cost');
+  const said = [];
+  if (step.usd) said.push(`$${step.usd < 0.01 ? step.usd.toFixed(4) : step.usd.toFixed(2)}`);
+  if (step.ms) said.push(step.ms < 1000 ? `${step.ms}ms` : `${(step.ms / 1000).toFixed(1)}s`);
+  if (!said.length) {
+    line?.remove();
+    return;
+  }
+  if (!line) {
+    line = document.createElement('p');
+    line.className = 'pin-cost';
+    pin.querySelector('.pin-head')?.after(line);
+  }
+  line.textContent = said.join(' · ');
 }
 
 const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', failed: '✕' };

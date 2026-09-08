@@ -423,8 +423,8 @@ async def test_the_reason_lands_on_the_card_and_in_the_run() -> None:
             )
             ways = [process.Line(from_name="step:1", to_name="step:2", kind="if", says="yes")]
 
-            async def fake_ask(prompt: str) -> tuple[str, str]:
-                return "1 the tests came back green", ""
+            async def fake_ask(prompt: str) -> engine.Answered:
+                return engine.Answered(said="1 the tests came back green")
 
             engine._ask, was = fake_ask, engine._ask  # type: ignore[assignment]
             try:
