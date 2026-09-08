@@ -1251,6 +1251,15 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_step.html").render(card=one),
             status_code=200 if one else 404,
         )
+    if kind == "task":
+        # A ticket. It has been draggable out of the right-hand column since that column existed
+        # and rendered "could not read this one" on arrival, because `render_card` knows the four
+        # kinds that come off the board and a ticket comes out of the store.
+        ticket = await store.task(id)
+        return HTMLResponse(
+            env.get_template("_card_task.html").render(card=ticket),
+            status_code=200 if ticket else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.

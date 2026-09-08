@@ -1,0 +1,49 @@
+{# A ticket on the workbench (01M1ZQ3JPM9AC5RN…).
+
+   It was already draggable out of the right-hand column and already had a role — and it rendered
+   "could not read this one", because `render_card` knows four board kinds and a ticket is not one
+   of them. This is what it says instead.
+
+   What a ticket contributes to a question is the work it describes and where that decision was
+   made. Not the queue's bookkeeping: whether an agent has started is on the column's own card,
+   where the buttons that change it are, and repeating it here would be a second copy going stale
+   in front of somebody. #}
+{% if not card %}
+<p class="empty small">that ticket is not in the queue any more</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ card.title }}">
+  <div class="plain-only">
+    <p class="card-said">{{ card.instruction }}</p>
+
+    <h4>Where it was decided</h4>
+    {# "An idea is a thought somebody had *here*, and a ticket is work somebody decided
+       *elsewhere*" — and which of the two this is decides what may be done with it, so it is said
+       on the card rather than inferred from a pill (docs/adr/0010). #}
+    <p class="small">
+      {% if card.source_kind == "tracker" %}Read from this project's own board{% if card.source_ref %}, where it is
+      <span class="mono">{{ card.source_ref }}</span>{% endif %}. Nothing here transitions it,
+      comments on it or closes it.
+      {% elif card.source_kind == "block" %}Asked for in this console, in a message that said to do it.
+      {% else %}Queued here by hand.
+      {% endif %}
+    </p>
+
+    <h4>Which project</h4>
+    {% if card.repo_key %}
+    <p class="small mono">{{ card.repo_key }}</p>
+    {% else %}
+    <p class="small dim">None recorded. It was queued without one.</p>
+    {% endif %}
+  </div>
+
+  {# --- and the technical half, behind the same toggle as every other card ----------------- #}
+  <div class="technical-only" hidden>
+    <dl class="card-facts">
+      <dt>queued</dt><dd>{{ card.queued_at | ago }}</dd>
+      {% if card.cwd %}<dt>in</dt><dd class="mono">{{ card.cwd }}</dd>{% endif %}
+      {% if card.agent_id %}<dt>agent</dt><dd class="mono">{{ card.agent_id }}</dd>{% endif %}
+      {% if card.detail %}<dt>said</dt><dd>{{ card.detail }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+{% endif %}

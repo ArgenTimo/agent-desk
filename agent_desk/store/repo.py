@@ -1145,6 +1145,25 @@ class Store:
             )
             return [Task(**row._mapping) for row in rows]
 
+    async def task(self, task_id: str) -> Task | None:
+        """One queued piece of work, for the card that stands for it on the workbench.
+
+        Read by id rather than filtered out of `tasks()`: that one is capped at a hundred, and a
+        card whose ticket happened to be the hundred and first would render "could not read this
+        one" for a row that is sitting in the table.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, repo_key, cwd, title, instruction, source_kind, source_ref, "
+                    "block_id, queued_at, started_at, agent_id, failed_at, finished_at, detail, "
+                    "landed FROM task WHERE id = :id"
+                ),
+                {"id": task_id},
+            )
+            row = rows.first()
+            return None if row is None else Task(**row._mapping)
+
     async def take_next_task(self, repo_key: str) -> Task | None:
         """The oldest waiting task in this project, claimed so that two ticks cannot take it.
 
