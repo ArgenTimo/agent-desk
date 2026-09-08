@@ -47,6 +47,7 @@ from agent_desk import (
     peer,
     process,
     roles,
+    room,
     telling,
     ties,
     tracker,
@@ -1207,6 +1208,35 @@ async def let_a_file_be_read(request: Request) -> Response:
         return HTMLResponse("", status_code=400)
     await store.let_it_be_read(path)
     return HTMLResponse("", status_code=204)
+
+
+@router.get("/room", response_class=JSONResponse)
+async def how_much_could_run() -> JSONResponse:
+    """How many agents could be started right now, and why that is the number (agent_desk/room.py).
+
+    Every reason comes from `autostart.why_not`, which is the function the loop itself asks. A
+    second opinion computed here would be a console explaining a decision that was made somewhere
+    else, and the two would disagree the first time either changed.
+    """
+    rows, _ = await asyncio.to_thread(board)
+    projects = shape(rows, await store.groups())
+    live = await asyncio.to_thread(autostart.live_agents)
+    seats = []
+    for project in projects:
+        why = await autostart.why_not(store, project.key, live)
+        seats.append(
+            room.Seat(
+                repo_key=project.key,
+                name=project.name,
+                free=not why,
+                why=why,
+                waiting=len(
+                    [one for one in await store.tasks(repo_key=project.key) if one.waiting]
+                ),
+            )
+        )
+    found = room.how_many(seats)
+    return JSONResponse({"at_once": found.at_once, "said": found.said, "lines": found.lines})
 
 
 @router.get("/cards/{kind}/parts", response_class=JSONResponse)

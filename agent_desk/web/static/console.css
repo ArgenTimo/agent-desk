@@ -2796,3 +2796,11 @@ button.go:hover, button.yes:hover {
 @media (prefers-reduced-motion: reduce) {
   .pin.promise .pin-kind::after { animation: none; }
 }
+
+/* --- how much could be going on at once ---------------------------------------------------------- */
+/* Folded by default: it answers a question somebody asks before queueing more work, not one they
+   watch. Open, every project says why — a count with no reasons is a number to argue with. */
+.room { border-top: 1px solid var(--line); padding: 4px 8px; font-size: var(--t-xs); }
+.room > summary { cursor: pointer; color: var(--fg-dim); }
+.room .room-lines { margin: 4px 0 0; padding-left: 16px; color: var(--fg-dim); }
+.room .room-lines li { padding: 1px 0; }

@@ -310,6 +310,7 @@ stream.addEventListener('board', (event) => {
   // A session that has started its first subagent has parts it did not have a moment ago, and a
   // checkout whose last session ended has none any more.
   for (const card of surface?.querySelectorAll('.pin[data-kind]') || []) showParts(card);
+  readRoom();
   const waiting = document.querySelectorAll('.node.session.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 });
@@ -3493,6 +3494,33 @@ function bringIntoView(pin) {
   applyView();
 }
 
+/* --- how much could be going on at once -------------------------------------------------------- */
+// "Число должно вычисляться и объясняться, а не задаваться." A count on its own is a number to
+// argue with; a count that says which project is free and why the others are not is one somebody
+// can act on — so the line and the reasons arrive together and are shown together.
+//
+// Read on the same beat as the board, because every input to it — a seat taken, a budget spent, a
+// project disarmed — is something the board push is already about.
+async function readRoom() {
+  const holder = document.getElementById('room');
+  if (!holder) return;
+  try {
+    const said = await (await fetch('/room')).json();
+    holder.querySelector('.room-said').textContent = said.said || '';
+    const list = holder.querySelector('.room-lines');
+    list.replaceChildren();
+    for (const line of said.lines || []) {
+      const row = document.createElement('li');
+      row.textContent = line;
+      list.appendChild(row);
+    }
+    holder.hidden = !(said.lines || []).length;
+  } catch {
+    // The board is still the board. A count that could not be read is left as it was rather than
+    // replaced with a zero, which would read as "nothing can run".
+  }
+}
+
 /* --- what is off the screen ------------------------------------------------------------------- */
 // More useful on a surface than it was on a list: a card you moved somewhere and then panned away
 // from is a card that still goes into the next message.
@@ -5044,3 +5072,6 @@ applyTabOrder();
 restoreBench();
 showActiveThread();
 emptyOrNot();
+// Once at the start, because the first board push may be two seconds away and an empty line where
+// a count belongs reads as a broken panel rather than as one that has not answered yet.
+readRoom();

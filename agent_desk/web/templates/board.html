@@ -34,6 +34,14 @@
               aria-label="hide the overview">–</button>
     </header>
     <div id="board" class="tree">{{ board|safe }}</div>
+    {# How much could actually be going on here at once, and why that is the number. It is a
+       summary of rules that already existed one project at a time, and nobody could see the sum
+       (agent_desk/room.py). Folded, because it is a question somebody asks before queueing five
+       more things rather than one they watch. #}
+    <details id="room" class="room">
+      <summary><span class="room-said">·</span></summary>
+      <ul class="room-lines"></ul>
+    </details>
     <nav class="col-foot">
       <a href="/ideas">ideas</a><a href="/plans">plans</a><a href="/viewers">viewers</a>
       <a href="/board.csv" title="the board as a spreadsheet">csv</a>
