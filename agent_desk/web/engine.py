@@ -333,7 +333,10 @@ async def _do(
     cards: list[process.Card],
     lines: list[process.Line],
 ) -> int:
-    """An Action: asked when it is read-only, queued when it is not."""
+    """An Action: a whole process of its own, asked when it is read-only, queued when it is not."""
+    inside = (card.said.get("runs") or "").strip()
+    if inside:
+        return await _run_a_process(store, run, card, inside)
     given = allowed.leave_for((await store.card_leaves()).get(card.name))
     said = briefing(card.name, cards, lines)
 
@@ -373,8 +376,87 @@ async def _do(
     return 1
 
 
+async def _run_a_process(store: Store, run: Run, card: process.Card, name: str) -> int:
+    """A step whose work is a saved drawing (049-a-step-that-is-a-process.sql).
+
+    "Иначе конструктор упирается в потолок примерно на десяти шагах, а все интересные процессы
+    длиннее."
+
+    The nested run is an ordinary run — same steps, same states, same engine, same undo — and the
+    only thing it carries extra is where to report back to. That is why this needed no new state:
+    `going` already means "started, and waiting for the thing it started", which is exactly what
+    the outer step is doing.
+    """
+    made = next((one for one in await store.templates() if one.name == name), None)
+    if made is None:
+        why = f"there is no saved process called “{name}”"
+        await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=why)
+        await store.end_run(run.id, why=f"{card.label or card.name}: {why}")
+        return 1
+    # Its own cards, for the reason a template always makes new ones: a process run twice must not
+    # overwrite what the first time produced.
+    fresh: dict[int, str] = {}
+    for step in made.steps:
+        inner = await store.add_step_card(step.label)
+        fresh[step.ord] = inner.name
+        await store.set_card_role(inner.name, step.role)
+        for asked, value in step.fields.items():
+            if roles.is_a_field(step.role, asked):
+                await store.set_card_field(inner.name, asked, value)
+        if step.leave:
+            await store.set_card_leave(inner.name, list(step.leave))
+    for line in made.lines:
+        if line.from_ord in fresh and line.to_ord in fresh:
+            await store.tie_cards(
+                from_name=fresh[line.from_ord],
+                to_name=fresh[line.to_ord],
+                kind=line.kind,
+                says=line.says,
+            )
+    started = await store.start_run(
+        cards=list(fresh.values()),
+        repo_key=run.repo_key,
+        cwd=run.cwd,
+        inside_run=run.id,
+        inside_step=card.name,
+    )
+    await store.set_run_step(
+        run_id=run.id, name=card.name, state="going", detail=f"running “{name}”"
+    )
+    log.info("engine.nested", run=run.id, step=card.name, inside=started.id, process=name)
+    return 1
+
+
+async def _settle_a_process(store: Store, run: Run, card: process.Card, inner: Run) -> int:
+    """The outer step of a nested run: has the run inside it finished, and how?
+
+    A nested run that stopped stops the step, and the step stops the outer run — for the reason an
+    ordinary failed step does, and it is the same sentence: the steps after it were described on
+    the assumption that it worked.
+    """
+    if inner.finished_at is None and not inner.stopped_why:
+        return 0
+    if inner.stopped_why:
+        why = f"the process inside it stopped: {inner.stopped_why}"
+        await store.set_run_step(run_id=run.id, name=card.name, state="failed", detail=why)
+        await store.end_run(run.id, why=f"{card.label or card.name}: {why}")
+        return 1
+    steps = await store.run_steps(inner.id)
+    done = sum(1 for one in steps if one.state == "done")
+    made = f"ran {done} step{'' if done == 1 else 's'} inside it"
+    await store.card_made(card.name, made)
+    await store.set_run_step(run_id=run.id, name=card.name, state="done", made=made)
+    log.info("engine.nested_done", run=run.id, step=card.name, inside=inner.id)
+    return 1
+
+
 async def _settle(store: Store, run: Run, card: process.Card, step: RunStep) -> int:
     """A step whose task is in flight: has it finished, and what did it produce?"""
+    # A step that is a whole process waits on a run rather than on a task, and has no task at all.
+    if step.task_id is None:
+        inner = await store.run_inside(run.id, card.name)
+        if inner is not None:
+            return await _settle_a_process(store, run, card, inner)
     task = next((one for one in await store.tasks(limit=500) if one.id == step.task_id), None)
     if task is None:
         await store.set_run_step(
@@ -424,9 +506,14 @@ async def _what_is_known(store: Store, run: Run) -> list[str]:
     Bounded, because a decision drowned in context is a decision made on the first line of it.
     """
     said: list[str] = []
-    tasks = [one for one in await store.tasks(repo_key=run.repo_key) if one.started_at]
+    # Not filtered on `started_at` first. A task that failed has its `started_at` cleared — it goes
+    # back to the queue to be picked up again (`task_failed`) — so an eager filter dropped every
+    # failure as well as everything waiting, and this returned nothing at all. Found by coverage:
+    # the lines were never reached, and the test that "passed" asserted a count was under a cap,
+    # which zero also satisfies.
+    tasks = await store.tasks(repo_key=run.repo_key)
     failed = [one for one in tasks if one.failed_at]
-    going = [one for one in tasks if not one.finished_at and not one.failed_at]
+    going = [one for one in tasks if one.started_at and not one.finished_at and not one.failed_at]
     if going:
         said.append(f"- {len(going)} piece(s) of work in this project are running right now")
     for one in failed[:THINGS_KNOWN]:

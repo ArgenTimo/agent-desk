@@ -334,13 +334,32 @@ async def test_what_is_known_is_about_this_project_and_bounded() -> None:
             await store.task_started(elsewhere.id, "other")
             await store.task_failed(elsewhere.id, "it broke")
 
+            # And one that is still going, which is the other half of "состояние задач".
+            await store.queue_task(
+                repo_key="mine",
+                instruction="still going",
+                cwd="/tmp",
+                title="still going",
+                source_kind="idea",
+            )
+            # `take_next_task` is what marks a task as started; `task_started` only records which
+            # agent took it. Going through the queue is also what a real run does.
+            taken = await store.take_next_task("mine")
+            assert taken is not None
+            await store.task_started(taken.id, "agent-live")
+
             known = await engine._what_is_known(store, run)
         finally:
             await store.close()
 
     assert known, "a decision is told nothing at all"
     assert not [one for one in known if "not this project" in one]
-    assert len([one for one in known if "work that failed" in one]) <= engine.THINGS_KNOWN
+    said = [one for one in known if "work that failed" in one]
+    assert said, "no failure is mentioned at all, which a count-under-a-cap check would allow"
+    assert len(said) <= engine.THINGS_KNOWN
+    assert [one for one in known if "running right now" in one], (
+        "a decision is not told what is in flight, which is half of what it was asked to see"
+    )
 
 
 # --- redrawing the drawing that is there (01M1XC4Z2SCT…) -----------------------------------------
@@ -382,3 +401,42 @@ def test_redrawing_is_offered_only_when_there_is_a_drawing_to_redraw() -> None:
     sketching = sketching[: sketching.index("\n}\n")]
 
     assert "hidden = !stepsOnTheBench().length" in sketching
+
+
+@pytest.mark.unit
+async def test_the_reason_lands_on_the_card_and_in_the_run() -> None:
+    """`read_why` is only half of it: the reason has to travel from the reply onto the card and
+    into the run's history, which is where the question "why did it go that way" gets asked."""
+    import tempfile
+
+    from agent_desk import process
+    from agent_desk.store.repo import Store
+    from agent_desk.web import engine
+
+    with tempfile.TemporaryDirectory() as where:
+        store = Store(pathlib.Path(where) / "agent-desk.db")
+        await store.open()
+        try:
+            run = await store.start_run(cards=["step:1"], repo_key="k", cwd="/tmp")
+            card = process.Card(
+                name="step:1", role="decision", label="ship?", said={"ask": "ship?"}
+            )
+            ways = [process.Line(from_name="step:1", to_name="step:2", kind="if", says="yes")]
+
+            async def fake_ask(prompt: str) -> tuple[str, str]:
+                return "1 the tests came back green", ""
+
+            engine._ask, was = fake_ask, engine._ask  # type: ignore[assignment]
+            try:
+                await engine._decide(store, run, card, [card], ways)
+            finally:
+                engine._ask = was  # type: ignore[assignment]
+
+            (step,) = await store.run_steps(run.id)
+            made = (await store.cards_made())["step:1"]
+        finally:
+            await store.close()
+
+    assert "went yes" in step.made
+    assert "the tests came back green" in step.made
+    assert "the tests came back green" in made, "the card does not carry the reason"
