@@ -2767,3 +2767,32 @@ button.go:hover, button.yes:hover {
 /* The control that opens a card out into its parts. Quiet like the other head controls: it is one
    of five things you can do to a card, not the point of the card (01M1X8DA5RSWKY…). */
 .pin-parts { font-size: var(--t-xs); }
+
+/* --- a card for a thing that does not exist yet -------------------------------------------------- */
+/* "Неактивные/бледные блоки что сейчас в процессе, возможно заштрихованные с шестерёнками."
+   Marked three ways at once, and not one of them is only colour: the word where every other card
+   says what it is, the hatching, and the fact that it carries nothing. A console that draws what
+   is not there yet the way it draws what is there reports an inference as a fact. */
+.pin.promise {
+  opacity: 0.66;
+  border-style: dashed;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    var(--line) 6px,
+    var(--line) 7px
+  );
+}
+.pin.promise .pin-kind { color: var(--fg-dim); font-style: italic; }
+/* The turning thing, so a still page still says "working". Reduced motion switches it off — the
+   dashed border and the word are what carry the meaning, and the spin was never the meaning. */
+.pin.promise .pin-kind::after {
+  content: " ⧗";
+  display: inline-block;
+  animation: promise-turn 2.4s linear infinite;
+}
+@keyframes promise-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pin.promise .pin-kind::after { animation: none; }
+}

@@ -574,7 +574,7 @@ function pinnedTargets() {
       // sending a hundred and twenty-three targets with every message. Silently, because the
       // count beside the field was measuring something else. The same mistake `pin()` made once
       // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
-      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.spent):not(.ringed):not(.put-away)')];
+      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
   return carried
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
@@ -600,7 +600,10 @@ function syncTargets() {
   // thread it belongs to, and `on_the_bench` drops it from the prompt for that reason — so
   // counting it here would tell somebody their message carries twice what it carries.
   const live =
-    picked || pins.querySelectorAll('.pin:not(.answer-card):not(.spent):not(.ringed):not(.put-away)').length;
+    picked ||
+    pins.querySelectorAll(
+      '.pin:not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)'
+    ).length;
   const carried = live + attached;
   // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
   // sentence somebody reads twice; "asking about these 3 only" is one they read once.
@@ -1328,7 +1331,9 @@ function cardName(pin) {
 //     still happening rather than for a card somebody put down.
 function benchState() {
   return onBench('.pin[data-kind]:not(.copy):not(.collection):not(.own)')
-    .filter((pin) => pin.dataset.kind !== 'note')
+    // A note lives in the page and a promise stands for something that does not exist. Writing
+    // either down would bring it back on the next load as a card about nothing.
+    .filter((pin) => pin.dataset.kind !== 'note' && pin.dataset.kind !== 'promise')
     .map((pin) => ({
       name: cardName(pin),
       kind: pin.dataset.kind,
@@ -4122,7 +4127,54 @@ function sayWhatItIsAbout(cards) {
   if (!cards.some(onTheScreen)) bringIntoView(cards[0]);
 }
 
-// Which questions have had their "follows on from" line drawn. The same bookkeeping, and the same
+// A card for a thing that does not exist yet.
+//
+// "На верстаке появляются блоки что уже готово, а также неактивные/бледные блоки что сейчас в
+// процессе, возможно заштрихованные с шестерёнками."
+//
+// The half of that which already existed is the rings a group turns while its work is running. The
+// half that did not is a card standing where a thing is *going to be* — and the whole difficulty is
+// that it must not be mistaken for a card standing where a thing is. A console that shows what is
+// not there yet the way it shows what is there is a console that reports an inference as a fact,
+// which is the fifth rule of CLAUDE.md.
+//
+// So a promise is marked in three ways at once, and none of them is only colour: it says
+// "promised" where every other card says what it is, it is hatched, and it carries nothing into
+// the next message — there is nothing to carry.
+function promiseFor(id, why) {
+  const name = `promise:${id}`;
+  if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) return;
+  const node = document.createElement('div');
+  node.className = 'pin promise';
+  node.tabIndex = 0;
+  node.dataset.kind = 'promise';
+  node.dataset.id = id;
+  node.dataset.name = name;
+  node.dataset.view = 'hint';
+  node.innerHTML = `<div class="pin-head">
+    <span class="pin-kind">promised</span>
+    <span class="pin-label"></span></div>
+    <div class="pin-body"><p class="small"></p></div>`;
+  node.querySelector('.pin-label').textContent = why;
+  node.querySelector('.pin-body p').textContent =
+    'Nothing is here yet. This is where it will be when the run finishes.';
+  pins.appendChild(node);
+  place(node, spotUnder([`block:${id}`]));
+}
+
+function keptThePromise(id) {
+  surface?.querySelector(`.pin[data-name="promise:${CSS.escape(id)}"]`)?.remove();
+}
+
+// What a message that is still running is going to put on the bench. Only the two kinds that make
+// cards: a question makes an answer, which is the answer card, and there is nothing to promise
+// about it that the block card is not already saying.
+const PROMISES = {
+  drawing: 'the cards this is drawing',
+  showing: 'the cards this is fetching',
+};
+
+// Which questions have had their "follows on from" line drawn.// Which questions have had their "follows on from" line drawn. The same bookkeeping, and the same
 // reason, as `arranged` below: this runs on every push and the line is drawn once.
 const joined = new Set();
 
@@ -4203,6 +4255,13 @@ function syncBlocks() {
     showRole(node);
     // A block's hint is what came back, not the question again — the question is already its title.
     writeHint(node);
+
+    // What it is going to make, while it is making it. Gone the moment the run settles, whether it
+    // produced anything or not: a promise left standing over a failed run is the console saying a
+    // thing is coming that is not.
+    const promising = PROMISES[[...article.classList].find((one) => one in PROMISES)];
+    if (promising && !article.hasAttribute('data-settled')) promiseFor(id, promising);
+    else keptThePromise(id);
 
     // What the console read this question as following on from. Once, and only while the card it
     // names is here: `syncBlocks` runs on every push, and a line pushed each time is the same line
