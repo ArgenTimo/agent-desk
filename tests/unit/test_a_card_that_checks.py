@@ -263,3 +263,59 @@ async def test_a_check_joined_to_two_answers_refuses_to_guess(desk: Store) -> No
 def test_the_card_says_so_before_it_is_pressed() -> None:
     """A control that will refuse should say so where somebody can read it, not when they press."""
     assert "A check reads one — rub out the others." in _code()
+
+
+# --- and what a verdict does to the card ---------------------------------------------------------
+def _body_of(name: str) -> str:
+    source = _code()
+    start = source.index(f"function {name}(")
+    return source[start : source.index("\n}\n", start)]
+
+
+def test_a_check_that_passed_goes_quiet() -> None:
+    """ "Карточка проверки потухает и становится серой и неактивной." A check that passed has
+    nothing left to say and should stop asking to be read."""
+    body = _body_of("showCheck")
+    css = (HERE / "agent_desk" / "web" / "static" / "console.css").read_text(encoding="utf-8")
+
+    assert "classList.toggle('checked'" in body
+    assert "button.hidden = !isCheck || Boolean(verdict);" in body, "it can still be pressed"
+    assert ".pin.checked { opacity:" in css
+
+
+def test_it_does_not_disappear() -> None:
+    """ "Но и исчезать не должна: то, что ответ был проверен, — это факт, который завтра
+    пригодится." Dimmed, and back to full weight under the pointer."""
+    css = (HERE / "agent_desk" / "web" / "static" / "console.css").read_text(encoding="utf-8")
+
+    assert ".pin.checked:hover, .pin.checked:focus-within { opacity: 1; }" in css
+    assert 'content: " · checked";' in css
+
+
+def test_a_check_that_failed_stays_open() -> None:
+    """It is the thing somebody has to act on, and folding it away would hide the sentence saying
+    what to do."""
+    body = _body_of("runTheCheck")
+
+    assert "if (said.verdict === 'passed') setView(holder, 'hint');" in body
+
+
+async def test_the_card_renders_what_it_checks_and_what_it_decided(desk: Store) -> None:
+    """The condition is on the card because a check whose condition you cannot read is one whose
+    verdict nobody trusts — the same argument the button's request is on its card."""
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+    await desk.card_checked(made.id, passed=True, why="it does not contain “ERROR”", judged=False)
+
+    answer = await routes.card("check", made.id)
+    said = answer.body.decode()
+
+    assert "does not contain ERROR" in said
+    assert "it passed" in said
+    assert "decided by the rule on the card" in said
+
+
+async def test_a_check_that_is_gone_says_so_rather_than_breaking(desk: Store) -> None:
+    answer = await routes.card("check", "01M1NOSUCHCHECK")
+
+    assert answer.status_code == 404
+    assert "not here any more" in answer.body.decode()

@@ -858,11 +858,18 @@ function saysWhatItChecks(holder) {
       : `Reads “${labelOf(on[0])}” — what was asked and what came back.`;
 }
 
+// "Карточка проверки потухает и становится серой и неактивной." A check that passed has nothing
+// left to say and should stop asking to be read — but it does not disappear, because *that this
+// answer was checked* is a fact worth having tomorrow. So: dimmed, folded to its line, and the
+// button gone. Pressing it again is still possible, and it is the ordinary way — open the card.
 function showCheck(holder) {
   const button = holder.querySelector('.pin-check');
   if (!button) return;
-  button.hidden = holder.dataset.kind !== 'check';
-  if (!button.hidden) saysWhatItChecks(holder);
+  const isCheck = holder.dataset.kind === 'check';
+  const verdict = holder.querySelector('.check-verdict.passed') ? 'passed' : '';
+  holder.classList.toggle('checked', isCheck && Boolean(verdict));
+  button.hidden = !isCheck || Boolean(verdict);
+  if (isCheck) saysWhatItChecks(holder);
 }
 
 async function runTheCheck(holder) {
@@ -884,7 +891,10 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
-      saysWhatItChecks(holder);
+      showCheck(holder);
+      // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
+      // has to act on, and folding it away would hide the sentence saying what to do.
+      if (said.verdict === 'passed') setView(holder, 'hint');
     }
   } catch {
     say('It could not be checked.');

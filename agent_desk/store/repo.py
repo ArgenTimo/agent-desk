@@ -2347,16 +2347,6 @@ class Store:
             row = rows.first()
             return None if row is None else CheckCard(**row._mapping)
 
-    async def check_cards(self) -> list[CheckCard]:
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT id, label, said, verdict, why, judged, at, made_at FROM check_card "
-                    "ORDER BY made_at DESC"
-                )
-            )
-            return [CheckCard(**row._mapping) for row in rows]
-
     async def add_button_card(self, label: str, prompt: str) -> ButtonCard:
         made = ButtonCard(id=_new_id(), label=label[:80], prompt=prompt[:2000], made_at=_now_ms())
         async with self.engine.begin() as conn:

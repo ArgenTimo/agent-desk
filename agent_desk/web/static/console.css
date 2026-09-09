@@ -2976,6 +2976,18 @@ button.go:hover, button.yes:hover {
 .pin-press:hover { background: color-mix(in srgb, var(--focus) 16%, transparent); }
 /* A verdict of two, and neither of them is only a colour: the words say it and the mark repeats
    it, because a bench read in a hurry is read by shape (062-a-card-that-checks.sql). */
+/* "Карточка проверки потухает и становится серой и неактивной." Dimmed, not deleted: that this
+   answer was checked is a fact worth having tomorrow. The same weight `spent` uses, because it is
+   the same claim — this one is not asking for anything. */
+.pin.checked { opacity: 0.5; border-left-color: var(--line-strong); }
+.pin.checked .pin-label::after {
+  content: " · checked";
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}
+/* Back to full weight under the pointer: a card nobody can read is not out of the way, it is gone,
+   and this one is still the record of a check somebody may want to reread. */
+.pin.checked:hover, .pin.checked:focus-within { opacity: 1; }
 .check-verdict { margin: 6px 0 0; font-size: var(--t-sm); line-height: 1.35; }
 .check-verdict.passed { color: var(--busy); }
 .check-verdict.passed strong::before { content: "✓ "; }
