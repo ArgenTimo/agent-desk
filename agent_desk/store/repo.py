@@ -3025,7 +3025,12 @@ class Store:
                 text(
                     "SELECT id, cards, repo_key, cwd, at, started_at, finished_at, stopped_why, "
                     "paused_at, inside_run, inside_step, given "
-                    "FROM run ORDER BY started_at DESC LIMIT 60"
+                    # There is a tie to break: "run it again and again" starts ten runs inside one
+                    # millisecond, and the panel that shows them calls two of them "the last two"
+                    # (agent_desk/comparing.py). `rowid` is the order they were inserted in, which
+                    # is the order they were started in — the id is not, because a ULID's ordering
+                    # inside one millisecond is its random half.
+                    "FROM run ORDER BY started_at DESC, rowid DESC LIMIT 60"
                 )
             )
             found = [Run(**row._mapping) for row in rows]
