@@ -2882,6 +2882,38 @@ canvas?.addEventListener('click', (event) => {
 
 // What can be done to all of them at once. Each is the one-card action, applied across — nothing
 // here can do anything a single card could not.
+// "Хоткеи для групп объектов."
+//
+// The keys do exactly what the bar's buttons do, by pressing them. Not a second implementation of
+// "fold these": a shortcut that drifts from the button beside it is two behaviours wearing one
+// name, and the one somebody learns is whichever they tried first.
+// `x` is the Combine tool and `g` is the area tool, so neither is free. Escape is shared on
+// purpose: it already goes back to Move, and "get out of whatever I am in" wanting to do both is
+// what people mean by it.
+const GROUP_KEYS = { f: 'fold', i: 'out', delete: 'off', backspace: 'off', escape: 'none' };
+
+document.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.altKey) return;
+  if (event.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+  const bar = document.getElementById('chosen-bar');
+  // Choose everything, which is the one group action that has no button: the bar only appears once
+  // two cards are chosen, so there is nowhere to put "choose them all".
+  if (event.key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    for (const pin of onBench()) pin.classList.add('chosen');
+    showChosen();
+    return;
+  }
+  if (event.ctrlKey) return;
+  // Only while a group exists. Otherwise Delete over a bench with nothing chosen is a key that
+  // does nothing on Tuesday and empties the surface on Wednesday.
+  if (!bar || bar.hidden) return;
+  const what = GROUP_KEYS[event.key.toLowerCase()];
+  if (!what) return;
+  event.preventDefault();
+  bar.querySelector(`[data-many="${what}"]`)?.click();
+});
+
 document.getElementById('chosen-bar')?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-many]');
   if (!button) return;
