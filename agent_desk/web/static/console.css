@@ -3118,3 +3118,20 @@ button.go:hover, button.yes:hover {
 .asked-words { display: grid; gap: 4px; }
 .asked-words textarea { width: 100%; resize: vertical; }
 .asked-answer { margin: 6px 0 0; font-size: var(--t-sm); line-height: 1.35; color: var(--busy); }
+
+/* What was worked out about a file, and why (068-what-was-worked-out.sql).
+
+   «Заметка без причины — это то, что следующий читатель отменит, не зная, что ломает.» The reason
+   is set at the same size as the fact rather than as fine print, because it is the half somebody
+   has to read before they undo the thing. */
+.known { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.known li { border-left: 2px solid var(--line-strong); padding-left: 8px; }
+.known-what { margin: 0; font-size: var(--t-sm); line-height: 1.35; }
+.known-why { margin: 2px 0 0; font-size: var(--t-sm); line-height: 1.35; color: var(--fg-soft); }
+/* What breaks if you do it the other way. Amber: it is a warning about an action somebody is
+   about to take, not a report that something has stopped. */
+.known-otherwise { margin: 2px 0 0; font-size: var(--t-sm); line-height: 1.35; color: var(--warn); }
+.known-source { margin: 2px 0 0; }
+.known-new { display: grid; gap: 4px; margin: 8px 0 0; }
+.known-new textarea, .known-new input { width: 100%; }
+.known-new textarea { resize: vertical; }

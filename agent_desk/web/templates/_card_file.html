@@ -38,6 +38,38 @@
       your questions.</p>
     <p class="fineprint">Nothing else is opened, and a credential is refused whatever you press.</p>
     {% endif %}
+
+    {# What was worked out about this file, and why (068). «Заметка без причины — это то, что
+       следующий читатель отменит, не зная, что ломает.» Here rather than on a page of its own,
+       because the moment a fact about a file is worth reading is the moment somebody has that
+       file in front of them. #}
+    {% if known %}
+    <ul class="known">
+      {% for one in known %}
+      <li>
+        <p class="known-what">{{ one.what }}</p>
+        {% if one.why %}<p class="known-why">because {{ one.why }}</p>{% endif %}
+        {% if one.otherwise %}<p class="known-otherwise">otherwise {{ one.otherwise }}</p>{% endif %}
+        <p class="small dim known-source">{{ one.source }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {# The same write an agent makes over MCP, through the same function. A page that recorded facts
+       a second way would be a second set of rules about what a fact has to carry. #}
+    <form class="known-new" method="post" action="/known" hx-post="/known" hx-swap="none">
+      <input type="hidden" name="files" value="{{ path }}">
+      <label class="visually-hidden" for="known-what-{{ card_id }}">what is true</label>
+      <textarea id="known-what-{{ card_id }}" name="what" rows="2"
+                placeholder="what is true about this file"></textarea>
+      <label class="visually-hidden" for="known-why-{{ card_id }}">why</label>
+      <textarea id="known-why-{{ card_id }}" name="why" rows="2"
+                placeholder="why — the half a reader needs before they undo it"></textarea>
+      <label class="visually-hidden" for="known-source-{{ card_id }}">what settles it</label>
+      <input id="known-source-{{ card_id }}" name="source"
+             placeholder="a commit, a file, or who said it — required">
+      <button type="submit">write it down</button>
+    </form>
   </div>
 
   <div class="technical-only" hidden>

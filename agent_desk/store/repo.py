@@ -301,6 +301,31 @@ class Asked(BaseModel):
         return self.answered_at is None
 
 
+class Known(BaseModel):
+    """One thing that was worked out about this project, and why it is true (068)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    what: str
+    why: str = ""
+    # What happens to somebody who does it the other way — the part a reader needs at the moment
+    # they are about to do the other thing.
+    otherwise: str = ""
+    # A commit, a file, or a person's name. Never empty: a fact nobody can chase is a rumour with a
+    # timestamp, and a store full of those is worse than an empty one because it looks like
+    # knowledge.
+    source: str
+    # The files this is about, one per line. Empty is not an oversight: it is a fact about the
+    # project rather than about a part of it, and it goes to every reader.
+    files: str = ""
+    at: int = 0
+
+    @property
+    def about(self) -> list[str]:
+        return [one.strip() for one in self.files.splitlines() if one.strip()]
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -2550,6 +2575,69 @@ class Store:
                 {"id": asked_id, "answer": said[:2000], "at": _now_ms()},
             )
             return bool(done.rowcount)
+
+    # --- what was worked out (068-what-was-worked-out.sql) --------------------------------------
+    async def record_known(
+        self,
+        what: str,
+        *,
+        source: str,
+        why: str = "",
+        otherwise: str = "",
+        files: Sequence[str] = (),
+    ) -> Known:
+        """Write down one fact about this project, with what settles it.
+
+        Raises rather than storing a fact with no source. The check is here and not in the schema
+        because a NOT NULL column accepts an empty string, and an empty string is exactly what a
+        caller with nothing to cite would send.
+        """
+        if not what.strip():
+            raise ValueError("a fact needs to say something")
+        if not source.strip():
+            raise ValueError(
+                "a fact needs a source — a commit, a file, or the name of whoever said it"
+            )
+        made = Known(
+            id=_new_id(),
+            what=what.strip()[:2000],
+            why=why.strip()[:2000],
+            otherwise=otherwise.strip()[:2000],
+            source=source.strip()[:400],
+            files="\n".join(one.strip() for one in files if one.strip())[:2000],
+            at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO known (id, what, why, otherwise, source, files, at) "
+                    "VALUES (:id, :what, :why, :otherwise, :source, :files, :at)"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def known(self, *, touching: Sequence[str] = ()) -> list[Known]:
+        """What is known, newest first — narrowed to what the work in front of somebody touches.
+
+        A hundred facts in a context window are no better than none. Given files, this answers the
+        facts that name one of them, plus the ones that name no file at all: those are about the
+        project rather than a part of it and are true wherever somebody is working.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, what, why, otherwise, source, files, at FROM known "
+                    "ORDER BY at DESC LIMIT 500"
+                )
+            )
+            found = [Known(**row._mapping) for row in rows]
+        if not touching:
+            return found
+        wanted = {one.strip() for one in touching if one.strip()}
+        return [
+            one for one in found if not one.about or any(named in wanted for named in one.about)
+        ]
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

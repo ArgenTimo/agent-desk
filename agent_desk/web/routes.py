@@ -1486,6 +1486,11 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 name=id.rsplit("/", 1)[-1],
                 allowed=allowed,
                 said=reading.read_file(id) if allowed else reading.Said(False),
+                # What was worked out about this file (068). Here rather than on a page of its
+                # own: the moment a fact about a file is worth reading is the moment somebody has
+                # that file in front of them.
+                known=[one for one in await store.known(touching=[id]) if one.about],
+                card_id=id.rsplit("/", 1)[-1],
             ),
             status_code=200,
         )
@@ -3236,6 +3241,30 @@ async def run_a_check(request: Request) -> JSONResponse:
             "about": reading,
         }
     )
+
+
+@router.post("/known", response_class=HTMLResponse)
+async def write_down_what_is_known(request: Request) -> Response:
+    """Write down one fact about this project, from a card (068).
+
+    The same call an agent makes over MCP, through the same function: a page that recorded facts a
+    second way would be a second set of rules about what a fact has to carry, and the rule that
+    matters here — a source, always — is the one that would rot first.
+    """
+    form = await _form(request)
+    try:
+        await store.record_known(
+            form.get("what", ""),
+            source=form.get("source", ""),
+            why=form.get("why", ""),
+            otherwise=form.get("otherwise", ""),
+            files=[one for one in form.get("files", "").splitlines() if one.strip()],
+        )
+    except ValueError as why:
+        # Said, not swallowed. A form that quietly discards what somebody typed is worse than one
+        # that refuses it, because they walk away believing it was written down.
+        return HTMLResponse(f'<p class="empty small">{why}</p>', status_code=422)
+    return HTMLResponse("", status_code=204)
 
 
 @router.post("/cards/asked/answer", response_class=HTMLResponse)

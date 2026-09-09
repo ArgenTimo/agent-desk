@@ -125,7 +125,7 @@ def test_every_tool_says_whether_it_changes_anything() -> None:
     for one in said:
         assert one["annotations"]["destructiveHint"] is False
     writing = {one["name"] for one in said if not one["annotations"]["readOnlyHint"]}
-    assert writing == {"keep_idea", "close_idea", "run", "ask"}
+    assert writing == {"keep_idea", "close_idea", "run", "ask", "know"}
 
 
 async def test_a_tool_that_raises_answers_rather_than_breaking_the_transport(

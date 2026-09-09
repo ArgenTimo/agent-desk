@@ -288,6 +288,55 @@ NOT_HERE: tuple[tuple[str, str], ...] = (
 )
 
 
+async def _know(store: Store, given: dict[str, Any]) -> str:
+    """Write down one thing that was worked out, so the next session does not work it out again.
+
+    «Каждая сессия начинается с нуля и заново выясняет то же самое.» The answers exist — in commits,
+    in decisions, in somebody's head — but they are cheaper to derive again than to find, so they
+    are derived again.
+
+    The reason is half the record. «Заметка без причины — это то, что следующий читатель отменит,
+    не зная, что ломает.» And the source is not optional: a fact nobody can chase is a rumour with
+    a timestamp, and a store full of those is worse than an empty one because it looks like
+    knowledge.
+    """
+    try:
+        made = await store.record_known(
+            str(given.get("what", "")),
+            source=str(given.get("source", "")),
+            why=str(given.get("why", "")),
+            otherwise=str(given.get("otherwise", "")),
+            files=[str(one) for one in given.get("files") or []],
+        )
+    except ValueError as why:
+        return f"Not written down. {why}"
+    where = ", ".join(made.about) or "the project as a whole"
+    return f"Written down as {made.id}, about {where}."
+
+
+async def _what_is_known(store: Store, given: dict[str, Any]) -> str:
+    """What has been worked out about the files in front of you.
+
+    «Сто фактов в контексте не лучше нуля. Отдаётся то, что называет файлы, которых касается
+    работа.» Naming no file asks for everything, which is answered — this is a store somebody has
+    to be able to read whole to trust — but the narrowing is the call worth making.
+    """
+    files = [str(one).strip() for one in given.get("files") or [] if str(one).strip()]
+    found = await store.known(touching=files)
+    if not found:
+        where = " about " + ", ".join(files) if files else ""
+        return f"Nothing has been written down{where}."
+    said = []
+    for one in found:
+        said.append(one.what)
+        if one.why:
+            said.append(f"  because {one.why}")
+        if one.otherwise:
+            said.append(f"  otherwise {one.otherwise}")
+        said.append(f"  — {one.source}" + (f" · {', '.join(one.about)}" if one.about else ""))
+    return "\n".join(said)
+
+
 async def _ask(store: Store, given: dict[str, Any]) -> str:
     """Leave a question for a person and go on with something else.
 
@@ -474,6 +523,53 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="know",
+        says=(
+            "Write down one thing that was worked out about this project: what is true, why, and "
+            "what happens if you do it otherwise. A source is required."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "what": {"type": "string", "description": "the fact, in one sentence"},
+                "why": {"type": "string", "description": "the reason it is true"},
+                "otherwise": {
+                    "type": "string",
+                    "description": "what breaks if you do it another way",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "a commit, a file, or the name of whoever said it",
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "the files it is about; none means it is about the project",
+                },
+            },
+            "required": ["what", "source"],
+        },
+        run=_know,
+        writes=True,
+        shows="Written down as 01M22J…, about agent_desk/store/repo.py.",
+    ),
+    Tool(
+        name="what_is_known",
+        says="What has been worked out about the files you are working on, with the reason for each.",
+        takes={
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "what the work touches; none asks for everything",
+                }
+            },
+        },
+        run=_what_is_known,
+        shows="the reader checks procStart / because pids are reused / — commit 4f2a1c",
     ),
     Tool(
         name="ask",
