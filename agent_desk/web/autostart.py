@@ -20,7 +20,7 @@ import structlog
 from agent_desk import dispatch, land
 from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd
-from agent_desk.store.repo import Autostart, Pull, Store, Task
+from agent_desk.store.repo import Autostart, BenchCard, Pull, Store, Task
 from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
 
@@ -211,6 +211,7 @@ async def settle(store: Store, live: set[str]) -> list[str]:
             continue
 
         await store.finish_task(task.id)
+        await _back_where_it_started(store, task)
 
         # What it found, merged if the project's own gate passes on it (docs/adr/0008, as the
         # owner amended it). A failing gate leaves the branch exactly where it is and says why.
@@ -225,6 +226,55 @@ async def settle(store: Store, live: set[str]) -> list[str]:
                 await store.set_idea_state(idea.id, "done")
                 settled.append(idea.id)
     return settled
+
+
+# Where a finished task's card goes on the bench it was started from, and how far below the last
+# one. Out of the way of an arrangement somebody made, which is theirs (042-placed-by-hand.sql).
+BACK_AT_X = 40
+BACK_STEP_Y = 96
+
+
+async def _back_where_it_started(store: Store, task: Task) -> None:
+    """Put what the agent did back on the workbench the question was assembled on (01M21KTYG3VM9REBV4N548SFEW).
+
+    «Сегодня результат уходит в задачу и в блокеры. Карточка на том верстаке, с которого запускали,
+    замыкает круг: человек видит ответ там же, где собирал вопрос.» Today a person who put four
+    cards together, asked, and pressed build has to go and find the answer somewhere else.
+
+    A card, not a copy of the answer: the task card reads the task, so nothing here goes stale and
+    nothing is stored twice. A task started from no block belongs to no bench and gets none —
+    silently, because work this console found for itself was never on anybody's workbench.
+    """
+    if not task.block_id:
+        return
+    block = await store.block(task.block_id)
+    if block is None:
+        return
+    on_it = await store.bench_cards(block.thread_id)
+    name = f"task:{task.id}"
+    if not on_it or any(card.name == name for card in on_it):
+        # Nothing on that bench means nobody is looking at it, and a card added to an empty surface
+        # somebody has moved on from is a card that appears out of nowhere next week.
+        return
+    await store.keep_bench(
+        [
+            *on_it,
+            BenchCard(
+                name=name,
+                kind="task",
+                card_id=task.id,
+                label=task.title,
+                x=BACK_AT_X,
+                y=max(card.y for card in on_it) + BACK_STEP_Y,
+                shown="hint",
+                spent=False,
+                ord=max(card.ord for card in on_it) + 1,
+                came="what came back from building this",
+                came_at=task.finished_at or 0,
+            ),
+        ],
+        thread_id=block.thread_id,
+    )
 
 
 async def _destination(store: Store, repo_key: str) -> jira.Destination | None:

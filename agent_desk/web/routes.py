@@ -4100,6 +4100,38 @@ async def stop_agent(agent_id: str, request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+async def from_the_bench(rows: list[BoardRow], thread_id: str) -> list[str]:
+    """The workbench this was started from, as the agent's briefing gets it (01M21KTYFVX4X3GTPZVNP2DMBA).
+
+    «Если человек уже собрал верстак — выбрал карточки, провёл связи, дал файлам разрешение — то
+    именно это и надо отдать агенту, а не абзац, написанный про это.» It is the same text a
+    question carries, through the same gatherer, so the permissions are the person's and the
+    briefing cannot see a file they have not opened themselves.
+
+    Names as well as the digest, and that is the part that is not a summary. «Пересказ — это то,
+    что кто-то уже прочитал за меня и сократил. Список имён и путей позволяет прочитать самому то,
+    что нужно, и не читать остальное.» A file card contributes its path; an agent with a path can
+    open the file, and an agent with a paragraph about the file cannot.
+
+    docs/adr/0006 is what permits this: a human pressed a button, and what starts is a new agent in
+    a worktree of its own. Nothing is written into anybody's session.
+    """
+    on_it = await store.bench_cards(thread_id)
+    if not on_it:
+        return []
+    carried = await block_runs.carried_from_the_bench(store, rows, [card.name for card in on_it])
+    said = block_runs.as_one_string(carried)
+    named = "\n".join(
+        f"- {card.name}" + (f" — {card.label}" if card.label != card.name else "") for card in on_it
+    )
+    return [
+        "The workbench this was started from. Read what you need by name; the rest is here so you "
+        "know it exists.",
+        named,
+        *([said] if said else []),
+    ]
+
+
 @router.post("/blocks/{block_id}/implement", response_class=HTMLResponse)
 async def implement_ideas(block_id: str, request: Request) -> Response:
     """Start an agent on the ideas this request turned out to be about (docs/adr/0006).
@@ -4138,6 +4170,7 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
     instruction = "\n\n".join(
         [block.input, "The ideas this is about, as they were written down:"]
         + [f"- {idea.text}" for idea in wanted]
+        + await from_the_bench(rows, block.thread_id)
     )
     task = await store.queue_task(
         repo_key=named.key,
