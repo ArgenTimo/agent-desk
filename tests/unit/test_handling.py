@@ -11,6 +11,7 @@ arrangement nobody wanted is one press of undo away.
 
 from __future__ import annotations
 
+import itertools
 import pathlib
 
 import pytest
@@ -35,14 +36,30 @@ def test_the_actions_are_a_closed_list() -> None:
 
 
 @pytest.mark.unit
-def test_nothing_here_can_take_a_card_off_or_start_anything() -> None:
-    """What keeps this the cheap branch. An arrangement somebody did not want is one press of undo
-    away; a card somebody did not want removed is not, and a run somebody did not want started
-    costs money and a worktree."""
-    said = handling.what_to_do(BENCH).lower()
+def test_nothing_here_removes_work_or_starts_anything() -> None:
+    """What keeps this the cheap branch. A run somebody did not want started costs money and a
+    worktree; an idea somebody did not want dropped is gone from the pool.
 
-    for dangerous in ("remove", "delete", "run ", "start", "join", "send"):
-        assert dangerous not in said, f"the actions offered include {dangerous!r}"
+    Taking a card off the *surface* is not in that company and used to be listed here by mistake:
+    `041-bench-undo.sql` counts which cards are on the bench as part of the surface, so it comes
+    back with the same press an arrangement does.
+
+    Asserted against the verbs the instruction actually offers rather than against the words in it.
+    The first version of this searched the whole text for "delete" and started failing the moment
+    the instruction said *"nothing is deleted"* — a substring check tripping over its own
+    documentation, which is the failure mode this repository keeps meeting."""
+    offered = _verbs_offered()
+
+    assert offered == {"mark", "sort", "clear", "fold", "open", "take"}
+
+
+def _verbs_offered() -> set[str]:
+    """The first word of every example shape in the instruction — which is the vocabulary it
+    teaches, and the only thing `handling.read` will act on."""
+    said = handling.what_to_do(BENCH)
+    after = said[said.index("shapes:") :].splitlines()[1:]
+    lines = list(itertools.takewhile(bool, itertools.dropwhile(lambda one: not one, after)))
+    return {one.split()[0] for one in lines}
 
 
 # --- reading the answer --------------------------------------------------------------------------
@@ -231,7 +248,7 @@ def test_folding_is_something_this_can_ask_for() -> None:
 
     assert "fold 2,5,6" in said
     assert "open 1" in said
-    assert "five shapes" in said
+    assert "six shapes" in said
 
 
 @pytest.mark.unit
@@ -324,3 +341,62 @@ async def test_an_answer_that_names_no_cards_changes_nothing_and_says_so(
         assert again.state == "answered"
     finally:
         await store.close()
+
+
+# --- and taking cards off, which this file used to refuse -----------------------------------------
+@pytest.mark.unit
+def test_cards_can_be_taken_off_by_asking() -> None:
+    """ "Удали карточки такие-то и такие-то." It asks for the thing the `×` on every card already
+    does, and asking for eleven of them in a sentence is the whole point of asking."""
+    asked = handling.read("take 2,4", BENCH)
+
+    assert asked.taken == ["idea:b", "idea:d"]
+    assert not asked.empty
+
+
+@pytest.mark.unit
+def test_taking_a_card_off_is_not_deleting_it() -> None:
+    """The refusal this file used to carry was wrong about its own repository: `041-bench-undo.sql`
+    records which cards are on the bench as part of the surface, so a card taken off comes back
+    with the same press an arrangement does. Nothing here writes to the idea or the block."""
+    said = handling.what_to_do(["one"])
+
+    assert "Nothing is deleted" in said
+    assert "undo brings" in said
+
+
+@pytest.mark.unit
+def test_what_was_taken_off_survives_the_round_trip() -> None:
+    asked = handling.read("take 1", BENCH)
+
+    again = handling.read_json(handling.as_json(asked))
+
+    assert again.taken == ["idea:a"]
+
+
+@pytest.mark.unit
+def test_a_block_written_before_taking_existed_takes_nothing_off() -> None:
+    """The one direction this must never be wrong in: an older row read as "take these off" would
+    empty a bench nobody asked to empty."""
+    older = '{"handling": {"marked": [], "sorted": [], "clear": false}}'
+
+    assert handling.read_json(older).taken == []
+
+
+@pytest.mark.unit
+def test_take_with_no_numbers_takes_nothing() -> None:
+    assert handling.read("take", BENCH).empty
+    assert handling.read("take them all off", BENCH).empty
+
+
+@pytest.mark.unit
+def test_the_page_writes_the_layout_down_after_taking_cards_off() -> None:
+    """Otherwise a bench reloaded a minute later has them back, and the request did nothing that
+    lasted."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function applyArrangement(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "said.taken" in body
+    assert "pin.remove()" in body
+    assert "rememberLayout()" in body

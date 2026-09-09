@@ -5309,6 +5309,22 @@ function applyArrangement(said) {
       if (pin) setView(pin, view);
     }
   }
+
+  // "Удали карточки такие-то и такие-то" — off the surface, which is what the `×` on every card
+  // already does and what undo already puts back (041). Nothing is deleted: the card is a row in
+  // the store and the conversation still holds it.
+  let took = 0;
+  for (const name of said.taken || []) {
+    const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+    if (!pin) continue;
+    placed.delete(name);
+    pin.remove();
+    took += 1;
+  }
+  if (took) {
+    syncTargets();
+    emptyOrNot();
+  }
   for (const one of said.marked || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
     if (pin) markCard(pin, one.why);
@@ -5318,8 +5334,15 @@ function applyArrangement(said) {
   // would be answered from.
   const columns = (said.sorted || []).filter((one) => one.names.length);
   if (!columns.length) {
-    // Folding changes every card's height, so the ones below have to be let down again.
+    // Folding changes every card's height, so the ones below have to be let down again. Taking
+    // cards off changes the surface itself, so the lines and the map are redrawn and the layout
+    // is written down — otherwise a bench reloaded a minute later has them back.
     if ((said.folded || []).length || (said.opened || []).length) settleOverlaps();
+    if (took) {
+      rememberLayout();
+      drawTies();
+      drawMap();
+    }
     return;
   }
   const tall = new Map();

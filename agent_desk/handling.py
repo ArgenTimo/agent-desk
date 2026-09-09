@@ -13,30 +13,38 @@ place things are put and becomes a thing you can arrange by talking.
 "Модель должна отвечать не текстом про карточки, а действиями из фиксированного списка… свободная
 формулировка «расположи покрасивее» не исполнима, и разбор её ответа превратится в угадайку."
 
-Five, and they cover every example in the letter:
+Six, and they cover every example in the letter:
 
     mark   <numbers> <why>       point at some of the cards, and say why each
     sort   <side> <numbers> <what they have in common>
     clear                        take the marks off
     fold   <numbers>             show only their line
     open   <numbers>             show what they say
+    take   <numbers>             take them off the workbench
 
 `fold` and `open` are the two the letter opens with — "сверни разверни все (либо выделенные)
 карточки" — and they belong to this list rather than to a control of their own for the same reason
 the other three do: on a bench of thirty cards, "fold everything except the four about the
 migration" is a sentence and not a sequence of thirty clicks. They also cost nothing to be wrong
 about, which is the test everything in this list has to pass: a card folded by mistake is one press
-from being open again, and the same is not true of a card taken off.
+from being open again.
 
 "Поставить сюда" and "разложить по колонкам" are one action, not two — a column is a place, and
 naming it is how somebody knows a minute later what is on the left. "Надписать" is that name, so it
 arrives with the sort rather than as an action of its own.
 
-What is deliberately absent is anything that *removes* work: nothing here takes a card off the
-bench, joins two cards, or starts anything. This is the cheapest branch in the whole idea pool —
-"ничего не запускается, ничего не пишется, ничего не стоит, кроме одного вызова модели" — and it
-stays cheap by not being able to do the expensive things. An arrangement somebody did not want is
-one press of undo away (041-bench-undo.sql); a card somebody did not want back is not.
+What is deliberately absent is anything that *removes work*: nothing here joins two cards, drops
+an idea, or starts anything. This is the cheapest branch in the whole idea pool — "ничего не
+запускается, ничего не пишется, ничего не стоит, кроме одного вызова модели" — and it stays cheap by
+not being able to do the expensive things.
+
+`take` is the one that had to be argued rather than assumed, because this file used to refuse it —
+and the refusal was wrong about its own repository. `041-bench-undo.sql` records *which cards are on
+the bench* as part of the surface, so a card taken off comes back with the same press an arrangement
+does. Nothing is deleted: the card is a row in the store and the conversation still holds it. What
+changes is which of them are in front of somebody, which is precisely what this module is for —
+"удали карточки такие-то и такие-то" asks for the thing the `×` on every card already does, and
+asking for eleven of them in a sentence is the whole point of asking.
 
 ## The numbers are the ones the model was shown
 
@@ -104,14 +112,14 @@ class Handling:
     # quietly misses what is gone.
     folded: list[str] = field(default_factory=list)
     opened: list[str] = field(default_factory=list)
+    # Cards to take off the surface. Not deleted: the card is a row in the store, the conversation
+    # still holds it, and undo puts it back (041-bench-undo.sql).
+    taken: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
-        return (
-            not self.marked
-            and not self.sorted_
-            and not self.clear
-            and not (self.folded or self.opened)
+        return not (
+            self.marked or self.sorted_ or self.clear or self.folded or self.opened or self.taken
         )
 
 
@@ -127,16 +135,19 @@ def what_to_do(cards: Sequence[str]) -> str:
             "This is a request to change what is on the workbench, not a question about it.",
             "Answer with actions and nothing else — no preamble, no explanation, no closing line.",
             "",
-            "One action per line, in one of these five shapes:",
+            "One action per line, in one of these six shapes:",
             "",
             "  mark 3,7 why these two and not the others",
             "  sort left 1,4 what the ones on the left have in common",
             "  clear",
             "  fold 2,5,6",
             "  open 1",
+            "  take 4",
             "",
             f"`sort` puts cards on one side: {', '.join(SIDES)}. `clear` takes every mark off.",
             "`fold` shows only a card's line; `open` shows what it says.",
+            "`take` takes cards off the workbench. Nothing is deleted and one press of undo brings",
+            "them back — but take a card off only where the request asks for it.",
             "",
             "Two rules matter more than the shape:",
             f"- Only the numbers above, 1 to {len(cards)}. A number that is not a card is ignored.",
@@ -161,6 +172,7 @@ _SORT = re.compile(
 _CLEAR = re.compile(r"\Aclear\b", re.IGNORECASE)
 _FOLD = re.compile(rf"\Afold\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 _OPEN = re.compile(rf"\Aopen\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
+_TAKE = re.compile(rf"\Atake\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 
 
 def _named(said: str, on_bench: Sequence[str]) -> list[str]:
@@ -189,6 +201,7 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
     sorted_: list[Sorted] = []
     folded: list[str] = []
     opened: list[str] = []
+    taken: list[str] = []
     clear = False
     for raw in reply.splitlines():
         said = raw.strip().lstrip("-*• ").strip()
@@ -204,6 +217,10 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
         opened_ = _OPEN.match(said)
         if opened_ is not None:
             opened.extend(_named(opened_.group(1), on_bench))
+            continue
+        take = _TAKE.match(said)
+        if take is not None:
+            taken.extend(_named(take.group(1), on_bench))
             continue
         sort = _SORT.match(said)
         if sort is not None:
@@ -224,7 +241,14 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
             # because X", and splitting that into two cards each saying X is what the person then
             # reads on the bench.
             marked.extend(Marked(name=name, why=why) for name in _named(mark.group(1), on_bench))
-    return Handling(marked=marked, sorted_=sorted_, clear=clear, folded=folded, opened=opened)
+    return Handling(
+        marked=marked,
+        sorted_=sorted_,
+        clear=clear,
+        folded=folded,
+        opened=opened,
+        taken=taken,
+    )
 
 
 # What the block stores, and what the page reads back to apply it.
@@ -245,6 +269,7 @@ def as_json(asked: Handling) -> str:
                 "clear": asked.clear,
                 "folded": asked.folded,
                 "opened": asked.opened,
+                "taken": asked.taken,
             }
         }
     )
@@ -278,6 +303,7 @@ def read_json(said: str) -> Handling:
         # nothing — which is what it asked for.
         folded=[str(one) for one in found.get("folded", [])],
         opened=[str(one) for one in found.get("opened", [])],
+        taken=[str(one) for one in found.get("taken", [])],
     )
 
 
@@ -302,7 +328,11 @@ def as_words(asked: Handling) -> str:
         )
     # Counted rather than named. Folding is the one action whose result is plainly visible on the
     # bench, so what a reader of the conversation wants is how much of it happened.
-    for what, names in (("folded", asked.folded), ("opened", asked.opened)):
+    for what, names in (
+        ("folded", asked.folded),
+        ("opened", asked.opened),
+        ("took off", asked.taken),
+    ):
         if names:
             said.append(f"{what} {len(names)} card{'' if len(names) == 1 else 's'}")
     return "\n".join(said)
