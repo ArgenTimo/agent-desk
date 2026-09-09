@@ -1,0 +1,22 @@
+-- What a person says about a verdict, in the words the machine did not have.
+--
+-- "В карточку проверки можно оставить комментарии." Человек объясняет, что именно не так — и это
+-- идёт в следующую попытку, а не остаётся заметкой на полях.
+--
+-- The last clause is the whole of it. A comment nobody reads is a comment field, and this console
+-- has no shortage of places to write things down. This one has a consumer: `try again` sends the
+-- check card with the question, and the digest describes a check by its condition, its verdict and
+-- now this — so what somebody typed is in the prompt of the next attempt without being pasted there
+-- by hand.
+--
+-- ## Why not the condition field
+--
+-- Because they are different claims and they are cleared at different times. The condition is what
+-- the answer has to be; changing it makes every earlier verdict meaningless, which is why editing
+-- it clears them. The comment is about the verdict that stands — "it does contain the word, but it
+-- is quoting the error rather than fixing it" — and it has to survive the thing it comments on.
+--
+-- Cleared when the condition is, for the same reason the verdict is: a note about a judgement
+-- nobody is making any more is a note about a question nobody asked.
+
+ALTER TABLE check_card ADD COLUMN note TEXT NOT NULL DEFAULT '';

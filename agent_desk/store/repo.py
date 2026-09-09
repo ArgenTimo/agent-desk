@@ -290,6 +290,9 @@ class CheckCard(BaseModel):
     # answer arrives joined to the check, and what it judged and what it will read next are two
     # different questions from that moment on.
     about: str = ""
+    # What a person said about the verdict, in the words the machine did not have (064). It goes
+    # into the next attempt rather than staying a note in the margin.
+    note: str = ""
     at: int = 0
     made_at: int
 
@@ -2316,7 +2319,7 @@ class Store:
             await conn.execute(
                 text(
                     "UPDATE check_card SET label = :label, said = :said, verdict = '', "
-                    "why = '', judged = 0, about = '', at = 0 WHERE id = :id"
+                    "why = '', judged = 0, about = '', note = '', at = 0 WHERE id = :id"
                 ),
                 {"label": label[:80], "said": said[:600], "id": card_id},
             )
@@ -2342,11 +2345,24 @@ class Store:
                 },
             )
 
+    async def note_on_a_check(self, card_id: str, note: str) -> None:
+        """What a person says about the verdict that stands (064).
+
+        Not part of the condition edit: changing the condition makes every earlier verdict
+        meaningless and clears them, and a comment about the verdict that stands has to survive the
+        thing it comments on.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE check_card SET note = :note WHERE id = :id"),
+                {"note": note[:600], "id": card_id},
+            )
+
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, label, said, verdict, why, judged, about, at, made_at "
+                    "SELECT id, label, said, verdict, why, judged, about, note, at, made_at "
                     "FROM check_card WHERE id = :id"
                 ),
                 {"id": card_id},

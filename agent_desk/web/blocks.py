@@ -525,6 +525,10 @@ async def on_the_bench(
                         said=(
                             f"it has to be: {checked.said}"
                             + (f" — last time {checked.why}" if checked.verdict else "")
+                            # What a person said about that verdict, in the words the machine did
+                            # not have. This is the whole of why a comment is not a note in the
+                            # margin: it is in the prompt of the next attempt (064).
+                            + (f" — and a person adds: {checked.note}" if checked.note else "")
                         ),
                         role=chosen.get(name, ""),
                     )

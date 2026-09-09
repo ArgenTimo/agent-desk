@@ -37,6 +37,17 @@
          and somebody acting on either deserves to know which they have. #}
       <span class="small dim">{{ "judged by the answer engine" if card.judged else "decided by the rule on the card" }}</span>
     </p>
+    {# What a person says about the verdict, in the words the machine did not have. Its own form,
+       because changing the condition clears every verdict and a comment about the verdict that
+       stands has to survive it (064-a-comment-on-a-check.sql). #}
+    <form class="check-note" method="post" action="/cards/check/note"
+          hx-post="/cards/check/note" hx-swap="none">
+      <input type="hidden" name="id" value="{{ card.id }}">
+      <label class="visually-hidden" for="check-note-{{ card.id }}">what is wrong with it</label>
+      <textarea id="check-note-{{ card.id }}" name="note" rows="2"
+                placeholder="what is wrong with it, in your words — this goes into the next attempt">{{ card.note }}</textarea>
+      <button type="submit">say it</button>
+    </form>
     {% else %}
     <p class="small dim">nobody has pressed it yet</p>
     {% endif %}

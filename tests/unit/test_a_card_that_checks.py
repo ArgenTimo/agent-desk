@@ -464,3 +464,53 @@ async def test_a_check_card_that_is_gone_describes_nothing(desk: Store) -> None:
     look = await blocks.on_the_bench(desk, [], ["check:01M1NOSUCH"], ["check:01M1NOSUCH"])
 
     assert look.cards == []
+
+
+# --- and what a person adds to it ----------------------------------------------------------------
+async def test_a_comment_survives_the_verdict_it_is_about(desk: Store) -> None:
+    """It is a comment *on* the verdict that stands — "it does contain the word, but it is quoting
+    the error rather than fixing it" — so it cannot be part of the edit that clears verdicts."""
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+    await desk.card_checked(made.id, passed=False, why="it contains it", judged=False)
+
+    await routes.note_on_a_check(_a_form(id=made.id, note="it+is+quoting+the+error"))
+
+    again = await desk.check_card(made.id)
+    assert again is not None
+    assert again.note == "it is quoting the error"
+    assert again.verdict == "failed", "leaving a comment threw the verdict away"
+
+
+async def test_changing_the_condition_forgets_the_comment(desk: Store) -> None:
+    """A note about a judgement nobody is making any more is a note about a question nobody
+    asked."""
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+    await desk.note_on_a_check(made.id, "it is quoting the error")
+
+    await desk.set_check_card(made.id, label="no errors", said="is JSON")
+
+    again = await desk.check_card(made.id)
+    assert again is not None and again.note == ""
+
+
+async def test_the_comment_goes_into_the_next_attempt(desk: Store) -> None:
+    """ "Это идёт в следующую попытку, а не остаётся заметкой на полях." A comment nobody reads is a
+    comment field, and this console has no shortage of places to write things down."""
+    from agent_desk.web import blocks
+
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+    await desk.card_checked(made.id, passed=False, why="it contains it", judged=False)
+    await desk.note_on_a_check(made.id, "it is quoting the error rather than fixing it")
+
+    look = await blocks.on_the_bench(desk, [], [made.name], [made.name])
+
+    (only,) = look.cards
+    assert "quoting the error rather than fixing it" in only.said
+
+
+def test_the_comment_says_what_it_is_for_where_it_is_typed() -> None:
+    """A field labelled "notes" is a field people write in and nobody reads."""
+    markup = CARD.read_text(encoding="utf-8")
+
+    assert "this goes into the next attempt" in markup
+    assert 'action="/cards/check/note"' in markup

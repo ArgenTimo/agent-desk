@@ -2740,6 +2740,20 @@ async def _decide(said: str, asked: str, got: str) -> tuple[bool, str, bool] | s
     return verdict[0], verdict[1], True
 
 
+@router.post("/cards/check/note", response_class=HTMLResponse)
+async def note_on_a_check(request: Request) -> Response:
+    """What a person says about the verdict, which goes into the next attempt (064).
+
+    Its own route rather than part of the condition edit: changing the condition clears every
+    verdict, and a comment about the verdict that stands has to survive the thing it comments on.
+    """
+    form = await _form(request)
+    card_id = form.get("id", "").strip()
+    if card_id:
+        await store.note_on_a_check(card_id, form.get("note", ""))
+    return HTMLResponse("", status_code=204)
+
+
 @router.post("/workbench/check", response_class=JSONResponse)
 async def run_a_check(request: Request) -> JSONResponse:
     """Press a check card: read what it is joined to, and say one of two things about it.
