@@ -1024,6 +1024,90 @@ async function runTheCheck(holder) {
   }
 }
 
+// --- tools: a card with behaviour, kept ---------------------------------------------------------
+// "Уникальная карточка, в которую можно закладывать разнообразный функционал… Хранятся в списке под
+// проектами, слева снизу." A button and a check both die with the workbench they were made on;
+// this is the same card kept under a name and put on any bench, as a fresh card each time.
+async function showTools() {
+  const into = document.getElementById('kept-tools');
+  if (!into) return;
+  into.replaceChildren();
+  let kept = [];
+  try {
+    kept = ((await (await fetch('/tools')).json()).tools) || [];
+  } catch {
+    return;
+  }
+  if (!kept.length) {
+    const none = document.createElement('li');
+    none.className = 'saved-none';
+    none.textContent = 'nothing kept yet';
+    into.appendChild(none);
+    return;
+  }
+  for (const one of kept) {
+    const row = document.createElement('li');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'saved-open';
+    open.textContent = `${one.name} · ${one.kind}`;
+    // What it will ask or check, where somebody decides which of six tools they meant.
+    open.title = one.said || 'it says nothing yet';
+    open.addEventListener('click', () => useTool_(one.name));
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'saved-drop';
+    drop.textContent = '×';
+    drop.title = `forget ${one.name}`;
+    drop.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await fetch('/tools/drop', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ name: one.name }),
+      });
+      showTools();
+    });
+    row.append(open, drop);
+    into.appendChild(row);
+  }
+}
+
+// Named with a trailing underscore because `useTool` is the tool *strip* — the pointer modes — and
+// two functions called the same thing in one file is the bug nobody finds by reading.
+async function useTool_(name) {
+  try {
+    const made = await (
+      await fetch('/tools/use', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ name }),
+      })
+    ).json();
+    if (!made.id) {
+      say(made.why || 'It could not be put on the workbench.');
+      return;
+    }
+    await pin({ kind: made.kind, id: made.id, label: made.label }, { came: 'taken from the tools' });
+  } catch {
+    say('It could not be put on the workbench.');
+  }
+}
+
+async function keepAsATool(holder) {
+  const name = (prompt('Keep it as a tool called:', holder.querySelector('.pin-label')?.textContent?.trim() || '') || '').trim();
+  if (!name) return;
+  const kept = await (
+    await fetch('/tools', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ card: cardName(holder), name }),
+    })
+  ).json();
+  say(kept.name ? `Kept “${kept.name}”.` : kept.why || 'It could not be kept.');
+  showTools();
+}
+
 async function addCheck() {
   const label = (prompt('What is the check called?', '') || '').trim();
   if (!label) return;
@@ -4707,6 +4791,11 @@ function cardMenuFor(pin) {
     { what: 'a line', act: () => setView(pin, 'hint') },
     { what: 'what it is', act: () => setView(pin, 'metadata') },
     { what: 'everything', act: () => setView(pin, 'full') },
+    // Only the two kinds that hold behaviour. Keeping an idea card "as a tool" would be keeping a
+    // thing that is already kept, under a second name, in a second list (065).
+    ...(pin.dataset.kind === 'button' || pin.dataset.kind === 'check'
+      ? [{ what: 'keep it as a tool', act: () => keepAsATool(pin) }]
+      : []),
     {
       what: pin.classList.contains('spent') ? 'put it back in the message' : 'leave it out of the message',
       act: () => {
@@ -6079,3 +6168,6 @@ emptyOrNot();
 // Once at the start, because the first board push may be two seconds away and an empty line where
 // a count belongs reads as a broken panel rather than as one that has not answered yet.
 readRoom();
+// And the kept tools, which live beside the projects rather than in a menu: a list nobody opened
+// is a list nobody remembers they have (065-a-tool-you-keep.sql).
+showTools();

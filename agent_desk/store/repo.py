@@ -301,6 +301,18 @@ class CheckCard(BaseModel):
         return f"check:{self.id}"
 
 
+class Tool(BaseModel):
+    """A card with behaviour in it, kept under a name and put on any workbench (065)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    # "button" or "check": the two card kinds that hold behaviour rather than information.
+    kind: str
+    said: str = ""
+    made_at: int
+
+
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
@@ -2312,6 +2324,52 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(text("SELECT path FROM readable ORDER BY path"))
             return [str(row[0]) for row in rows]
+
+    # --- tools: a card with behaviour, kept (065-a-tool-you-keep.sql) -------------------------
+    # The kinds a tool may be. Here rather than at the route because it is the store that would
+    # otherwise accept "buton" and hand back a tool nothing can put on a bench.
+    TOOL_KINDS = ("button", "check")
+
+    async def keep_tool(self, *, name: str, kind: str, said: str) -> Tool | None:
+        """Keep this behaviour under a name, replacing any tool of that name.
+
+        `None` for a kind this does not make. Saving over is how somebody fixes a prompt they got
+        slightly wrong; the tool already on a bench keeps working as it was, because putting one on
+        a bench makes a copy rather than a reference.
+        """
+        if kind not in self.TOOL_KINDS or not name.strip():
+            return None
+        made = Tool(name=name.strip()[:60], kind=kind, said=said[:2000], made_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO tool (name, kind, said, made_at) "
+                    "VALUES (:name, :kind, :said, :made_at) "
+                    "ON CONFLICT (name) DO UPDATE SET kind = :kind, said = :said, made_at = :made_at"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def tools(self) -> list[Tool]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT name, kind, said, made_at FROM tool ORDER BY name")
+            )
+            return [Tool(**row._mapping) for row in rows]
+
+    async def tool(self, name: str) -> Tool | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT name, kind, said, made_at FROM tool WHERE name = :name"),
+                {"name": name},
+            )
+            row = rows.first()
+            return None if row is None else Tool(**row._mapping)
+
+    async def forget_tool(self, name: str) -> None:
+        async with self.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM tool WHERE name = :name"), {"name": name})
 
     async def add_check_card(self, label: str, said: str) -> CheckCard:
         made = CheckCard(id=_new_id(), label=label[:80], said=said[:600], made_at=_now_ms())

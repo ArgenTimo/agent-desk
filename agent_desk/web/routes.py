@@ -2687,6 +2687,79 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
     )
 
 
+# --- tools: a card with behaviour, kept (065-a-tool-you-keep.sql) -------------------------------
+# "Уникальная карточка, в которую можно закладывать разнообразный функционал: например заложить туда
+# кнопку с промптом… Хранятся в списке под проектами, слева снизу."
+#
+# A button and a check are the two card kinds that hold behaviour rather than information, and both
+# die with the workbench they were made on. Somebody who writes "декомпозируй" as a button writes it
+# again in the next chat, and by the fourth chat they stop bothering. A tool is that card, kept.
+@router.post("/tools", response_class=JSONResponse)
+async def keep_a_tool(request: Request) -> JSONResponse:
+    """Keep a card's behaviour under a name, from the card itself.
+
+    Read off the card rather than typed again: a tool whose prompt is a second copy of the button's
+    is a tool that quietly stops matching the thing it was saved from.
+    """
+    form = await _form(request)
+    kind, _, ident = form.get("card", "").strip().partition(":")
+    name = form.get("name", "").strip()
+    if kind == "button":
+        card = await store.button_card(ident)
+        said = card.prompt if card else None
+    elif kind == "check":
+        checked = await store.check_card(ident)
+        said = checked.said if checked else None
+    else:
+        return JSONResponse({"why": "Only a button or a check can be kept as a tool."})
+    if said is None:
+        return JSONResponse({"why": "That card is not here any more."})
+    made = await store.keep_tool(name=name, kind=kind, said=said)
+    if made is None:
+        return JSONResponse({"why": "A tool needs a name."})
+    return JSONResponse({"name": made.name, "kind": made.kind})
+
+
+@router.get("/tools", response_class=JSONResponse)
+async def list_tools() -> JSONResponse:
+    return JSONResponse(
+        {
+            "tools": [
+                {"name": one.name, "kind": one.kind, "said": one.said[:120]}
+                for one in await store.tools()
+            ]
+        }
+    )
+
+
+@router.post("/tools/use", response_class=JSONResponse)
+async def use_a_tool(request: Request) -> JSONResponse:
+    """Make a fresh card from a kept tool.
+
+    A new card every time, which is why the same tool can be on four workbenches at once with four
+    different sets of lines — and why editing the card on one bench does not reach the others or
+    the tool. The same argument a saved drawing is made under (038).
+    """
+    form = await _form(request)
+    tool = await store.tool(form.get("name", "").strip())
+    if tool is None:
+        return JSONResponse({"why": "There is no tool by that name."})
+    if tool.kind == "button":
+        made = await store.add_button_card(tool.name, tool.said)
+        return JSONResponse({"kind": "button", "id": made.id, "label": made.label})
+    checked = await store.add_check_card(tool.name, tool.said)
+    return JSONResponse({"kind": "check", "id": checked.id, "label": checked.label})
+
+
+@router.post("/tools/drop", response_class=JSONResponse)
+async def forget_a_tool(request: Request) -> JSONResponse:
+    """Forget one. The cards it already made stay: they are copies, and a card that vanished
+    because somebody tidied a list is a workbench that changed while nobody was looking."""
+    form = await _form(request)
+    await store.forget_tool(form.get("name", "").strip())
+    return JSONResponse({"forgot": True})
+
+
 @router.post("/cards/check", response_class=JSONResponse)
 async def add_check_card(request: Request) -> JSONResponse:
     """A new check, with a name and what the answer has to be (062)."""

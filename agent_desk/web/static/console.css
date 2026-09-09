@@ -673,6 +673,10 @@ button[disabled] { opacity: 0.5; cursor: default; }
    file — same specificity, later, so it won, and a marked card on the bench had the ordinary blue
    edge. Marking had been invisible on the surface since it was built: the reason line under the
    head was the only sign of it. Found by adding colours and seeing yellow come out blue. */
+/* The kept tools, under the projects. Same shape as the saved lists in the bench menu, because it
+   is the same kind of list — things that outlive the chat you are in (065-a-tool-you-keep.sql). */
+.tools-kept { margin-top: 10px; }
+.tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }
 /* "Закрась ярко жёлтым те карточки, что тебе больше всего нравятся, и т.д." Three, so that two
    groups can be told apart at a glance without moving anything — and none of them is red or green,
