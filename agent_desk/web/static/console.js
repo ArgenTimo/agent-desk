@@ -4216,10 +4216,28 @@ document.addEventListener('click', (event) => {
   zoomTo(ZOOMS.indexOf(view.scale) + step);
 });
 
+// "Без нажатия ctrl колёсико мыши не задействовано — давай скейлинг на него повесим, когда курсор
+// на верстаке." It was not doing anything else: the canvas is `overflow: hidden`, so a plain wheel
+// over the bench scrolled nothing and zoomed nothing. Ctrl still works, because that is the
+// browser-wide gesture and somebody's hands already know it.
+//
+// Except over something that scrolls. A long answer and a card opened to `full` have their own
+// scrollbars, and a wheel that zoomed the bench instead of moving the text somebody is reading
+// would be the gesture taking priority over the thing it is pointed at. Ctrl overrides that in
+// turn: held down, it means zoom wherever the pointer is.
+function scrollsItself(target) {
+  for (let at = target; at && at !== canvas; at = at.parentElement) {
+    if (at.scrollHeight > at.clientHeight + 1 && getComputedStyle(at).overflowY !== 'visible') {
+      return true;
+    }
+  }
+  return false;
+}
+
 canvas?.addEventListener(
   'wheel',
   (event) => {
-    if (!event.ctrlKey) return;
+    if (!event.ctrlKey && scrollsItself(event.target)) return;
     event.preventDefault();
     const frame = canvas.getBoundingClientRect();
     zoomTo(ZOOMS.indexOf(view.scale) + (event.deltaY < 0 ? 1 : -1), {

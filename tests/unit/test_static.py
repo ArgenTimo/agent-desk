@@ -119,6 +119,30 @@ def test_full_size_is_the_default_and_the_way_back_to_it_is_one_press() -> None:
 
 
 @pytest.mark.unit
+def test_the_wheel_zooms_the_bench_without_a_modifier() -> None:
+    """ "Без нажатия ctrl колёсико мыши не задействовано — давай скейлинг на него повесим." It was
+    doing nothing else: the canvas is `overflow: hidden`, so a plain wheel over the bench scrolled
+    nothing and zoomed nothing."""
+    script = (STATIC / "console.js").read_text()
+    start = script.index("canvas?.addEventListener(\n  'wheel',")
+    body = script[start : script.index("{ passive: false }", start)]
+
+    assert "if (!event.ctrlKey) return;" not in body, "it still asks for a modifier"
+    assert "zoomTo(" in body
+
+
+@pytest.mark.unit
+def test_the_wheel_leaves_alone_whatever_it_is_pointed_at() -> None:
+    """A long answer and a card opened to `full` have scrollbars of their own, and a wheel that
+    zoomed the bench instead of moving the text somebody is reading would be the gesture taking
+    priority over the thing it is pointed at. Ctrl overrides that in turn."""
+    script = (STATIC / "console.js").read_text()
+
+    assert "function scrollsItself(" in script
+    assert "if (!event.ctrlKey && scrollsItself(event.target)) return;" in script
+
+
+@pytest.mark.unit
 def test_nothing_on_the_page_is_smaller_than_twelve_pixels() -> None:
     """A console is read at a glance, across a desk, at the end of a long day. This page had 9px
     and 10px text on it, which is legible on the machine it was written on and nowhere else."""
