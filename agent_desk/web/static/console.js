@@ -2213,6 +2213,9 @@ function useTool(name) {
   // Named out loud for the moment after a press, because an icon that has just changed meaning is
   // an icon somebody wants confirmed.
   if (said) said.textContent = name === 'move' ? '' : TOOLS[name];
+  // Read when it is about to matter rather than kept in a variable: the rule belongs to the chat,
+  // and chats are switched between without this page reloading.
+  if (name === 'mix') sayWhatCombiningAsks();
 }
 
 document.getElementById('tools')?.addEventListener('click', (event) => {
@@ -2298,9 +2301,11 @@ function endBand() {
 // What comes back is an ordinary answer card, which is the whole point: the third thing can be
 // combined again, and the chain does not stop at the second step. Nothing is written into the idea
 // pool — this is a thing made on the bench, and whether it is worth keeping is a separate press.
-const HOW_TO_COMBINE =
-  'Make one thing out of these two. Say what having them together gives that neither gives alone, ' +
-  'and say it in a few sentences. Do not summarise the two cards back to me.';
+//
+// What it *asks* is not here. "Одна и та же пара в разных правилах даёт разное": the rule belongs
+// to the workbench and the server holds it, so a drag sends two card names and nothing else
+// (061-the-rule-a-combine-follows.sql). A copy of the wording in this file would be a second
+// answer to "what does combining mean", and the two would part company the first time one moved.
 
 let mixing = null;
 
@@ -2346,10 +2351,48 @@ window.addEventListener('pointerup', (event) => {
 });
 window.addEventListener('pointercancel', stopMixing);
 
+// The rule, shown on the tool that follows it. A tooltip is where somebody looks to find out what
+// a button does, so it is where "what will this ask" belongs — and it is read from the server, so
+// what the tooltip promises and what the drag sends cannot differ.
+async function sayWhatCombiningAsks() {
+  const button = document.querySelector('[data-tool="mix"]');
+  if (!button) return;
+  try {
+    const answer = await fetch(`/workbench/combining?thread=${encodeURIComponent(activeThread())}`);
+    const said = await answer.json();
+    button.title = `Combine — drag one card onto another and the two make a third (X)\n\nIt asks: ${said.said}`;
+  } catch {
+    // Leave the tooltip as the markup wrote it. A control that says nothing about its rule is
+    // worse than one that says it wrongly, and both are better than a page that stopped working.
+  }
+}
+
+async function howCombiningWorks() {
+  let now = '';
+  try {
+    const answer = await fetch(`/workbench/combining?thread=${encodeURIComponent(activeThread())}`);
+    now = (await answer.json()).said || '';
+  } catch {
+    say('Could not read the rule.');
+    return;
+  }
+  // Prefilled with what it asks now, so changing it is editing a sentence rather than writing one
+  // — and clearing the box is how somebody goes back to the console's own.
+  const said = window.prompt('When two cards are put together, ask this. Empty for the usual:', now);
+  if (said === null) return;
+  const answer = await fetch('/workbench/combining', {
+    method: 'POST',
+    headers: FORM,
+    body: new URLSearchParams({ thread: activeThread(), said }),
+  });
+  const set = await answer.json();
+  say(set.why || (set.its_own ? `Two cards now ask: ${set.said}` : 'Back to the usual rule.'));
+  sayWhatCombiningAsks();
+}
+
 async function combine(from, onto) {
   say(`Combining “${labelOf(from)}” and “${labelOf(onto)}”…`);
   const body = new URLSearchParams({
-    text: HOW_TO_COMBINE,
     thread: activeThread(),
     // No card for the question, the same as a button: what was asked is the gesture, and a card
     // repeating the gesture back is a card nobody reads twice.
@@ -4221,6 +4264,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'step') addStep();
   else if (what === 'about') beginWith();
   else if (what === 'button') addButton();
+  else if (what === 'combining') howCombiningWorks();
   else if (what === 'template') keepTemplate();
 });
 

@@ -2836,6 +2836,40 @@ class Store:
             found = rows.first()
             return str(found[0]) if found else ""
 
+    async def combine_with(self, thread_id: str, said: str) -> None:
+        """What "put these two together" asks on this bench (061).
+
+        Empty clears it, and a bench with no row asks what `combining.DEFAULT` says. Storing an
+        empty string instead would give the same behaviour today and a second way to spell "the
+        default" that somebody would eventually have to reconcile.
+        """
+        if not said.strip():
+            async with self.engine.begin() as conn:
+                await conn.execute(
+                    text("DELETE FROM combining WHERE thread_id = :thread_id"),
+                    {"thread_id": thread_id},
+                )
+            return
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO combining (thread_id, said, at) "
+                    "VALUES (:thread_id, :said, :at) "
+                    "ON CONFLICT (thread_id) DO UPDATE SET said = :said, at = :at"
+                ),
+                {"thread_id": thread_id, "said": said.strip(), "at": _now_ms()},
+            )
+
+    async def combining(self, thread_id: str = "") -> str:
+        """What this bench was told, or "" where nobody has said. The default is not this layer's."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT said FROM combining WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
+            found = rows.first()
+            return str(found[0]) if found else ""
+
     async def keep_template(
         self,
         *,

@@ -40,6 +40,7 @@ from markupsafe import Markup, escape
 from agent_desk import (
     allowed,
     branching,
+    combining,
     comparing,
     connectors,
     dispatch,
@@ -1649,6 +1650,33 @@ async def new_instance(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+@router.get("/workbench/combining", response_class=JSONResponse)
+async def what_a_combine_asks(thread: str = "") -> JSONResponse:
+    """What dragging one card onto another will ask on this bench, and whether anybody set it.
+
+    `its_own` is the difference between "this is what it asks" and "this is what somebody chose",
+    which is the difference a panel offering to change it has to draw.
+    """
+    said = await store.combining(thread)
+    return JSONResponse({"said": combining.rule(said), "its_own": bool(said.strip())})
+
+
+@router.post("/workbench/combining", response_class=JSONResponse)
+async def set_what_a_combine_asks(request: Request) -> JSONResponse:
+    """Change it, or clear it back to what the console asks by default.
+
+    Empty is how somebody undoes this, and it is the same gesture as never having set it: the row
+    goes, and the default comes from one place (agent_desk/combining.py).
+    """
+    form = await _form(request)
+    thread = form.get("thread", "").strip()
+    if not thread:
+        return JSONResponse({"why": "Open a chat first — a rule belongs to one workbench."})
+    await store.combine_with(thread, form.get("said", "")[: combining.MOST_CHARS])
+    said = await store.combining(thread)
+    return JSONResponse({"said": combining.rule(said), "its_own": bool(said.strip())})
+
+
 @router.post("/project-env", response_class=HTMLResponse)
 async def set_project_env(request: Request) -> Response:
     """Name a variable this project's agents need. The name; never the value."""
@@ -1923,6 +1951,13 @@ async def ask(request: Request) -> Response:
     # question is *about* — every message has those. This says what the third card was made out of,
     # and only a combine has it (060-what-two-cards-made.sql).
     combined = [one for one in form.get("made_from", "").split(",") if one]
+    # A combine's words are the bench's rule, and the page does not get a say in them. The gesture
+    # sends two card names; what putting two cards together *means* is a thing somebody set once
+    # and can change (061-the-rule-a-combine-follows.sql). Read here rather than sent by the page
+    # so there is one copy of it, and so a rule changed in one tab is the rule the next drag in
+    # another tab follows.
+    if len(combined) == 2:
+        typed = combining.rule(await store.combining(form.get("thread", "").strip()))
     if typed:
         rows, _ = await asyncio.to_thread(board)
         # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
