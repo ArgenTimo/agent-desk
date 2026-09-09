@@ -2360,12 +2360,32 @@ async def workbench_process(cards: str = "") -> JSONResponse:
     ]
     walked = process.order(on_bench, lines)
     leaves = await store.card_leaves()
+    chosen_roles = await store.card_roles()
     return JSONResponse(
         {
             "order": list(walked.steps),
             "tangled": list(walked.tangled),
             "why_not": process.ready_to_run(on_bench, lines),
             "unfinished": {name: list(gaps) for name, gaps in process.unfinished(on_bench).items()},
+            # Holes in the *shape* rather than in the fields: a Decision with one way out, an
+            # Action that makes nothing, a step joined to nothing. A structural check and not an
+            # opinion, which is why it can be shown without being asked for
+            # (01M1XED1E27MBT3TDAK07P5GSG).
+            "gaps": {
+                name: list(said)
+                for name, said in process.gaps(
+                    on_bench,
+                    lines,
+                    # The cards somebody is drawing with: a card made to be a step, or one whose
+                    # role a person chose. A question and its answer are on the same surface and
+                    # their natural roles make them steps, but nobody drew them as a process.
+                    [
+                        card.name
+                        for card in on_bench
+                        if card.name.startswith("step:") or card.name in chosen_roles
+                    ],
+                ).items()
+            },
             # The whole thing walked through without running any of it: the order, what each step
             # would be told, the ways out of every Decision, and where it would stop. Nothing new
             # is computed — this is `order`, `memory_for` and `roles.missing` put side by side in

@@ -708,6 +708,18 @@ button[disabled] { opacity: 0.5; cursor: default; }
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   border-radius: var(--radius);
 }
+/* A hole in the shape of the drawing. Quiet on purpose: a drawing being made is not a form being
+   validated, and a card that shouted about a line somebody has not drawn yet would be the nagging
+   this was written to avoid (01M1XED1E27MBT3TDAK07P5GSG). */
+.pin-wants {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px dashed var(--attention);
+  border-radius: 8px;
+  color: var(--attention);
+  font-size: var(--t-xs);
+  cursor: help;
+}
 .tools-kept { margin-top: 10px; }
 .tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }

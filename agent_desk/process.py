@@ -216,6 +216,67 @@ def unfinished(cards: Sequence[Card]) -> dict[str, tuple[str, ...]]:
     return short
 
 
+def gaps(
+    cards: Sequence[Card], lines: Sequence[Line], drawn: Sequence[str] = ()
+) -> dict[str, tuple[str, ...]]:
+    """Holes in the *shape* of a drawing, by card name.
+
+    "У схемы есть форма, и в ней видны дыры: у решения одна ветка вместо двух, у действия нет
+    результата, событие ничего не запускает, шаг ни с чем не связан. Ненавязчивая подсказка рядом,
+    без единого вызова модели — это структурная проверка, а не мнение."
+
+    The last clause is the whole licence for this. Every rule below is a fact about the lines
+    drawn, not a judgement about the work — which is why it can be shown without being asked for,
+    and why it says what is missing rather than what would be better.
+
+    `unfinished` is the other half and answers a different question: that one is about fields a
+    role asks for, this one is about lines. A card can be complete and joined to nothing, and a
+    card joined perfectly can have said nothing.
+
+    A lone card on an empty bench has no gaps. Somebody who has just drawn their first card is
+    drawing, not making a mistake, and a console that said so would be the nagging this is written
+    to avoid.
+
+    `drawn` is the cards somebody is drawing *with*, and everything else is left alone. A question
+    and its answer are cards on the same surface and their natural roles make them steps, but
+    nobody drew them as a process — telling somebody that the conversation they had this morning
+    is joined to nothing would be exactly the noise that gets a hint like this switched off. Empty
+    means every card, which is what a caller with no such list should get.
+    """
+    if len(cards) < 2:
+        return {}
+    only = set(drawn)
+    out: dict[str, list[str]] = {}
+    carries = _carrying(lines)
+    for card in cards:
+        if card.role not in STEPS or (only and card.name not in only):
+            continue
+        leaving = [line for line in carries if line.from_name == card.name]
+        arriving = [line for line in carries if line.to_name == card.name]
+        wants: list[str] = []
+        if not leaving and not arriving:
+            wants.append("it is joined to nothing, so nothing leads to it and nothing follows")
+        if card.role == "decision":
+            ways = [
+                line
+                for line in lines
+                if line.from_name == card.name and line.kind in ("if", "when")
+            ]
+            if len(ways) < 2:
+                # One way out is not a decision, it is a step with a question mark on it.
+                wants.append(
+                    f"a Decision needs two ways out and has {len(ways)}: draw an `if` line for "
+                    "each answer"
+                )
+        if card.role == "action" and not any(line.kind == "makes" for line in leaving):
+            wants.append("an Action makes something: draw a `makes` line to what it produces")
+        if card.role == "event" and not leaving:
+            wants.append("an Event starts something: draw a line to what happens when it does")
+        if wants:
+            out[card.name] = wants
+    return {name: tuple(said) for name, said in out.items()}
+
+
 @dataclass(frozen=True)
 class Walked:
     """One step, as a run would meet it.

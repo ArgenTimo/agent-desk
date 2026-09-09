@@ -1384,6 +1384,7 @@ async function pin(card, how) {
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-press" title="send what this button asks" hidden>press</button>
     <button type="button" class="pin-check" title="read what this is joined to and say whether it is what it had to be" hidden>check</button>
+    <span class="pin-wants" hidden aria-hidden="true">?</span>
     <button type="button" class="pin-again" title="ask the question again, this time meeting the check" hidden>try again</button>
     <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
     <button type="button" class="pin-answers" title="what each model answered, side by side" hidden>answers</button>
@@ -3506,8 +3507,26 @@ async function readProcess() {
     if (!answer.ok) return;
     processSaid = await answer.json();
     showProcess();
+    showGaps();
   } catch {
     // The bench still works; it simply cannot be read as a process right now.
+  }
+}
+
+// "Ненавязчивая подсказка рядом, без единого вызова модели — это структурная проверка, а не
+// мнение." On the card, because that is where the hole is; a mark and a sentence on hover, because
+// a drawing being made is not a form being validated and a card that shouted would be worse than
+// no hint at all.
+function showGaps() {
+  const said = processSaid.gaps || {};
+  for (const pin of surface?.querySelectorAll('.pin') || []) {
+    const mark = pin.querySelector('.pin-wants');
+    if (!mark) continue;
+    const wants = said[cardName(pin)];
+    mark.hidden = !wants;
+    // Every one of them, not the first: two holes in one card are two things to draw.
+    mark.title = wants ? wants.join('\n') : '';
+    pin.classList.toggle('wants', Boolean(wants));
   }
 }
 
