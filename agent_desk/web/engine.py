@@ -47,7 +47,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -56,6 +56,7 @@ import structlog
 from agent_desk import allowed, checking, dispatch, engines, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
 from agent_desk.ideas import waking
+from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Run, RunStep, Store
 from agent_desk.web import autostart, blockers, later
 
@@ -203,7 +204,27 @@ class Answered:
     ms: int = 0
 
 
-async def _ask(prompt: str, engine: str | None = None) -> Answered:
+# What each step of each run is doing right now, keyed `run_id:card_name`. Memory only, and dropped
+# the moment the step settles.
+#
+# «Отслеживать прямо на верстаке, прямо интуитивно понятно и визуально ясно, как, когда, какие скилы
+# вызываются… Не лог после, а на карточке во время.» A prompt step that spends forty seconds reading
+# files streams no text at all, and a card that says nothing for forty seconds is a card somebody
+# reads as a hang. The tool calls arrive as their own events in the stream the answer already comes
+# in, so this costs nothing but the wiring (01M1XA1V955P2DH7CAG0D9DKT8).
+DOING: dict[str, str] = {}
+
+
+def doing_key(run_id: str, name: str) -> str:
+    return f"{run_id}:{name}"
+
+
+async def _ask(
+    prompt: str,
+    engine: str | None = None,
+    *,
+    on_step: Callable[[str], None] | None = None,
+) -> Answered:
     """Ask, and give back what came back. Never raises: a step that could not be asked is a step
     that failed, and the run says so rather than the loop falling over.
 
@@ -220,7 +241,12 @@ async def _ask(prompt: str, engine: str | None = None) -> Answered:
 
     try:
         said = "".join(
-            [chunk async for chunk in stream_answer(prompt, engine=engine, on_cost=note)]
+            [
+                chunk
+                async for chunk in stream_answer(
+                    prompt, engine=engine, on_cost=note, on_step=on_step
+                )
+            ]
         ).strip()
     except (AnswerFailed, OSError) as gone:
         return Answered(
@@ -488,7 +514,19 @@ async def _do(
         answers: list[tuple[str, str]] = []
         spent, took = 0.0, 0
         for which in asked:
-            came = await _ask(said, None if which is None else which.binary)
+            here = doing_key(run.id, card.name)
+
+            def note_step(step: str, here: str = here) -> None:
+                # Scrubbed like everything else that leaves this program: a tool call names a
+                # path, and a path names things (docs/07-security.md).
+                DOING[here] = scrub(step)
+
+            try:
+                came = await _ask(said, None if which is None else which.binary, on_step=note_step)
+            finally:
+                # A note about a step in progress answers nothing once the step is over, and a
+                # stale line on a finished card says the console is still working.
+                DOING.pop(here, None)
             spent, took = spent + came.usd, took + came.ms
             if came.gone:
                 await store.set_run_step(

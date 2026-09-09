@@ -3179,3 +3179,17 @@ button.go:hover, button.yes:hover {
 /* Taking a project off the board (073-a-project-stays.sql). Under the arming controls, because it
    is the last thing somebody does with a project and not the first. */
 .forget-project { margin: 12px 0 0; display: grid; gap: 4px; justify-items: start; }
+
+/* What a step is doing right now (01M1XA1V955P2DH7CAG0D9DKT8).
+
+   Under the card's own text and quieter than it: this is a line that changes every second or two,
+   and something that moves at the top of a card pulls the eye off everything that does not. */
+.pin-doing {
+  margin: 4px 0 0;
+  font-size: var(--t-xs);
+  line-height: 1.3;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

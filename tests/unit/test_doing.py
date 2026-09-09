@@ -102,8 +102,13 @@ async def test_a_run_that_only_reads_files_still_says_something(
     steps: list[str] = []
     said = [c async for c in session.stream_answer("q", on_step=steps.append)]
 
-    assert steps == ["reading store/repo.py"]
-    assert said == ["done"], "the note about the run leaked into its answer"
+    # Both assertions carry what actually came back. This test failed once inside `make coverage`
+    # on 2026-09-07 and has not been seen again in several hundred runs since — in isolation, under
+    # CPU load, and in the full suite. A bare `assert` on the next occurrence would say only that it
+    # went, and which of the two goes is the first thing worth knowing
+    # (01M1ZEN85PA2NYSV70H59ZZFWN).
+    assert steps == ["reading store/repo.py"], f"steps={steps!r} said={said!r}"
+    assert said == ["done"], f"the note about the run leaked into its answer: said={said!r}"
 
 
 @pytest.mark.unit

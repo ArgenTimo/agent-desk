@@ -107,13 +107,23 @@ def test_a_card_that_is_not_about_a_model_is_left_alone() -> None:
     assert engine._asked_of(step, [article, step], [_into(article, step)]) == ([None], "")
 
 
-def test_the_run_stops_rather_than_asking_the_wrong_model() -> None:
-    source = (
-        pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "engine.py"
-    ).read_text(encoding="utf-8")
+async def test_the_engine_a_card_named_is_the_one_that_is_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The card says which model and the run asks that one. Checked by asking, rather than by
+    reading the line that does it: the line moved once, and a test that greps for it fails on a
+    refactor while a card asking the wrong model would not have been noticed."""
+    asked: list[object] = []
 
-    assert "asked, why = _asked_of(card, cards, lines)" in source
-    assert "await _ask(said, None if which is None else which.binary)" in source
+    async def stream(prompt: str, **rest: object) -> object:
+        asked.append(rest.get("engine"))
+        yield "said"
+
+    monkeypatch.setattr(engine, "stream_answer", stream)
+
+    await engine._ask("q", "some-other-binary")
+
+    assert asked == ["some-other-binary"]
 
 
 def test_a_named_engine_is_the_only_one_tried() -> None:

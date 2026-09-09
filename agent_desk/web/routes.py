@@ -2678,6 +2678,11 @@ async def workbench_runs() -> JSONResponse:
                         # worth it" is beside the answer rather than in a bill (058).
                         "usd": step.usd,
                         "ms": step.ms,
+                        # What it is doing *right now*, as opposed to what it has said
+                        # (01M1XA1V955P2DH7CAG0D9DKT8). A prompt step that spends forty seconds
+                        # reading files streams no text at all, and a card silent for forty
+                        # seconds is a card somebody reads as a hang.
+                        "doing": engine.DOING.get(engine.doing_key(one.id, step.name), ""),
                     }
                     for step in await store.run_steps(one.id)
                 ],

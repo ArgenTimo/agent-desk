@@ -3993,6 +3993,20 @@ function showRuns() {
     }
     mark.textContent = STEP_MARK[step.state] || '';
     mark.title = step.detail || step.made || step.state;
+    // «Не лог после, а на карточке во время.» What this step is doing at this moment — reading a
+    // file, calling a tool, gone into a sub-agent — on the card while it happens. Removed the
+    // moment it stops: a stale line under a finished step says the console is still working.
+    let busy = pin.querySelector('.pin-doing');
+    if (step.doing) {
+      if (!busy) {
+        busy = document.createElement('p');
+        busy.className = 'pin-doing';
+        pin.appendChild(busy);
+      }
+      busy.textContent = step.doing;
+    } else {
+      busy?.remove();
+    }
     // Only on a card that produced several answers. Decided from the run this page already has,
     // rather than by asking per card: a request every two seconds for a control most cards will
     // never show is a request nobody asked for (01M1XA1V906B3KRJ84G4KHRE33).
