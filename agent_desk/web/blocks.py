@@ -440,8 +440,34 @@ def _targets(rows: Sequence[BoardRow], dropped: Sequence[str]) -> tuple[list[Boa
     return chosen, ", ".join(labels)
 
 
+async def _half_of_an_exchange(
+    store: Store, kind: str, ident: str, role: str
+) -> looking.OnBench | None:
+    """A question card or an answer card, put on the bench because a gesture named it.
+
+    Both are ordinarily left out, and for a good reason: they are the conversation, which is in the
+    prompt already as the thread. But a card somebody dragged onto another card is not being
+    carried along — it is being pointed at, and the model has to be able to see two things where
+    two were named. Without this the second step of a chain answered "there is only one card in
+    front of you", which is the chain ending at step two.
+    """
+    block = await store.block(ident)
+    if block is None:
+        return None
+    said = (block.answer or "") if kind == "answer" else block.input
+    if not said.strip():
+        return None
+    return looking.OnBench(
+        name=f"{kind}:{ident}",
+        kind=kind,
+        label=said.strip().splitlines()[0][:60],
+        said=said,
+        role=role,
+    )
+
+
 async def on_the_bench(
-    store: Store, rows: Sequence[BoardRow], dropped: Sequence[str]
+    store: Store, rows: Sequence[BoardRow], dropped: Sequence[str], named: Sequence[str] = ()
 ) -> looking.Look:
     """The cards in front of this question, as the model is shown them (agent_desk/looking.py).
 
@@ -459,6 +485,10 @@ async def on_the_bench(
     A block card is left out, and so is an answer card — the two halves of one exchange, which is
     already in the prompt twice over as the thread's history. Listing either again as a card would
     have the model reason about the conversation as a thing on the bench.
+
+    Unless it is in `named`, which is the cards a *gesture* pointed at rather than the cards a
+    message happened to be carrying. Dragging a result onto another card is somebody saying "these
+    two", and a digest that then describes one of them is a digest that cannot be answered.
     """
     names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
     said = await store.cards_said(names)
@@ -470,7 +500,15 @@ async def on_the_bench(
     for target in dropped:
         kind, ident, _ = _card(target)
         name = f"{kind}:{ident}"
-        if kind in ("block", "answer") or not ident or name in seen:
+        if not ident or name in seen:
+            continue
+        if kind in ("block", "answer"):
+            if name not in named:
+                continue
+            seen.add(name)
+            half = await _half_of_an_exchange(store, kind, ident, chosen.get(name, ""))
+            if half is not None:
+                cards.append(half)
             continue
         seen.add(name)
         idea = ideas.get(name)
@@ -577,6 +615,7 @@ async def submit(
     thread_id: str = "",
     history: Sequence[str] = (),
     notes_: str = "",
+    made_from: Sequence[str] = (),
 ) -> Block:
     """Accept one line of input and start working on it.
 
@@ -639,7 +678,7 @@ async def submit(
     written = await notes(store, targets)
     # Read now rather than when the run reaches the prompt: this is what was in front of the person
     # when they pressed send, and a bench read a minute later is a different bench.
-    look = await on_the_bench(store, rows, targets)
+    look = await on_the_bench(store, rows, targets, made_from)
     surface = looking.as_lines(look)
     # The same cards in the same order the digest numbered them, so an answer that says "3" and a
     # card on the bench are the same card (agent_desk/handling.py).
@@ -652,6 +691,13 @@ async def submit(
             block,
             aimed,
             classify=classify,
+            # A gesture is not read. The console writes the words of a combine itself, so there is
+            # nothing for a reader to work out — and when it was read it came back `master`, which
+            # is the branch that starts an agent in a worktree. Twice, in a browser, from a drag.
+            # Dragging one card onto another must not be able to start work, and the guard belongs
+            # here rather than in the wording: a prompt phrased more carefully is a prompt the next
+            # release of the classifier can read differently.
+            a_gesture=bool(made_from),
             about=about,
             deep=deep,
             history=list(history),
@@ -801,6 +847,7 @@ async def _work(
     rows: Sequence[BoardRow],
     *,
     classify: bool,
+    a_gesture: bool = False,
     about: str = "",
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
@@ -823,7 +870,12 @@ async def _work(
             if thread is not None:
                 await rename_if_it_has_moved_on(store, thread)
 
-        kind = await classifier.kind(block.input, pointed_at=pointed_at)
+        # A gesture says what it is by being one. Everything else is read, because somebody typed a
+        # sentence and the console has to work out which of nine things it was; a combine was
+        # written by the console and is a question about two cards, always.
+        kind = (
+            "question" if a_gesture else await classifier.kind(block.input, pointed_at=pointed_at)
+        )
         if kind == "unsure":
             # "Чем дороже ветка, тем выше должна быть уверенность и тем скорее нужно спросить, а не
             # догадываться." The one branch that does nothing: the block asks which was meant, and

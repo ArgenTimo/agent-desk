@@ -1892,6 +1892,10 @@ async def ask(request: Request) -> Response:
     # then: pressing a button is "как будто бы мы его вписали в поле ввода, только без создания
     # карточки запроса" (059-a-card-that-is-a-button.sql).
     by_button = str(form.get("button", "")).strip() == "yes"
+    # Two cards dragged together on the workbench. Separate from `targets`, which says what the
+    # question is *about* — every message has those. This says what the third card was made out of,
+    # and only a combine has it (060-what-two-cards-made.sql).
+    combined = [one for one in form.get("made_from", "").split(",") if one]
     if typed:
         rows, _ = await asyncio.to_thread(board)
         # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
@@ -1914,13 +1918,13 @@ async def ask(request: Request) -> Response:
             history=[one for one in form.get("history", "").split(",") if one],
             # Blocks somebody wrote on the bench themselves: text, not a card to look up.
             notes_=form.get("notes", ""),
+            # Named by the gesture rather than carried by the message, which is what lets a result
+            # card be one of the two: `on_the_bench` leaves the halves of an exchange out unless
+            # something pointed at them.
+            made_from=combined if len(combined) == 2 else (),
         )
         if by_button:
             await store.sent_by_a_button(made.id)
-        # Two cards dragged together on the workbench. Separate from `targets`, which says what the
-        # question is *about* — every button press has those. This says what the third card was
-        # *made out of*, and only a combine has it (060-what-two-cards-made.sql).
-        combined = [one for one in form.get("made_from", "").split(",") if one]
         if len(combined) == 2:
             await store.made_out_of(made.id, combined)
     if _wants_fragment(request):

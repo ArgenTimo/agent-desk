@@ -278,3 +278,157 @@ def test_a_plain_message_carries_only_what_is_true_of_it() -> None:
     )
 
     assert names == {"class", "data-block", "data-thread"}
+
+
+# --- and the third card can be dragged onto a fourth --------------------------------------------
+async def test_a_result_card_named_by_the_gesture_is_on_the_bench(desk: Store) -> None:
+    """ "Бесконечную динамичную адаптивную." Found by combining twice in a browser: the second
+    combine answered "there is still only one card in front of you", because an answer card is left
+    out of the digest as half of the conversation. That rule is right for a card the message merely
+    carried and wrong for a card a gesture pointed at, and the difference is the whole chain."""
+    from agent_desk.web import blocks
+
+    thread = await desk.create_thread("a chat")
+    first = await desk.create_block(
+        thread_id=thread.id, kind="question", input="combine them", thread_set_by="human"
+    )
+    await desk.finish_block(first.id, "steam, which neither water nor fire is")
+    idea = await desk.create_idea(
+        text_="fire", summary="fire", source_kind="typed", source_ref=None, context=None
+    )
+
+    look = await blocks.on_the_bench(
+        desk, [], [f"answer:{first.id}", f"idea:{idea.id}"], [f"answer:{first.id}"]
+    )
+
+    assert [card.kind for card in look.cards] == ["answer", "idea"]
+    assert "steam" in look.cards[0].said
+
+
+async def test_an_exchange_the_message_only_carried_is_still_left_out(desk: Store) -> None:
+    """The rule it was carved out of stays: the conversation is in the prompt as the thread, and a
+    bench that lists it back has the model reasoning about the conversation as a thing on it."""
+    from agent_desk.web import blocks
+
+    thread = await desk.create_thread("a chat")
+    first = await desk.create_block(
+        thread_id=thread.id, kind="question", input="hello", thread_set_by="human"
+    )
+    await desk.finish_block(first.id, "hello back")
+
+    look = await blocks.on_the_bench(desk, [], [f"answer:{first.id}"])
+
+    assert look.cards == []
+
+
+async def test_a_card_whose_exchange_is_gone_is_left_out(desk: Store) -> None:
+    """A block can be deleted while its card is still on somebody's bench. Naming one is then a
+    name and nothing behind it, and a card carrying an invented sentence is worse than one fewer
+    card (CLAUDE.md, rule five)."""
+    from agent_desk.web import blocks
+
+    look = await blocks.on_the_bench(
+        desk, [], ["answer:01M1NOSUCHBLOCK"], ["answer:01M1NOSUCHBLOCK"]
+    )
+
+    assert look.cards == []
+
+
+async def test_a_named_card_with_nothing_written_on_it_is_not_invented(desk: Store) -> None:
+    """A run that has not answered yet has no words, and a card carrying an empty sentence is the
+    console saying something is there when nothing is (CLAUDE.md, rule five)."""
+    from agent_desk.web import blocks
+
+    thread = await desk.create_thread("a chat")
+    first = await desk.create_block(
+        thread_id=thread.id, kind="question", input="x", thread_set_by="human"
+    )
+
+    look = await blocks.on_the_bench(desk, [], [f"answer:{first.id}"], [f"answer:{first.id}"])
+
+    assert look.cards == []
+
+
+def test_the_gesture_names_them_all_the_way_down() -> None:
+    """The route reads the pair once and hands it to both: the digest, so the model sees two cards,
+    and the store, so the third card finds its way back under them after a reload."""
+    route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
+
+    assert "made_from=combined if len(combined) == 2 else ()" in route
+    assert "await on_the_bench(store, rows, targets, made_from)" in (
+        HERE / "agent_desk" / "web" / "blocks.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_gesture_is_never_read_as_an_instruction() -> None:
+    """Found in the browser, twice, and not hypothetically: a combine was read as `master` and the
+    console started an agent in a worktree of its own. The words of a combine are written by the
+    console, so there is nothing for a reader to work out — and dragging one card onto another must
+    not be able to start work. The guard is here and not in the wording, because a prompt phrased
+    more carefully is a prompt the next release of the classifier can read differently."""
+    source = (HERE / "agent_desk" / "web" / "blocks.py").read_text(encoding="utf-8")
+
+    assert '"question" if a_gesture else await classifier.kind(' in source
+    assert "a_gesture=bool(made_from)," in source
+
+
+async def test_a_gesture_never_reaches_the_classifier_at_all(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source says `a_gesture`; this says what that buys. Reading a combine is not merely
+    wasteful — `master` is the branch that starts an agent in a worktree, so the classifier must
+    not see one at all."""
+    from agent_desk.web import blocks
+
+    read: list[str] = []
+    landed: list[str] = []
+
+    async def never(said: str, *, pointed_at: int = 0) -> str:
+        read.append(said)
+        return "master"
+
+    async def answered(store: Store, block: object, rows: object, **rest: object) -> None:
+        landed.append("answered")
+
+    monkeypatch.setattr(blocks.classifier, "kind", never)
+    monkeypatch.setattr(blocks, "_classify_and_answer", answered)
+
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id,
+        kind="question",
+        input="Make one thing out of these two.",
+        thread_set_by="human",
+    )
+
+    await blocks._work(desk, block, [], classify=False, a_gesture=True)
+
+    assert read == [], "a drag was handed to the reader that decides whether to start an agent"
+    assert landed == ["answered"]
+
+
+async def test_a_typed_message_is_still_read(desk: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The carve-out is for gestures and nothing else: a sentence somebody typed still has to be
+    worked out, which is the whole of what the classifier is for."""
+    from agent_desk.web import blocks
+
+    read: list[str] = []
+
+    async def reads(said: str, *, pointed_at: int = 0) -> str:
+        read.append(said)
+        return "idea"
+
+    async def recorded(store: Store, block: object, rows: object) -> None:
+        return None
+
+    monkeypatch.setattr(blocks.classifier, "kind", reads)
+    monkeypatch.setattr(blocks, "record_idea", recorded)
+
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="a thought", thread_set_by="human"
+    )
+
+    await blocks._work(desk, block, [], classify=False)
+
+    assert read == ["a thought"]
