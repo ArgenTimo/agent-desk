@@ -95,6 +95,7 @@ from agent_desk.store.repo import (
     Kicking,
     LooksLike,
     ProjectLink,
+    Seen,
     Store,
     Task,
     TemplateLine,
@@ -322,7 +323,7 @@ class Project:
         return sum(instance.flagged for instance in self.instances)
 
 
-def shape(rows: list[BoardRow], groups: list[Group]) -> list[Project]:
+def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) -> list[Project]:
     """Fold the flat list of sessions into what a person actually has.
 
     Sessions belong to a working directory, directories belong to a repository, and repositories
@@ -390,6 +391,31 @@ def shape(rows: list[BoardRow], groups: list[Group]) -> list[Project]:
                     repo_keys=tuple(group.repo_keys),
                 )
             )
+
+    # «Проекты, которые были добавлены в нашу систему, остаются висеть в ней до тех пор, пока мы их
+    # не удалим отсюда. Даже если в проекте в конкретный момент нет ни одной ллм сессии» (073). The
+    # registry is a picture of right now; a project whose last session ended took its ideas, its
+    # queue and its links off the board with it, and the person who closed a terminal lost the place
+    # they had been dragging cards into.
+    #
+    # The checkout it was last seen in travels with it, so a card dragged onto one of these still
+    # has somewhere to run — an empty project that cannot be used is a row, not a project.
+    named = {key for project in projects for key in project.repo_keys} | set(buckets)
+    for one in seen:
+        if one.repo_key in named or one.repo_key in claimed:
+            continue
+        projects.append(
+            Project(
+                key=one.repo_key,
+                name=one.name,
+                instances=(
+                    [Instance(path=one.cwd, name=Path(one.cwd).name or one.cwd, rows=[])]
+                    if one.cwd
+                    else []
+                ),
+                repo_keys=(one.repo_key,),
+            )
+        )
 
     position = {row.session.session_id: index for index, row in enumerate(rows)}
     projects.sort(
@@ -608,7 +634,7 @@ async def describe_card(kind: str, card_id: str) -> str:
             store, f"idea:{card_id}", "idea somebody wrote down", idea.text[:600]
         )
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     stamped = [row for project in projects for one in project.instances for row in one.rows]
     if kind in ("session", "agent"):
         mine = [row for row in stamped if row.session.session_id == card_id]
@@ -938,7 +964,7 @@ async def board_csv() -> Response:
     column somebody will sum (docs/03-session-observation.md).
     """
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     out = io.StringIO()
     sheet = csv.writer(out)
     sheet.writerow(
@@ -1014,6 +1040,35 @@ async def open_chats() -> list[Thread]:
     return list(reversed(threads))
 
 
+async def _note_what_is_here(projects: list[Project]) -> None:
+    """Write down every project that has a session right now, so it survives the session ending.
+
+    Only the ones with something running: a project already on the board because it is remembered
+    would otherwise have its `last_at` moved every two seconds, and "when was it last actually
+    running" is the one thing the row is for.
+    """
+    for project in projects:
+        if not project.sessions:
+            continue
+        where = next((one.path for one in project.instances if one.rows), "")
+        for key in project.repo_keys or (project.key,):
+            await store.note_project(key, project.name, where)
+
+
+@router.post("/projects/forget", response_class=HTMLResponse)
+async def take_a_project_off_the_board(request: Request) -> Response:
+    """Stop showing a project that has no sessions (073).
+
+    It removes nothing else. Its ideas, its queue, its links and its subscription belong to the
+    project rather than to the board, and a control that quietly deleted them would be a delete
+    button wearing "hide" as a label. A project with a session running comes straight back, which
+    is right: it is here.
+    """
+    form = await _form(request)
+    await store.forget_project(form.get("key", "").strip())
+    return HTMLResponse(await render_page())
+
+
 async def render_page(message: str = "") -> str:
     """The whole console: the board, the write-path panel when one is open, and the blocks.
 
@@ -1022,7 +1077,11 @@ async def render_page(message: str = "") -> str:
     """
     groups = await store.groups()
     rows, notices = await asyncio.to_thread(board)
-    projects = shape(rows, groups)
+    projects = shape(rows, groups, await store.seen_projects())
+    # Written from the read that happened anyway, never on a schedule of its own (073). A project
+    # this console has seen stays on the board after its last session ends, because everything
+    # attached to it — its ideas, its queue, its links — stayed in the database.
+    await _note_what_is_here(projects)
     chats = await open_chats()
     # The chat the page opens on, which `_tabs.html` marks with `loop.first`. Its bench is the one
     # rendered into the page; every other chat's is fetched when somebody switches to it.
@@ -1285,7 +1344,7 @@ async def how_much_could_run() -> JSONResponse:
     else, and the two would disagree the first time either changed.
     """
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     live = await asyncio.to_thread(autostart.live_agents)
     seats = []
     for project in projects:
@@ -1552,7 +1611,7 @@ async def _kept_the_variable(key: str, name: str, typed: str) -> bool:
 async def render_project(key: str, refused: str = "") -> str:
     """The settings panel for one project, rendered where the write path's panel goes."""
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     named = next((project for project in projects if project.key == key), None)
     return env.get_template("_project.html").render(
         refused=refused,
@@ -1600,7 +1659,7 @@ async def project_page(key: str = "") -> HTMLResponse:
 async def new_instance_form(request: Request, key: str = "") -> Response:
     """The form behind "New instance…": a name, a specialisation, and what it will do."""
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     named = next((project for project in projects if project.key == key), None)
     panel = env.get_template("_instance.html").render(
         stage="ask",
@@ -1632,7 +1691,7 @@ async def new_instance(request: Request) -> Response:
     doing = form.get("doing", "").strip()[:200]
 
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     named = next((project for project in projects if project.key == key), None)
     if named is None or not named.instances:
         # A project added by pointing at a repository is an address and nothing else, and this is
@@ -2050,7 +2109,7 @@ async def ask(request: Request) -> Response:
         # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
         # the target the human picked is a card, and only a row that has been through `shape`
         # knows which card it is under.
-        projects = shape(rows, await store.groups())
+        projects = shape(rows, await store.groups(), await store.seen_projects())
         stamped = [row for p in projects for i in p.instances for row in i.rows]
         made = await block_runs.submit(
             store,
@@ -2099,7 +2158,7 @@ async def workbench_ties(cards: str = "") -> HTMLResponse:
     """
     picked = [one for one in cards.split(",") if one]
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     stamped = [row for project in projects for one in project.instances for row in one.rows]
     drawn = bench.lay_out(picked, stamped, await store.ideas(), await store.idea_links())
     ties = [{"from": tie.from_id, "to": tie.to_id, "says": tie.says} for tie in drawn.ties]
@@ -3888,7 +3947,7 @@ async def workbench_diagram(cards: str = "") -> HTMLResponse:
     rows, _ = await asyncio.to_thread(board)
     # The *shaped* rows: `project_key` is stamped by `shape`, and without it a session and the
     # project it runs in are two boxes with nothing between them.
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     stamped = [row for project in projects for one in project.instances for row in one.rows]
     return HTMLResponse(
         env.get_template("_workbench.html").render(
@@ -3988,7 +4047,10 @@ def sessions_only() -> list[BoardRow]:
 async def _project_choices() -> list[tuple[str, str]]:
     """Every project a card could be pointed at, as (key, name)."""
     rows = await asyncio.to_thread(sessions_only)
-    return [(one.key, one.name) for one in shape(rows, await store.groups())]
+    return [
+        (one.key, one.name)
+        for one in shape(rows, await store.groups(), await store.seen_projects())
+    ]
 
 
 @router.get("/ideas/{idea_id}/kin", response_class=HTMLResponse)
@@ -4028,7 +4090,14 @@ async def idea_kin(idea_id: str) -> HTMLResponse:
     key = ideas[idea_id].project_key
     if key:
         rows, _ = await asyncio.to_thread(board)
-        named = next((one for one in shape(rows, await store.groups()) if one.key == key), None)
+        named = next(
+            (
+                one
+                for one in shape(rows, await store.groups(), await store.seen_projects())
+                if one.key == key
+            ),
+            None,
+        )
         project = {"key": key, "name": named.name if named else key.split(":")[-1]}
 
     return HTMLResponse(
@@ -4085,7 +4154,14 @@ async def _project_name(key: str) -> str:
     if not key:
         return ""
     rows, _ = await asyncio.to_thread(board)
-    named = next((one for one in shape(rows, await store.groups()) if one.key == key), None)
+    named = next(
+        (
+            one
+            for one in shape(rows, await store.groups(), await store.seen_projects())
+            if one.key == key
+        ),
+        None,
+    )
     return named.name if named else key.split(":")[-1]
 
 
@@ -4301,7 +4377,7 @@ async def queue_task(request: Request) -> Response:
     key = form.get("key", "").strip()
     instruction = form.get("instruction", "").strip()
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     named = next((project for project in projects if project.key == key), None)
     if named and instruction and named.instances:
         await store.queue_task(
@@ -4458,7 +4534,7 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         if one in known and known[one].state != "done"
     ]
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     # Where the work happens: the project the instruction was aimed at, or the only one there is.
     directive = next((d for d in await store.directives() if d.block_id == block_id), None)
     row = next(
@@ -4579,7 +4655,7 @@ async def set_exploring(request: Request) -> Response:
         # The checkout goes with the switch: an exploration is the first task in a project and
         # has none to inherit a directory from (docs/adr/0008).
         rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups())
+        projects = shape(rows, await store.groups(), await store.seen_projects())
         named = next((project for project in projects if project.key == key), None)
         where = named.instances[0].path if named and named.instances else ""
         await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes", cwd=where)
@@ -4603,7 +4679,7 @@ async def set_kicking_here(request: Request) -> Response:
     on = form.get("kicking") == "yes"
     if key:
         rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups())
+        projects = shape(rows, await store.groups(), await store.seen_projects())
         named = next((project for project in projects if project.key == key), None)
         for row in [r for i in (named.instances if named else []) for r in i.rows]:
             if row.session.kind != "bg":
@@ -5164,7 +5240,7 @@ async def _build_it(idea: Idea) -> None:
     if not idea.project_key:
         return
     rows, _ = await asyncio.to_thread(board)
-    projects = shape(rows, await store.groups())
+    projects = shape(rows, await store.groups(), await store.seen_projects())
     named = next((one for one in projects if one.key == idea.project_key), None)
     if named is None or not named.instances:
         return

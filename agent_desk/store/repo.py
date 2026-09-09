@@ -419,6 +419,19 @@ class Graded(BaseModel):
         return f"{self.right_} of {self.of}"
 
 
+class Seen(BaseModel):
+    """A project this console has seen, which stays on the board until somebody takes it off (073)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    name: str
+    # A checkout it was last seen in, so a card dragged onto it still has somewhere to run.
+    cwd: str = ""
+    first_at: int = 0
+    last_at: int = 0
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -3080,6 +3093,50 @@ class Store:
             if one["from_name"] in here and one["to_name"] in here
         ]
         return cards, lines, known
+
+    # --- a project stays (073-a-project-stays.sql) ----------------------------------------------
+    async def note_project(self, repo_key: str, name: str, cwd: str = "") -> None:
+        """Record that this project is here. Called from the board read, which happens anyway.
+
+        `first_at` is kept and `name`, `cwd` and `last_at` move: what somebody deciding whether to
+        take a project off the board wants to know is when it was last actually running.
+        """
+        if not repo_key:
+            return
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO project_seen (repo_key, name, cwd, first_at, last_at) "
+                    "VALUES (:key, :name, :cwd, :at, :at) "
+                    "ON CONFLICT(repo_key) DO UPDATE SET "
+                    "name = :name, cwd = CASE WHEN :cwd = '' THEN cwd ELSE :cwd END, last_at = :at"
+                ),
+                {"key": repo_key, "name": name[:200], "cwd": cwd, "at": _now_ms()},
+            )
+
+    async def seen_projects(self) -> list[Seen]:
+        """Every project this console has seen, newest first."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, name, cwd, first_at, last_at FROM project_seen "
+                    "ORDER BY last_at DESC LIMIT 200"
+                )
+            )
+            return [Seen(**row._mapping) for row in rows]
+
+    async def forget_project(self, repo_key: str) -> bool:
+        """Take one off the board. Removes nothing else.
+
+        Its ideas, its queue, its links and its subscription belong to the project rather than to
+        the board, and a control that quietly deleted them would be a delete button wearing "hide"
+        as a label.
+        """
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("DELETE FROM project_seen WHERE repo_key = :key"), {"key": repo_key}
+            )
+            return bool(done.rowcount)
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

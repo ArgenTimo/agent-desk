@@ -265,5 +265,16 @@
     </span>
   </form>
 
+  {# «Проекты остаются висеть в системе до тех пор, пока мы их не удалим отсюда» (073). Taking one
+     off stops the board showing it once its sessions have ended; it removes nothing else, and a
+     project with something running comes straight back — which is right, because it is here. #}
+  <form class="forget-project" method="post" action="/projects/forget"
+        hx-post="/projects/forget" hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <button type="submit" class="danger">Take it off the board</button>
+    <span class="small dim">It stops being shown once nothing is running in it. Its ideas, its
+      queue and its connectors stay exactly where they are.</span>
+  </form>
+
   <footer><a class="as-button" href="/">Close</a></footer>
 </div>

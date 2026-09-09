@@ -34,7 +34,7 @@ def a_project(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         routes,
         "shape",
-        lambda rows, groups: [
+        lambda rows, groups, seen=(): [
             SimpleNamespace(key=KEY, name="api", instances=[SimpleNamespace(path=str(tmp_path))])
         ],
     )
@@ -78,7 +78,9 @@ async def test_an_idea_whose_project_has_no_checkout_here_queues_nothing(
 ) -> None:
     monkeypatch.setattr(routes, "board", lambda: ([], 0))
     monkeypatch.setattr(
-        routes, "shape", lambda rows, groups: [SimpleNamespace(key=KEY, name="api", instances=[])]
+        routes,
+        "shape",
+        lambda rows, groups, seen=(): [SimpleNamespace(key=KEY, name="api", instances=[])],
     )
     idea = await inbox.capture(desk, "cache the probe results", project_key=KEY)
 

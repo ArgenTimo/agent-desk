@@ -3176,3 +3176,6 @@ button.go:hover, button.yes:hover {
 .rewind-slider { width: 100%; }
 .rewind-said { margin: 6px 0 0; }
 .rewind-cards { margin: 4px 0 0; padding-left: 16px; font-size: var(--t-sm); line-height: 1.4; }
+/* Taking a project off the board (073-a-project-stays.sql). Under the arming controls, because it
+   is the last thing somebody does with a project and not the first. */
+.forget-project { margin: 12px 0 0; display: grid; gap: 4px; justify-items: start; }
