@@ -85,6 +85,7 @@ from agent_desk.observe.model import (
     triage_rank,
 )
 from agent_desk.observe.shape import repository_of
+from agent_desk.store import repo
 from agent_desk.store.repo import (
     DRAFT_KINDS,
     BenchCard,
@@ -1634,6 +1635,11 @@ async def render_project(key: str, refused: str = "") -> str:
         note=await store.project_note(key),
         # The words they use here, and the ones that mean the same everywhere (021-glossary.sql).
         terms=await store.terms(key),
+        # What this project lends the agents it starts (074). Beside the connectors, because a
+        # connector is a link to another service and this is the half of that list an agent can
+        # actually call.
+        servers=await store.mcp_servers(key),
+        server_kinds=repo.MCP_KINDS,
     )
 
 
@@ -1893,6 +1899,46 @@ async def remove_project_link(request: Request) -> Response:
     if _wants_fragment(request):
         return HTMLResponse(panel)
     return HTMLResponse(await render_page(panel))
+
+
+@router.post("/mcp-servers", response_class=HTMLResponse)
+async def add_mcp_server(request: Request) -> Response:
+    """Attach an MCP server to a project (074).
+
+    «Возможность подключить MCP сервер… у тебя должна быть возможность подключать и добавлять
+    различные mcp.» Every agent this console starts in this project is given them, through a config
+    file under `data_dir` — never a `.mcp.json` in somebody's checkout, which is what CLAUDE.md's
+    second rule refuses.
+
+    The token field names a variable and never holds a value, which is the decision a project link
+    was built under and the reason this one has no field to type a secret into.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    said = ""
+    try:
+        await store.add_mcp_server(
+            key,
+            form.get("name", ""),
+            form.get("kind", "stdio").strip(),
+            form.get("address", ""),
+            form.get("token_env", "").strip()[:64],
+        )
+    except ValueError as why:
+        said = str(why)
+    if said:
+        return HTMLResponse(await render_project(key, refused=said))
+    panel = await render_project(key)
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+
+@router.post("/mcp-servers/remove", response_class=HTMLResponse)
+async def remove_mcp_server(request: Request) -> Response:
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    await store.remove_mcp_server(key, form.get("name", "").strip())
+    panel = await render_project(key)
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
 
 @router.post("/projects", response_class=HTMLResponse)
@@ -4581,6 +4627,7 @@ async def implement_ideas(block_id: str, request: Request) -> Response:
         ),
         cwd=named.instances[0].path,
         name=block.input[:40],
+        servers=await store.mcp_servers(named.key),
     )
     if result.started:
         await store.take_next_task(named.key)
@@ -5186,6 +5233,7 @@ async def _start_it(task: Task) -> None:
         ),
         cwd=task.cwd,
         name=task.title,
+        servers=await store.mcp_servers(task.repo_key),
     )
     if result.started:
         await store.task_started(task.id, result.agent_id)

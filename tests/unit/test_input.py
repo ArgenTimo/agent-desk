@@ -862,7 +862,7 @@ async def test_an_instruction_is_written_out_and_started(
     told: list[str] = []
 
     def fake_start(
-        instruction: str, *, cwd: str, name: str, env: object = None
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
     ) -> dispatch.Started:
         told.append(instruction)
         return dispatch.Started(True, agent_id="agent3")
@@ -1228,7 +1228,7 @@ async def test_a_request_about_the_console_is_done_in_the_console(
     told: list[str] = []
 
     def fake_start(
-        instruction: str, *, cwd: str, name: str, env: object = None
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
     ) -> dispatch.Started:
         told.append(cwd)
         return dispatch.Started(True, agent_id="desk1")
@@ -1306,7 +1306,7 @@ async def test_a_desk_agent_is_given_the_facts_and_the_tokens_it_needs(
     seen: dict[str, object] = {}
 
     def fake_start(
-        instruction: str, *, cwd: str, name: str, env: object = None
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
     ) -> dispatch.Started:
         seen.update(instruction=instruction, env=env)
         return dispatch.Started(True, agent_id="desk9")

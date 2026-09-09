@@ -55,7 +55,7 @@ def started(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     calls: list[dict[str, str]] = []
 
     def fake_start(
-        instruction: str, *, cwd: str, name: str, env: object = None
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
     ) -> dispatch.Started:
         calls.append({"instruction": instruction, "cwd": cwd, "name": name})
         return dispatch.Started(True, agent_id=f"agent{len(calls)}")

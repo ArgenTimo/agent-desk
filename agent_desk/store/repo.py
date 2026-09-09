@@ -432,6 +432,38 @@ class Seen(BaseModel):
     last_at: int = 0
 
 
+# The two kinds of MCP server the CLI takes (074). A third would be a control that fails when
+# pressed, which is the failure `allowed.py` exists to prevent.
+MCP_KINDS = ("stdio", "http")
+
+
+class McpServer(BaseModel):
+    """An MCP server a project lends to the agents this console starts in it (074)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_key: str
+    name: str
+    kind: str
+    # The command line for stdio, the URL for http.
+    address: str
+    # The *name* of an environment variable, never its value: this is a plain SQLite file that a
+    # second application already serves a redacted view out of (docs/07-security.md).
+    token_env: str = ""
+    at: int = 0
+
+    @property
+    def token_present(self) -> bool:
+        """Whether there is something under that name here — never what it is.
+
+        The same two places a project link counts, through the same function: a second reader of
+        "is this secret set" is a second answer to it.
+        """
+        from agent_desk import secrets as kept
+
+        return kept.has(self.token_env or "")
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -3135,6 +3167,63 @@ class Store:
         async with self.engine.begin() as conn:
             done = await conn.execute(
                 text("DELETE FROM project_seen WHERE repo_key = :key"), {"key": repo_key}
+            )
+            return bool(done.rowcount)
+
+    # --- an MCP server a project lends (074-an-mcp-server-a-project-lends.sql) -------------------
+    async def add_mcp_server(
+        self, repo_key: str, name: str, kind: str, address: str, token_env: str = ""
+    ) -> McpServer:
+        """Attach one to a project. The same name twice replaces it, which is what editing is.
+
+        Refuses a kind the CLI does not take and a variable name that does not look like one: the
+        second is the same guard `project_link` is under, and it is there because `ghp_R7Sz…` is
+        letters, digits and underscores too (docs/07-security.md).
+        """
+        if kind not in MCP_KINDS:
+            raise ValueError(f"an MCP server is stdio or http, not {kind!r}")
+        if not name.strip() or not address.strip():
+            raise ValueError("an MCP server needs a name and an address")
+        if token_env and not _ENV_NAME.match(token_env):
+            raise ValueError(
+                f"{token_env!r} is not the name of an environment variable — this stores the "
+                "name, never the value"
+            )
+        made = McpServer(
+            repo_key=repo_key,
+            name=name.strip()[:80],
+            kind=kind,
+            address=address.strip()[:2000],
+            token_env=token_env,
+            at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT OR REPLACE INTO mcp_server "
+                    "(repo_key, name, kind, address, token_env, at) "
+                    "VALUES (:repo_key, :name, :kind, :address, :token_env, :at)"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def mcp_servers(self, repo_key: str = "") -> list[McpServer]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, name, kind, address, token_env, at FROM mcp_server "
+                    "WHERE (:key = '' OR repo_key = :key) ORDER BY repo_key, name"
+                ),
+                {"key": repo_key},
+            )
+            return [McpServer(**row._mapping) for row in rows]
+
+    async def remove_mcp_server(self, repo_key: str, name: str) -> bool:
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("DELETE FROM mcp_server WHERE repo_key = :key AND name = :name"),
+                {"key": repo_key, "name": name},
             )
             return bool(done.rowcount)
 

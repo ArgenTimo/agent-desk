@@ -314,7 +314,7 @@ async def test_build_it_starts_straight_away_when_the_project_is_armed(
     already said this project may start work by itself."""
     started: list[str] = []
 
-    def start(task: object, *, cwd: str, name: str) -> object:
+    def start(task: object, *, cwd: str, name: str, **rest: object) -> object:
         started.append(name)
         return SimpleNamespace(started=True, agent_id="agent-1", detail="")
 
@@ -383,7 +383,7 @@ async def test_a_start_that_fails_is_recorded_on_the_task_rather_than_lost(
 ) -> None:
     """A failed start with nothing written down is a task that reads as running forever."""
 
-    def refuses(task: object, *, cwd: str, name: str) -> object:
+    def refuses(task: object, *, cwd: str, name: str, **rest: object) -> object:
         return SimpleNamespace(started=False, agent_id="", detail="no such directory")
 
     monkeypatch.setattr(routes.dispatch, "start", refuses)

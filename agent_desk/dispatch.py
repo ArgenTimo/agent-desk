@@ -13,15 +13,19 @@ agent it starts.
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from agent_desk.config import settings
+from agent_desk.store.repo import McpServer
 
 # Flags that would hand a dispatched agent the machine. This program does not pass them, from any
 # route, under any setting — an agent that cannot ask a human for permission is an agent nobody is
@@ -46,20 +50,68 @@ class Started:
     detail: str = ""
 
 
-def argv(instruction: str, *, worktree: str) -> list[str]:
+def argv(instruction: str, *, worktree: str, mcp_config: Path | None = None) -> list[str]:
     """The command, as a list, so that a test can read it and a shell never sees it.
 
     `--bg` returns as soon as the session exists. `-w` gives it a git worktree of its own, which
     is what keeps the work out of the checkout somebody is sitting in (docs/adr/0006). The
     instruction goes on the command line as the prompt, which is where the CLI takes it.
+
+    `--mcp-config` is how a project lends its servers to the agent it starts (074). The file is
+    under `data_dir` and never in the repository: `.mcp.json` in somebody's checkout is precisely
+    what CLAUDE.md's second rule refuses, and a person who looks at their tree afterwards finds it
+    as they left it.
     """
     return [
         settings.claude_bin,
         "--bg",
         "--worktree",
         worktree,
+        *(["--mcp-config", str(mcp_config)] if mcp_config else []),
         instruction,
     ]
+
+
+# Where the servers a project lends are written. One file, under the only tree this program writes
+# to (config.py), replaced each time an agent starts.
+MCP_CONFIG = "mcp-servers.json"
+
+
+def as_mcp_config(servers: Sequence[McpServer]) -> dict[str, Any]:
+    """The servers, in the shape the CLI reads them in.
+
+    A stdio server is a command and its arguments; an http one is a URL. The variable name a server
+    was given is passed as an env entry pointing at itself — the *name* travels, the value is
+    whatever the process this starts already has, and this program never holds it
+    (docs/07-security.md).
+    """
+    found: dict[str, Any] = {}
+    for one in servers:
+        if one.kind == "http":
+            found[one.name] = {"type": "http", "url": one.address}
+        else:
+            parts = shlex.split(one.address)
+            if not parts:
+                continue
+            found[one.name] = {"command": parts[0], "args": parts[1:]}
+        if one.token_env:
+            found[one.name]["env"] = {one.token_env: f"${{{one.token_env}}}"}
+    return {"mcpServers": found}
+
+
+def write_mcp_config(servers: Sequence[McpServer]) -> Path | None:
+    """Write the config out, or `None` when a project lends nothing.
+
+    `None` rather than an empty file, so an agent started for a project with no servers is started
+    with exactly the command it was before.
+    """
+    shape = as_mcp_config(servers)
+    if not shape["mcpServers"]:
+        return None
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    where = settings.data_dir / MCP_CONFIG
+    where.write_text(json.dumps(shape, indent=2, sort_keys=True), encoding="utf-8")
+    return where
 
 
 def resume_argv(session_id: str, instruction: str) -> list[str]:
@@ -347,7 +399,12 @@ def _read_id(output: str) -> str:
 
 
 def start(
-    instruction: str, *, cwd: str, name: str, env: Mapping[str, str] | None = None
+    instruction: str,
+    *,
+    cwd: str,
+    name: str,
+    env: Mapping[str, str] | None = None,
+    servers: Sequence[McpServer] = (),
 ) -> Started:
     """Start one agent on one instruction. Blocking: the caller runs it in a thread.
 
@@ -362,7 +419,7 @@ def start(
     if shutil.which(settings.claude_bin) is None and not Path(settings.claude_bin).exists():
         return Started(False, detail=f"{settings.claude_bin} is not installed here")
 
-    command = argv(instruction, worktree=_worktree_name(name))
+    command = argv(instruction, worktree=_worktree_name(name), mcp_config=write_mcp_config(servers))
     forbidden = [flag for flag in command if flag in NEVER]
     if forbidden:  # pragma: no cover — the argv builder cannot produce one; the check is the rule
         return Started(False, detail=f"refusing to start an agent with {forbidden[0]}")

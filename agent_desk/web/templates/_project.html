@@ -265,6 +265,53 @@
     </span>
   </form>
 
+  {# The half of the connector list an agent can actually call (074). «Возможность подключить MCP
+     сервер.» Every agent this console starts in this project is given these, through a config file
+     under `data_dir` — never a `.mcp.json` in somebody's checkout, which is the write CLAUDE.md's
+     second rule refuses. The token field names a variable and never holds a value. #}
+  <header class="second">MCP servers this project lends its agents</header>
+  {% if servers %}
+  <ul class="links">
+    {% for server in servers %}
+    <li class="node">
+      <span class="pill quiet works">{{ server.kind }}</span>
+      <strong>{{ server.name }}</strong>
+      <span class="dim">{{ server.address }}</span>
+      {% if server.token_env %}
+      <span class="pill{{ ' flag' if not server.token_present }}"
+            title="whether there is something under this name — never what it is">{{ server.token_env }}{{ " · set here" if server.token_present else " · not set" }}</span>
+      {% endif %}
+      <form method="post" action="/mcp-servers/remove"
+            hx-post="/mcp-servers/remove" hx-target="#message">
+        <input type="hidden" name="key" value="{{ key }}">
+        <input type="hidden" name="name" value="{{ server.name }}">
+        <button type="submit" class="danger">remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty small">None. An agent started here gets exactly the tools the CLI gives it.</p>
+  {% endif %}
+  <form class="new-server" method="post" action="/mcp-servers"
+        hx-post="/mcp-servers" hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <label class="visually-hidden" for="server-name-{{ key }}">what to call it</label>
+    <input id="server-name-{{ key }}" name="name" placeholder="what to call it">
+    <label class="visually-hidden" for="server-kind-{{ key }}">what kind it is</label>
+    <select id="server-kind-{{ key }}" name="kind">
+      {% for one in server_kinds %}
+      <option value="{{ one }}">{{ one }}</option>
+      {% endfor %}
+    </select>
+    <label class="visually-hidden" for="server-address-{{ key }}">the command or the URL</label>
+    <input id="server-address-{{ key }}" name="address"
+           placeholder="the command to run, or the URL to call">
+    <label class="visually-hidden" for="server-token-{{ key }}">the name of a variable it needs</label>
+    <input id="server-token-{{ key }}" name="token_env" placeholder="A_TOKEN — the name, never the value">
+    <button type="submit">Attach it</button>
+  </form>
+
   {# «Проекты остаются висеть в системе до тех пор, пока мы их не удалим отсюда» (073). Taking one
      off stops the board showing it once its sessions have ended; it removes nothing else, and a
      project with something running comes straight back — which is right, because it is here. #}

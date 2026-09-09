@@ -141,6 +141,9 @@ async def _start(store: Store, task: Task) -> None:
         ),
         cwd=task.cwd,
         name=task.title,
+        # What this project lends its agents (074). Read at the moment it starts, because a
+        # server added an hour ago is one the person expects the next agent to have.
+        servers=await store.mcp_servers(task.repo_key),
     )
     if result.started:
         await store.task_started(task.id, result.agent_id)
@@ -490,6 +493,7 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
         ),
         cwd=cwd,
         name=task.title,
+        servers=await store.mcp_servers(arming.repo_key),
     )
     if result.started:
         await store.task_started(task.id, result.agent_id)
