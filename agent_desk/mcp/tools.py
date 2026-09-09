@@ -307,6 +307,18 @@ def _as_a_failure(said: str) -> str:
     return f"did not work — {first}" + (f"\n{rest}" if rest else "")
 
 
+async def _where_i_stopped(store: Store, given: dict[str, Any]) -> str:
+    """Where the work stopped: the first thing to read after a context window is compacted.
+
+    «Каждый раз я терял детали и заново выяснял, где нахожусь: перечитывал пул, идею, код.» All of
+    it is already written down; this is the shape that costs five hundred tokens instead of twenty
+    thousand (`agent_desk/standing.py`).
+    """
+    from agent_desk import standing
+
+    return await standing.where_it_stopped(store)
+
+
 async def _leave(store: Store, given: dict[str, Any]) -> str:
     """Leave what you found on a workbench, for whoever picks the work up next.
 
@@ -615,6 +627,16 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="where_i_stopped",
+        says=(
+            "What was being worked on, what was committed, what the gate said — the first thing "
+            "to read after a compaction."
+        ),
+        takes={"type": "object", "properties": {}},
+        run=_where_i_stopped,
+        shows="The shift began 4h ago and has 31 lines in it. …",
     ),
     Tool(
         name="leave",

@@ -59,6 +59,7 @@ from agent_desk import (
     roles,
     room,
     spread,
+    standing,
     starting,
     telling,
     ties,
@@ -3284,6 +3285,34 @@ async def _looks_like(idea_id: str) -> list[tuple[LooksLike, Idea]]:
         if other is not None:
             found.append((one, other))
     return found
+
+
+@router.get("/standing", response_class=PlainTextResponse)
+async def where_it_stopped() -> PlainTextResponse:
+    """Where the work stopped, as text (01M21KTYEDDEJSZCH1MW7ZJ0YX).
+
+    «Маршрут, отдающий это как простой текст, а не как страницу.» The reader is usually not a
+    person with a browser: it is whatever starts next and has to find out where it is, and a page
+    is markup it has to get through before it reaches the four sentences it came for.
+    """
+    return PlainTextResponse(await standing.where_it_stopped(store))
+
+
+@router.get("/shift", response_class=PlainTextResponse)
+async def the_whole_shift() -> PlainTextResponse:
+    """Every line of the shift being worked, for the reader who saw the number and wants the rest.
+
+    Unbounded on purpose, and it is the only thing here that is: `/standing` is what has a ceiling,
+    and a ceiling with nowhere to go behind it is a ceiling that loses things.
+    """
+    shift = await store.the_shift()
+    if shift is None:
+        return PlainTextResponse("Nothing has happened yet.")
+    now = now_ms()
+    steps = await store.shift_steps(shift.id)
+    said = [f"{len(steps)} lines, oldest first."]
+    said += [f"{since(one.at, now)} ago · {one.what} · {one.said}" for one in steps]
+    return PlainTextResponse("\n".join(said))
 
 
 @router.post("/ideas/kin", response_class=HTMLResponse)

@@ -343,6 +343,40 @@ class LooksLike(BaseModel):
     settled_at: int | None = None
 
 
+# What a line of a shift can be. Five words rather than free text, so that reading a shift back is
+# reading a table and a sixth kind is a decision somebody makes (070-a-shift.sql).
+ShiftLine = Literal["idea", "commit", "gate", "run", "note"]
+
+# How long a silence ends a shift. Long enough to survive lunch and a long gate; short enough that
+# yesterday's work and today's are not one stretch. Nothing watches this clock — it is read when
+# the next line is written, because a program that needed a timer would lose the row on restart.
+SHIFT_ENDS_AFTER_MS = 3 * 60 * 60 * 1000
+
+
+class Shift(BaseModel):
+    """One stretch of work (070)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    began_at: int
+    # None while this is the one being written to.
+    ended_at: int | None = None
+    note: str = ""
+
+
+class ShiftStep(BaseModel):
+    """One thing that happened during a shift, written by whatever did it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    shift_id: str
+    at: int
+    what: ShiftLine
+    said: str = ""
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -1498,6 +1532,9 @@ class Store:
                 text("UPDATE task SET detail = :detail, landed = :landed WHERE id = :id"),
                 {"detail": detail[:500], "landed": int(landed), "id": task_id},
             )
+        await self.note_in_the_shift(
+            "gate", ("green: " if landed else "red: ") + (detail or "it said nothing")
+        )
 
     async def task_failed(self, task_id: str, detail: str) -> None:
         """It stays failed and says why. Retry is a click (docs/adr/0007)."""
@@ -1773,6 +1810,7 @@ class Store:
                 ),
                 filing.model_dump(),
             )
+        await self.note_in_the_shift("commit", f"{issue_key} closes {idea_id}")
         return filing
 
     async def filings(self) -> list[Filing]:
@@ -2039,6 +2077,11 @@ class Store:
                 text("UPDATE idea SET state = :state WHERE id = :id"),
                 {"id": idea_id, "state": state},
             )
+        if state == "done":
+            # A line in the shift, written by the thing that did it rather than assembled at the
+            # end — because the end is exactly the moment a context window runs out (070).
+            one = await self.idea(idea_id)
+            await self.note_in_the_shift("idea", f"closed {idea_id}: {one.summary if one else ''}")
 
     async def set_idea_summary(
         self, idea_id: str, summary: str, *, only_if: str | None = None
@@ -2721,6 +2764,95 @@ class Store:
             )
             row = rows.first()
             return None if row is None else LooksLike(**row._mapping)
+
+    # --- a shift (070-a-shift.sql) --------------------------------------------------------------
+    async def note_in_the_shift(self, what: ShiftLine, said: str) -> ShiftStep:
+        """Write one line into the shift being worked, opening one if there is none.
+
+        No button. The first line opens a shift and a silence longer than `SHIFT_ENDS_AFTER_MS`
+        closes it, because a shift somebody has to start is a shift they start after the part they
+        wanted it for.
+        """
+        now = _now_ms()
+        async with self.engine.begin() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, began_at, ended_at, note FROM shift WHERE ended_at IS NULL "
+                    "ORDER BY began_at DESC LIMIT 1"
+                )
+            )
+            row = rows.first()
+            going = None if row is None else Shift(**row._mapping)
+            if going is not None:
+                last = await conn.execute(
+                    text("SELECT max(at) FROM shift_step WHERE shift_id = :id"), {"id": going.id}
+                )
+                since = last.scalar() or going.began_at
+                if now - since > SHIFT_ENDS_AFTER_MS:
+                    # Closed at its last line rather than now: the hours of silence were not work,
+                    # and a shift that claims them is a shift whose cost per idea is a fiction.
+                    await conn.execute(
+                        text("UPDATE shift SET ended_at = :at WHERE id = :id"),
+                        {"id": going.id, "at": since},
+                    )
+                    going = None
+            if going is None:
+                going = Shift(id=_new_id(), began_at=now, note=said[:200])
+                await conn.execute(
+                    text("INSERT INTO shift (id, began_at, note) VALUES (:id, :began_at, :note)"),
+                    going.model_dump(exclude={"ended_at"}),
+                )
+            step = ShiftStep(id=_new_id(), shift_id=going.id, at=now, what=what, said=said[:400])
+            await conn.execute(
+                text(
+                    "INSERT INTO shift_step (id, shift_id, at, what, said) "
+                    "VALUES (:id, :shift_id, :at, :what, :said)"
+                ),
+                step.model_dump(),
+            )
+            return step
+
+    async def the_shift(self) -> Shift | None:
+        """The one being written to, or `None` when nothing has happened yet."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, began_at, ended_at, note FROM shift WHERE ended_at IS NULL "
+                    "ORDER BY began_at DESC LIMIT 1"
+                )
+            )
+            row = rows.first()
+            return None if row is None else Shift(**row._mapping)
+
+    async def shift_steps(self, shift_id: str, *, limit: int = 500) -> list[ShiftStep]:
+        """What happened during one shift, oldest first."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, shift_id, at, what, said FROM shift_step WHERE shift_id = :id "
+                    "ORDER BY at LIMIT :limit"
+                ),
+                {"id": shift_id, "limit": limit},
+            )
+            return [ShiftStep(**row._mapping) for row in rows]
+
+    async def spent_since(self, at: int) -> float:
+        """What has been spent since a moment, adding up what is already counted.
+
+        «Ни одного нового измерения: вызовы модели уже считаются, шаги прогонов уже считаются. Не
+        хватает сложения по смене.» Two columns and no third measurement: `spend` is what this
+        console's own model calls cost (043) and `run_step.usd` is what a step of a drawing cost
+        (058). Neither of them is what an agent spent in a worktree, which nothing here can see —
+        and the sentence that reports this says so rather than adding a zero.
+        """
+        async with self.engine.connect() as conn:
+            calls = await conn.execute(
+                text("SELECT COALESCE(sum(usd), 0) FROM spend WHERE at >= :at"), {"at": at}
+            )
+            steps = await conn.execute(
+                text("SELECT COALESCE(sum(usd), 0) FROM run_step WHERE at >= :at"), {"at": at}
+            )
+            return float(calls.scalar() or 0.0) + float(steps.scalar() or 0.0)
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:
