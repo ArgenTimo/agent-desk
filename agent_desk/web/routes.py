@@ -2372,6 +2372,18 @@ async def workbench_process(cards: str = "") -> JSONResponse:
             # Action that makes nothing, a step joined to nothing. A structural check and not an
             # opinion, which is why it can be shown without being asked for
             # (01M1XED1E27MBT3TDAK07P5GSG).
+            # What would never happen if this step did not. "Схема — это данные, а не картинка, и
+            # по ней можно отвечать на вопросы… сегодня единственный способ узнать — запустить и
+            # посмотреть." `from_here` already walks it; this asks it of every step at once, so
+            # the page can answer without a second request per card
+            # (01M1XED1CPRAYRA5KNHF7VWKJB).
+            "after": {
+                card.name: [
+                    one for one in process.from_here(card.name, on_bench, lines) if one != card.name
+                ]
+                for card in on_bench
+                if card.role in process.STEPS
+            },
             "gaps": {
                 name: list(said)
                 for name, said in process.gaps(

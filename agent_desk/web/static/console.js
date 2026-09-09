@@ -5068,6 +5068,7 @@ function cardMenuFor(pin) {
       ? [{ what: `rub out all ${linesOf(name).length} of its lines`, act: () => rubOutLinesOf(name) }]
       : []),
     { what: 'why is this here?', act: () => whyItIsHere(pin) },
+    ...(isAStep(pin) ? [{ what: 'what if this stopped?', act: () => whatIfItStopped(pin) }] : []),
     { what: 'a line', act: () => setView(pin, 'hint') },
     { what: 'what it is', act: () => setView(pin, 'metadata') },
     { what: 'everything', act: () => setView(pin, 'full') },
@@ -5133,6 +5134,50 @@ async function whyItIsHere(holder) {
   }
   if (steps.length) box.appendChild(list);
   // Opened, because a chain written into a folded card is a chain nobody sees.
+  if (holder.dataset.view === 'hint') setView(holder, 'metadata');
+}
+
+// "Что будет, если третий шаг упадёт?" A pure walk of the drawing, asked of one card: everything
+// downstream of it is what would never happen, and today the only way to find that out is to run it
+// and watch.
+//
+// It reads what the process panel already fetched rather than asking again — one answer to "what
+// follows what", so this and the run cannot disagree.
+async function whatIfItStopped(holder) {
+  const name = cardName(holder);
+  await readProcess();
+  const after = (processSaid.after || {})[name];
+  const into = holder.querySelector('.pin-body');
+  if (!into) return;
+  let box = into.querySelector('.why-here');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'why-here';
+    into.prepend(box);
+  }
+  box.replaceChildren();
+  const head = document.createElement('p');
+  head.className = 'small';
+  if (!after) {
+    // Not a step, or not on the bench as one. Said rather than shown as an empty list, which reads
+    // as "nothing depends on this" and is a different claim.
+    head.textContent = 'This is not a step, so nothing runs after it.';
+    box.appendChild(head);
+    return;
+  }
+  head.textContent = after.length
+    ? `If this stopped, ${after.length} step${after.length === 1 ? '' : 's'} would never run:`
+    : 'Nothing runs after this one, so stopping here costs nothing else.';
+  box.appendChild(head);
+  if (after.length) {
+    const list = document.createElement('ol');
+    for (const one of after) {
+      const row = document.createElement('li');
+      row.textContent = labelOf(one);
+      list.appendChild(row);
+    }
+    box.appendChild(list);
+  }
   if (holder.dataset.view === 'hint') setView(holder, 'metadata');
 }
 
