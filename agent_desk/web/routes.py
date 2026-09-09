@@ -3287,6 +3287,41 @@ async def _looks_like(idea_id: str) -> list[tuple[LooksLike, Idea]]:
     return found
 
 
+@router.get("/scripts", response_class=PlainTextResponse)
+async def kept_scripts(project: str = "") -> PlainTextResponse:
+    """What is in the drawer, as text (01M21KTYENWWNPMAM8WYSQ5YV2).
+
+    Names and sizes, not bodies: a listing that handed back four scripts to show that four exist
+    is a listing that costs more than the drawer saves.
+    """
+    found = await store.scripts(project_key=project)
+    if not found:
+        return PlainTextResponse("The drawer is empty.")
+    return PlainTextResponse("\n".join(f"{one.name} · {len(one.body)} characters" for one in found))
+
+
+@router.get("/scripts/{name}", response_class=PlainTextResponse)
+async def kept_script(name: str, project: str = "") -> PlainTextResponse:
+    """One script, exactly as it was written. Text, because it is a file that has no disk."""
+    one = await store.script(name, project_key=project)
+    if one is None:
+        return PlainTextResponse(f"There is nothing called {name} in the drawer.", status_code=404)
+    return PlainTextResponse(one.body)
+
+
+@router.post("/scripts", response_class=PlainTextResponse)
+async def keep_a_script(request: Request) -> PlainTextResponse:
+    """Write one into the drawer. The same name twice is one row, which is what saving a file is."""
+    form = await _form(request)
+    try:
+        one = await store.keep_script(
+            form.get("name", ""), form.get("body", ""), project_key=form.get("project", "")
+        )
+    except ValueError as why:
+        return PlainTextResponse(str(why), status_code=422)
+    return PlainTextResponse(f"Kept {one.name}.")
+
+
 @router.get("/standing", response_class=PlainTextResponse)
 async def where_it_stopped() -> PlainTextResponse:
     """Where the work stopped, as text (01M21KTYEDDEJSZCH1MW7ZJ0YX).

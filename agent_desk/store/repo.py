@@ -377,6 +377,17 @@ class ShiftStep(BaseModel):
     said: str = ""
 
 
+class Scratch(BaseModel):
+    """One draft or small script, kept at a project rather than at a conversation (071)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    project_key: str = ""
+    body: str = ""
+    made_at: int = 0
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -2853,6 +2864,69 @@ class Store:
                 text("SELECT COALESCE(sum(usd), 0) FROM run_step WHERE at >= :at"), {"at": at}
             )
             return float(calls.scalar() or 0.0) + float(steps.scalar() or 0.0)
+
+    # --- a drawer at the project (071-a-drawer-at-the-project.sql) ------------------------------
+    async def keep_script(self, name: str, body: str, *, project_key: str = "") -> Scratch:
+        """Write a draft or a small script down under a name. The same name twice is one row.
+
+        What this replaces is a file, and writing a file twice does not leave two of them. A drawer
+        that grew a row per save would hold four versions of one script by lunchtime, and none of
+        them would be the one somebody wanted.
+
+        Nothing is written to disk here, and that is the rule rather than an implementation detail:
+        a drawer of scripts landing next to somebody's code is precisely what CLAUDE.md's second
+        rule refuses.
+        """
+        if not name.strip():
+            raise ValueError("a script needs a name — it is the thing you will ask for it by")
+        made = Scratch(
+            name=name.strip()[:200],
+            project_key=project_key.strip(),
+            body=body,
+            made_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT OR REPLACE INTO scratch (name, project_key, body, made_at) "
+                    "VALUES (:name, :project_key, :body, :made_at)"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def scripts(self, *, project_key: str = "") -> list[Scratch]:
+        """What is in the drawer, by name. Bodies included: a listing that made a caller ask again
+        for each one would cost more than the drawer saves."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT name, project_key, body, made_at FROM scratch "
+                    "WHERE project_key = :key ORDER BY name"
+                ),
+                {"key": project_key.strip()},
+            )
+            return [Scratch(**row._mapping) for row in rows]
+
+    async def script(self, name: str, *, project_key: str = "") -> Scratch | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT name, project_key, body, made_at FROM scratch "
+                    "WHERE project_key = :key AND name = :name"
+                ),
+                {"key": project_key.strip(), "name": name.strip()},
+            )
+            row = rows.first()
+            return None if row is None else Scratch(**row._mapping)
+
+    async def forget_script(self, name: str, *, project_key: str = "") -> bool:
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("DELETE FROM scratch WHERE project_key = :key AND name = :name"),
+                {"key": project_key.strip(), "name": name.strip()},
+            )
+            return bool(done.rowcount)
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

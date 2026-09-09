@@ -307,6 +307,50 @@ def _as_a_failure(said: str) -> str:
     return f"did not work — {first}" + (f"\n{rest}" if rest else "")
 
 
+async def _keep_script(store: Store, given: dict[str, Any]) -> str:
+    """Put a draft or a small script in the drawer, under a name you can ask for it by.
+
+    «Три раза за смену я писал заново одни и те же три скрипта, потому что каталог сессии исчезает
+    вместе с сессией.» A scratch directory belongs to a conversation and dies with it; this belongs
+    to a project and does not.
+
+    Nothing lands on disk. A drawer of scripts sitting next to somebody's code is exactly what the
+    second of the five rules in CLAUDE.md refuses, so the body is a column and running one is the
+    caller's own act in the caller's own tree.
+    """
+    try:
+        one = await store.keep_script(
+            str(given.get("name", "")),
+            str(given.get("body", "")),
+            project_key=str(given.get("project", "")),
+        )
+    except ValueError as why:
+        return f"Not kept. {why}"
+    return f"Kept {one.name}, {len(one.body)} characters."
+
+
+async def _script(store: Store, given: dict[str, Any]) -> str:
+    """One script out of the drawer, or the whole list of what is in it.
+
+    Naming nothing lists names and sizes rather than bodies: a caller that wanted one script and
+    got four has spent the saving.
+    """
+    project = str(given.get("project", ""))
+    name = str(given.get("name", "")).strip()
+    if not name:
+        found = await store.scripts(project_key=project)
+        if not found:
+            return "The drawer is empty."
+        return "\n".join(f"{one.name} · {len(one.body)} characters" for one in found)
+    one = await store.script(name, project_key=project)
+    if one is None:
+        there = ", ".join(x.name for x in await store.scripts(project_key=project))
+        return f"There is nothing called {name} in the drawer." + (
+            f" There is: {there}" if there else ""
+        )
+    return one.body
+
+
 async def _where_i_stopped(store: Store, given: dict[str, Any]) -> str:
     """Where the work stopped: the first thing to read after a context window is compacted.
 
@@ -627,6 +671,35 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="keep_script",
+        says=(
+            "Put a draft or a small script in the drawer, under a name. It belongs to the project "
+            "and outlives this conversation. The same name twice is one script."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "body": {"type": "string"},
+                "project": {"type": "string", "description": "which project; none means any"},
+            },
+            "required": ["name", "body"],
+        },
+        run=_keep_script,
+        writes=True,
+        shows="Kept open_ideas.py, 812 characters.",
+    ),
+    Tool(
+        name="script",
+        says="One script out of the drawer by name, or the list of what is in it.",
+        takes={
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "project": {"type": "string"}},
+        },
+        run=_script,
+        shows="open_ideas.py · 812 characters",
     ),
     Tool(
         name="where_i_stopped",
