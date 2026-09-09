@@ -2366,6 +2366,21 @@ async def workbench_process(cards: str = "") -> JSONResponse:
             "tangled": list(walked.tangled),
             "why_not": process.ready_to_run(on_bench, lines),
             "unfinished": {name: list(gaps) for name, gaps in process.unfinished(on_bench).items()},
+            # The whole thing walked through without running any of it: the order, what each step
+            # would be told, the ways out of every Decision, and where it would stop. Nothing new
+            # is computed — this is `order`, `memory_for` and `roles.missing` put side by side in
+            # the sequence they would happen in (01M1XED1C0SDGWHMX3GRYBE47R).
+            "walk": [
+                {
+                    "name": one.name,
+                    "label": one.label,
+                    "role": one.role,
+                    "told": one.told,
+                    "branches": list(one.branches),
+                    "stops": one.stops,
+                }
+                for one in process.walk(on_bench, lines)
+            ],
             # What each step would be told about what leads into it. Computed here rather than
             # when a run starts, so that "what does this step actually get" is a question somebody
             # can answer by looking, before anything costs anything.

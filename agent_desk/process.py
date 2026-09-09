@@ -216,6 +216,78 @@ def unfinished(cards: Sequence[Card]) -> dict[str, tuple[str, ...]]:
     return short
 
 
+@dataclass(frozen=True)
+class Walked:
+    """One step, as a run would meet it.
+
+    Everything here is worked out from the drawing. `branches` is the one place a dry run has to
+    admit it cannot know: a Decision chooses by what it is told at the time, and this can only name
+    the ways out of it.
+    """
+
+    name: str
+    label: str
+    role: str
+    # What this step would be told about what leads into it — `memory_for`, verbatim.
+    told: str
+    # The ways out of a Decision, as the words on the lines. Empty for anything else.
+    branches: tuple[str, ...]
+    # Why a run would get no further than this, or "". The first one that has a reason is where it
+    # would stop, and everything after it is what it would never reach.
+    stops: str
+
+
+def walk(cards: Sequence[Card], lines: Sequence[Line]) -> tuple[Walked, ...]:
+    """The whole drawing walked through, without running any of it.
+
+    "Нажать «как если бы» — и движок проходит схему до конца: показывает порядок, какие развилки
+    выбрал бы, что именно получил бы на вход каждый шаг, и где остановился бы. Ни одного агента, ни
+    одного вызова модели, ни одной записи."
+
+    Nothing here is new arithmetic. `order` already says the sequence, `memory_for` already says
+    what a step is told, and `roles.missing` already says what a card has not filled in — this puts
+    the three side by side in the order they would happen, which is the thing nobody could see
+    before without paying for a run.
+
+    A drawing of eight steps could not be checked any other way than by running it and paying. That
+    is the difference between a builder somebody is afraid to press and one they try twenty times.
+    """
+    by_name = {card.name: card for card in cards}
+    walked: list[Walked] = []
+    stopped = False
+    for name in order(cards, lines).steps:
+        card = by_name.get(name)
+        if card is None or card.role not in STEPS:
+            continue
+        gaps = roles.missing(card.role, dict(card.said))
+        # The first step that cannot run is where a run would stop. Everything after it is listed
+        # too and says so, because "and then these four would never happen" is half of what
+        # somebody is asking when they press this.
+        because = ""
+        if stopped:
+            because = "a step before this one would have stopped the run"
+        elif gaps:
+            because = "it has not said: " + ", ".join(gaps)
+            stopped = True
+        walked.append(
+            Walked(
+                name=name,
+                label=card.label or name,
+                role=card.role,
+                told=memory_for(name, cards, lines),
+                branches=tuple(
+                    line.says or line.kind
+                    for line in lines
+                    if line.from_name == name and line.kind in ("if", "when")
+                )
+                if card.role == "decision"
+                else (),
+                stops=because,
+            )
+        )
+    return tuple(walked)
+
+
 def ready_to_run(cards: Sequence[Card], lines: Sequence[Line]) -> str:
     """Why this drawing cannot be run yet, or an empty string.
 

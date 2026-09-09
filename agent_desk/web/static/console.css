@@ -693,6 +693,21 @@ button[disabled] { opacity: 0.5; cursor: default; }
   font-size: var(--t-xs);
   color: var(--fg-dim);
 }
+/* The dry run. A step that would stop the run is marked, and everything after it says why it
+   would never be reached — "и вот эти четыре никогда бы не случились" is half of what somebody is
+   asking when they press this. */
+.asif-body ol { margin: 0; padding-left: 20px; }
+.asif-body li { margin-bottom: 8px; font-size: var(--t-sm); line-height: 1.35; }
+.asif-body li.asif-stops { border-left: 3px solid var(--flag); padding-left: 8px; margin-left: -8px; }
+.asif-why { margin: 2px 0; color: var(--flag); }
+.asif-told {
+  margin: 3px 0 0;
+  padding: 4px 6px;
+  font-size: var(--t-xs);
+  white-space: pre-wrap;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-radius: var(--radius);
+}
 .tools-kept { margin-top: 10px; }
 .tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }

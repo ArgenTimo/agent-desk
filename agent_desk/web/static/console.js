@@ -3490,7 +3490,12 @@ let processSaid = {};
 
 async function readProcess() {
   const panel = document.getElementById('process-panel');
-  if (!panel || panel.hidden) return;
+  // Two panels read this now, so the guard is "nobody is looking" rather than "this one is shut".
+  // Written as the latter, opening the dry run read nothing at all and it said "nothing here is a
+  // step" over a bench with thirteen of them — a panel confidently describing a drawing it had
+  // never fetched.
+  const asif = document.getElementById('asif-panel');
+  if (!panel || (panel.hidden && (!asif || asif.hidden))) return;
   const names = onBench().map(cardName);
   if (!names.length) {
     panel.querySelector('.process-body').textContent = 'Nothing on the workbench yet.';
@@ -3560,6 +3565,70 @@ function showMemory(name) {
   if (!into) return;
   into.textContent = said || 'Nothing leads into this step, so it starts from what it says itself.';
 }
+
+// --- the dry run -----------------------------------------------------------------------------
+// "Нажать «как если бы» — и движок проходит схему до конца: показывает порядок, какие развилки
+// выбрал бы, что именно получил бы на вход каждый шаг, и где остановился бы. Ни одного агента, ни
+// одного вызова модели, ни одной записи."
+//
+// It reads the same route the process panel reads, because a dry run that answered from a second
+// calculation would be a dry run that disagrees with the real one — which is worse than not
+// having it. Everything shown here came out of `agent_desk/process.py`.
+function showAsIf() {
+  const panel = document.getElementById('asif-panel');
+  const into = panel?.querySelector('.asif-body');
+  if (!into) return;
+  into.replaceChildren();
+  const walk = processSaid.walk || [];
+  if (!walk.length) {
+    const none = document.createElement('p');
+    none.className = 'small dim';
+    none.textContent = 'Nothing here is a step, so a run would do nothing.';
+    into.appendChild(none);
+    return;
+  }
+  const list = document.createElement('ol');
+  for (const step of walk) {
+    const row = document.createElement('li');
+    if (step.stops) row.className = 'asif-stops';
+    const head = document.createElement('strong');
+    head.textContent = `${step.label} · ${step.role}`;
+    row.appendChild(head);
+    if (step.stops) {
+      const why = document.createElement('p');
+      why.className = 'asif-why';
+      why.textContent = `It would stop here: ${step.stops}`;
+      row.appendChild(why);
+    }
+    if (step.branches.length) {
+      const ways = document.createElement('p');
+      ways.className = 'small dim';
+      // The one place a dry run has to admit what it cannot know. A Decision chooses by what it is
+      // told at the time, and naming the ways out is the whole of what can be said before that.
+      ways.textContent = `It would choose between: ${step.branches.join(' · ')}`;
+      row.appendChild(ways);
+    }
+    if (step.told) {
+      const told = document.createElement('pre');
+      told.className = 'asif-told';
+      told.textContent = step.told;
+      row.appendChild(told);
+    }
+    list.appendChild(row);
+  }
+  into.appendChild(list);
+}
+
+document.querySelector('[data-asif]')?.addEventListener('click', async () => {
+  const panel = document.getElementById('asif-panel');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (panel.hidden) return;
+  // Read again on every opening: a walk shown from what the bench looked like a minute ago is the
+  // wrong answer to "what would happen if I pressed run now".
+  await readProcess();
+  showAsIf();
+});
 
 document.querySelector('[data-process]')?.addEventListener('click', () => {
   const panel = document.getElementById('process-panel');

@@ -94,6 +94,11 @@
       {# The drawing said in words, for somebody who will never open the workbench. #}
       <button type="button" class="chip" data-words
               title="say this process in words — or describe one and have it drawn">in words</button>
+      {# The whole drawing walked through without running any of it: the order, what each step
+         would be told, the ways out of every Decision, and where it would stop. No agent, no model
+         call, nothing written (01M1XED1C0SDGWHMX3GRYBE47R). #}
+      <button type="button" class="chip" data-asif
+              title="walk the whole drawing without running it — nothing starts and nothing is paid for">as if</button>
       <button type="button" class="chip go" data-run
               title="run this drawing, one step at a time">run it</button>
       <span class="spacer"></span>
@@ -186,6 +191,13 @@
         <pre class="words-offer"></pre>
       </aside>
 
+      {# The dry run. Its own panel rather than a section of the process one: that panel answers
+         "what is this drawing", and this answers "what would happen", which is a different
+         question somebody asks at a different moment. #}
+      <aside id="asif-panel" class="process-panel" hidden aria-label="what a run would do">
+        <header>as if it ran</header>
+        <div class="asif-body"></div>
+      </aside>
       <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">
         <header>in this order</header>
         <div class="process-body"></div>
