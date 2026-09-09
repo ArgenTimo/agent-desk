@@ -845,3 +845,93 @@ async def test_a_bound_belongs_to_whoever_has_a_reason_for_one(desk: Store) -> N
     head = source[start : source.index('"""', start)]
 
     assert "limit: int | None = None" in head
+
+
+# --- a model that could not answer is a delay, not a scar -----------------------------------------
+@pytest.mark.unit
+async def test_a_summary_that_never_landed_is_tried_again(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Если в момент записи идеи модель не может ответить — обработка откладывается до того
+    момента, как модель сможет ответить."
+
+    Appraisal already worked that way. The summary did not: one failed run and the card kept a
+    truncated first line for ever, which on a machine that was out of quota for ten minutes is a
+    permanent scar from a temporary fault."""
+    from agent_desk.ideas import appraise
+
+    long = "a very long first line that will certainly be cut short by the fallback " * 3
+    idea = await desk.create_idea(text_=long, summary="", source_kind="typed")
+    await desk.set_idea_summary(idea.id, inbox.fallback_summary(long))
+
+    async def answers(prompt: str):  # type: ignore[no-untyped-def]
+        yield "read the log before deciding"
+
+    monkeypatch.setattr(appraise, "stream_answer", answers)
+    await appraise.sweep(desk)
+
+    again = await desk.idea(idea.id)
+    assert again is not None and again.summary == "read the log before deciding"
+
+
+@pytest.mark.unit
+async def test_a_line_somebody_edited_is_not_replaced(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A human editing the card *while a run was in flight* has said what they want it to be, and a
+    generated line arriving afterwards does not get to disagree.
+
+    Written as the race it guards: the run starts from the line as it was, the person edits it, and
+    the answer lands after."""
+    from agent_desk.ideas import appraise
+
+    idea = await desk.create_idea(
+        text_="a long thought about the reader", summary="", source_kind="typed"
+    )
+    await desk.set_idea_summary(idea.id, "the fallback line")
+    started_from = await desk.idea(idea.id)
+    await desk.set_idea_summary(idea.id, "what I actually meant")
+
+    async def answers(prompt: str):  # type: ignore[no-untyped-def]
+        yield "something else entirely"
+
+    monkeypatch.setattr(appraise, "stream_answer", answers)
+    assert started_from is not None
+    await appraise.better_summary(desk, started_from)
+
+    again = await desk.idea(idea.id)
+    assert again is not None and again.summary == "what I actually meant"
+
+
+@pytest.mark.unit
+async def test_a_model_that_is_still_away_leaves_the_line_alone(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The honest thing for a card nobody has read."""
+    from agent_desk.answer.session import AnswerFailed
+    from agent_desk.ideas import appraise
+
+    long = "a very long first line that will certainly be cut short by the fallback " * 3
+    idea = await desk.create_idea(text_=long, summary="", source_kind="typed")
+    await desk.set_idea_summary(idea.id, inbox.fallback_summary(long))
+
+    async def away(prompt: str):  # type: ignore[no-untyped-def]
+        raise AnswerFailed("out of quota")
+        yield ""
+
+    monkeypatch.setattr(appraise, "stream_answer", away)
+    assert await appraise.better_summary(desk, (await desk.idea(idea.id))) is False  # type: ignore[arg-type]
+
+    again = await desk.idea(idea.id)
+    assert again is not None and again.summary == inbox.fallback_summary(long)
+
+
+@pytest.mark.unit
+async def test_a_card_whose_whole_text_fits_is_not_retried_for_ever(desk: Store) -> None:
+    """The fallback is the first line, cut. If nothing was cut there is nothing to improve, and
+    asking a model every minute for the same answer is what a bound is for."""
+    from agent_desk.ideas import appraise
+
+    idea = await desk.create_idea(text_="add hotkeys", summary="add hotkeys", source_kind="typed")
+
+    assert appraise._still_a_truncation(await desk.idea(idea.id)) is False  # type: ignore[arg-type]

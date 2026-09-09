@@ -12,7 +12,7 @@ import pathlib
 from collections.abc import AsyncIterator
 
 import pytest
-from agent_desk.ideas import inbox
+from agent_desk.ideas import appraise, inbox
 from agent_desk.store.repo import Store
 from agent_desk.web import blocks
 
@@ -97,7 +97,9 @@ async def test_a_generated_line_cannot_undo_the_check(
     async def heading(_prompt: str) -> AsyncIterator[str]:
         yield "Folder cards"
 
-    monkeypatch.setattr(blocks.session, "stream_answer", heading)
+    # The summariser lives in `ideas/appraise.py` now, because the sweep tries it again
+    # when the model was away; the seam moved with it.
+    monkeypatch.setattr(appraise, "stream_answer", heading)
     await blocks._summarise(store, idea)
 
     kept = await store.idea(idea.id)
@@ -113,7 +115,9 @@ async def test_a_generated_line_that_reads_at_a_glance_is_taken(
     async def line(_prompt: str) -> AsyncIterator[str]:
         yield better
 
-    monkeypatch.setattr(blocks.session, "stream_answer", line)
+    # The summariser lives in `ideas/appraise.py` now, because the sweep tries it again
+    # when the model was away; the seam moved with it.
+    monkeypatch.setattr(appraise, "stream_answer", line)
     idea = await inbox.capture(store, GOOD, author="desk")
     await blocks._summarise(store, idea)
 

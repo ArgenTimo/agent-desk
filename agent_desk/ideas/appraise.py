@@ -37,6 +37,7 @@ import re
 import structlog
 
 from agent_desk.answer.session import AnswerFailed, stream_answer
+from agent_desk.ideas import inbox
 from agent_desk.store.repo import Idea, Store
 
 log = structlog.get_logger()
@@ -133,6 +134,46 @@ async def already_there(store: Store, idea: Idea) -> str:
     return ""
 
 
+async def better_summary(store: Store, idea: Idea) -> bool:
+    """Replace a card's line with a generated one, where a run produces a better one.
+
+    Returns whether anything was written. Never raises — an unavailable model leaves the line as
+    it was, which is a truncated first line and is the honest thing for a card nobody has read.
+
+    Two guards, and both are about not overwriting a person.
+
+    A line a human has edited is never replaced: `only_if` is a compare-and-set against the line
+    this run started from, and a human editing the card while the run was in flight has said what
+    they want it to be.
+
+    And a generated line does not get to undo the check `capture` made about a proposal. Held at
+    capture and nowhere else, "a proposal reads at a glance" would be true of the row only for as
+    long as a summary run took, which is a race rather than a promise.
+    """
+    try:
+        parts = [chunk async for chunk in stream_answer(inbox.summary_prompt(idea.text))]
+    except (AnswerFailed, OSError):
+        return False
+    line = next((one for one in "".join(parts).splitlines() if one.strip()), "").strip()
+    if not line:
+        return False
+    if idea.author == "desk" and inbox.unclear(inbox.fallback_summary(line)):
+        return False
+    await store.set_idea_summary(idea.id, inbox.fallback_summary(line), only_if=idea.summary)
+    return True
+
+
+def _still_a_truncation(idea: Idea) -> bool:
+    """Whether this card is still showing the line `capture` put there because it had nothing else.
+
+    Derived rather than recorded: the fallback is the first line, cut. If the card still says
+    exactly that *and* the text has more in it, no generated line ever landed — which on a machine
+    that was out of quota an hour ago is the ordinary outcome, and today it is permanent.
+    """
+    fallback = inbox.fallback_summary(idea.text)
+    return idea.summary == fallback and idea.text.strip() != fallback
+
+
 async def sweep(store: Store) -> int:
     """Read the ideas nobody has read yet. Returns how many were looked at.
 
@@ -140,6 +181,20 @@ async def sweep(store: Store) -> int:
     """
     looked = 0
     for idea in await store.unappraised_ideas(AT_A_TIME):
+        # "Если в момент записи идеи модель не может ответить — обработка откладывается до того
+        # момента, как модель сможет ответить."
+        #
+        # Appraisal already worked that way: a failure leaves `appraised_at` null and the next
+        # sweep tries again. The *summary* did not — one failed run and the card kept a truncated
+        # first line for ever, which on a machine that was out of quota for ten minutes is a
+        # permanent scar from a temporary fault.
+        #
+        # Tried here and only here, which bounds it: an idea that has been appraised was appraised
+        # by a model that was available, so a line still showing the fallback after that is a line
+        # the summariser looked at and had nothing better for. Retrying that one for ever would be
+        # paying for the same answer every minute.
+        if _still_a_truncation(idea):
+            await better_summary(store, idea)
         # Evidence first, because it is free and it is a fact. Only where there is none does a
         # reading of the text get a say.
         evidence = await already_there(store, idea)

@@ -37,7 +37,7 @@ from agent_desk import (
 from agent_desk import secrets as kept
 from agent_desk.answer import classify as classifier
 from agent_desk.answer import session
-from agent_desk.ideas import inbox, kin
+from agent_desk.ideas import appraise, inbox, kin
 from agent_desk.observe import reading
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
@@ -366,22 +366,13 @@ async def _place(store: Store, idea: Idea) -> None:
 
 
 async def _summarise(store: Store, idea: Idea) -> None:
-    """Replace the fallback line if a run produces a better one. Never fail the capture over it."""
-    try:
-        parts = [chunk async for chunk in session.stream_answer(inbox.summary_prompt(idea.text))]
-    except (session.AnswerFailed, OSError):
-        return
-    line = next((one for one in "".join(parts).splitlines() if one.strip()), "").strip()
-    # A generated line does not get to undo the check `capture` made. Held at capture and nowhere
-    # else, "a proposal reads at a glance" would be true of the row for as long as it took a
-    # summary run to finish, which is not a promise — it is a race.
-    if idea.author == "desk" and inbox.unclear(inbox.fallback_summary(line)):
-        return
-    if line:
-        # Only if the fallback is still there. A human editing the card while this run was in
-        # flight has said what they want the line to be, and a generated one arriving afterwards
-        # does not get to disagree.
-        await store.set_idea_summary(idea.id, inbox.fallback_summary(line), only_if=idea.summary)
+    """Replace the fallback line if a run produces a better one. Never fail the capture over it.
+
+    One implementation, in `ideas/appraise.py`, because the sweep tries this again when the model
+    was unavailable here — and two copies of "what may overwrite a card's line" would disagree
+    about a person's own words the first time either moved.
+    """
+    await appraise.better_summary(store, idea)
 
 
 async def draft(store: Store, idea: Idea, kind: DraftKind) -> None:
