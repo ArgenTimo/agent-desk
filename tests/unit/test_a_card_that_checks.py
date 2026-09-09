@@ -247,22 +247,25 @@ def test_it_reads_an_answer_and_says_which_one() -> None:
     assert 'data-add="check"' in BOARD.read_text(encoding="utf-8")
 
 
-async def test_a_check_joined_to_two_answers_refuses_to_guess(desk: Store) -> None:
-    """Found in a browser: joined to two, it read the first and said nothing about the choice. One
-    verdict about one of two things, with no way to tell which."""
+async def test_a_check_joined_to_two_answers_reads_the_newest_and_says_which(desk: Store) -> None:
+    """Refusing to choose was the first answer here, and using it showed why that is wrong: an
+    answer grown from a check arrives joined to that check, so two is the ordinary state after one
+    "try again" — and the line to it is worked out rather than drawn, so it cannot be rubbed out.
+    The fault the refusal was written for was reading one of several *silently*."""
     first = await _an_answer(desk, "one", "fine")
     second = await _an_answer(desk, "two", "also fine")
     made = await desk.add_check_card("no errors", "does not contain ERROR")
 
     answer = await routes.run_a_check(_a_form(id=made.id, on=f"answer:{first}%2Canswer:{second}"))
 
-    assert "joined to 2 answers" in answer.body.decode()
-    assert (await desk.check_card(made.id)).verdict == ""  # type: ignore[union-attr]
+    assert json.loads(answer.body)["about"] == f"answer:{max(first, second)}"
+    assert (await desk.check_card(made.id)).about == f"answer:{max(first, second)}"  # type: ignore[union-attr]
 
 
-def test_the_card_says_so_before_it_is_pressed() -> None:
-    """A control that will refuse should say so where somebody can read it, not when they press."""
-    assert "A check reads one — rub out the others." in _code()
+def test_the_card_says_which_one_it_reads_before_it_is_pressed() -> None:
+    """A control that reaches for one of several has to say which, where somebody reads it rather
+    than after they press."""
+    assert "The newest of the ${joined} it is joined to." in _code()
 
 
 # --- and what a verdict does to the card ---------------------------------------------------------
@@ -359,3 +362,105 @@ def test_a_check_that_passes_lets_the_answer_out() -> None:
     start = body.index("if (!failed || !on.length)")
 
     assert "classList.remove('quarantined')" in body[:start], "clearing happens after the test"
+
+
+# --- and a corrected answer growing out of it ----------------------------------------------------
+def test_trying_again_carries_the_answer_that_failed_and_the_check() -> None:
+    """ "Из карантина растут исправленные ответы." An attempt that cannot see what it failed is an
+    attempt at the same answer, so both travel as cards the gesture named."""
+    body = _body_of("tryAgain")
+
+    assert "dataset.about" in body, "it redoes what it would read next, not what it judged"
+    assert "made_from: [on[0], cardName(holder)].join(',')" in body
+    assert "gesture: 'again'" in body
+
+
+def test_trying_again_is_not_a_combine() -> None:
+    """ "Answer it again, and this time satisfy the check" is the whole of the gesture, and there is
+    nothing about it for anybody to configure — so it does not follow the bench's combining rule."""
+    source = _code()
+
+    assert "HOW_TO_TRY_AGAIN" in source
+    assert "text: HOW_TO_TRY_AGAIN" in _body_of("tryAgain")
+    route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
+    assert 'if gesture == "combine" and len(combined) == 2:' in route
+
+
+def test_it_is_offered_only_where_there_is_something_to_correct() -> None:
+    """A "try again" on a check nobody has pressed asks the same question for no reason."""
+    body = _body_of("showCheck")
+
+    assert "again.hidden = !isCheck || !holder.querySelector('.check-verdict.failed');" in body
+
+
+def test_a_gesture_is_named_rather_than_guessed_from_the_form() -> None:
+    """The flag decides whether the classifier ever sees this text, and that is the branch that can
+    start an agent. It should not hang on how many names a field happened to hold."""
+    route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
+
+    assert 'gesture = form.get("gesture", "").strip()' in route
+    assert "a_gesture=bool(gesture)," in route
+
+
+async def test_a_check_card_in_front_of_a_question_says_what_it_wants(desk: Store) -> None:
+    """The digest describes it, condition and verdict both. Without that the next attempt is asked
+    to do better with no idea what "better" meant."""
+    from agent_desk.web import blocks
+
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+    await desk.card_checked(made.id, passed=False, why="it contains “ERROR”", judged=False)
+
+    look = await blocks.on_the_bench(desk, [], [made.name], [made.name])
+
+    (only,) = look.cards
+    assert only.kind == "check"
+    assert "does not contain ERROR" in only.said
+    assert "it contains “ERROR”" in only.said, "the next attempt cannot see what it failed"
+
+
+async def test_the_verdict_names_the_answer_it_is_about(desk: Store) -> None:
+    """Found by using it: the corrected answer arrives joined to the check that asked for it, so
+    "what did it judge" and "what will it read next" part company from that moment (063)."""
+    block = await _an_answer(desk, "give me the log", "everything fine")
+    made = await desk.add_check_card("no errors", "does not contain ERROR")
+
+    await routes.run_a_check(_a_form(id=made.id, on=f"answer:{block}"))
+
+    again = await desk.check_card(made.id)
+    assert again is not None and again.about == f"answer:{block}"
+
+
+async def test_editing_the_condition_forgets_what_it_judged(desk: Store) -> None:
+    """A card that remembers what it judged while saying it has judged nothing is the pair of facts
+    disagreeing."""
+    made = await desk.add_check_card("a check", "is JSON")
+    await desk.card_checked(made.id, passed=False, why="no", judged=False, about="answer:one")
+
+    await desk.set_check_card(made.id, label="a check", said="shorter than 40")
+
+    again = await desk.check_card(made.id)
+    assert again is not None and again.about == ""
+
+
+def test_a_check_does_not_read_what_it_has_already_set_aside() -> None:
+    """Which is what leaves exactly one answer to press it on — the corrected one."""
+    body = _body_of("whatItChecks")
+
+    assert "name !== judged" in body
+
+
+def test_the_frame_follows_the_verdict_and_not_the_lines() -> None:
+    body = _body_of("quarantineFor")
+
+    assert "dataset.about" in body
+    assert "const on = about ? [about] : [];" in body
+
+
+async def test_a_check_card_that_is_gone_describes_nothing(desk: Store) -> None:
+    """A card can be named by a gesture and deleted before the run reads it. Describing it from
+    nothing would be inventing a condition, which is the one thing a check must not do."""
+    from agent_desk.web import blocks
+
+    look = await blocks.on_the_bench(desk, [], ["check:01M1NOSUCH"], ["check:01M1NOSUCH"])
+
+    assert look.cards == []

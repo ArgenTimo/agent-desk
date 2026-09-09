@@ -139,7 +139,9 @@ async def test_the_same_pair_under_two_rules_asks_two_things(
 
     for rule in ("draft a document from them", "find what they disagree about"):
         await desk.combine_with(thread.id, rule)
-        await routes.ask(_a_form(thread=thread.id, made_from="idea%3Aa%2Cidea%3Ab"))
+        await routes.ask(
+            _a_form(thread=thread.id, gesture="combine", made_from="idea%3Aa%2Cidea%3Ab")
+        )
 
     assert asked == ["draft a document from them", "find what they disagree about"]
 
@@ -404,5 +406,5 @@ def test_a_combine_is_not_aimed_at_the_whole_board() -> None:
     start = source.index("    aimed, about = aim(rows, project, session, targets)")
     after = source[start : start + 700]
 
-    assert "if made_from:" in after
+    assert "if a_gesture:" in after
     assert 'aimed, about = [], ""' in after

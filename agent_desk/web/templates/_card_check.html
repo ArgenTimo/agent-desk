@@ -9,7 +9,11 @@
 {% if not card %}
 <p class="empty small">that check is not here any more</p>
 {% else %}
-<div class="card-detail" data-detail="plain" data-label="{{ card.label }}">
+{# `data-about` is which answer the verdict is about, which is not the same as what the card is
+   joined to now: a corrected answer arrives joined to the check (063). The frame is drawn round
+   this one, and this one is the one the check will not read again. #}
+<div class="card-detail" data-detail="plain" data-label="{{ card.label }}"
+     data-about="{{ card.about }}" data-verdict="{{ card.verdict }}">
   <div class="plain-only">
     <form class="check-card" method="post" action="/cards/check/edit"
           hx-post="/cards/check/edit" hx-swap="none">

@@ -2002,12 +2002,16 @@ async def ask(request: Request) -> Response:
     # question is *about* — every message has those. This says what the third card was made out of,
     # and only a combine has it (060-what-two-cards-made.sql).
     combined = [one for one in form.get("made_from", "").split(",") if one]
+    # Which gesture this was, or "" for something somebody typed. Named rather than inferred from
+    # the shape of the form: the flag decides whether the classifier ever sees this text, and that
+    # is the branch that can start an agent — it should not hang on a field's length.
+    gesture = form.get("gesture", "").strip()
     # A combine's words are the bench's rule, and the page does not get a say in them. The gesture
     # sends two card names; what putting two cards together *means* is a thing somebody set once
     # and can change (061-the-rule-a-combine-follows.sql). Read here rather than sent by the page
     # so there is one copy of it, and so a rule changed in one tab is the rule the next drag in
     # another tab follows.
-    if len(combined) == 2:
+    if gesture == "combine" and len(combined) == 2:
         typed = combining.rule(await store.combining(form.get("thread", "").strip()))
     if typed:
         rows, _ = await asyncio.to_thread(board)
@@ -2034,7 +2038,8 @@ async def ask(request: Request) -> Response:
             # Named by the gesture rather than carried by the message, which is what lets a result
             # card be one of the two: `on_the_bench` leaves the halves of an exchange out unless
             # something pointed at them.
-            made_from=combined if len(combined) == 2 else (),
+            made_from=combined if gesture else (),
+            a_gesture=bool(gesture),
         )
         if by_button:
             await store.sent_by_a_button(made.id)
@@ -2754,25 +2759,30 @@ async def run_a_check(request: Request) -> JSONResponse:
     on = [one for one in form.get("on", "").split(",") if one.startswith("answer:")]
     if not on:
         return JSONResponse({"why": "Join it to an answer — a check needs something to check."})
-    if len(on) > 1:
-        # Found in a browser: joined to two answers it read the first and said nothing about the
-        # choice. One verdict about one of two things, with no way to tell which — a check has to
-        # be unambiguous or it is worse than none.
-        return JSONResponse(
-            {
-                "why": f"It is joined to {len(on)} answers. A check reads one — rub out the lines "
-                "to the ones it is not about."
-            }
-        )
-    block = await store.block(on[0].removeprefix("answer:"))
+    # The newest, and the card says which. Refusing to choose was the first answer to "joined to
+    # two" and using it showed why that is wrong: an answer grown from a check arrives joined to
+    # that check, so two is the *ordinary* state after one "try again" — and the line to it is
+    # worked out rather than drawn, so it cannot be rubbed out. The fault the refusal was written
+    # for was reading one of several *silently*; reading the newest and saying so fixes that too.
+    #
+    # Newest by id, which is a ULID: lexicographic order is creation order, and no clock is asked.
+    reading = max(on)
+    block = await store.block(reading.removeprefix("answer:"))
     if block is None or not (block.answer or "").strip():
         return JSONResponse({"why": "That answer has nothing in it yet."})
     decided = await _decide(card.said, block.input, block.answer or "")
     if isinstance(decided, str):
         return JSONResponse({"why": decided})
     passed, why, judged = decided
-    await store.card_checked(card.id, passed=passed, why=why, judged=judged)
-    return JSONResponse({"verdict": "passed" if passed else "failed", "why": why, "judged": judged})
+    await store.card_checked(card.id, passed=passed, why=why, judged=judged, about=reading)
+    return JSONResponse(
+        {
+            "verdict": "passed" if passed else "failed",
+            "why": why,
+            "judged": judged,
+            "about": reading,
+        }
+    )
 
 
 @router.post("/cards/button", response_class=JSONResponse)

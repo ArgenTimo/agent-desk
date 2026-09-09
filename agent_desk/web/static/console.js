@@ -844,18 +844,27 @@ async function pressTheButton(holder) {
 // what was asked and what came back. So "what is it joined to" is the same question a button asks,
 // through the same line, and there was no second kind of wire to invent.
 function whatItChecks(holder) {
-  return (reaches(holder) || []).filter((name) => name.startsWith('answer:'));
+  const judged = holder.querySelector('[data-about]')?.dataset.about || '';
+  const joined = (reaches(holder) || []).filter(
+    // Not one it has already set aside. A corrected answer arrives joined to the check that asked
+    // for it, so without this the gesture builds the second answer that stops the gesture (063).
+    (name) => name.startsWith('answer:') && name !== judged
+  );
+  // The newest, by id: these are ULIDs, so sorting them is sorting by when they were made. A
+  // corrected answer is by definition the later one, which is the one to check next.
+  return joined.length > 1 ? [joined.slice().sort().pop()] : joined;
 }
 
 function saysWhatItChecks(holder) {
   const line = holder.querySelector('.check-scope');
   if (!line) return;
   const on = whatItChecks(holder);
+  const joined = (reaches(holder) || []).filter((name) => name.startsWith('answer:')).length;
   line.textContent = !on.length
     ? 'Joined to no answer yet. Draw a line from it to one.'
-    : on.length > 1
-      ? `Joined to ${on.length} answers. A check reads one — rub out the others.`
-      : `Reads “${labelOf(on[0])}” — what was asked and what came back.`;
+    : `Reads “${labelOf(on[0])}” — what was asked and what came back.${
+        joined > 1 ? ` The newest of the ${joined} it is joined to.` : ''
+      }`;
 }
 
 // "Карточка проверки потухает и становится серой и неактивной." A check that passed has nothing
@@ -874,7 +883,10 @@ function saysWhatItChecks(holder) {
 function quarantineFor(holder) {
   const name = cardName(holder);
   const failed = Boolean(holder.querySelector('.check-verdict.failed'));
-  const on = whatItChecks(holder);
+  // What it *judged*, not what it is joined to now. Those are two questions and they part company
+  // the moment a corrected answer arrives (063).
+  const about = holder.querySelector('[data-about]')?.dataset.about || '';
+  const on = about ? [about] : [];
   const ring = surface?.querySelector(`.ring[data-check="${CSS.escape(name)}"]`);
 
   for (const card of surface?.querySelectorAll(`.pin[data-quarantined="${CSS.escape(name)}"]`) || []) {
@@ -918,9 +930,67 @@ function showCheck(holder) {
   const verdict = holder.querySelector('.check-verdict.passed') ? 'passed' : '';
   holder.classList.toggle('checked', isCheck && Boolean(verdict));
   button.hidden = !isCheck || Boolean(verdict);
+  // Only where there is something to correct. A "try again" on a check nobody has pressed is a
+  // button that would ask the same question for no reason.
+  const again = holder.querySelector('.pin-again');
+  if (again) again.hidden = !isCheck || !holder.querySelector('.check-verdict.failed');
   if (isCheck) {
     saysWhatItChecks(holder);
     quarantineFor(holder);
+  }
+}
+
+// "Из карантина растут исправленные ответы, и когда всё готово — карантин исчезает."
+//
+// Asking again, with the two things the last attempt did not have: the answer that failed, and the
+// check that failed it. Both travel as cards the gesture named, so the digest describes them —
+// an attempt that cannot see what it failed is an attempt at the same answer.
+//
+// It is not a combine and does not follow the bench's combining rule: what this asks is fixed by
+// the console, because "answer it again, and this time satisfy the check" is the whole of the
+// gesture and there is nothing about it for anybody to configure.
+const HOW_TO_TRY_AGAIN =
+  'The answer on the workbench did not pass the check beside it. Answer the original question ' +
+  'again, and this time meet the condition the check states. Do not explain what went wrong — ' +
+  'give the answer.';
+
+async function tryAgain(holder) {
+  // The answer it judged, not the one it would read next. "Try again" means redo the one that
+  // failed, and by the time this is offered the check has already stopped reading it.
+  const failed = holder.querySelector('[data-about]')?.dataset.about || '';
+  if (!failed) {
+    say('Press check first — there is nothing to correct yet.');
+    return;
+  }
+  const on = [failed];
+  say('Asking again…');
+  const body = new URLSearchParams({
+    text: HOW_TO_TRY_AGAIN,
+    thread: activeThread(),
+    button: 'yes',
+    gesture: 'again',
+    // The failed answer and the check, in that order: what was produced, and what it had to be.
+    made_from: [on[0], cardName(holder)].join(','),
+    targets: [on[0], cardName(holder)].join(','),
+    history: attachedBlocks(),
+    notes: ownBlockText(),
+  });
+  try {
+    const answer = await fetch('/blocks', {
+      method: 'POST',
+      headers: { ...FORM, 'HX-Request': 'true' },
+      body,
+    });
+    if (!answer.ok) {
+      say('It did not send.');
+      return;
+    }
+    document.getElementById('blocks').innerHTML = await answer.text();
+    if (window.htmx) htmx.process(document.getElementById('blocks'));
+    syncBlocks();
+    showActiveThread();
+  } catch {
+    say('It did not send.');
   }
 }
 
@@ -1132,6 +1202,7 @@ async function pin(card, how) {
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-press" title="send what this button asks" hidden>press</button>
     <button type="button" class="pin-check" title="read what this is joined to and say whether it is what it had to be" hidden>check</button>
+    <button type="button" class="pin-again" title="ask the question again, this time meeting the check" hidden>try again</button>
     <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
     <button type="button" class="pin-answers" title="what each model answered, side by side" hidden>answers</button>
     <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
@@ -1360,6 +1431,11 @@ document.addEventListener('click', (event) => {
 
   if (event.target.classList.contains('pin-check')) {
     runTheCheck(event.target.closest('.pin'));
+    return;
+  }
+
+  if (event.target.classList.contains('pin-again')) {
+    tryAgain(event.target.closest('.pin'));
     return;
   }
 
@@ -2572,6 +2648,7 @@ async function combine(from, onto, again) {
     // No card for the question, the same as a button: what was asked is the gesture, and a card
     // repeating the gesture back is a card nobody reads twice.
     button: 'yes',
+    gesture: 'combine',
     targets: [from, onto].join(','),
     // The same two cards said twice, because they are two different facts about this message.
     // `targets` is what the question is about, which every message has. `made_from` is what the

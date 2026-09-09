@@ -286,6 +286,10 @@ class CheckCard(BaseModel):
     # Decided by the answer engine rather than by a rule. "It passed" from a regular expression and
     # "it passed" from a model are not the same claim.
     judged: bool = False
+    # The answer card this verdict is about (063). Not "what it is joined to now": a corrected
+    # answer arrives joined to the check, and what it judged and what it will read next are two
+    # different questions from that moment on.
+    about: str = ""
     at: int = 0
     made_at: int
 
@@ -2312,24 +2316,27 @@ class Store:
             await conn.execute(
                 text(
                     "UPDATE check_card SET label = :label, said = :said, verdict = '', "
-                    "why = '', judged = 0, at = 0 WHERE id = :id"
+                    "why = '', judged = 0, about = '', at = 0 WHERE id = :id"
                 ),
                 {"label": label[:80], "said": said[:600], "id": card_id},
             )
 
-    async def card_checked(self, card_id: str, *, passed: bool, why: str, judged: bool) -> None:
+    async def card_checked(
+        self, card_id: str, *, passed: bool, why: str, judged: bool, about: str = ""
+    ) -> None:
         """Write down what it decided, and how. Stored rather than recomputed: a check that
         quietly changes its mind between page loads is worse than no check (062)."""
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "UPDATE check_card SET verdict = :verdict, why = :why, judged = :judged, "
-                    "at = :at WHERE id = :id"
+                    "about = :about, at = :at WHERE id = :id"
                 ),
                 {
                     "verdict": "passed" if passed else "failed",
                     "why": why[:600],
                     "judged": 1 if judged else 0,
+                    "about": about,
                     "at": _now_ms(),
                     "id": card_id,
                 },
@@ -2339,8 +2346,8 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
-                    "SELECT id, label, said, verdict, why, judged, at, made_at FROM check_card "
-                    "WHERE id = :id"
+                    "SELECT id, label, said, verdict, why, judged, about, at, made_at "
+                    "FROM check_card WHERE id = :id"
                 ),
                 {"id": card_id},
             )

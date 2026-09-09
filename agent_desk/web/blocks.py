@@ -510,6 +510,26 @@ async def on_the_bench(
             if half is not None:
                 cards.append(half)
             continue
+        if kind == "check":
+            # A check card carries its condition and, once pressed, its verdict. Both belong in the
+            # prompt of anything asked with one in front of it: an attempt that cannot see what it
+            # failed is an attempt at the same answer (062-a-card-that-checks.sql).
+            seen.add(name)
+            checked = await store.check_card(ident)
+            if checked is not None:
+                cards.append(
+                    looking.OnBench(
+                        name=name,
+                        kind="check",
+                        label=checked.label,
+                        said=(
+                            f"it has to be: {checked.said}"
+                            + (f" — last time {checked.why}" if checked.verdict else "")
+                        ),
+                        role=chosen.get(name, ""),
+                    )
+                )
+            continue
         seen.add(name)
         idea = ideas.get(name)
         if idea is not None:
@@ -616,6 +636,7 @@ async def submit(
     history: Sequence[str] = (),
     notes_: str = "",
     made_from: Sequence[str] = (),
+    a_gesture: bool = False,
 ) -> Block:
     """Accept one line of input and start working on it.
 
@@ -674,7 +695,7 @@ async def submit(
     if dropped_ideas:
         await store.link_block_ideas(block.id, dropped_ideas)
     aimed, about = aim(rows, project, session, targets)
-    if made_from:
+    if a_gesture:
         # "Соединение стоит один вызов и происходит часто… дёшево и быстро." A combine is about two
         # cards and nothing else, so it carries neither. `aim` falls back to the whole board when
         # the cards it was pointed at are not sessions — which two ideas never are — and every
@@ -705,7 +726,7 @@ async def submit(
             # Dragging one card onto another must not be able to start work, and the guard belongs
             # here rather than in the wording: a prompt phrased more carefully is a prompt the next
             # release of the classifier can read differently.
-            a_gesture=bool(made_from),
+            a_gesture=a_gesture,
             about=about,
             deep=deep,
             history=list(history),

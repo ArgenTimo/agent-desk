@@ -354,7 +354,7 @@ def test_the_gesture_names_them_all_the_way_down() -> None:
     and the store, so the third card finds its way back under them after a reload."""
     route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
 
-    assert "made_from=combined if len(combined) == 2 else ()" in route
+    assert "made_from=combined if gesture else ()" in route
     assert "await on_the_bench(store, rows, targets, made_from)" in (
         HERE / "agent_desk" / "web" / "blocks.py"
     ).read_text(encoding="utf-8")
@@ -369,7 +369,9 @@ def test_a_gesture_is_never_read_as_an_instruction() -> None:
     source = (HERE / "agent_desk" / "web" / "blocks.py").read_text(encoding="utf-8")
 
     assert '"question" if a_gesture else await classifier.kind(' in source
-    assert "a_gesture=bool(made_from)," in source
+    assert "a_gesture=bool(gesture)," in (HERE / "agent_desk" / "web" / "routes.py").read_text(
+        encoding="utf-8"
+    )
 
 
 async def test_a_gesture_never_reaches_the_classifier_at_all(
