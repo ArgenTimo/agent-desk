@@ -123,7 +123,7 @@ def test_every_tool_says_whether_it_changes_anything() -> None:
     for one in said:
         assert one["annotations"]["destructiveHint"] is False
     writing = {one["name"] for one in said if not one["annotations"]["readOnlyHint"]}
-    assert writing == {"keep_idea", "close_idea"}
+    assert writing == {"keep_idea", "close_idea", "run"}
 
 
 async def test_a_tool_that_raises_answers_rather_than_breaking_the_transport(
@@ -481,3 +481,128 @@ def test_nothing_under_mcp_opens_a_file_itself() -> None:
     }
 
     assert {name: found for name, found in guilty.items() if found} == {}
+
+
+# --- a run an agent starts and never waits for (01M21NAVC858G6C3ZWM9TXAKP1) --------------------
+async def _a_drawing(store: Store) -> list[str]:
+    """Two prompt steps, joined. It touches nothing, so it needs no project."""
+    first = await store.add_step_card("summarise")
+    second = await store.add_step_card("rewrite")
+    for card, asks in ((first, "Summarise this."), (second, "Now rewrite it shorter.")):
+        await store.set_card_role(card.name, "action")
+        await store.set_card_field(card.name, "asks", asks)
+    await store.tie_cards(from_name=first.name, to_name=second.name, kind="then", says="")
+    await store.keep_bench([_bench_card(one.name, at=n) for n, one in enumerate((first, second))])
+    return [first.name, second.name]
+
+
+async def test_a_run_comes_back_with_an_id_and_nothing_else(desk: Store, no_board: None) -> None:
+    """The whole point of calling a console instead of reading one: the work stays here, and what
+    crosses the pipe is an id."""
+    await _a_drawing(desk)
+
+    said = _said(await tools.call(desk, "run", {"given": "a long article"}))
+
+    (started,) = await desk.runs()
+    assert started.id in said
+    assert started.given == "a long article"
+    assert await desk.run_steps(started.id) == []
+
+
+async def test_a_drawing_that_cannot_run_says_why_rather_than_starting(
+    desk: Store, no_board: None
+) -> None:
+    """The refusal is `engine.begin`'s, which is the one the run button shows — a button that is
+    offered and a call that is refused must not disagree about why."""
+    one = await desk.create_idea(
+        text_="not a drawing", summary="not a drawing", source_kind="typed"
+    )
+    await desk.keep_bench([_bench_card(f"idea:{one.id}")])
+
+    said = _said(await tools.call(desk, "run", {}))
+
+    assert await desk.runs() == []
+    assert said.startswith("It did not start:")
+
+
+async def test_how_it_went_counts_and_never_answers(desk: Store, no_board: None) -> None:
+    """ "Возвращает счёт, а не ответы." Eight answers handed back is the whole run in the context
+    this call exists to keep it out of."""
+    run = await desk.start_run(cards=["step:one", "step:two"], repo_key="", cwd="")
+    await desk.set_run_step(
+        run_id=run.id, name="step:one", state="done", made="the long answer nobody asked for"
+    )
+    await desk.set_run_step(run_id=run.id, name="step:two", state="failed", detail="it broke")
+
+    said = _said(await tools.call(desk, "how_it_went", {"run": run.id}))
+
+    assert "1 done" in said and "1 failed" in said
+    assert "step:two" in said
+    assert "the long answer nobody asked for" not in said
+
+
+async def test_a_run_that_has_not_finished_is_not_called_running(
+    desk: Store, no_board: None
+) -> None:
+    """A run whose console is not up sits untouched, and this cannot tell that from one being
+    worked on (CLAUDE.md, rule five)."""
+    run = await desk.start_run(cards=["step:one"], repo_key="", cwd="")
+    await desk.set_run_step(run_id=run.id, name="step:one", state="going")
+
+    said = _said(await tools.call(desk, "how_it_went", {"run": run.id}))
+
+    assert "not finished" in said
+    assert "running" not in said
+
+
+async def test_an_answer_is_taken_by_name(desk: Store, no_board: None) -> None:
+    """ "Агент берёт их поимённо." There is no call that returns all of them, deliberately."""
+    run = await desk.start_run(cards=["step:one", "step:two"], repo_key="", cwd="")
+    await desk.set_run_step(run_id=run.id, name="step:one", state="done", made="the first answer")
+    await desk.set_run_step(run_id=run.id, name="step:two", state="done", made="the second answer")
+
+    said = _said(await tools.call(desk, "answer_from", {"run": run.id, "step": "step:two"}))
+
+    assert said == "the second answer"
+
+
+async def test_no_tool_hands_back_a_whole_run(desk: Store) -> None:
+    """The rule behind `answer_from`, held where it can be checked: a call that returned every
+    answer at once would undo what `how_it_went` is for."""
+    run = await desk.start_run(cards=["step:one", "step:two"], repo_key="", cwd="")
+    for name in ("step:one", "step:two"):
+        await desk.set_run_step(run_id=run.id, name=name, state="done", made=f"answer of {name}")
+
+    everything = [
+        _said(await tools.call(desk, one.name, {"run": run.id, "id": run.id}))
+        for one in tools.TOOLS
+    ]
+
+    assert not [said for said in everything if "answer of step:one" in said]
+
+
+async def test_a_step_nobody_named_lists_the_ones_there_are(desk: Store, no_board: None) -> None:
+    run = await desk.start_run(cards=["step:one"], repo_key="", cwd="")
+    await desk.set_run_step(run_id=run.id, name="step:one", state="done", made="said")
+
+    said = _said(await tools.call(desk, "answer_from", {"run": run.id, "step": "step:nine"}))
+
+    assert "step:one" in said
+
+
+async def test_a_step_that_has_said_nothing_says_what_it_is_doing(
+    desk: Store, no_board: None
+) -> None:
+    run = await desk.start_run(cards=["step:one"], repo_key="", cwd="")
+    await desk.set_run_step(
+        run_id=run.id, name="step:one", state="held", detail="waiting on a gate"
+    )
+
+    said = _said(await tools.call(desk, "answer_from", {"run": run.id, "step": "step:one"}))
+
+    assert "held" in said and "waiting on a gate" in said
+
+
+async def test_a_run_nobody_started_is_said_plainly(desk: Store, no_board: None) -> None:
+    assert "no run" in _said(await tools.call(desk, "how_it_went", {"run": "nope"}))
+    assert "no run" in _said(await tools.call(desk, "answer_from", {"run": "nope", "step": "x"}))

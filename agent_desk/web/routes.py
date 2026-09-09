@@ -2487,7 +2487,7 @@ async def start_run(request: Request) -> JSONResponse:
             return JSONResponse(
                 {"started": False, "why": "that card is not on the workbench"}, status_code=409
             )
-    where = await _where_for(names)
+    where = await where_for(store, names)
     made, why = await engine.begin(
         store, names=names, repo_key=where[0], cwd=where[1], given=str(form.get("given", ""))
     )
@@ -2496,19 +2496,23 @@ async def start_run(request: Request) -> JSONResponse:
     return JSONResponse({"started": True, "run": made.id})
 
 
-async def _where_for(names: Sequence[str]) -> tuple[str, str]:
+async def where_for(desk: Store, names: Sequence[str]) -> tuple[str, str]:
     """Which project a run happens in: the one the cards are about.
 
     Read from the ideas on the bench, because that is the only card kind that carries a project a
     person chose. A drawing whose cards are about nothing in particular has nowhere to run, and
     `engine.begin` says so rather than picking a project.
+
+    Public, and takes the store it reads, because a run can now be started by something that is not
+    this page (`agent_desk/mcp/tools.py`). Where a drawing runs must be worked out the same way for
+    both, or an agent could start in a project a person could not.
     """
-    ideas = {f"idea:{one.id}": one for one in await store.ideas()}
+    ideas = {f"idea:{one.id}": one for one in await desk.ideas()}
     keys = [ideas[name].project_key for name in names if name in ideas and ideas[name].project_key]
     if not keys:
         return ("", "")
     rows = await asyncio.to_thread(sessions_only)
-    named = next((one for one in shape(rows, await store.groups()) if one.key == keys[0]), None)
+    named = next((one for one in shape(rows, await desk.groups()) if one.key == keys[0]), None)
     if named is None or not named.instances:
         return (keys[0] or "", "")
     return (named.key, named.instances[0].path)
@@ -4490,7 +4494,7 @@ async def run_what_was_understood(block_id: str, request: Request) -> Response:
     said, names = telling.read_will_run(block.answer or "") if block else ("", [])
     if block is None or block.kind != "running" or not names:
         return HTMLResponse(_a_sentence("There is nothing waiting to be run there."), 404)
-    where = await _where_for(names)
+    where = await where_for(store, names)
     made, why = await engine.begin(
         store, names=names, repo_key=where[0], cwd=where[1], given=block.input
     )

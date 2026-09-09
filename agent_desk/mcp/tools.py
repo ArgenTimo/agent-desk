@@ -27,17 +27,22 @@ what any of this means.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from agent_desk.ideas import inbox
 from agent_desk.mcp import saying
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import StepState, Store
 
 # How much of an idea's own words travel in a listing. The summary is one line by construction; this
 # is for the call that asks for one idea in full.
 MOST_TEXT = 2000
+
+# The states a step can be in, in the order a reader wants them: what is finished first, what
+# went wrong next, and what has not happened yet last (agent_desk/store/repo.py).
+STATES: tuple[StepState, ...] = ("done", "failed", "held", "going", "waiting")
 
 
 @dataclass(frozen=True)
@@ -146,24 +151,120 @@ async def _bench(store: Store, given: dict[str, Any]) -> str:
     # application into a program that speaks on a pipe.
     from agent_desk.web import blocks, routes
 
-    name = str(given.get("name", "")).strip()
-    thread_id, why = await _which_bench(store, name)
+    # Somebody who chose three cards gets three, and a name that is not on this bench is said
+    # rather than dropped: an agent that mistyped a card and got the whole workbench back would
+    # think it had asked for the whole workbench.
+    names, why = await _cards_for(store, given)
     if why:
         return why
+    rows, _ = await asyncio.to_thread(routes.board)
+    carried = await blocks.carried_from_the_bench(store, rows, names)
+    return blocks.as_one_string(carried) or "There is nothing on those cards to carry."
+
+
+async def _run(store: Store, given: dict[str, Any]) -> str:
+    """Start the drawing on a workbench and come straight back with its id.
+
+    «Прогон схемы вызывается агентом и не проходит через его контекст.» This is the shape that
+    makes a console worth calling rather than reading: the work happens here, in the console's own
+    loop, and what crosses the pipe is an id. A caller that waited for a six-step drawing would be
+    holding a context window open for four minutes to receive text it did not need.
+
+    Nothing here runs anything. `engine.begin` writes the run down and the console's loop picks it
+    up, which is also why this cannot report that it started well: it can report that it was
+    accepted, and `how_it_went` reports the rest. Saying more would be reporting a status inferred
+    from silence (CLAUDE.md, rule five).
+    """
+    from agent_desk.web import engine, routes
+
+    names, why = await _cards_for(store, given)
+    if why:
+        return why
+    where = await routes.where_for(store, names)
+    made, refused = await engine.begin(
+        store,
+        names=names,
+        repo_key=where[0],
+        cwd=where[1],
+        given=str(given.get("given", "")),
+    )
+    if made is None:
+        return f"It did not start: {refused}"
+    return (
+        f"Started as {made.id}, over {len(names)} card{'' if len(names) == 1 else 's'}. "
+        "Nothing here waits for it — ask how_it_went."
+    )
+
+
+async def _how_it_went(store: Store, given: dict[str, Any]) -> str:
+    """The count, and the names of what failed. Never the answers.
+
+    «Возвращает счёт, а не ответы: сколько прошло, сколько нет.» A run of eight steps holds eight
+    answers, and handing them back would put the whole run into the context this call exists to
+    keep out of it. What a caller needs to decide what to do next is how many, and which ones went
+    wrong by name; the answers are `answer_from`'s, one at a time.
+    """
+    run_id = str(given.get("run", "")).strip()
+    the_run = next((one for one in await store.runs() if one.id == run_id), None)
+    if the_run is None:
+        return "There is no run with that id."
+    steps = await store.run_steps(run_id)
+    if not steps:
+        return f"{run_id} has not reached a step yet."
+    counted = Counter(step.state for step in steps)
+    said = [
+        f"{run_id}: " + ", ".join(f"{counted[state]} {state}" for state in STATES if counted[state])
+    ]
+    failed = [step.name for step in steps if step.state == "failed"]
+    if failed:
+        said.append("failed: " + ", ".join(failed))
+    if the_run.stopped_why:
+        said.append(f"stopped: {the_run.stopped_why}")
+    elif the_run.finished_at is None:
+        # Not "running": a run whose console is not up sits here untouched, and this call cannot
+        # tell that from one being worked on (CLAUDE.md, rule five).
+        said.append("not finished")
+    return "\n".join(said)
+
+
+async def _answer_from(store: Store, given: dict[str, Any]) -> str:
+    """One step's answer, by name.
+
+    «Ответы прогона лежат в консоли и открываются человеком — агент берёт их поимённо.» There is
+    deliberately no call that returns all of them: a caller that names the step it needs has read
+    `how_it_went` and decided, and a caller that did not should not be handed eight answers to
+    find out which one it wanted.
+    """
+    run_id = str(given.get("run", "")).strip()
+    want = str(given.get("step", "")).strip()
+    steps = await store.run_steps(run_id)
+    if not steps:
+        return "There is no run with that id, or it has not reached a step yet."
+    step = next((one for one in steps if one.name == want), None)
+    if step is None:
+        return "That run has no step called that. Its steps: " + ", ".join(
+            one.name for one in steps
+        )
+    if not step.made:
+        return f"{want} is {step.state} and has said nothing yet." + (
+            f" {step.detail}" if step.detail else ""
+        )
+    return step.made
+
+
+async def _cards_for(store: Store, given: dict[str, Any]) -> tuple[list[str], str]:
+    """Which cards a call is about: a workbench, narrowed by names when it named any."""
+    thread_id, why = await _which_bench(store, str(given.get("name", "")).strip())
+    if why:
+        return [], why
     on_it = await store.bench_cards(thread_id)
     if not on_it:
-        return "That workbench is empty."
+        return [], "That workbench is empty."
     wanted = [str(one).strip() for one in given.get("cards") or [] if str(one).strip()]
-    cards = [one for one in on_it if not wanted or one.name in wanted]
-    # Somebody who chose three cards gets three. A name that is not on this bench is said rather
-    # than dropped: an agent that mistyped a card and got the whole workbench back would think it
-    # had asked for the whole workbench.
     missing = [one for one in wanted if one not in {card.name for card in on_it}]
     if missing:
-        return "Not on that workbench: " + ", ".join(missing)
-    rows, _ = await asyncio.to_thread(routes.board)
-    carried = await blocks.carried_from_the_bench(store, rows, [card.name for card in cards])
-    return blocks.as_one_string(carried) or "There is nothing on those cards to carry."
+        return [], "Not on that workbench: " + ", ".join(missing)
+    return [one.name for one in on_it if not wanted or one.name in wanted], ""
 
 
 async def _which_bench(store: Store, name: str) -> tuple[str, str]:
@@ -241,6 +342,43 @@ TOOLS: tuple[Tool, ...] = (
             },
         },
         run=_bench,
+    ),
+    Tool(
+        name="run",
+        says=(
+            "Run the drawing on a workbench and come straight back with a run id. Nothing waits: "
+            "the console does the work and how_it_went reports it."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the chat whose workbench this is"},
+                "cards": {"type": "array", "items": {"type": "string"}},
+                "given": {"type": "string", "description": "what the drawing is run against"},
+            },
+        },
+        run=_run,
+        writes=True,
+    ),
+    Tool(
+        name="how_it_went",
+        says="How a run stands: how many steps done, how many failed, and which ones by name.",
+        takes={
+            "type": "object",
+            "properties": {"run": {"type": "string"}},
+            "required": ["run"],
+        },
+        run=_how_it_went,
+    ),
+    Tool(
+        name="answer_from",
+        says="What one step of a run said, by name. There is no call that returns all of them.",
+        takes={
+            "type": "object",
+            "properties": {"run": {"type": "string"}, "step": {"type": "string"}},
+            "required": ["run", "step"],
+        },
+        run=_answer_from,
     ),
 )
 
