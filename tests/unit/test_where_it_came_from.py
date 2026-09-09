@@ -152,8 +152,8 @@ def test_every_way_of_putting_a_card_on_the_bench_says_which_one_it_was() -> Non
     console = _code()
 
     said = console.count("came: '") + console.count("came: `")
-    assert said == 18, (
-        f"{said} places name where a card came from, and there are eighteen ways in. A new one "
+    assert said == 19, (
+        f"{said} places name where a card came from, and there are nineteen ways in. A new one "
         "renders a card that cannot say why it is on the bench"
     )
 

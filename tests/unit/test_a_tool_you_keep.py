@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from typing import ClassVar
 
 import pytest
+from agent_desk import tooling
 from agent_desk.store.repo import Store
 from agent_desk.web import routes
 
@@ -185,3 +186,110 @@ def test_only_a_button_or_a_check_is_offered_the_keeping() -> None:
 
     assert "pin.dataset.kind === 'button' || pin.dataset.kind === 'check'" in source
     assert "keep it as a tool" in source
+
+
+# --- and one made from a description --------------------------------------------------------------
+def test_a_reply_in_three_lines_makes_a_tool() -> None:
+    """Three named lines rather than JSON: the reply is read by a regular expression, and a model
+    that wraps JSON in a sentence of apology produces something a parser has to guess at."""
+    made = tooling.read_made("kind: button\nname: decompose\ndoes: break this into its parts")
+
+    assert made is not None
+    assert (made.kind, made.name, made.said) == (
+        "button",
+        "decompose",
+        "break this into its parts",
+    )
+
+
+def test_a_third_kind_is_not_a_tool_this_can_make() -> None:
+    """The honest answer to "make me a tool that opens Jira" is that it cannot yet — given by
+    refusing the reply rather than by making a button that says "open Jira" and does nothing."""
+    assert tooling.read_made("kind: connector\nname: jira\ndoes: open a ticket") is None
+    assert tooling.read_made("no") is None
+    assert tooling.read_made("I would need to know more about your workflow first.") is None
+
+
+def test_a_tool_with_no_name_or_nothing_to_do_is_not_made() -> None:
+    assert tooling.read_made("kind: button\nname: \ndoes: something") is None
+    assert tooling.read_made("kind: button\nname: x\ndoes:") is None
+
+
+def test_the_two_kinds_are_the_two_the_store_accepts() -> None:
+    """Two lists disagreeing is how a reply gets accepted here and refused one layer down."""
+    assert set(tooling.KINDS) == set(Store.TOOL_KINDS)
+
+
+async def test_describing_one_makes_a_card_and_keeps_nothing(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Making a card is cheap and undoable — one press takes it off — so it happens on the asking.
+    Keeping it is a decision about a list that outlives every chat, and stays a separate act."""
+
+    async def replies(prompt: str):  # type: ignore[no-untyped-def]
+        yield "kind: button\nname: decompose\ndoes: break this into its parts"
+
+    monkeypatch.setattr(routes.answer_session, "stream_answer", replies)
+
+    made = json.loads(
+        (
+            await routes.make_a_tool_from_a_description(_a_form(said="something+that+splits+ideas"))
+        ).body
+    )
+
+    assert made["kind"] == "button"
+    card = await desk.button_card(made["id"])
+    assert card is not None and card.prompt == "break this into its parts"
+    assert await desk.tools() == [], "it kept the tool nobody asked it to keep"
+
+
+async def test_a_description_of_something_this_cannot_make_says_so(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refuses(prompt: str):  # type: ignore[no-untyped-def]
+        yield "no"
+
+    monkeypatch.setattr(routes.answer_session, "stream_answer", refuses)
+
+    answer = await routes.make_a_tool_from_a_description(_a_form(said="connect+to+jira"))
+
+    assert "two kinds of tool" in answer.body.decode()
+    assert await desk.button_cards() == []
+
+
+async def test_an_empty_description_asks_nothing(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model call is the expensive part, and an empty field is not a request."""
+
+    async def never(prompt: str):  # type: ignore[no-untyped-def]
+        raise AssertionError("it asked the model")
+        yield ""
+
+    monkeypatch.setattr(routes.answer_session, "stream_answer", never)
+
+    answer = await routes.make_a_tool_from_a_description(_a_form(said="  "))
+
+    assert "Say what the tool should do" in answer.body.decode()
+
+
+def test_the_field_says_that_keeping_is_a_separate_press() -> None:
+    """Otherwise somebody describes six tools and finds a list of six they did not choose."""
+    markup = BOARD.read_text(encoding="utf-8")
+
+    assert 'id="describe-tool"' in markup
+    assert "keeping it is a separate press" in markup
+    assert "came: 'made from a description'" in _code()
+
+
+def test_the_list_and_the_field_survive_a_board_push() -> None:
+    """The board fragment is replaced wholesale on every push and the tools live inside it — under
+    the projects, where they were asked for. Found in a browser: the list was empty under its
+    heading and the field did nothing, silently, and only after a push nobody was watching for."""
+    source = _code()
+    start = source.index("stream.addEventListener('board'")
+    body = source[start : source.index("\n});", start)]
+
+    assert "showTools();" in body, "the list is drawn once and then wiped by the first push"
+    assert "document.addEventListener('submit'" in source
+    assert "event.target.id !== 'describe-tool'" in source

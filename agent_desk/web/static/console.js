@@ -311,6 +311,10 @@ stream.addEventListener('board', (event) => {
   // checkout whose last session ended has none any more.
   for (const card of surface?.querySelectorAll('.pin[data-kind]') || []) showParts(card);
   readRoom();
+  // The board fragment is replaced wholesale, and the tools live inside it — under the projects,
+  // where they were asked for. So the list is drawn again here rather than once at the start: a
+  // push two seconds after the page opened used to leave an empty list under a heading.
+  showTools();
   const waiting = document.querySelectorAll('.node.session.flagged').length;
   document.title = waiting ? `agent-desk (${waiting})` : 'agent-desk';
 });
@@ -1093,6 +1097,38 @@ async function useTool_(name) {
     say('It could not be put on the workbench.');
   }
 }
+
+// On the document rather than on the form: the board fragment is replaced on every push, and a
+// listener bound to the form went with the first one — the field then did nothing, silently, and
+// only after a push nobody was watching for.
+document.addEventListener('submit', async (event) => {
+  if (event.target.id !== 'describe-tool') return;
+  event.preventDefault();
+  const field = event.target.querySelector('input[name="said"]');
+  const said = field.value.trim();
+  if (!said) return;
+  say('Making it…');
+  try {
+    const made = await (
+      await fetch('/tools/describe', {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ said }),
+      })
+    ).json();
+    if (!made.id) {
+      say(made.why || 'It could not be made.');
+      return;
+    }
+    field.value = '';
+    // On the workbench and not in the list: keeping it is the press that already exists on the
+    // card, so a tool nobody wanted twice leaves nothing behind.
+    await pin({ kind: made.kind, id: made.id, label: made.label }, { came: 'made from a description' });
+    say(`Made “${made.label}”. Keep it as a tool from the card if you want it again.`);
+  } catch {
+    say('It could not be made.');
+  }
+});
 
 async function keepAsATool(holder) {
   const name = (prompt('Keep it as a tool called:', holder.querySelector('.pin-label')?.textContent?.trim() || '') || '').trim();

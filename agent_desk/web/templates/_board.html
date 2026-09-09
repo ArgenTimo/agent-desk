@@ -329,4 +329,13 @@
 <div class="tools-kept">
   <h2 class="saved-head">tools</h2>
   <ul id="kept-tools" class="bench-saved"></ul>
+  {# "Также можно описать суть инструмента, и сервис сам создаст по описанию такой инструмент на
+     верстаке." Made, not kept: making a card is cheap and one press takes it off; keeping is a
+     decision about a list that outlives every chat (agent_desk/tooling.py). #}
+  <form class="new-project" id="describe-tool">
+    <label class="visually-hidden" for="tool-said">what the tool should do</label>
+    <input id="tool-said" name="said" autocomplete="off"
+           placeholder="describe a tool — “break this into parts”">
+    <button type="submit" title="make a card that does this — keeping it is a separate press">+</button>
+  </form>
 </div>

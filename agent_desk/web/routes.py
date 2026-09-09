@@ -56,6 +56,7 @@ from agent_desk import (
     starting,
     telling,
     ties,
+    tooling,
     tracker,
 )
 from agent_desk import secrets as kept
@@ -2748,6 +2749,39 @@ async def use_a_tool(request: Request) -> JSONResponse:
         made = await store.add_button_card(tool.name, tool.said)
         return JSONResponse({"kind": "button", "id": made.id, "label": made.label})
     checked = await store.add_check_card(tool.name, tool.said)
+    return JSONResponse({"kind": "check", "id": checked.id, "label": checked.label})
+
+
+@router.post("/tools/describe", response_class=JSONResponse)
+async def make_a_tool_from_a_description(request: Request) -> JSONResponse:
+    """Make a card from a sentence about what it should do (agent_desk/tooling.py).
+
+    It is made and not kept. Making a card is cheap and undoable — one press takes it off — so it
+    happens on the asking; keeping it is a decision about a list that outlives every chat, and that
+    stays the separate act it already is.
+    """
+    form = await _form(request)
+    said = form.get("said", "").strip()
+    if not said:
+        return JSONResponse({"why": "Say what the tool should do."})
+    try:
+        reply = "".join(
+            [chunk async for chunk in answer_session.stream_answer(tooling.what_to_make(said))]
+        )
+    except (answer_session.AnswerFailed, OSError) as gone:
+        return JSONResponse({"why": f"It could not be made: {str(gone)[:120]}"})
+    made = tooling.read_made(reply)
+    if made is None:
+        return JSONResponse(
+            {
+                "why": "That is not a button or a check, which are the two kinds of tool this "
+                "console can make."
+            }
+        )
+    if made.kind == "button":
+        card = await store.add_button_card(made.name, made.said)
+        return JSONResponse({"kind": "button", "id": card.id, "label": card.label})
+    checked = await store.add_check_card(made.name, made.said)
     return JSONResponse({"kind": "check", "id": checked.id, "label": checked.label})
 
 
