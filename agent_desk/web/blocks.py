@@ -18,6 +18,7 @@ import contextlib
 import functools
 import re
 from collections.abc import Callable, Coroutine, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -634,6 +635,56 @@ def aim(
     return rows, ""
 
 
+@dataclass(frozen=True)
+class Carried:
+    """What a workbench contributes to a question, before the question is written.
+
+    Three lists rather than one because the prompt puts them in different places: the digest of the
+    cards, what those cards *say*, and the names in the order the digest numbered them — so an
+    answer that says "3" and a card on the bench are the same card (agent_desk/handling.py).
+    """
+
+    surface: list[str]
+    written: list[str]
+    on_bench: list[str]
+
+
+async def carried_from_the_bench(
+    store: Store,
+    rows: Sequence[BoardRow],
+    targets: Sequence[str],
+    named: Sequence[str] = (),
+) -> Carried:
+    """Gather what these cards carry into a question.
+
+    One function because two callers need the same answer and one of them is not a browser: the
+    console gathers it when somebody presses send, and an agent asking for a workbench over MCP is
+    asking for this and nothing else (`agent_desk/mcp/tools.py`). A second gatherer would be a
+    second set of rules about which files may be read, and that is the rule this program most
+    cannot afford to have two of.
+
+    `targets` is what the question is pointed at — the cards somebody chose, or the whole bench
+    when they chose none. Nothing here widens it.
+    """
+    look = await on_the_bench(store, rows, targets, named)
+    return Carried(
+        surface=looking.as_lines(look),
+        written=await notes(store, targets),
+        on_bench=[card.name for card in look.cards],
+    )
+
+
+def as_one_string(carried: Carried) -> str:
+    """The same text a question would carry, in the same words and the same order.
+
+    Built out of the prompt's own section builders rather than out of a copy of them, so that what
+    an agent is handed is a piece of the prompt and can be checked to be one.
+    """
+    return "\n".join(
+        session.workbench_section(carried.surface) + session.carried_section(carried.written)
+    ).strip("\n")
+
+
 async def submit(
     store: Store,
     typed: str,
@@ -714,14 +765,10 @@ async def submit(
         aimed, about = [], ""
 
     deep = transcripts(rows, targets)
-    written = await notes(store, targets)
     # Read now rather than when the run reaches the prompt: this is what was in front of the person
     # when they pressed send, and a bench read a minute later is a different bench.
-    look = await on_the_bench(store, rows, targets, made_from)
-    surface = looking.as_lines(look)
-    # The same cards in the same order the digest numbered them, so an answer that says "3" and a
-    # card on the bench are the same card (agent_desk/handling.py).
-    on_bench = [card.name for card in look.cards]
+    bench = await carried_from_the_bench(store, rows, targets, made_from)
+    written, surface, on_bench = bench.written, bench.surface, bench.on_bench
     classify = not forced_new and not thread_id
     runs.start(
         block.id,

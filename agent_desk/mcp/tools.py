@@ -26,6 +26,7 @@ what any of this means.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -124,6 +125,64 @@ async def _close(store: Store, given: dict[str, Any]) -> str:
     return f"{idea_id} is done: {note}"
 
 
+async def _bench(store: Store, given: dict[str, Any]) -> str:
+    """A workbench as assembled context, not as a page.
+
+    "Верстак — это конструктор контекста, и человек уже собрал его руками." The cheapest thing this
+    console can give an agent is the arrangement somebody already made: which cards, in which
+    order, saying what, with which files allowed. It costs nothing to produce because the console
+    builds this text every time somebody presses send.
+
+    What comes back is that text and not a description of it — the same section a question carries,
+    built by the prompt's own writers (`agent_desk/answer/session.py`). An agent handed a summary
+    of a workbench would be reading somebody's notes about the work instead of the work.
+
+    Two limits are inherited rather than restated here, which is the point of gathering it in one
+    function. A file contributes its contents only where somebody said it may (055), so an agent
+    sees exactly what is on the screen and never a file the person themselves has not opened; and
+    everything is scrubbed on the way out.
+    """
+    # Late because the board is the console's and importing it at module load would drag a web
+    # application into a program that speaks on a pipe.
+    from agent_desk.web import blocks, routes
+
+    name = str(given.get("name", "")).strip()
+    thread_id, why = await _which_bench(store, name)
+    if why:
+        return why
+    on_it = await store.bench_cards(thread_id)
+    if not on_it:
+        return "That workbench is empty."
+    wanted = [str(one).strip() for one in given.get("cards") or [] if str(one).strip()]
+    cards = [one for one in on_it if not wanted or one.name in wanted]
+    # Somebody who chose three cards gets three. A name that is not on this bench is said rather
+    # than dropped: an agent that mistyped a card and got the whole workbench back would think it
+    # had asked for the whole workbench.
+    missing = [one for one in wanted if one not in {card.name for card in on_it}]
+    if missing:
+        return "Not on that workbench: " + ", ".join(missing)
+    rows, _ = await asyncio.to_thread(routes.board)
+    carried = await blocks.carried_from_the_bench(store, rows, [card.name for card in cards])
+    return blocks.as_one_string(carried) or "There is nothing on those cards to carry."
+
+
+async def _which_bench(store: Store, name: str) -> tuple[str, str]:
+    """Which chat's workbench that is: the id, or the sentence saying why there is none.
+
+    No name means the workbench that belongs to no chat, which is the one somebody opens the
+    console to. A name is matched against what the chats are called, because that is what is
+    written on the tab and the only name a person has for a bench.
+    """
+    if not name:
+        return "", ""
+    open_ = await store.open_threads()
+    for one in open_:
+        if one.subject.strip().lower() == name.lower():
+            return one.id, ""
+    called = ", ".join(one.subject for one in open_) or "none are open"
+    return "", f"No workbench is called {name!r}. Open chats: {called}."
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         name="keep_idea",
@@ -162,6 +221,26 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_close,
         writes=True,
+    ),
+    Tool(
+        name="bench",
+        says=(
+            "A workbench as the text a question would carry: the cards, in order, saying what "
+            "they say. Name a chat to get its bench, or nothing for the one outside the chats. "
+            "Name cards to get only those."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "the chat whose workbench this is"},
+                "cards": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "card names, `kind:id`, when only some of them are wanted",
+                },
+            },
+        },
+        run=_bench,
     ),
 )
 

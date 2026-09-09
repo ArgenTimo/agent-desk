@@ -349,15 +349,32 @@ async def test_a_named_card_with_nothing_written_on_it_is_not_invented(desk: Sto
     assert look.cards == []
 
 
-def test_the_gesture_names_them_all_the_way_down() -> None:
+async def test_the_gesture_names_them_all_the_way_down(desk: Store) -> None:
     """The route reads the pair once and hands it to both: the digest, so the model sees two cards,
-    and the store, so the third card finds its way back under them after a reload."""
-    route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
+    and the store, so the third card finds its way back under them after a reload.
 
+    The half that reaches the digest is checked by gathering a bench twice over the same answer
+    card: an answer is left out of a digest by default, because it is already in the prompt as the
+    thread's history, and it is in only when a gesture named it. So the pair arriving or not
+    arriving is the difference between two cards and none — which is what the model sees.
+    """
+    route = (HERE / "agent_desk" / "web" / "routes.py").read_text(encoding="utf-8")
     assert "made_from=combined if gesture else ()" in route
-    assert "await on_the_bench(store, rows, targets, made_from)" in (
-        HERE / "agent_desk" / "web" / "blocks.py"
-    ).read_text(encoding="utf-8")
+
+    from agent_desk.web import blocks
+
+    thread = await desk.create_thread("a chat")
+    first = await desk.create_block(
+        thread_id=thread.id, kind="question", input="what did it do", thread_set_by="human"
+    )
+    await desk.finish_block(first.id, "it read the registry")
+    pair = [f"answer:{first.id}"]
+
+    named = await blocks.carried_from_the_bench(desk, [], pair, pair)
+    unnamed = await blocks.carried_from_the_bench(desk, [], pair)
+
+    assert named.on_bench == pair
+    assert unnamed.on_bench == []
 
 
 def test_a_gesture_is_never_read_as_an_instruction() -> None:

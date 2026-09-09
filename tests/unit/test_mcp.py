@@ -13,8 +13,10 @@ import pathlib
 from collections.abc import AsyncIterator
 
 import pytest
+from agent_desk.answer import session
 from agent_desk.mcp import saying, server, tools
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import BenchCard, Store
+from agent_desk.web import blocks, routes
 
 pytestmark = pytest.mark.unit
 
@@ -287,3 +289,135 @@ async def test_one_idea_in_full_says_what_it_is_part_of(desk: Store) -> None:
 
     assert "and a grid" in back
     assert f"part of {whole.id}" in back
+
+
+# --- the workbench as assembled context (01M21NAVBZEVDT023Z80Z92Y02) ---------------------------
+@pytest.fixture
+def no_board(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No live sessions. The registry on this machine is not what any of these tests are about."""
+    monkeypatch.setattr(routes, "board", lambda: ([], []))
+
+
+def _bench_card(name: str, at: int = 0) -> BenchCard:
+    kind, _, card_id = name.partition(":")
+    return BenchCard(
+        name=name,
+        kind=kind,
+        card_id=card_id,
+        label=name,
+        x=10,
+        y=20,
+        shown="hint",
+        spent=False,
+        ord=at,
+    )
+
+
+def _how_many_cards(said: str) -> int:
+    """The count the digest itself states, rather than a guess from counting lines."""
+    (first,) = (line for line in said.splitlines() if "cards are on the workbench" in line)
+    return int(first.split()[1])
+
+
+async def test_a_workbench_comes_back_as_a_piece_of_the_prompt(desk: Store, no_board: None) -> None:
+    """Not a description of the bench — the text itself, the same words a question carries.
+
+    Asserted by building the prompt the console would have built from the same bench and finding
+    what the tool returned inside it. A test that looked for a heading would pass on a copy of the
+    heading; this one fails the moment the two stop being the same text.
+    """
+    one = await desk.create_idea(
+        text_="the reader is blocking", summary="a blocking read", source_kind="typed"
+    )
+    await desk.keep_bench([_bench_card(f"idea:{one.id}")])
+
+    said = _said(await tools.call(desk, "bench", {}))
+
+    carried = await blocks.carried_from_the_bench(desk, [], [f"idea:{one.id}"])
+    whole = session.build_prompt(
+        "does this still hold?",
+        board=[],
+        history=[],
+        workbench=carried.surface,
+        notes=carried.written,
+    )
+    assert said in whole
+    assert "a blocking read" in said
+
+
+async def test_only_the_cards_that_were_chosen_are_carried(desk: Store, no_board: None) -> None:
+    """ "Если человек выделил три, отдаются три." A selection that widened on the way to an agent
+    would be this console deciding what somebody meant."""
+    made = [
+        await desk.create_idea(
+            text_=f"idea number {n}", summary=f"idea number {n}", source_kind="typed"
+        )
+        for n in range(5)
+    ]
+    await desk.keep_bench([_bench_card(f"idea:{one.id}", at=n) for n, one in enumerate(made)])
+    chosen = [f"idea:{one.id}" for one in made[:3]]
+
+    said = _said(await tools.call(desk, "bench", {"cards": chosen}))
+
+    assert _how_many_cards(said) == 3
+    assert "idea number 4" not in said
+
+
+async def test_a_card_that_is_not_on_that_bench_is_said_rather_than_ignored(
+    desk: Store, no_board: None
+) -> None:
+    """Falling back to the whole workbench would answer a question nobody asked, and the caller
+    would have no way to tell."""
+    one = await desk.create_idea(text_="on the bench", summary="on the bench", source_kind="typed")
+    await desk.keep_bench([_bench_card(f"idea:{one.id}")])
+
+    said = _said(await tools.call(desk, "bench", {"cards": ["idea:nowhere"]}))
+
+    assert "idea:nowhere" in said
+    assert "on the bench" not in said
+
+
+async def test_a_file_says_nothing_until_somebody_allowed_it(
+    desk: Store, no_board: None, tmp_path: pathlib.Path
+) -> None:
+    """The permissions are the person's, and an agent gets no more than is on the screen.
+
+    Same table, same check, same function — because `bench` gathers what a question gathers. A
+    second reader with its own idea of what may be opened is how a rule acquires an exception.
+    """
+    secret = tmp_path / "notes.txt"
+    secret.write_text("the paragraph nobody allowed")
+    await desk.keep_bench([_bench_card(f"file:{secret}")])
+
+    before = _said(await tools.call(desk, "bench", {}))
+    await desk.let_it_be_read(str(secret))
+    after = _said(await tools.call(desk, "bench", {}))
+
+    assert "the paragraph nobody allowed" not in before
+    assert "the paragraph nobody allowed" in after
+
+
+async def test_a_bench_is_asked_for_by_the_name_of_its_chat(desk: Store, no_board: None) -> None:
+    """A chat's subject is what is written on the tab, and the only name a person has for one."""
+    chat = await desk.create_thread("the registry reader")
+    one = await desk.create_idea(text_="in that chat", summary="in that chat", source_kind="typed")
+    await desk.keep_bench([_bench_card(f"idea:{one.id}")], thread_id=chat.id)
+
+    said = _said(await tools.call(desk, "bench", {"name": "The Registry Reader"}))
+
+    assert "in that chat" in said
+
+
+async def test_a_name_that_is_no_workbench_lists_the_ones_that_are(
+    desk: Store, no_board: None
+) -> None:
+    await desk.create_thread("the registry reader")
+
+    said = _said(await tools.call(desk, "bench", {"name": "something else"}))
+
+    assert "the registry reader" in said
+    assert "something else" in said
+
+
+async def test_an_empty_workbench_says_so(desk: Store, no_board: None) -> None:
+    assert _said(await tools.call(desk, "bench", {})) == "That workbench is empty."

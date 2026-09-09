@@ -515,6 +515,31 @@ async def stream_answer(
         return
 
 
+def workbench_section(cards: Iterable[str]) -> list[str]:
+    """The cards themselves, numbered (agent_desk/looking.py).
+
+    Before the thread and before the transcripts, because a question asked with cards in front of
+    it is usually a question *about* those cards, and the thing a question is about should not be
+    reached by scrolling past everything it is not about.
+
+    A function rather than four lines inside the prompt because something other than the prompt
+    now asks for the same text: an agent calling `bench` over MCP is asking for exactly what a
+    question carries, and two places writing that heading are two places that drift apart.
+    """
+    surface = list(cards)
+    return ["", "## The workbench", *surface] if surface else []
+
+
+def carried_section(written: Iterable[str]) -> list[str]:
+    """Ideas somebody dropped into the question.
+
+    They are not evidence of anything an agent did — they are what a person thought at some
+    point — and the prompt says so.
+    """
+    said = list(written)
+    return ["", "## Ideas the person carried into this question", *said] if said else []
+
+
 def build_prompt(
     question: str,
     *,
@@ -559,13 +584,7 @@ def build_prompt(
     if about:
         lines += ["", "## What this question is about", about]
 
-    surface = list(workbench)
-    if surface:
-        # The cards themselves, numbered (agent_desk/looking.py). Before the thread and before the
-        # transcripts, because a question asked with cards in front of it is usually a question
-        # *about* those cards, and the thing a question is about should not be reached by scrolling
-        # past everything it is not about.
-        lines += ["", "## The workbench", *surface]
+    lines += workbench_section(workbench)
 
     previous = list(history)
     if previous:
@@ -573,11 +592,7 @@ def build_prompt(
         for asked, answered in previous:
             lines += [f"Q: {asked}", f"A: {answered}", ""]
 
-    written = list(notes)
-    if written:
-        # Ideas somebody dropped into the question. They are not evidence of anything an agent
-        # did — they are what a person thought at some point — and the prompt says so.
-        lines += ["", "## Ideas the person carried into this question", *written]
+    lines += carried_section(notes)
 
     read = list(transcripts)
     if read:
