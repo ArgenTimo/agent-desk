@@ -50,7 +50,6 @@ from agent_desk import (
     process,
     roles,
     room,
-    spread,
     starting,
     telling,
     ties,
@@ -2437,7 +2436,7 @@ async def repeat_a_run(request: Request) -> JSONResponse:
 
     Only a drawing made entirely of prompts. Ten runs of a drawing with work in it is ten agents in
     ten worktrees, which is not a thing to start from a text box — and a harness is prompts by
-    definition, so nothing that this is for is refused (agent_desk/spread.py).
+    definition, so nothing that this is for is refused (agent_desk/comparing.py).
     """
     form = await _form(request)
     names = [one for one in form.get("cards", "").split(",") if one]
@@ -2464,65 +2463,36 @@ async def repeat_a_run(request: Request) -> JSONResponse:
     return JSONResponse({"started": len(made), "runs": made})
 
 
-@router.get("/workbench/spread", response_class=JSONResponse)
-async def spread_of_runs(cards: str = "") -> JSONResponse:
-    """What every run of this drawing produced, step by step (agent_desk/spread.py)."""
-    here = {one for one in cards.split(",") if one}
-    mine = [one for one in await store.runs() if here & set(one.names)]
-    labels = {one.name: one.label for one in await store.step_cards()}
-    found = spread.over([await store.run_steps(one.id) for one in mine], labels)
-    return JSONResponse(
-        {
-            "said": found.said,
-            "rows": [
-                {
-                    "name": step.name,
-                    "label": step.label,
-                    "says": step.says,
-                    "changed": len(step.answers) > 1 or bool(step.failed),
-                    "before": step.answers[0][0] if step.answers else "",
-                    "after": step.answers[1][0] if len(step.answers) > 1 else "",
-                    "marks": [],
-                }
-                for step in found.steps
-            ],
-        }
-    )
+def _side_by_side(row: comparing.Row) -> dict[str, object]:
+    """One row of the panel. One shape, because there is one panel: the runs of a drawing and the
+    answers of a card are the same question asked of different things."""
+    return {
+        "name": row.name,
+        "label": row.label,
+        "before": row.before,
+        "after": row.after,
+        "says": row.says,
+        "changed": row.changed,
+        # Word by word, with what changed marked. Two answers side by side are readable; two with
+        # the changed words marked are comparable, which is the thing the harness is assembled to
+        # reach.
+        "marks": [{"mark": mark, "text": text} for mark, text in row.marks],
+    }
 
 
 @router.get("/workbench/compare", response_class=JSONResponse)
-async def compare_two_runs(runs: str = "") -> JSONResponse:
-    """Two runs of one drawing, step by step (agent_desk/comparing.py).
+async def compare_the_runs(cards: str = "") -> JSONResponse:
+    """The runs of this drawing, step by step (agent_desk/comparing.py).
 
-    Named by id rather than "the last two", because which two is a thing the person is looking at
-    and the newest run is not always the interesting one.
+    Every run of it rather than two named ones: the columns are the last two, which is the pair
+    somebody testing a pipeline is looking at, and what the rest of them said is on the row beside
+    them. Two questions that were two controls and two panels, and are one of each.
     """
-    wanted = [one for one in runs.split(",") if one][:2]
-    if len(wanted) != 2:
-        return JSONResponse({"rows": [], "said": "two runs are needed to compare two runs"})
-    earlier, later = (await store.run_steps(wanted[0]), await store.run_steps(wanted[1]))
+    here = {one for one in cards.split(",") if one}
+    mine = [one for one in await store.runs() if here & set(one.names)]
     labels = {one.name: one.label for one in await store.step_cards()}
-    rows = comparing.against(earlier, later, labels)
-    return JSONResponse(
-        {
-            "said": comparing.in_a_word(rows),
-            "rows": [
-                {
-                    "name": row.name,
-                    "label": row.label,
-                    "before": row.before,
-                    "after": row.after,
-                    "says": row.says,
-                    "changed": row.changed,
-                    # Word by word, with what changed marked. Two answers side by side are
-                    # readable; two with the changed words marked are comparable, which is the
-                    # thing the harness is assembled to reach.
-                    "marks": [{"mark": mark, "text": text} for mark, text in row.marks],
-                }
-                for row in rows
-            ],
-        }
-    )
+    found = comparing.over([await store.run_steps(one.id) for one in mine], labels)
+    return JSONResponse({"said": found.said, "rows": [_side_by_side(row) for row in found.rows]})
 
 
 @router.get("/cards/answers", response_class=JSONResponse)
@@ -2547,21 +2517,7 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
         for other, said in answers[1:]
     ]
     return JSONResponse(
-        {
-            "said": comparing.in_a_word(rows),
-            "rows": [
-                {
-                    "name": row.name,
-                    "label": row.label,
-                    "before": row.before,
-                    "after": row.after,
-                    "says": row.says,
-                    "changed": row.changed,
-                    "marks": [{"mark": mark, "text": text} for mark, text in row.marks],
-                }
-                for row in rows
-            ],
-        }
+        {"said": comparing.in_a_word(rows), "rows": [_side_by_side(row) for row in rows]}
     )
 
 

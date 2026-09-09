@@ -3275,7 +3275,8 @@ const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', faile
 // "Тестировать пайплайн — значит запускать его несколько раз и смотреть, что изменилось."
 //
 // The history was always there — every run keeps what each of its steps produced — and nothing
-// showed it. This is the two most recent runs of what is on the bench, side by side.
+// showed it. This is every run of what is on the bench: the last two side by side, and what all of
+// them disagreed about on the row beside them.
 //
 // Offered only when there are two, because comparing one run with nothing is a table of one
 // column, and a control that produces one is a control somebody presses once.
@@ -3287,10 +3288,6 @@ function runsOfThisBench() {
 function showCompare() {
   const button = document.getElementById('compare-runs');
   if (button) button.hidden = runsOfThisBench().length < 2;
-  // The spread wants two runs as well: one run has no spread, and a table of one column is what a
-  // person presses once and never again.
-  const spread = document.getElementById('spread-runs');
-  if (spread) spread.hidden = runsOfThisBench().length < 2;
   // Repeating is offered only for a drawing of prompts, which is the same rule the route holds —
   // ten runs of a drawing with work in it is ten agents in ten worktrees.
   const again = document.getElementById('repeat-runs');
@@ -3301,12 +3298,13 @@ function showCompare() {
   }
 }
 
-async function compareTheLastTwo() {
-  const mine = runsOfThisBench().slice(0, 2);
-  if (mine.length < 2) return;
-  // Older first, so "before" is before. `/workbench/runs` answers newest first.
-  const wanted = [mine[1].id, mine[0].id].join(',');
-  await showComparison(`/workbench/compare?runs=${encodeURIComponent(wanted)}`);
+// One control, because it was two answers to one question: what changed between the last two runs,
+// and what all of them disagreed about. The route reads every run of this drawing — the columns
+// are the last two and the counting is beside them (agent_desk/comparing.py).
+async function compareTheRuns() {
+  await showComparison(
+    `/workbench/compare?cards=${encodeURIComponent(onBench().map(cardName).join(','))}`
+  );
 }
 
 // "Два ответа, показанные друг под другом с отличиями — это то, ради чего собирают такую схему."
@@ -3320,7 +3318,7 @@ async function showAnswersOn(holder) {
 
 // "Прогон N раз с показом разброса и доли прошедших проверок" — and the same control for a set of
 // examples, because running twenty times with one input and once per line of twenty are the same
-// act with a different list (agent_desk/spread.py).
+// act with a different list (agent_desk/comparing.py).
 async function repeatIt() {
   const said = (
     prompt(
@@ -3347,14 +3345,7 @@ async function repeatIt() {
   }
 }
 
-async function showSpread() {
-  await showComparison(
-    `/workbench/spread?cards=${encodeURIComponent(onBench().map(cardName).join(','))}`
-  );
-}
-
 document.getElementById('repeat-runs')?.addEventListener('click', repeatIt);
-document.getElementById('spread-runs')?.addEventListener('click', showSpread);
 
 async function showComparison(where) {
   const panel = document.getElementById('compare-panel');
@@ -3400,7 +3391,7 @@ function writeMarks(into, marks, side, whole) {
   }
 }
 
-document.getElementById('compare-runs')?.addEventListener('click', compareTheLastTwo);
+document.getElementById('compare-runs')?.addEventListener('click', compareTheRuns);
 document
   .querySelector('[data-compare-off]')
   ?.addEventListener('click', () => {

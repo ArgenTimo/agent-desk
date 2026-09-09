@@ -2814,10 +2814,10 @@ button.go:hover, button.yes:hover {
   font-size: var(--t-xs);
 }
 
-/* --- two runs of one drawing, side by side ------------------------------------------------------- */
-/* What changed between them, and nothing about whether it got better: a model asked the same
-   question twice answers differently, and a verdict here would be noise wearing a checkmark
-   (agent_desk/comparing.py). */
+/* --- the runs of one drawing, side by side -------------------------------------------------------- */
+/* The last two in the columns and what all of them disagreed about on the row — and nothing about
+   whether it got better: a model asked the same question twice answers differently, and a verdict
+   here would be noise wearing a checkmark (agent_desk/comparing.py). */
 .compare {
   position: absolute; right: 12px; bottom: 64px; z-index: 6;
   max-width: 62ch; max-height: 60vh; overflow: auto;
