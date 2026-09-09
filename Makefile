@@ -75,6 +75,9 @@ check-patterns: ## The packaged secret shapes must match the ones the commit hoo
 # --reload-exclude is the second bug fix in this target. A dispatched agent works in a worktree
 # *inside* this repository (.claude/worktrees/), so without it every file that agent touches
 # restarts the console — which kills the loop that started it, mid-run, several times a minute.
+mcp: ## The MCP server on stdin/stdout, for an agent to attach to
+	$(POETRY) run python -m agent_desk.mcp
+
 run: ## The console on http://127.0.0.1:8787
 	$(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
 	  --reload-exclude '.claude/worktrees/*' --reload-exclude '*/.claude/worktrees/*' \

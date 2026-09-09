@@ -52,6 +52,10 @@ _NOT_AN_ON_DISK_FORMAT = {
     "tracker/jira.py",
     "tracker/github.py",
     "secrets.py",
+    # JSON-RPC on a pipe. Not an on-disk format at all: it is a wire protocol this program speaks
+    # to whatever attached to it, and the rule this list carves out of is about Claude Code's files
+    # changing under us (docs/adr/0004). Nothing here reads anything off a disk.
+    "mcp/server.py",
 }
 
 
