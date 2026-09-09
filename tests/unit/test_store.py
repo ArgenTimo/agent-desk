@@ -508,3 +508,37 @@ def test_missing_secret_shapes_stop_the_program_rather_than_render_unredacted(
             redact.scrub("ghp_" + "x" * 36)
     finally:
         redact.patterns.cache_clear()
+
+
+# --- a reader must not block a writer ------------------------------------------------------------
+@pytest.mark.unit
+async def test_the_journal_is_one_a_reader_does_not_hold_shut(store: Store) -> None:
+    """In the default mode a shared lock held by anything reading makes a write wait, and after
+    five seconds SQLite gives up with "database is locked". It cost one shutdown in four."""
+    async with store.engine.connect() as conn:
+        rows = await conn.execute(text("PRAGMA journal_mode"))
+        assert str(rows.scalar()).lower() == "wal"
+
+
+@pytest.mark.unit
+async def test_a_writer_waits_for_a_writer_rather_than_failing(store: Store) -> None:
+    """WAL still allows one writer at a time, and "wait a moment" is the right answer to that
+    where "the database is locked" is not."""
+    async with store.engine.connect() as conn:
+        rows = await conn.execute(text("PRAGMA busy_timeout"))
+        assert int(rows.scalar()) >= 5000
+
+
+@pytest.mark.unit
+async def test_a_write_lands_while_something_is_reading(store: Store) -> None:
+    """The property the pragma buys, asserted rather than described: a read transaction is open
+    for the whole of the write, which is exactly the shape the shutdown hang had."""
+    thread = await _thread(store)
+    async with store.engine.connect() as reading:
+        await reading.execute(text("SELECT count(*) FROM block"))
+
+        await store.create_block(
+            thread_id=thread, kind="question", input="while it reads", thread_set_by="human"
+        )
+
+    assert len(await store.blocks_in_thread(thread)) == 1

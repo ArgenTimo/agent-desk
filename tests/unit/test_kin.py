@@ -154,3 +154,17 @@ async def test_an_idea_is_never_filed_under_its_own_child(
     # The child is not offered as a candidate for its own parent at all.
     assert await kin.place(store, parent) in ("new", "new: nothing to compare it with")
     assert (await store.idea(parent.id)).parent_id is None  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+async def test_an_idea_that_is_gone_by_the_time_this_runs_is_left_alone(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """This runs after the capture, not inside it, and a person reading the list can act in that
+    gap. Until now it was covered only when the race happened to happen, which is a branch tested
+    by luck — and luck moved the suite's coverage across its own floor between runs."""
+    idea = await store.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    _answers("under 1", monkeypatch)
+    await store.delete_idea(idea.id)
+
+    assert await kin.place(store, idea) == "left alone: it is not there any more"

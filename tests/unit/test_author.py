@@ -231,7 +231,7 @@ async def test_answering_it_instead_removes_the_idea_it_should_not_have_made(
         try:
             left = await block_runs.answer_it_instead(desk, block, [])
         finally:
-            block_runs.runs.cancel_all()
+            await block_runs.runs.stop_all()
             block_runs.runs.attach(None)
 
     assert await desk.idea(loose.id) is None, "the idea it should not have made is still there"

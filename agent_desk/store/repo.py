@@ -844,6 +844,22 @@ def _prepare_connection(dbapi_connection: Any, _record: Any) -> None:
     """
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # A reader must not block a writer. In the default journal mode it does: a shared lock held by
+    # anything reading — the board, the block column, an SSE push — makes a write wait, and after
+    # five seconds SQLite gives up with "database is locked".
+    #
+    # That is not a theoretical race. It cost one shutdown in four: a run cancelled on the way out
+    # writes its own `cancelled` row under a shield, could not get the lock, waited out the busy
+    # timeout twice and took eleven seconds to close a console that promises to close at once.
+    # Measured by running the test that asserts it, twelve times.
+    #
+    # WAL is the answer to the whole class rather than to that instance, and it is the mode this
+    # program was already shaped for: one process, several things reading constantly, writes that
+    # are small and rare (docs/adr/0003).
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # And a writer waits for a writer rather than failing. WAL still allows only one at a time, and
+    # "wait a moment" is the right answer to that where "the database is locked" is not.
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
     dbapi_connection.isolation_level = None
 

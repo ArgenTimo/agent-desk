@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.
-                for block_id in blocks.runs.cancel_all():
+                for block_id in await blocks.runs.stop_all():
                     with suppress(Exception):
                         await blocks.cancel(routes.store, block_id)
                 blocks.runs.attach(None)

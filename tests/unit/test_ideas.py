@@ -57,7 +57,7 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
         try:
             yield store
         finally:
-            blocks.runs.cancel_all()
+            await blocks.runs.stop_all()
             blocks.runs.attach(None)
     await store.close()
 

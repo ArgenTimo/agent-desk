@@ -179,15 +179,30 @@ class Runs:
             await task
         return True
 
-    def cancel_all(self) -> list[str]:
+    async def stop_all(self) -> list[str]:
         """Shutdown ends runs rather than waiting for them, and says which it ended.
 
         A console that will not stop while three questions are in the air is the shutdown hang
         this project already fixed once, in a different disguise.
+
+        Cancelled together and then awaited, which is the half that was missing. A cancelled run
+        writes its own `cancelled` row under a shield; the caller then writes one too, for the run
+        that was cancelled before its first step. Without the wait those two writes are in flight
+        at the same moment, and SQLite answers the second with "database is locked" — five seconds
+        of busy-wait, twice, and a console that took eleven seconds to close. It was not a hang and
+        it was not rare: one shutdown in four, measured by running the test that asserts this.
+
+        Every cancellation is delivered before anything is awaited, so this is still "end them"
+        and not "wait for them": the wait is on tasks that have already been told to stop, and
+        each is bounded by the reap in `answer/session.py`.
         """
         stopped = list(self._by_block)
-        for task in list(self._by_block.values()):
+        tasks = list(self._by_block.values())
+        for task in tasks:
             task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         return stopped
 
     def __len__(self) -> int:
