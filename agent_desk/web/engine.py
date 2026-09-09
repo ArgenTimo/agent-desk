@@ -49,13 +49,15 @@ import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import structlog
 
 from agent_desk import allowed, checking, dispatch, engines, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
+from agent_desk.ideas import waking
 from agent_desk.store.repo import Run, RunStep, Store
-from agent_desk.web import autostart, blockers
+from agent_desk.web import autostart, blockers, later
 
 log = structlog.get_logger()
 
@@ -844,19 +846,56 @@ async def _decide(
 
 
 async def _wait_for(store: Store, run: Run, card: process.Card, step: RunStep | None) -> int:
-    """An Event: the one step that is not work. It waits until somebody says it happened.
+    """An Event: the one step that is not work. It waits until the thing it waits for is true.
 
     Held, not failed, and the difference is kept: a run waiting on Tuesday's release is a run that
     is fine, and a console that showed it in red would have somebody looking for a fault.
+
+    ## The console answers the ones it can
+
+    "Сегодня Event ждёт, пока человек скажет «случилось». Но консоль уже сама знает кучу фактов:
+    гейт позеленел… ни одна сессия не занята, наступило время."
+
+    So the words on the card are read the way a deferred thought's are — by `ideas/waking.py`,
+    against the same closed list of conditions — and where they name one this console can check,
+    the run goes on by itself. That is the difference between a drawing somebody runs and one that
+    lives.
+
+    Anything the reader does not recognise still waits for a person, unchanged. Free text is not a
+    condition and never becomes one by being guessed at: "когда всё устаканится" would otherwise
+    become a moment that never arrives or, worse, one that arrives at random.
     """
+    awaits = (card.said.get("awaits") or "").strip()
+    wake = waking.read(awaits, now=datetime.now(UTC)) if awaits else None
+    if wake is not None:
+        # Asked every tick rather than once: a condition is a fact about the world, and the world
+        # is what changes while a run is held.
+        if waking.has_come(
+            wake,
+            now=datetime.now(UTC),
+            anything_running=await later.anything_running(),
+            gate_is_green=await later.gate_is_green(store, run.repo_key),
+        ):
+            await store.set_run_step(
+                run_id=run.id, name=card.name, state="done", made=f"it came true: {awaits}"
+            )
+            await store.card_made(card.name, f"it came true: {awaits}")
+            log.info("engine.event_came_true", run=run.id, step=card.name, awaits=awaits)
+            return 1
     if step is not None and step.state == "held":
         return 0
-    awaits = (card.said.get("awaits") or "").strip()
     await store.set_run_step(
         run_id=run.id,
         name=card.name,
         state="held",
-        detail=awaits or "waiting for something to happen",
+        # What it is waiting for, and whether anybody has to do anything about it. A person who
+        # cannot tell the two apart presses "it happened" on a condition the console was about to
+        # answer by itself.
+        detail=(
+            f"waiting for it to be true: {awaits}"
+            if wake is not None
+            else awaits or "waiting for something to happen"
+        ),
     )
     log.info("engine.waiting", run=run.id, step=card.name)
     return 1
