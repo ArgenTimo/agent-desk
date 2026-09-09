@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import functools
 import hashlib
 import io
 import json
@@ -58,6 +59,7 @@ from agent_desk import (
     recalling,
     roles,
     room,
+    seen,
     spread,
     standing,
     starting,
@@ -3285,6 +3287,45 @@ async def _looks_like(idea_id: str) -> list[tuple[LooksLike, Idea]]:
         if other is not None:
             found.append((one, other))
     return found
+
+
+# What the page's own script said when it last loaded, in memory and nowhere else
+# (01M21KTYFHDNFY02JSBFDPVX8Y). Not stored: an error from a page nobody has open since is a fact
+# about a version of the file that is gone, and a table of them would be read as a history it is
+# not. One list, replaced by the next page load.
+SCRIPT_SAID: list[str] = []
+
+
+@router.post("/seen/errors", response_class=PlainTextResponse)
+async def the_script_fell_over(request: Request) -> PlainTextResponse:
+    """The page telling this console what its script threw while loading."""
+    try:
+        said = seen.read_what_went_wrong(await request.body())
+    except ValueError:
+        return PlainTextResponse("that was not JSON", status_code=400)
+    SCRIPT_SAID.clear()
+    SCRIPT_SAID.extend(said)
+    log.warning("console.script_failed", said=SCRIPT_SAID[:3])
+    return PlainTextResponse("")
+
+
+@router.get("/seen", response_class=PlainTextResponse)
+async def the_page_as_text() -> PlainTextResponse:
+    """The console as a reader with no browser gets it (01M21KTYFADJZ27H4EPVZ736CX).
+
+    «Разница между чтением кода и взглядом на экран — это разница между "должно работать" и
+    "работает".» Three real defects lived in the source for hours and were found in five minutes
+    once there was a browser. This is the half of a browser that fits in a pipe: what is on the
+    page, what can be pressed and what that is bound to, and what the script said when it ran.
+    """
+    nodes, controls = seen.read(await render_page(), script=_console_script())
+    return PlainTextResponse(seen.as_text(nodes, controls, SCRIPT_SAID))
+
+
+@functools.cache
+def _console_script() -> str:
+    """The console's own source, read once. It changes only when this process is restarted."""
+    return (Path(__file__).parent / "static" / "console.js").read_text(encoding="utf-8")
 
 
 @router.get("/scripts", response_class=PlainTextResponse)

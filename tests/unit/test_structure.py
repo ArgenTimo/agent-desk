@@ -56,6 +56,9 @@ _NOT_AN_ON_DISK_FORMAT = {
     # to whatever attached to it, and the rule this list carves out of is about Claude Code's files
     # changing under us (docs/adr/0004). Nothing here reads anything off a disk.
     "mcp/server.py",
+    # The page telling its own server what its script threw (01M21KTYFHDNFY02JSBFDPVX8Y). Same
+    # argument: two halves of this program agreeing on a message, not a file somebody else writes.
+    "seen.py",
 }
 
 

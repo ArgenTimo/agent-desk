@@ -307,6 +307,21 @@ def _as_a_failure(said: str) -> str:
     return f"did not work — {first}" + (f"\n{rest}" if rest else "")
 
 
+async def _the_page(store: Store, given: dict[str, Any]) -> str:
+    """The console as somebody with a browser sees it, in text.
+
+    «Разница между чтением кода и взглядом на экран — это разница между "должно работать" и
+    "работает".» An agent has the source and not the product. This is the half of a browser that
+    fits in a pipe: what is on the page, what can be pressed and what that is bound to, and what
+    the script said when it last ran.
+    """
+    from agent_desk import seen
+    from agent_desk.web import routes
+
+    nodes, controls = seen.read(await routes.render_page(), script=routes._console_script())
+    return seen.as_text(nodes, controls, routes.SCRIPT_SAID)
+
+
 async def _keep_script(store: Store, given: dict[str, Any]) -> str:
     """Put a draft or a small script in the drawer, under a name you can ask for it by.
 
@@ -671,6 +686,16 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="the_page",
+        says=(
+            "The console as text: what is on the page, what can be pressed and what that is "
+            "bound to, and what its script said when it last loaded."
+        ),
+        takes={"type": "object", "properties": {}},
+        run=_the_page,
+        shows='214 things on the page. / main / heading "the board" …',
     ),
     Tool(
         name="keep_script",

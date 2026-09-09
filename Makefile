@@ -48,10 +48,15 @@ coverage: ## pytest with a coverage floor
 
 gate: lint typecheck test ## What stop-verify.sh runs at every turn end
 
-verify: gate check-links check-patterns coverage ## Everything green before a human sees it
+verify: gate check-links check-patterns check-script coverage ## Everything green before a human sees it
 
 check-links: ## Prove every relative link in docs/ and design/ resolves
 	@scripts/check-doc-links.sh
+
+# A syntax error in console.js stops the whole file executing, so every gesture and the workbench
+# go at once while the page still renders — and no Python test sees it (01M21KTYFQS5FW8GSV96PZF4AQ).
+check-script: ## Prove the console's script parses
+	@scripts/check-the-script.sh
 
 .PHONY: audit
 audit: ## Known advisories against what is installed, and a static look for the usual holes

@@ -6,6 +6,38 @@
  * only removes the page reload (docs/adr/0003).
  */
 
+/* --- what went wrong while this was loading ---------------------------------------------------- */
+// «Ошибки скрипта собираются на странице и отдаются вместе с ним.» An agent reading this console
+// has the source and not the product, and the one thing the source cannot show is a script that
+// fell over: the page still renders, and every gesture on it is silently gone. So errors are
+// collected here and posted once, and /seen hands them back with the tree.
+//
+// First in the file on purpose. A handler installed after the line that throws catches nothing,
+// and the errors worth catching are the ones at the top.
+const wentWrong = [];
+window.addEventListener('error', (event) => {
+  wentWrong.push(`${event.message} (${event.filename}:${event.lineno})`);
+  tellTheConsole();
+});
+window.addEventListener('unhandledrejection', (event) => {
+  wentWrong.push(`unhandled rejection: ${event.reason}`);
+  tellTheConsole();
+});
+
+// Sent once and late, so a page that throws forty times in a loop posts one list rather than forty
+// requests — and so the post itself never runs before the page has finished loading.
+let telling = null;
+function tellTheConsole() {
+  clearTimeout(telling);
+  telling = setTimeout(() => {
+    fetch('/seen/errors', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ said: wentWrong.slice(0, 20) }),
+    }).catch(() => {});
+  }, 1000);
+}
+
 const poll = window.POLL_SECONDS || 2;
 const asof = document.getElementById('asof');
 const state = document.getElementById('stream-state');
