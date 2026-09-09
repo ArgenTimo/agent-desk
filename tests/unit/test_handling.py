@@ -44,13 +44,29 @@ def test_nothing_here_removes_work_or_starts_anything() -> None:
     `041-bench-undo.sql` counts which cards are on the bench as part of the surface, so it comes
     back with the same press an arrangement does.
 
+    `join`, `name` and `role` joined them for the same reason and pass the same test: the surface an
+    undo records is the cards, where they sit *and the lines between them*, so a line drawn wrongly,
+    a name typed wrongly and a role set wrongly all cost one press
+    (01M23NMJM7ZJYC309B7MWFDGF4).
+
     Asserted against the verbs the instruction actually offers rather than against the words in it.
     The first version of this searched the whole text for "delete" and started failing the moment
     the instruction said *"nothing is deleted"* — a substring check tripping over its own
     documentation, which is the failure mode this repository keeps meeting."""
     offered = _verbs_offered()
 
-    assert offered == {"mark", "sort", "clear", "fold", "open", "take", "tidy"}
+    assert offered == {
+        "mark",
+        "sort",
+        "clear",
+        "fold",
+        "open",
+        "take",
+        "tidy",
+        "join",
+        "name",
+        "role",
+    }
 
 
 def _verbs_offered() -> set[str]:
@@ -248,7 +264,7 @@ def test_folding_is_something_this_can_ask_for() -> None:
 
     assert "fold 2,5,6" in said
     assert "open 1" in said
-    assert "seven shapes" in said
+    assert "ten shapes" in said
 
 
 @pytest.mark.unit

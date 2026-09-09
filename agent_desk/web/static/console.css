@@ -3197,3 +3197,20 @@ button.go:hover, button.yes:hover {
    connector form beside it, because they are the two halves of one list. */
 .new-server { display: grid; gap: 4px; margin: 8px 0 0; justify-items: start; }
 .new-server input, .new-server select { width: 100%; max-width: 28rem; }
+/* A button that comes back with cards (075-a-card-that-comes-back-with-cards.sql). On the card
+   with the prompt, because it changes what pressing it does and a control whose behaviour you
+   cannot read is one you press once. */
+.brings-back { display: flex; gap: 6px; align-items: baseline; font-size: var(--t-xs); }
+
+/* «Консоль замечает, что вы делаете одно и то же» (01M1XED1DYFK1QRTHZDHHGY8W9). One line above the
+   input field, quiet: it is an offer, and an offer that shouts is one somebody dismisses without
+   reading. */
+.again {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: var(--t-sm);
+  color: var(--fg-soft);
+}
+.again-said { flex: 1 1 auto; }

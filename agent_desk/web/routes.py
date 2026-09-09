@@ -51,13 +51,16 @@ from agent_desk import (
     describing,
     diagrams,
     dispatch,
+    finding,
     grading,
     handling,
     land,
+    opening,
     pasted,
     peer,
     process,
     recalling,
+    repeating,
     roles,
     room,
     seen,
@@ -2150,6 +2153,11 @@ async def ask(request: Request) -> Response:
     # another tab follows.
     if gesture == "combine" and len(combined) == 2:
         typed = combining.rule(await store.combining(form.get("thread", "").strip()))
+    if typed and str(form.get("brings_back", "")).strip() == "yes":
+        # The shape the answer has to arrive in, added here rather than written into every button:
+        # a person writing a button is writing what they want to know, and a shape they have to
+        # remember to append is a shape half the buttons will be missing (agent_desk/finding.py).
+        typed = finding.what_to_ask(typed)
     if typed:
         rows, _ = await asyncio.to_thread(board)
         # The board is shaped before the question is aimed, and the *shaped* rows are what travels:
@@ -2179,7 +2187,9 @@ async def ask(request: Request) -> Response:
             a_gesture=bool(gesture),
         )
         if by_button:
-            await store.sent_by_a_button(made.id)
+            await store.sent_by_a_button(
+                made.id, brings_back=str(form.get("brings_back", "")).strip() == "yes"
+            )
         if len(combined) == 2:
             await store.made_out_of(made.id, combined)
     if _wants_fragment(request):
@@ -3578,6 +3588,73 @@ async def _grades_before(*, skip: int) -> list[tuple[str, str]]:
     ]
 
 
+@router.post("/sessions/{session_id}/open", response_class=JSONResponse)
+async def open_a_session(session_id: str) -> JSONResponse:
+    """Open one session in a terminal on this machine (01M1VAZ5PT5YHPDZ6BR780HM0E).
+
+    «Кнопка "перейти" должна открывать сессию на экране устройства.» The page cannot open a
+    terminal and never could; the console is a process on the same machine, started by the same
+    person, and it can.
+
+    Nothing is written into the session. What happens is a window opening in front of whoever
+    pressed the button, with their own session in it — docs/adr/0002 is about this program putting
+    text into a context, and this puts a person in front of one.
+    """
+    done = await asyncio.to_thread(opening.open_it, session_id)
+    return JSONResponse({"opened": done.ok, "why": done.detail})
+
+
+@router.get("/workbench/again", response_class=JSONResponse)
+async def what_keeps_being_done() -> JSONResponse:
+    """Whether somebody has done the same thing enough times to be worth offering
+    (01M1XED1DYFK1QRTHZDHHGY8W9).
+
+    «Три раза подряд: собрал те же три карточки, задал тот же по форме вопрос, запустил.» The most
+    direct road from "interesting thing" to "I use this every day" is a template nobody had to sit
+    down and invent.
+    """
+    asked = [
+        (one.input, one.context or "")
+        for one in await store.blocks(limit=repeating.RECENT)
+        if one.input.strip()
+    ]
+    found = repeating.noticed(asked)
+    if found is None:
+        return JSONResponse({"times": 0})
+    return JSONResponse(
+        {
+            "times": found.times,
+            "says": found.shape.says,
+            "asks": found.asks,
+            "kinds": list(found.shape.kinds),
+        }
+    )
+
+
+@router.post("/workbench/again", response_class=JSONResponse)
+async def draw_what_keeps_being_done(request: Request) -> JSONResponse:
+    """Put that process on the workbench, already assembled.
+
+    «Уже собранный, с полями, заполненными по тому, что делалось» — one step for each kind of card
+    the question was asked with, and the question itself in the step that asks it. Assembled, not
+    saved: keeping it under a name is the press somebody makes afterwards, which is the same
+    decision every other tool on this bench is kept by.
+    """
+    form = await _form(request)
+    asks = form.get("asks", "").strip()
+    kinds = [one for one in form.get("kinds", "").split(",") if one.strip()]
+    if not asks:
+        return JSONResponse({"made": [], "why": "there is nothing to draw"}, 400)
+    steps = [{"role": "object", "label": f"the {one}", "words": ""} for one in kinds]
+    steps.append({"role": "action", "label": asks[:60], "words": asks})
+    lines = [
+        {"from": str(number), "to": str(len(steps)), "kind": "then", "says": ""}
+        for number in range(1, len(steps))
+    ]
+    made = await block_runs.cards_from_shape(store, steps, lines)
+    return JSONResponse({"made": made})
+
+
 @router.get("/scripts", response_class=PlainTextResponse)
 async def kept_scripts(project: str = "") -> PlainTextResponse:
     """What is in the drawer, as text (01M21KTYENWWNPMAM8WYSQ5YV2).
@@ -3723,6 +3800,8 @@ async def edit_button_card(request: Request) -> Response:
             card_id,
             label=form.get("label", "").strip() or "a button",
             prompt=form.get("prompt", ""),
+            # «Вернётся с новыми карточками, основанными на полученных данных» (075).
+            brings_back=form.get("brings_back", "") == "yes",
         )
     return HTMLResponse("", status_code=204)
 

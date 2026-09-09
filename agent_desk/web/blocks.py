@@ -26,6 +26,7 @@ import structlog
 
 from agent_desk import (
     dispatch,
+    finding,
     handling,
     looking,
     pasted,
@@ -43,6 +44,7 @@ from agent_desk.observe import reading
 from agent_desk.observe.model import Session
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import (
+    BenchCard,
     Block,
     BoardTicket,
     DraftKind,
@@ -1405,7 +1407,38 @@ async def _rearrange(
             "any cards. Nothing was changed.",
         )
         return
+    await _write_what_was_asked(store, block, asked)
     await store.finish_block(block.id, handling.as_json(asked))
+
+
+async def _write_what_was_asked(store: Store, block: Block, asked: handling.Handling) -> None:
+    """The three actions whose result is a row rather than a place on a surface (01M23NMJM7ZJYC309B7MWFDGF4).
+
+    Marks, folds and sides live on the page; a line, a name and a role are facts about cards and
+    live in the store. They are written here rather than by the page for the reason every other
+    write is: the page applies an arrangement once and a card dragged to another bench takes its
+    role and its lines with it, which a page-only change would not survive.
+
+    Each goes through the function the mouse already uses, so a line drawn by a sentence and one
+    drawn by hand are the same row — including `tie_cards`' own refusal to tie a card to itself,
+    and including the undo step it records.
+    """
+    for line in asked.joined:
+        await store.tie_cards(
+            from_name=line.from_name,
+            to_name=line.to_name,
+            kind=line.kind,
+            says=line.says,
+            thread_id=block.thread_id,
+        )
+    for made in asked.given:
+        await store.set_card_role(made.name, made.role)
+    for called in asked.named:
+        kind, _, card_id = called.name.partition(":")
+        # Only a card this console made. Renaming a session card would be renaming somebody's
+        # session, which is a fact about their machine rather than about this bench.
+        if kind == "step" and called.label:
+            await store.name_step_card(card_id, called.label)
 
 
 def project_of(rows: Sequence[BoardRow]) -> str:
@@ -1947,6 +1980,67 @@ async def _run(store: Store, block: Block, prompt: str, add_dirs: list[Path]) ->
     finally:
         PARTIAL.pop(block.id, None)
         DOING.pop(block.id, None)
+    await bring_findings_back(store, block)
+
+
+async def bring_findings_back(store: Store, block: Block) -> list[str]:
+    """Turn what a bringing-back button was told into cards on its bench (075).
+
+    «Вернётся с новыми карточками, основанными на полученных данных.» An answer card is a
+    paragraph, read whole or not at all; a finding on a card is taken when it is wanted and left
+    when it is not.
+
+    Each becomes an idea, which is what the pool is for and what makes a finding survive the chat
+    it arrived in. A finding the inbox cannot make a summary of is left out by name rather than
+    written down unreadably — the answer itself is still on its own card either way.
+    """
+    if not block.brings_back:
+        return []
+    answered = await store.block(block.id)
+    if answered is None or answered.state != "answered" or not answered.answer:
+        return []
+    on_it = await store.bench_cards(block.thread_id)
+    bottom = max((card.y for card in on_it), default=0)
+    top = max((card.ord for card in on_it), default=-1)
+    made = []
+    for said in finding.read_findings(answered.answer):
+        try:
+            made.append(await inbox.capture(store, said, author="desk"))
+        except ValueError:
+            continue
+    if not made:
+        return []
+    await store.keep_bench(
+        [
+            *on_it,
+            *(
+                BenchCard(
+                    name=f"idea:{one.id}",
+                    kind="idea",
+                    card_id=one.id,
+                    label=one.summary,
+                    x=FOUND_AT_X,
+                    y=bottom + FOUND_STEP_Y * (at + 1),
+                    shown="hint",
+                    spent=False,
+                    ord=top + at + 1,
+                    came="found by " + (block.input.splitlines()[0][:40] or "a button"),
+                    came_at=one.created_at,
+                )
+                for at, one in enumerate(made)
+            ),
+        ],
+        thread_id=block.thread_id,
+    )
+    log.info("blocks.found", block=block.id, cards=len(made))
+    return [f"idea:{one.id}" for one in made]
+
+
+# Where a found card lands, and how far below the last one. A workbench somebody arranged is not
+# rearranged by an answer arriving: these come in a column of their own, out of the way
+# (042-placed-by-hand.sql).
+FOUND_AT_X = 40
+FOUND_STEP_Y = 96
 
 
 async def retry(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:

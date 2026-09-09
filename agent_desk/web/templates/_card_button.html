@@ -20,6 +20,14 @@
       <label class="visually-hidden" for="button-asks-{{ card.id }}">what it asks</label>
       <textarea id="button-asks-{{ card.id }}" name="prompt" rows="3"
                 placeholder="what to ask — “combine these”, “decompose this”, anything you would type below">{{ card.prompt }}</textarea>
+      {# «Вернётся с новыми карточками, основанными на полученных данных» (075). What it says is
+         what it does — it asks, and what comes back becomes cards. Never that it went anywhere:
+         whether the engine behind an answer can reach the internet is the CLI's business. #}
+      <label class="brings-back">
+        <input type="checkbox" name="brings_back" value="yes"
+               {{ "checked" if card.brings_back }}>
+        come back with cards, not one answer
+      </label>
       <button type="submit">keep it</button>
     </form>
     {# What it will reach. Written by the page, which is the only thing that knows what is joined

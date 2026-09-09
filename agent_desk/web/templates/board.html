@@ -338,6 +338,16 @@
 
     <div id="message">{{ message|safe }}</div>
 
+    {# «Консоль замечает, что вы делаете одно и то же, и предлагает из этого процесс»
+       (01M1XED1DYFK1QRTHZDHHGY8W9). One line above the field, and one press. It offers and never
+       saves: an arrangement this console kept by itself is a list somebody did not make, sitting
+       where they look for the ones they did. #}
+    <p id="doing-it-again" class="again" hidden>
+      <span class="again-said"></span>
+      <button type="button" data-draw-again>draw it as a process</button>
+      <button type="button" data-not-again aria-label="not now">×</button>
+    </p>
+
     {# The input: the bottom of the workbench, and the only part of it that is never put away. #}
     <form class="say" id="ask" method="post" action="/blocks"
           hx-post="/blocks" hx-target="#blocks" hx-swap="innerHTML"

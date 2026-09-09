@@ -69,6 +69,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from agent_desk import roles, ties
+
 # Where a sort may put things. Two sides and a middle, because the examples are all "these here and
 # those there" — and because a model given a free choice of columns produces seven of them, which
 # is a worse answer to "разложи" than three.
@@ -116,6 +118,32 @@ class Sorted:
 
 
 @dataclass(frozen=True)
+class Joined:
+    """Two cards and the word for the line between them."""
+
+    from_name: str
+    to_name: str
+    kind: str
+    says: str = ""
+
+
+@dataclass(frozen=True)
+class Named:
+    """A card and what it should be called."""
+
+    name: str
+    label: str
+
+
+@dataclass(frozen=True)
+class Given:
+    """A card and what it is in a process."""
+
+    name: str
+    role: str
+
+
+@dataclass(frozen=True)
 class Handling:
     """Everything one answer asked for. Empty means it asked for nothing this could read."""
 
@@ -133,6 +161,15 @@ class Handling:
     # Lay the whole bench out again. No numbers: it is about the arrangement rather than about any
     # card, and it is the only action here that names nothing.
     tidy: bool = False
+    # «Полное управление верстаком и любыми единицами на нём через поле ввода»
+    # (01M23NMJM7ZJYC309B7MWFDGF4). Three more, and each was weighed against the same test as the
+    # seven: a line drawn wrongly, a name typed wrongly and a role set wrongly all cost one press of
+    # undo, because the surface an undo records is the cards, where they sit *and the lines between
+    # them* (041-bench-undo.sql). None of them starts anything or removes work, which is where this
+    # module has always drawn its line.
+    joined: list[Joined] = field(default_factory=list)
+    named: list[Named] = field(default_factory=list)
+    given: list[Given] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -144,6 +181,9 @@ class Handling:
             or self.opened
             or self.taken
             or self.tidy
+            or self.joined
+            or self.named
+            or self.given
         )
 
 
@@ -159,7 +199,7 @@ def what_to_do(cards: Sequence[str]) -> str:
             "This is a request to change what is on the workbench, not a question about it.",
             "Answer with actions and nothing else — no preamble, no explanation, no closing line.",
             "",
-            "One action per line, in one of these seven shapes:",
+            "One action per line, in one of these ten shapes:",
             "",
             "  mark 3,7 why these two and not the others",
             "  mark yellow 1,2 why these are the yellow ones",
@@ -169,6 +209,10 @@ def what_to_do(cards: Sequence[str]) -> str:
             "  open 1",
             "  take 4",
             "  tidy",
+            "  join 2 5 then",
+            "  join 2 5 named what the line says",
+            "  name 3 what to call it",
+            "  role 3 action",
             "",
             f"`sort` puts cards on one side: {', '.join(SIDES)}. `clear` takes every mark off.",
             f"A mark may name a colour: {', '.join(COLOURS)}. Use one when the request asks for",
@@ -178,6 +222,12 @@ def what_to_do(cards: Sequence[str]) -> str:
             "them back — but take a card off only where the request asks for it.",
             "`tidy` lays the whole bench out again and takes no numbers. It is the answer to",
             '"перегруппируй, чтобы отображались корректнее", and it changes nothing else.',
+            "",
+            "`join` draws a line from the first card to the second. The words for a line "
+            f"are: {', '.join(ties.KINDS)}. `if` and `named` take words after them saying "
+            "what the line means; the others do not.",
+            f"`name` renames a card. `role` says what a card is in a process: "
+            f"{', '.join(roles.ROLES)}.",
             "",
             "Two rules matter more than the shape:",
             f"- Only the numbers above, 1 to {len(cards)}. A number that is not a card is ignored.",
@@ -209,6 +259,14 @@ _TIDY = re.compile(r"\Atidy\b", re.IGNORECASE)
 _FOLD = re.compile(rf"\Afold\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 _OPEN = re.compile(rf"\Aopen\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 _TAKE = re.compile(rf"\Atake\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
+# `join 2 5 then` and `join 2 5 named the thing it says`: two numbers, a word for the line, and
+# whatever the line says where that word wants words.
+_JOIN = re.compile(
+    rf"\Ajoin\s+([0-9]+)\s+([0-9]+)\s+({'|'.join(ties.KINDS)})\b\s*[-—:.]?\s*(.*)\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_NAME = re.compile(r"\Aname\s+([0-9]+)\s+(.+?)\s*\Z", re.IGNORECASE | re.DOTALL)
+_ROLE = re.compile(rf"\Arole\s+([0-9]+)\s+({'|'.join(roles.ROLES)})\s*\Z", re.IGNORECASE)
 
 
 def _named(said: str, on_bench: Sequence[str]) -> list[str]:
@@ -238,6 +296,9 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
     folded: list[str] = []
     opened: list[str] = []
     taken: list[str] = []
+    joined: list[Joined] = []
+    named: list[Named] = []
+    given: list[Given] = []
     clear = False
     tidy = False
     for raw in reply.splitlines():
@@ -261,6 +322,35 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
         take = _TAKE.match(said)
         if take is not None:
             taken.extend(_named(take.group(1), on_bench))
+            continue
+        join = _JOIN.match(said)
+        if join is not None:
+            ends = _named(f"{join.group(1)},{join.group(2)}", on_bench)
+            # Both ends, and two different cards. A line from a card to itself is not a line, and
+            # one with an end off the bench is one nobody can follow (agent_desk/ideas/bench.py).
+            if len(ends) == 2:
+                joined.append(
+                    Joined(
+                        from_name=ends[0],
+                        to_name=ends[1],
+                        kind=join.group(3).lower(),
+                        says=join.group(4).strip()[:WHY_CHARS],
+                    )
+                )
+            continue
+        role = _ROLE.match(said)
+        if role is not None:
+            given.extend(
+                Given(name=name, role=role.group(2).lower())
+                for name in _named(role.group(1), on_bench)
+            )
+            continue
+        naming = _NAME.match(said)
+        if naming is not None:
+            named.extend(
+                Named(name=name, label=naming.group(2).strip()[:WHY_CHARS])
+                for name in _named(naming.group(1), on_bench)
+            )
             continue
         sort = _SORT.match(said)
         if sort is not None:
@@ -293,6 +383,9 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
         opened=opened,
         taken=taken,
         tidy=tidy,
+        joined=joined,
+        named=named,
+        given=given,
     )
 
 
@@ -318,6 +411,12 @@ def as_json(asked: Handling) -> str:
                 "opened": asked.opened,
                 "taken": asked.taken,
                 "tidy": asked.tidy,
+                "joined": [
+                    {"from": one.from_name, "to": one.to_name, "kind": one.kind, "says": one.says}
+                    for one in asked.joined
+                ],
+                "named": [{"name": one.name, "label": one.label} for one in asked.named],
+                "given": [{"name": one.name, "role": one.role} for one in asked.given],
             }
         }
     )
@@ -357,6 +456,21 @@ def read_json(said: str) -> Handling:
         opened=[str(one) for one in found.get("opened", [])],
         taken=[str(one) for one in found.get("taken", [])],
         tidy=bool(found.get("tidy")),
+        joined=[
+            Joined(
+                from_name=str(one["from"]),
+                to_name=str(one["to"]),
+                kind=str(one["kind"]),
+                says=str(one.get("says", "")),
+            )
+            for one in found.get("joined", [])
+        ],
+        named=[
+            Named(name=str(one["name"]), label=str(one["label"])) for one in found.get("named", [])
+        ],
+        given=[
+            Given(name=str(one["name"]), role=str(one["role"])) for one in found.get("given", [])
+        ],
     )
 
 
@@ -388,6 +502,14 @@ def as_words(asked: Handling) -> str:
     ):
         if names:
             said.append(f"{what} {len(names)} card{'' if len(names) == 1 else 's'}")
+    for line in asked.joined:
+        # Said in the word for the line rather than counted: a line is a statement about two
+        # cards, and how many of them there are says nothing about any of them.
+        said.append(f"joined two cards: {line.kind}" + (f" — {line.says}" if line.says else ""))
+    for called in asked.named:
+        said.append(f"named a card: {called.label}")
+    for made in asked.given:
+        said.append(f"made a card {made.role}")
     if asked.tidy:
         said.append("laid the bench out again")
     return "\n".join(said)

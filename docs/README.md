@@ -22,6 +22,7 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | 09 | [roadmap](09-roadmap.md) | five phases with a done-when criterion each |
 | 10 | [meeting intake](10-meeting-intake.md) | beyond v1 — and the two things the foundation does now |
 | 11 | [the plan](11-the-plan.md) | nine pieces of work, in the order they had to happen (finished) |
+| 12 | [the tool builder](12-the-tool-builder.md) | what a tool is made of, and what each scenario needs from it |
 
 ## Decisions
 

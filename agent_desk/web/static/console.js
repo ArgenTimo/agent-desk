@@ -358,6 +358,9 @@ stream.addEventListener('blocks', (event) => {
   // answers arrive in the order the questions were asked.
   const settled = (event.data.match(/data-settled/g) || []).length;
   for (let i = answeredSoFar; i < settled; i += 1) ringDone();
+  // Asked when a question has just been answered rather than on a clock: what somebody is doing
+  // changes when they do something, and nowhere else (01M1XED1DYFK1QRTHZDHHGY8W9).
+  if (settled > answeredSoFar) noticeTheRepetition();
   answeredSoFar = settled;
 
   // Never while somebody is reading or typing inside it: replacing the column under a selection
@@ -850,11 +853,15 @@ async function pressTheButton(holder) {
     return;
   }
   const joined = reaches(holder);
+  // Read off the card as it stands, which is what somebody just set on it — the server copies it
+  // onto the block, so a button edited after this press does not change work already going (075).
+  const brings = holder.querySelector('input[name="brings_back"]')?.checked ? 'yes' : '';
   const body = new URLSearchParams({
     text: asks,
     thread: activeThread(),
     // Sent by a button, so the bench draws no card for the question — only for what comes back.
     button: 'yes',
+    brings_back: brings,
     targets: (joined || pinnedTargets().split(',').filter(Boolean)).join(','),
     history: attachedBlocks(),
     notes: ownBlockText(),
@@ -4426,6 +4433,61 @@ function markBeginning(name) {
 }
 
 // "Процесс, который собрали один раз, должен запускаться второй раз с другими входами."
+// «Консоль замечает, что вы делаете одно и то же, и предлагает из этого процесс.» Asked once a
+// question has been answered rather than on a clock: the shape of what somebody is doing changes
+// when they do something, and nowhere else.
+//
+// Turned off for the session by one press. An offer that came back after being waved away is an
+// offer that stops being read, and this one has exactly one thing to say.
+let notAgain = false;
+let offered = null;
+
+async function noticeTheRepetition() {
+  const line = document.getElementById('doing-it-again');
+  if (!line || notAgain) return;
+  let said;
+  try {
+    said = await (await fetch('/workbench/again')).json();
+  } catch {
+    return;
+  }
+  if (!said.times) {
+    line.hidden = true;
+    return;
+  }
+  offered = said;
+  line.querySelector('.again-said').textContent =
+    `You have asked this ${said.times} times: “${said.says}”.`;
+  line.hidden = false;
+}
+
+document.addEventListener('click', async (event) => {
+  if (event.target.closest('[data-not-again]')) {
+    notAgain = true;
+    document.getElementById('doing-it-again').hidden = true;
+    return;
+  }
+  if (!event.target.closest('[data-draw-again]') || !offered) return;
+  const answer = await fetch('/workbench/again', {
+    method: 'POST',
+    headers: FORM,
+    body: new URLSearchParams({ asks: offered.asks, kinds: (offered.kinds || []).join(',') }),
+  });
+  const said = await answer.json();
+  if (!said.made?.length) return say(said.why || 'It could not be drawn.');
+  // On the bench, not in the list of saved ones: keeping it under a name is the press somebody
+  // makes afterwards, which is how every other tool here is kept.
+  for (const one of said.made) {
+    const [kind, ...rest] = one.split(':');
+    await pin(
+      { kind, id: rest.join(':'), label: '' },
+      { quiet: true, came: 'drawn from what you keep doing' }
+    );
+  }
+  document.getElementById('doing-it-again').hidden = true;
+  say('Drawn. Save it as a process if you want to keep it.');
+});
+
 async function keepTemplate() {
   const names = onBench().map(cardName);
   if (!names.length) return say('There is nothing to save.');
@@ -6022,6 +6084,22 @@ function applyArrangement(said) {
     emptyOrNot();
   }
 
+  // «Абсолютное управление всем верстаком и любыми единицами на нём через поле ввода»
+  // (01M23NMJM7ZJYC309B7MWFDGF4). A line, a name and a role are facts about cards rather than
+  // places on a surface, so the server has already written them: the page reads the lines back and
+  // redraws the cards it renamed. Doing it here as well would be a second writer of the same row.
+  if ((said.joined || []).length) readLines();
+  for (const one of said.named || []) {
+    const label = surface
+      ?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`)
+      ?.querySelector('.pin-label');
+    if (label) label.textContent = one.label;
+  }
+  for (const one of said.given || []) {
+    const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    if (pin) pin.dataset.role = one.role;
+  }
+
   // Last of the three that change the surface rather than a card, and last on purpose: laying the
   // bench out again after cards have come off is the arrangement somebody asked for, and doing it
   // before would leave holes where they were.
@@ -6243,14 +6321,47 @@ document.addEventListener('click', (event) => {
 });
 
 /* --- go to it ---------------------------------------------------------------------------------- */
-// A page cannot open a terminal on somebody's desktop, and a button that claimed to would be one
-// more thing on this board that says something it does not know. What it can do is hand over the
-// exact line, so that going there is a paste rather than a hunt for the id.
+// «Кнопка "перейти" должна открывать сессию на экране устройства» (01M1VAZ5PT5YHPDZ6BR780HM0E).
+// The *page* cannot open a terminal, and that was never the question: the console is a process on
+// this machine, started by the same person, and it can. So this asks it to.
+//
+// Nothing is written into the session. What happens is a window opening in front of whoever pressed
+// the button, with their own session in it.
+document.addEventListener('click', async (event) => {
+  const going = event.target.closest('[data-open]');
+  if (!going) return;
+  event.preventDefault();
+  const said = going.textContent;
+  going.textContent = 'opening…';
+  let answer = { opened: false, why: 'the console did not answer' };
+  try {
+    answer = await (
+      await fetch(`/sessions/${encodeURIComponent(going.dataset.open)}/open`, { method: 'POST' })
+    ).json();
+  } catch {
+    // Left as it is: the fallback below is the same one a machine with no terminal gets.
+  }
+  if (answer.opened) {
+    going.textContent = '✓ opened';
+    setTimeout(() => { going.textContent = said; }, 2000);
+    return;
+  }
+  // No terminal this console knows how to open, or it would not start. The exact line to paste is
+  // what this button always was, and it is still the honest half.
+  say(answer.why || 'it would not open');
+  copyTheLine(going, said);
+});
+
+// What it always did, kept for the fallback and for anything else on the board that hands over a
+// line to paste.
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-copy]');
-  if (!button) return;
+  if (!button || button.hasAttribute('data-open')) return;
   event.preventDefault();
-  const said = button.textContent;
+  copyTheLine(button, button.textContent);
+});
+
+async function copyTheLine(button, said) {
   try {
     await navigator.clipboard.writeText(button.dataset.copy);
     button.textContent = '✓ copied — paste it in a terminal';
@@ -6261,7 +6372,7 @@ document.addEventListener('click', async (event) => {
     return;
   }
   setTimeout(() => { button.textContent = said; }, 2000);
-});
+}
 
 /* --- the keyboard ----------------------------------------------------------------------------- */
 // This window hovers over a terminal, and reaching for the mouse is what it exists to save.

@@ -140,6 +140,9 @@ class Block(BaseModel):
     # The two cards somebody dragged together to make this, comma-separated (060). A fact and not a
     # reading, which is why it is not `relates_to`: nothing was inferred, two cards were dragged.
     made_from: str = ""
+    # Whether the answer becomes cards on the workbench (075). Copied from the button that sent it,
+    # so a button edited in between does not change work already going.
+    brings_back: bool = False
 
 
 class Directive(BaseModel):
@@ -263,6 +266,9 @@ class ButtonCard(BaseModel):
     label: str
     prompt: str = ""
     made_at: int
+    # Whether what comes back becomes cards on the workbench (075). A button that does not is the
+    # one that was here before: it asks, and one answer card arrives.
+    brings_back: bool = False
 
     @property
     def name(self) -> str:
@@ -1402,7 +1408,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from, brings_back FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -1414,7 +1420,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from, brings_back FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -1425,7 +1431,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block WHERE id = :id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from, brings_back FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )
@@ -3251,20 +3257,34 @@ class Store:
             )
         return made
 
-    async def set_button_card(self, card_id: str, *, label: str, prompt: str) -> None:
-        """What the button is called and what it asks. Both at once, because they are one edit:
-        renaming a button whose prompt still says something else is how a bench fills with controls
-        nobody dares press."""
+    async def set_button_card(
+        self, card_id: str, *, label: str, prompt: str, brings_back: bool = False
+    ) -> None:
+        """What the button is called, what it asks, and whether what comes back becomes cards.
+
+        All at once, because they are one edit: renaming a button whose prompt still says something
+        else is how a bench fills with controls nobody dares press.
+        """
         async with self.engine.begin() as conn:
             await conn.execute(
-                text("UPDATE button_card SET label = :label, prompt = :prompt WHERE id = :id"),
-                {"label": label[:80], "prompt": prompt[:2000], "id": card_id},
+                text(
+                    "UPDATE button_card SET label = :label, prompt = :prompt, "
+                    "brings_back = :brings_back WHERE id = :id"
+                ),
+                {
+                    "label": label[:80],
+                    "prompt": prompt[:2000],
+                    "brings_back": int(brings_back),
+                    "id": card_id,
+                },
             )
 
     async def button_card(self, card_id: str) -> ButtonCard | None:
         async with self.engine.connect() as conn:
             rows = await conn.execute(
-                text("SELECT id, label, prompt, made_at FROM button_card WHERE id = :id"),
+                text(
+                    "SELECT id, label, prompt, made_at, brings_back FROM button_card WHERE id = :id"
+                ),
                 {"id": card_id},
             )
             row = rows.first()
@@ -3290,10 +3310,13 @@ class Store:
                 {"id": block_id, "cards": ",".join(cards)},
             )
 
-    async def sent_by_a_button(self, block_id: str) -> None:
+    async def sent_by_a_button(self, block_id: str, *, brings_back: bool = False) -> None:
+        """Copied onto the block, not read off the button when the answer lands: a button edited or
+        deleted in between must not change what happens to work that is already going (075)."""
         async with self.engine.begin() as conn:
             await conn.execute(
-                text("UPDATE block SET by_button = 1 WHERE id = :id"), {"id": block_id}
+                text("UPDATE block SET by_button = 1, brings_back = :brings_back WHERE id = :id"),
+                {"id": block_id, "brings_back": int(brings_back)},
             )
 
     async def tracker_blockers(self) -> list[TrackerBlocker]:
@@ -3861,7 +3884,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from "
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from, brings_back "
                     "FROM block WHERE thread_id = :thread_id AND state = 'answered' "
                     "AND input = :said AND made_from IN (:one, :other) "
                     "ORDER BY id DESC LIMIT 1"
@@ -3891,7 +3914,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from "
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from, brings_back "
                     "FROM block WHERE thread_id = :thread_id AND state = 'answered' "
                     "AND made_from <> '' ORDER BY id DESC LIMIT :limit"
                 ),

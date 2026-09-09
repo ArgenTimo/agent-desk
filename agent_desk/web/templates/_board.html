@@ -214,12 +214,15 @@
                 👟 don't let it idle</button>
               {% endif %}
             </form>
-            {# "Go to it" — as far as a browser can take you, which is the command and not the
-               terminal. A page cannot open a terminal on somebody's desktop and a button that
-               claimed to would be a button that lies; this is the exact line to paste, copied by
-               one click, which is the half that is real. #}
-            <button type="button" class="chip goto" data-copy="claude attach {{ row.session.session_id.split('-')[0] }}"
-                    title="copy the command that opens this session in a terminal">
+            {# "Go to it", and it goes (01M1VAZ5PT5YHPDZ6BR780HM0E). The *page* cannot open a
+               terminal — but the console is a process on this machine and it can, so the button
+               asks it to. `data-copy` stays: on a machine with no terminal this console knows how
+               to open, copying the exact line to paste is what it falls back to, and that is the
+               half that was always real. #}
+            <button type="button" class="chip goto"
+                    data-open="{{ row.session.session_id }}"
+                    data-copy="claude attach {{ row.session.session_id.split('-')[0] }}"
+                    title="open this session in a terminal on this machine">
               ↗ go to it</button>
             {% if kick and kick.disarmed_why %}
             <p class="small quiet one">it stopped being kept going: {{ kick.disarmed_why }}</p>
