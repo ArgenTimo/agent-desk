@@ -58,6 +58,13 @@ check-links: ## Prove every relative link in docs/ and design/ resolves
 check-script: ## Prove the console's script parses
 	@scripts/check-the-script.sh
 
+# Which test files could be about what changed, and how many were left out. Never a gate: the
+# message says what it did not run, because a narrow run that reported like `verify` would be
+# called green by somebody within a week (01M21KTYESRHK7TH6HRJJXC26B).
+AT ?= origin/main
+what-to-run: ## Which tests could be about the change in this tree
+	@$(POETRY) run python scripts/what-to-run.py $(AT)
+
 .PHONY: audit
 audit: ## Known advisories against what is installed, and a static look for the usual holes
 	@# Not part of `verify`, and that is deliberate: both of these want the network, and a gate
