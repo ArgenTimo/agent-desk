@@ -2902,6 +2902,29 @@ class Store:
             found = rows.first()
             return None if found is None else Block(**found._mapping)
 
+    async def made_here(self, thread_id: str, limit: int = 60) -> list[Block]:
+        """Everything this workbench has made by putting two cards together, newest first.
+
+        "Полученные элементы — это библиотека, а не разовые карточки." A combine that scrolled off
+        the edge of the bench is gone as far as anybody using it is concerned, and the game this is
+        for is played by trying pair after pair — so what came out has to be somewhere other than
+        where it landed.
+
+        Answered only. A failed combine is not a thing that was made, and listing it on a shelf of
+        what exists would be the fifth rule again.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from "
+                    "FROM block WHERE thread_id = :thread_id AND state = 'answered' "
+                    "AND made_from <> '' ORDER BY id DESC LIMIT :limit"
+                ),
+                {"thread_id": thread_id, "limit": limit},
+            )
+            return [Block(**row._mapping) for row in rows]
+
     async def keep_template(
         self,
         *,

@@ -3754,6 +3754,54 @@ async function useTemplate(name) {
   }
 }
 
+// The shelf: everything two cards have made on this bench, newest first. Pressing a row brings
+// the card back into view, or puts it back on the surface if it was taken off — which is the whole
+// point of the list. Without it the "бесконечная" game ends the first time something scrolls past
+// the edge and nobody can find it again.
+async function showShelf() {
+  const into = document.getElementById('bench-shelf');
+  if (!into) return;
+  into.replaceChildren();
+  let made = [];
+  try {
+    const answer = await fetch(`/workbench/shelf?thread=${encodeURIComponent(activeThread())}`);
+    made = (await answer.json()).made || [];
+  } catch {
+    return;
+  }
+  if (!made.length) {
+    const none = document.createElement('li');
+    none.className = 'saved-none';
+    none.textContent = 'nothing made here yet';
+    into.appendChild(none);
+    return;
+  }
+  for (const one of made) {
+    const row = document.createElement('li');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'saved-open';
+    open.textContent = one.label;
+    // What it was made of, so a shelf of twenty answers is still a shelf somebody can read.
+    open.title = one.from.map((name) => labelOf(name)).join('  +  ');
+    open.addEventListener('click', () => {
+      hideMenu();
+      const card = surface?.querySelector(`.pin[data-name="${CSS.escape(one.card)}"]`);
+      if (card) {
+        bringIntoView(card);
+        card.classList.add('about-this');
+        setTimeout(() => card.classList.remove('about-this'), 2500);
+        return;
+      }
+      // Off the bench: it is still in the conversation, so unfolding brings its card back rather
+      // than asking the pair again.
+      say('That one is not on the workbench — unfolding the conversation brings it back.');
+    });
+    row.appendChild(open);
+    into.appendChild(row);
+  }
+}
+
 async function showTemplates() {
   const into = document.getElementById('bench-templates');
   if (!into) return;
@@ -4223,6 +4271,7 @@ function showMenu(x, y) {
   // somebody deleted.
   showBenches();
   showTemplates();
+  showShelf();
   benchMenu.hidden = false;
   const frame = document.getElementById('bench-canvas').getBoundingClientRect();
   // Kept inside the window: a menu opened near the bottom edge that runs off it is a menu with

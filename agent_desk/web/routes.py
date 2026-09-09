@@ -1680,6 +1680,28 @@ async def what_these_two_already_made(thread: str = "", pair: str = "") -> JSONR
     return JSONResponse({"block": before.id, "said": (before.answer or "")[:200]})
 
 
+@router.get("/workbench/shelf", response_class=JSONResponse)
+async def what_this_bench_has_made(thread: str = "") -> JSONResponse:
+    """Everything two cards have made here, newest first — the shelf it all goes on.
+
+    Each row carries the name of its answer card, so a press can bring the card back rather than
+    ask the same pair a second time. The first line of the answer is the label: what a made thing
+    is called is what it says, and a name somebody has to invent for each one is a name nobody
+    types.
+    """
+    made = []
+    for block in await store.made_here(thread):
+        first = (block.answer or "").strip().splitlines()
+        made.append(
+            {
+                "card": f"answer:{block.id}",
+                "label": (first[0] if first else "an answer")[:70],
+                "from": [one for one in block.made_from.split(",") if one],
+            }
+        )
+    return JSONResponse({"made": made})
+
+
 @router.post("/workbench/combining", response_class=JSONResponse)
 async def set_what_a_combine_asks(request: Request) -> JSONResponse:
     """Change it, or clear it back to what the console asks by default.

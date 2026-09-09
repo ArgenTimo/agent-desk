@@ -11,6 +11,7 @@ two put together to find what they disagree about are one gesture and two questi
 
 from __future__ import annotations
 
+import json
 import pathlib
 from collections.abc import AsyncIterator
 from typing import ClassVar
@@ -285,3 +286,61 @@ async def test_one_card_is_not_a_pair(desk: Store) -> None:
     answer = await routes.what_these_two_already_made(thread="t1", pair="a")
 
     assert answer.body.decode() == "{}"
+
+
+# --- and it all goes on a shelf -----------------------------------------------------------------
+async def test_what_was_made_here_is_listed_newest_first(desk: Store) -> None:
+    """ "Полученные элементы — это библиотека, а не разовые карточки. Без места, где они лежат,
+    «бесконечная» игра заканчивается на том, что предыдущее потерялось за краем верстака.\" """
+    thread = await desk.create_thread("a chat")
+    first = await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam")
+    second = await _a_combine(desk, thread.id, "c,d", combining.DEFAULT, "mud")
+
+    made = await desk.made_here(thread.id)
+
+    assert [one.id for one in made] == [second, first]
+
+
+async def test_an_ordinary_answer_is_not_on_the_shelf(desk: Store) -> None:
+    """The shelf is what cards made, not what the chat said. Everything else is the conversation,
+    which has a column of its own."""
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="hello", thread_set_by="human"
+    )
+    await desk.finish_block(block.id, "hello back")
+
+    assert await desk.made_here(thread.id) == []
+
+
+async def test_a_combine_that_failed_is_not_a_thing_that_exists(desk: Store) -> None:
+    """Listing it on a shelf of what was made would be reporting a status nobody has."""
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input=combining.DEFAULT, thread_set_by="human"
+    )
+    await desk.made_out_of(block.id, ["a", "b"])
+    await desk.fail_block(block.id, "it stopped")
+
+    assert await desk.made_here(thread.id) == []
+
+
+async def test_the_shelf_says_what_each_one_was_made_of(desk: Store) -> None:
+    """A shelf of twenty answers that says only what each one is called is a shelf nobody reads."""
+    thread = await desk.create_thread("a chat")
+    await _a_combine(desk, thread.id, "idea:a,idea:b", combining.DEFAULT, "steam\nand more")
+
+    answer = await routes.what_this_bench_has_made(thread=thread.id)
+    (one,) = json.loads(answer.body)["made"]
+
+    assert one["label"] == "steam", "the label is not the first line of what it says"
+    assert one["from"] == ["idea:a", "idea:b"]
+
+
+def test_the_shelf_is_rebuilt_every_time_the_menu_opens() -> None:
+    """A list kept in step by hand is a list that offers a card somebody took off an hour ago."""
+    source = _code()
+    start = source.index("function showMenu(")
+    body = source[start : source.index("\n}\n", start)]
+
+    assert "showShelf();" in body
