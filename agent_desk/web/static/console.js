@@ -1894,7 +1894,9 @@ canvas?.addEventListener('pointerdown', (event) => {
   if (event.target.closest(NOT_A_GRIP)) return;
   // "Вкл-выкл курсор — не перетягивает карточки, а просто их включает и выключает." A tool whose
   // whole promise is that a press does one thing has to not also do the other one.
-  if (tool === 'choose' && pin) return;
+  // Only Move moves. Every other tool's whole promise is that a press on a card does one thing,
+  // and a tool that also slides the card underneath has broken it before the press is finished.
+  if (tool !== 'move' && pin) return;
 
   if (pin) {
     const at = whereIs(pin);
@@ -2173,12 +2175,27 @@ function showChosen() {
 // means has to be visible before the click, and a mark on one card cannot say what the pointer will
 // do on the next one. A tool strip says it once, for everything, and stays said.
 //
-// Three, because there are three things a pointer does on this surface and no more. Each is a mode
+// Four, because there are four things a pointer does on this surface and no more. Each is a mode
 // and each stays chosen until another is — the convention every drawing program has had for thirty
 // years, and people arrive already knowing it. Escape goes back to Move, which is the way out
 // somebody reaches for without being told.
-const TOOLS = { move: 'Move', choose: 'Choose', area: 'Choose an area' };
-const TOOL_KEYS = { v: 'move', c: 'choose', g: 'area', 1: 'move', 2: 'choose', 3: 'area' };
+//
+// The fourth is Combine, and it needed a mode rather than a modifier. "Перетащил одну карточку на
+// другую — получил третью": on a bench where cards are dragged around all day, a plain drop onto
+// another card cannot mean this, because parking one card over another is something people do by
+// accident every minute. A held key would have worked and nobody would ever have found it — which
+// is the argument that put this strip here in the first place.
+const TOOLS = { move: 'Move', choose: 'Choose', area: 'Choose an area', mix: 'Combine' };
+const TOOL_KEYS = {
+  v: 'move',
+  c: 'choose',
+  g: 'area',
+  x: 'mix',
+  1: 'move',
+  2: 'choose',
+  3: 'area',
+  4: 'mix',
+};
 let tool = 'move';
 
 function useTool(name) {
@@ -2191,6 +2208,7 @@ function useTool(name) {
   // that clicking it will not drag it.
   canvas?.classList.toggle('choosing', name === 'choose');
   canvas?.classList.toggle('boxing', name === 'area');
+  canvas?.classList.toggle('mixing', name === 'mix');
   const said = document.querySelector('.tool-said');
   // Named out loud for the moment after a press, because an icon that has just changed meaning is
   // an icon somebody wants confirmed.
@@ -2270,6 +2288,96 @@ function endBand() {
     if (over) pin.classList.add('chosen');
   }
   showChosen();
+}
+
+// --- two cards make a third -------------------------------------------------------------------
+// "Создал условно 4 карточки с элементами, а дальше за счёт интерфейса могу получать и комбинировать
+// новые элементы и изделия." Ключевое слово — «за счёт интерфейса»: перетащил одну карточку на
+// другую, получил третью.
+//
+// What comes back is an ordinary answer card, which is the whole point: the third thing can be
+// combined again, and the chain does not stop at the second step. Nothing is written into the idea
+// pool — this is a thing made on the bench, and whether it is worth keeping is a separate press.
+const HOW_TO_COMBINE =
+  'Make one thing out of these two. Say what having them together gives that neither gives alone, ' +
+  'and say it in a few sentences. Do not summarise the two cards back to me.';
+
+let mixing = null;
+
+function cardUnder(event) {
+  return document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.pin') || null;
+}
+
+function markToMix(pin) {
+  if (mixing?.over === pin) return;
+  mixing?.over?.classList.remove('to-mix');
+  mixing.over = pin;
+  pin?.classList.add('to-mix');
+}
+
+function stopMixing() {
+  mixing?.from?.classList.remove('joining');
+  mixing?.over?.classList.remove('to-mix');
+  mixing = null;
+}
+
+canvas?.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || tool !== 'mix') return;
+  const pin = event.target.closest('.pin');
+  if (!pin) return;
+  event.preventDefault();
+  mixing = { from: pin, over: null };
+  pin.classList.add('joining');
+  canvas.setPointerCapture?.(event.pointerId);
+});
+
+canvas?.addEventListener('pointermove', (event) => {
+  if (!mixing) return;
+  const over = cardUnder(event);
+  markToMix(over && over !== mixing.from ? over : null);
+});
+
+window.addEventListener('pointerup', (event) => {
+  if (!mixing) return;
+  const from = mixing.from;
+  const onto = mixing.over || (cardUnder(event) !== from ? cardUnder(event) : null);
+  stopMixing();
+  if (onto) combine(cardName(from), cardName(onto));
+});
+window.addEventListener('pointercancel', stopMixing);
+
+async function combine(from, onto) {
+  say(`Combining “${labelOf(from)}” and “${labelOf(onto)}”…`);
+  const body = new URLSearchParams({
+    text: HOW_TO_COMBINE,
+    thread: activeThread(),
+    // No card for the question, the same as a button: what was asked is the gesture, and a card
+    // repeating the gesture back is a card nobody reads twice.
+    button: 'yes',
+    targets: [from, onto].join(','),
+    // The same two cards said twice, because they are two different facts about this message.
+    // `targets` is what the question is about, which every message has. `made_from` is what the
+    // third card was made out of, which only a combine has — and it is what the answer card reads
+    // to find its way back under the two, on this page load and on every one after it.
+    made_from: [from, onto].join(','),
+    history: attachedBlocks(),
+    // The notes a person wrote on the bench travel with every other message, and a combine that
+    // quietly left them out would be the one message that means something different.
+    notes: ownBlockText(),
+  });
+  try {
+    const answer = await fetch('/blocks', { method: 'POST', headers: { ...FORM, 'HX-Request': 'true' }, body });
+    if (!answer.ok) {
+      say('It did not send.');
+      return;
+    }
+    document.getElementById('blocks').innerHTML = await answer.text();
+    if (window.htmx) htmx.process(document.getElementById('blocks'));
+    syncBlocks();
+    showActiveThread();
+  } catch {
+    say('It did not send.');
+  }
 }
 
 window.addEventListener('pointerup', endBand);
@@ -4555,8 +4663,13 @@ function answerCard(article, rev) {
     // placed like any other new card — and joined to nothing, because there is nothing to join it
     // to and a line to a card that is not there explains nothing.
     const asked = surface.querySelector(`.pin[data-name="block:${CSS.escape(id)}"]`);
-    place(node, asked ? spotUnder([`block:${id}`]) : null);
+    // Or under the two cards it was made out of, joined to both. A third card that appears in the
+    // next free slot is a card nobody connects to the gesture that made it — and the gesture is
+    // the whole of what "за счёт интерфейса" means.
+    const mixed = (article.dataset.madeFrom || '').split(',').filter(Boolean);
+    place(node, asked ? spotUnder([`block:${id}`]) : mixed.length ? spotUnder(mixed) : null);
     if (asked) ownTies.push({ from: `block:${id}`, to: name, says: 'answered' });
+    else for (const one of mixed) ownTies.push({ from: one, to: name, says: 'makes' });
   }
   const body = node.querySelector('.pin-body');
   const shown = body.firstElementChild;

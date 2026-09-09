@@ -1,0 +1,25 @@
+-- What two cards were dragged together to make this.
+--
+-- "Создал условно 4 карточки с элементами, а дальше за счёт интерфейса могу получать и комбинировать
+-- новые элементы и изделия." The gesture is the whole idea — drag one card onto another and a third
+-- appears — and the third card is only worth having if it says where it came from.
+--
+-- ## Why not `relates_to`
+--
+-- `relates_to` (051) is the right *shape*: comma-separated card names, more than one because a
+-- question can be about two things at once. It is the wrong *claim*. That column is documented as
+-- a reading — a short run's guess at what a typed question follows on from, drawn as a line a
+-- person can rub out. This is not a guess: two cards were dragged together by hand, and nothing was
+-- inferred. Writing a fact into a column that says "reading" is how the fifth rule of CLAUDE.md
+-- gets broken from the other direction — not a guess reported as known, but a known thing filed
+-- where everything is a guess, so nobody can tell the two apart afterwards.
+--
+-- ## Why not the browser
+--
+-- The first version held the pair in a `Map` in the page, keyed by block id. It worked until a
+-- reload, after which the third card sat on the bench joined to nothing — and a card whose
+-- provenance disappears when you refresh is decoration rather than a connection. The pair belongs
+-- on the block that asked, next to `by_button`, which is already the fact that this question was a
+-- gesture rather than a sentence.
+
+ALTER TABLE block ADD COLUMN made_from TEXT NOT NULL DEFAULT '';

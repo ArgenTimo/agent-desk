@@ -137,6 +137,9 @@ class Block(BaseModel):
     # Sent by a button on the workbench rather than typed (059). The bench draws no card for the
     # question — "как будто бы мы его вписали в поле ввода, только без создания карточки запроса".
     by_button: bool = False
+    # The two cards somebody dragged together to make this, comma-separated (060). A fact and not a
+    # reading, which is why it is not `relates_to`: nothing was inferred, two cards were dragged.
+    made_from: str = ""
 
 
 class Directive(BaseModel):
@@ -1144,7 +1147,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block WHERE thread_id = :thread_id ORDER BY id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block WHERE thread_id = :thread_id ORDER BY id"
                 ),
                 {"thread_id": thread_id},
             )
@@ -1156,7 +1159,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block ORDER BY id DESC LIMIT :limit"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block ORDER BY id DESC LIMIT :limit"
                 ),
                 {"limit": limit},
             )
@@ -1167,7 +1170,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
-                    "created_at, finished_at, context, relates_to, from_repo, by_button FROM block WHERE id = :id"
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from FROM block WHERE id = :id"
                 ),
                 {"id": block_id},
             )
@@ -2299,6 +2302,19 @@ class Store:
                 text("SELECT id, label, prompt, made_at FROM button_card ORDER BY made_at DESC")
             )
             return [ButtonCard(**row._mapping) for row in rows]
+
+    async def made_out_of(self, block_id: str, cards: Sequence[str]) -> None:
+        """The two cards a person dragged together to make this one (060).
+
+        Verbatim, in the order the gesture named them: the card that was dragged and the card it
+        was dropped on. Nothing here checks that they are on the workbench, because they were when
+        the gesture happened and a card taken off later does not un-make what it made.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE block SET made_from = :cards WHERE id = :id"),
+                {"id": block_id, "cards": ",".join(cards)},
+            )
 
     async def sent_by_a_button(self, block_id: str) -> None:
         async with self.engine.begin() as conn:

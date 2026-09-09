@@ -2930,6 +2930,13 @@ button.go:hover, button.yes:hover {
 .bench-canvas.choosing .pin .pin-head { cursor: pointer; }
 .bench-canvas.boxing { cursor: crosshair; }
 .bench-canvas.boxing .pin { cursor: crosshair; }
+/* Combine: the card you are dragging from is held, and the one you are over is where it would
+   land. Both are named the same way a line's two ends are, because that is what this is. */
+.bench-canvas.mixing .pin { cursor: copy; }
+.pin.to-mix {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 55%, transparent);
+  border-color: var(--focus);
+}
 /* A card the next question is about. The outline is the same one `chosen` already used; what is
    new is that it now arrives from a plain click, so it has to be unmistakable at a glance. */
 .pin.chosen { box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }

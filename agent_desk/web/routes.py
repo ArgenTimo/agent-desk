@@ -1917,6 +1917,12 @@ async def ask(request: Request) -> Response:
         )
         if by_button:
             await store.sent_by_a_button(made.id)
+        # Two cards dragged together on the workbench. Separate from `targets`, which says what the
+        # question is *about* — every button press has those. This says what the third card was
+        # *made out of*, and only a combine has it (060-what-two-cards-made.sql).
+        combined = [one for one in form.get("made_from", "").split(",") if one]
+        if len(combined) == 2:
+            await store.made_out_of(made.id, combined)
     if _wants_fragment(request):
         return HTMLResponse(await render_blocks())
     # Post/redirect/get: a refresh after asking must not ask again.

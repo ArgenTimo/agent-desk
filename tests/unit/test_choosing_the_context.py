@@ -54,18 +54,19 @@ def test_a_click_under_the_choose_tool_chooses_the_card() -> None:
     assert "showChosen()" in body
 
 
-def test_the_choose_tool_does_not_drag_a_card() -> None:
+def test_only_move_moves_a_card() -> None:
     """ "Вкл-выкл курсор — не перетягивает карточки, а просто их включает и выключает." A tool whose
-    whole promise is that a press does one thing has to not also do the other one."""
-    assert "if (tool === 'choose' && pin) return;" in _code()
+    whole promise is that a press does one thing has to not also do the other one — and stating it
+    of Move rather than of Choose is what keeps the fourth tool from having to remember it too."""
+    assert "if (tool !== 'move' && pin) return;" in _code()
 
 
-def test_there_are_three_tools_and_each_says_its_name_and_its_key() -> None:
+def test_every_tool_says_its_name_and_its_key() -> None:
     """The arrangement every drawing program has had for thirty years, and people arrive already
     knowing it. What it buys is that "what happens if I click" is answered before the click."""
     markup = BOARD.read_text(encoding="utf-8")
 
-    for name, key in (("Move", "V"), ("Choose", "C"), ("Choose an area", "G")):
+    for name, key in (("Move", "V"), ("Choose", "C"), ("Choose an area", "G"), ("Combine", "X")):
         assert f"{name} —" in markup, name
         assert f"({key})" in markup, key
     assert 'role="toolbar"' in markup
@@ -77,6 +78,7 @@ def test_the_tool_can_be_reached_from_the_keyboard() -> None:
 
     assert "TOOL_KEYS" in source
     assert "v: 'move'" in source and "c: 'choose'" in source and "g: 'area'" in source
+    assert "x: 'mix'" in source
 
 
 def test_escape_goes_back_to_move() -> None:
@@ -246,7 +248,7 @@ def test_every_tool_icon_is_drawn_in_the_same_box() -> None:
     and the column came out visibly bent. A drawn icon has one box and one baseline."""
     buttons = _tool_buttons()
 
-    assert set(buttons) == {"move", "choose", "area"}
+    assert set(buttons) == {"move", "choose", "area", "mix"}
     boxes = set()
     for name, inside in buttons.items():
         icons = [got for tag, got in inside if tag == "svg"]

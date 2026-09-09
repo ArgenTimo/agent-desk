@@ -70,10 +70,15 @@ def test_the_two_are_joined_by_a_line() -> None:
 
 def test_the_answer_is_placed_under_its_question() -> None:
     """Where there is one. A button's answer has no question card — the question was sent without
-    one — so it is placed like any other new card (059-a-card-that-is-a-button.sql)."""
+    one — so it is placed like any other new card (059-a-card-that-is-a-button.sql). The third
+    reading is a combine, which has no question card either but does have the two cards it was
+    made out of, and belongs under them (060-what-two-cards-made.sql)."""
     making = _body("answerCard")
 
-    assert "place(node, asked ? spotUnder([`block:${id}`]) : null)" in making
+    assert (
+        "place(node, asked ? spotUnder([`block:${id}`]) : mixed.length ? spotUnder(mixed) : null)"
+        in making
+    )
 
 
 def test_what_an_answer_wrote_hangs_off_the_answer() -> None:
