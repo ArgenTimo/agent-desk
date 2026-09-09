@@ -734,6 +734,15 @@ button[disabled] { opacity: 0.5; cursor: default; }
   border-radius: 2px;
   background: var(--attention);
 }
+/* The diagram as text, ready to copy. Monospace because it is a format rather than prose, and
+   wide because a line that wraps looks like two nodes (agent_desk/diagrams.py). */
+.diagram-text {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--t-xs);
+  white-space: pre;
+  overflow-x: auto;
+}
 .tools-kept { margin-top: 10px; }
 .tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }

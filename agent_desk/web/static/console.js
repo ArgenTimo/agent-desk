@@ -1035,6 +1035,35 @@ async function runTheCheck(holder) {
 // --- a whole workbench as one file ---------------------------------------------------------------
 // "Вот всё, над чем я думал" as one thing. The console offers the document and the browser saves
 // it: this program writes into one tree and it is not somebody's Downloads folder (config.py).
+// The bench as a diagram, in a form somewhere else can read. Shown rather than downloaded: what
+// somebody does with this is paste it, and a file they have to open first is a step in the way.
+async function showTheDiagram() {
+  let said;
+  try {
+    said = await (
+      await fetch(`/workbench/diagram?thread=${encodeURIComponent(activeThread())}`)
+    ).json();
+  } catch {
+    say('It could not be drawn.');
+    return;
+  }
+  const panel = document.getElementById('asif-panel');
+  const into = panel?.querySelector('.asif-body');
+  if (!into || !panel) return;
+  panel.hidden = false;
+  panel.querySelector('header').textContent = `as a diagram · ${said.cards} cards`;
+  into.replaceChildren();
+  const text = document.createElement('textarea');
+  text.className = 'diagram-text';
+  text.readOnly = true;
+  text.rows = 14;
+  text.value = said.said;
+  into.appendChild(text);
+  // Selected, so the next keystroke somebody makes is the copy they came for.
+  text.focus();
+  text.select();
+}
+
 async function saveTheBench() {
   let said;
   try {
@@ -4989,6 +5018,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'combining') howCombiningWorks();
   else if (what === 'file') saveTheBench();
   else if (what === 'open') openABench();
+  else if (what === 'diagram') showTheDiagram();
   else if (what === 'template') keepTemplate();
 });
 

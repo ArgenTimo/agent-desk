@@ -48,6 +48,7 @@ from agent_desk import (
     comparing,
     connectors,
     describing,
+    diagrams,
     dispatch,
     handling,
     land,
@@ -2757,6 +2758,36 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
 # unreachable: `/cards/{kind}` is registered earlier and matched `/cards/why` with kind="why",
 # answering 404 to every request. The unit tests called the function and never went through the
 # router, so it looked fine until a browser asked for it.
+@router.get("/workbench/diagram", response_class=JSONResponse)
+async def the_workbench_as_a_diagram(thread: str = "") -> JSONResponse:
+    """The bench as Mermaid text (agent_desk/diagrams.py).
+
+    "Печать рабочих пространств в формате диаграмм." The same picture, pasteable into a pull
+    request, a ticket or a message — and readable by everything that renders Mermaid without asking
+    this console for anything.
+
+    The role each card is drawn as comes from the same reader the bench and the run use, so the
+    shape in the picture and the shape on the surface cannot disagree.
+    """
+    cards = await store.bench_cards(thread)
+    chosen = await store.card_roles()
+    on_it = {one.name for one in cards}
+    nodes = [
+        diagrams.Node(
+            name=one.name,
+            label=one.label or one.name,
+            role=roles.role_of(one.kind, chosen.get(one.name, "")).name,
+        )
+        for one in cards
+    ]
+    edges = [
+        diagrams.Edge(from_name=tie.from_name, to_name=tie.to_name, says=tie.says or "")
+        for tie in await store.card_ties()
+        if tie.from_name in on_it and tie.to_name in on_it
+    ]
+    return JSONResponse({"said": diagrams.as_mermaid(nodes, edges), "cards": len(nodes)})
+
+
 @router.get("/workbench/file", response_class=JSONResponse)
 async def the_whole_workbench(thread: str = "") -> JSONResponse:
     """A whole workbench as one document (agent_desk/carrying.py).
