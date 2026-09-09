@@ -25,6 +25,19 @@
     <h4>Why it is stuck</h4>
     <p class="last-line">{{ one.why }}</p>
 
+    {# "Задача упала с текстом, который почти совпадает с текстом падения на прошлой неделе."
+       What it does *not* say is what fixed it: nobody records that, and a sentence claiming it
+       would be an invention sitting exactly where somebody is looking for a fact. Pointing at the
+       earlier failure is the honest half, and the useful one (agent_desk/recalling.py). #}
+    {% if before %}
+    <h4>It has failed like this before</h4>
+    <ul class="small before-this">
+      {% for one in before %}
+      <li>{{ one.title }} — {{ one.at | ago }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
     <h4>What it is</h4>
     <p class="small">
       {% if one.kind == "task" %}A task this console started, which failed. Nobody has retried it.

@@ -53,6 +53,7 @@ from agent_desk import (
     pasted,
     peer,
     process,
+    recalling,
     roles,
     room,
     spread,
@@ -1508,7 +1509,9 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
         stuck = await blockers.one(store, id)
         return HTMLResponse(
-            env.get_template("_card_blocker.html").render(one=stuck, card_id=id),
+            env.get_template("_card_blocker.html").render(
+                one=stuck, card_id=id, before=await _failed_like_this(stuck)
+            ),
             status_code=200 if stuck else 404,
         )
     groups = await store.groups()
@@ -2857,6 +2860,37 @@ async def _card_is_here(name: str) -> bool:
     if kind == "check":
         return await store.check_card(ident) is not None
     return True
+
+
+async def _failed_like_this(stuck: object) -> list[recalling.Match]:
+    """Earlier tasks that failed the way this one did (agent_desk/recalling.py).
+
+    "Задача упала с текстом, который почти совпадает с текстом падения на прошлой неделе." All of
+    it is already stored: `task.detail` is kept and tasks are not deleted.
+
+    Only for a stuck *task*. A question that came back an error and a session waiting on somebody
+    are stuck for reasons that have no earlier text to compare with, and offering a memory of
+    something else would be worse than offering none.
+    """
+    kind = getattr(stuck, "kind", "")
+    card = getattr(stuck, "card", "")
+    if kind != "task" or not card.startswith("task:"):
+        return []
+    here = card.removeprefix("task:")
+    tasks = await store.tasks()
+    now = next((one for one in tasks if one.id == here), None)
+    if now is None or not (now.detail or "").strip():
+        return []
+    return recalling.like_this(
+        now.detail or "",
+        [
+            recalling.Before(
+                id=one.id, title=one.title, detail=one.detail or "", at=one.failed_at or 0
+            )
+            for one in tasks
+            if one.id != here and one.failed_at
+        ],
+    )
 
 
 @router.post("/workbench/describe", response_class=JSONResponse)

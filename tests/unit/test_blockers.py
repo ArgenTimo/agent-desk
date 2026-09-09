@@ -458,7 +458,10 @@ async def test_the_open_card_renders_for_every_kind_of_blocker(
     kinds = set()
     for one in await blockers.blockers(desk):
         kinds.add(one.kind)
-        html = env.get_template("_card_blocker.html").render(one=one, card_id=one.id)
+        # `before` is what this one has failed like before, and StrictUndefined is why it is
+        # passed rather than defaulted: a template variable a caller can forget is one a caller
+        # eventually does (agent_desk/recalling.py).
+        html = env.get_template("_card_blocker.html").render(one=one, card_id=one.id, before=[])
         assert "What is waiting on it" in html
         assert "Which project it belongs to" in html
 
