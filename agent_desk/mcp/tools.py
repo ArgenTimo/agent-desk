@@ -288,6 +288,98 @@ NOT_HERE: tuple[tuple[str, str], ...] = (
 )
 
 
+# Where a left card goes, and how far below the last one. A workbench somebody arranged is not
+# rearranged by an agent leaving something on it: these land in a column of their own, out of the
+# way, and whoever opens the bench moves them where they want them (042-placed-by-hand.sql).
+LEFT_AT_X = 40
+LEFT_STEP_Y = 96
+
+
+def _as_a_failure(said: str) -> str:
+    """The same words, with the outcome in front of them.
+
+    «Что не получилось — половина ценности передачи и та, которую пересказ теряет первой.» The
+    first line of an idea becomes its summary, which is what a folded card shows across the room —
+    so the outcome belongs on that line, not in the third paragraph where the reader who most
+    needs it will not get to it.
+    """
+    first, _, rest = said.strip().partition("\n")
+    return f"did not work — {first}" + (f"\n{rest}" if rest else "")
+
+
+async def _leave(store: Store, given: dict[str, Any]) -> str:
+    """Leave what you found on a workbench, for whoever picks the work up next.
+
+    «Сегодня передача выглядит так: один агент рассказывает человеку, человек пересказывает
+    второму. Два пересказа, и оба неточные.» The board is the shared place both write to and which
+    is nobody's context. Nothing is written into anybody's session, so docs/adr/0002 is untouched.
+
+    Cards rather than a paragraph, because «абзац читают целиком или не читают вовсе. Карточки
+    берут по одной, и вторая половина остаётся непрочитанной ровно до тех пор, пока не
+    понадобится» — which is the whole reason the next agent can afford to look at all.
+    """
+    from agent_desk.store.repo import BenchCard
+
+    name = str(given.get("name", "")).strip()
+    who = str(given.get("who", "")).strip()
+    worked = [str(one).strip() for one in given.get("found") or [] if str(one).strip()]
+    failed = [str(one).strip() for one in given.get("did_not") or [] if str(one).strip()]
+    if not worked and not failed:
+        return "Nothing was left: say what you found, or what you tried that did not work."
+    thread_id = await _bench_to_leave_it_on(store, name)
+
+    made = []
+    refused = []
+    for said in [*worked, *(_as_a_failure(one) for one in failed)]:
+        try:
+            made.append(await inbox.capture(store, said, author="desk"))
+        except ValueError as why:
+            refused.append(f"{said.splitlines()[0][:60]}: {why}")
+
+    on_it = await store.bench_cards(thread_id)
+    top = max((card.ord for card in on_it), default=-1)
+    bottom = max((card.y for card in on_it), default=0)
+    came = f"left by {who}" if who else "left by an agent"
+    await store.keep_bench(
+        [
+            *on_it,
+            *(
+                BenchCard(
+                    name=f"idea:{one.id}",
+                    kind="idea",
+                    card_id=one.id,
+                    label=one.summary,
+                    x=LEFT_AT_X,
+                    y=bottom + LEFT_STEP_Y * (at + 1),
+                    shown="hint",
+                    spent=False,
+                    ord=top + at + 1,
+                    came=came,
+                    came_at=one.created_at,
+                )
+                for at, one in enumerate(made)
+            ),
+        ],
+        thread_id=thread_id,
+    )
+    said = f"Left {len(made)} card{'' if len(made) == 1 else 's'} on {name or 'the workbench'}."
+    return said + ("\nNot left: " + "; ".join(refused) if refused else "")
+
+
+async def _bench_to_leave_it_on(store: Store, name: str) -> str:
+    """The chat with that name, made if there is none.
+
+    A handoff names a place before the place exists — the first agent finishes before anybody has
+    opened a chat about it — so a name nobody has used yet is a new bench rather than an error.
+    """
+    if not name:
+        return ""
+    for one in await store.open_threads():
+        if one.subject.strip().lower() == name.lower():
+            return one.id
+    return (await store.create_thread(name)).id
+
+
 async def _know(store: Store, given: dict[str, Any]) -> str:
     """Write down one thing that was worked out, so the next session does not work it out again.
 
@@ -523,6 +615,32 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="leave",
+        says=(
+            "Leave what you found on a workbench for whoever picks this up next — one card a "
+            "finding, and what you tried that did not work said as that."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "the workbench to leave it on; made if there is none",
+                },
+                "found": {"type": "array", "items": {"type": "string"}},
+                "did_not": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "what you tried that did not work",
+                },
+                "who": {"type": "string", "description": "who is leaving it"},
+            },
+        },
+        run=_leave,
+        writes=True,
+        shows="Left 3 cards on the migration.",
     ),
     Tool(
         name="know",
