@@ -20,6 +20,15 @@
 </header>
 
 <main>
+  {# The same check that runs when a thought is written, over the pool that was already there
+     (069). A notebook that only de-duplicates what arrives after the feature was built is a
+     notebook with all of its duplicates still in it. It suggests; nothing is joined without a
+     press. #}
+  <form class="look-for-kin" method="post" action="/ideas/kin/look"
+        hx-post="/ideas/kin/look" hx-swap="none">
+    <button type="submit">look for ones that are already here</button>
+  </form>
+
   {# The poll is for a draft arriving, and it must not take the line somebody is typing with it:
      the swap is skipped while the focus is inside this list or a selection is open. #}
   <div id="inbox" hx-get="/ideas/list" hx-trigger="every 3s" hx-swap="innerHTML"

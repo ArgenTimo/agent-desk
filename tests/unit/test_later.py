@@ -270,7 +270,7 @@ async def test_a_deferred_idea_says_on_its_card_when_it_comes_back() -> None:
         wakes_when=wake.when,
     )
 
-    html = env.get_template("_card_idea.html").render(idea=idea, said="", projects=[])
+    html = env.get_template("_card_idea.html").render(idea=idea, said="", projects=[], alike=[])
 
     assert "comes back" in html
     assert "once the gate is green" in html

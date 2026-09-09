@@ -3,6 +3,9 @@
 The failure this replaces is a list of near-duplicates. The failure it could introduce is worse —
 two different thoughts filed as one, and the second gone from the list somebody reads — so most of
 these assert that nothing was moved.
+
+Since 069 nothing is moved by this module at all: it writes a suggestion and a person presses.
+`tests/unit/test_this_might_be_the_same.py` covers what happens when they do.
 """
 
 from __future__ import annotations
@@ -55,13 +58,17 @@ async def test_a_repeat_is_hung_under_the_idea_it_repeats(
     )
     _answers("same 1", monkeypatch)
 
-    assert await kin.place(store, again) == "same"
+    assert await kin.suggest(store, again) == "same"
 
-    moved = await store.idea(again.id)
-    assert moved is not None and moved.parent_id == first.id
+    # Suggested, not done (069). The list must hold what somebody put in it until they say
+    # otherwise, and the cost of a wrong judgement is paid by whoever has to notice.
+    (offered,) = await store.suggestions()
+    assert (offered.idea_id, offered.like_id, offered.kind) == (again.id, first.id, "same")
+    still = await store.idea(again.id)
+    assert still is not None and still.parent_id is None
     # Nothing anybody wrote was touched: there is no statement in this program that writes
     # `idea.text` and this module does not add one (docs/05-ideas.md).
-    assert moved.text == "we should have keyboard shortcuts"
+    assert still.text == "we should have keyboard shortcuts"
     assert (await store.idea(first.id)).text == "add hotkeys"  # type: ignore[union-attr]
 
 
@@ -75,8 +82,11 @@ async def test_a_part_of_a_bigger_idea_becomes_a_sub_idea(
     part = await store.create_idea(text_="and a grid", summary="and a grid", source_kind="typed")
     _answers("under 1", monkeypatch)
 
-    assert await kin.place(store, part) == "under"
-    assert (await store.idea(part.id)).parent_id == whole.id  # type: ignore[union-attr]
+    assert await kin.suggest(store, part) == "under"
+
+    (offered,) = await store.suggestions()
+    assert (offered.like_id, offered.kind) == (whole.id, "under")
+    assert (await store.idea(part.id)).parent_id is None  # type: ignore[union-attr]
 
 
 @pytest.mark.unit
@@ -89,8 +99,8 @@ async def test_an_idea_that_is_its_own_thing_is_left_exactly_where_it_is(
     )
     _answers("new", monkeypatch)
 
-    assert await kin.place(store, other) == "new"
-    assert (await store.idea(other.id)).parent_id is None  # type: ignore[union-attr]
+    assert await kin.suggest(store, other) == "new"
+    assert await store.suggestions() == []
 
 
 @pytest.mark.unit
@@ -103,8 +113,8 @@ async def test_an_idea_somebody_has_touched_is_never_moved(
     await store.set_idea_state(kept.id, "kept")
     _answers("same 1", monkeypatch)
 
-    assert "already touched it" in await kin.place(store, kept)
-    assert (await store.idea(kept.id)).parent_id is None  # type: ignore[union-attr]
+    assert "already touched it" in await kin.suggest(store, kept)
+    assert await store.suggestions() == []
 
 
 @pytest.mark.unit
@@ -121,8 +131,8 @@ async def test_an_unavailable_model_leaves_an_honest_duplicate(
 
     monkeypatch.setattr(kin, "stream_answer", broken)
 
-    assert await kin.place(store, again) == "new"
-    assert (await store.idea(again.id)).parent_id is None  # type: ignore[union-attr]
+    assert await kin.suggest(store, again) == "new"
+    assert await store.suggestions() == []
 
 
 @pytest.mark.unit
@@ -136,7 +146,7 @@ async def test_the_first_idea_in_an_empty_notebook_is_compared_with_nothing(
 
     monkeypatch.setattr(kin, "stream_answer", never)
 
-    assert "nothing to compare" in await kin.place(store, only)
+    assert "nothing to compare" in await kin.suggest(store, only)
 
 
 @pytest.mark.unit
@@ -152,8 +162,8 @@ async def test_an_idea_is_never_filed_under_its_own_child(
     _answers("under 1", monkeypatch)
 
     # The child is not offered as a candidate for its own parent at all.
-    assert await kin.place(store, parent) in ("new", "new: nothing to compare it with")
-    assert (await store.idea(parent.id)).parent_id is None  # type: ignore[union-attr]
+    assert await kin.suggest(store, parent) in ("new", "new: nothing to compare it with")
+    assert await store.suggestions() == []
 
 
 @pytest.mark.unit
@@ -167,4 +177,4 @@ async def test_an_idea_that_is_gone_by_the_time_this_runs_is_left_alone(
     _answers("under 1", monkeypatch)
     await store.delete_idea(idea.id)
 
-    assert await kin.place(store, idea) == "left alone: it is not there any more"
+    assert await kin.suggest(store, idea) == "left alone: it is not there any more"

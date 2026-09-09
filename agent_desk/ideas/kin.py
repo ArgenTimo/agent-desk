@@ -11,12 +11,18 @@ Three rules shape what this module is allowed to do, and all three come from the
 `inbox.capture`. This runs afterwards and can fail freely: an unavailable model leaves a list with
 one honest duplicate in it, which is a far smaller failure than a capture that lost the idea.
 
-**It moves rows, and it never touches a word anybody wrote.** A judgement that two things are the
-same is a judgement, and this one is a model's. There is no statement in this program that writes
-`idea.text` and this module does not add one (docs/05-ideas.md) — so a repeat is *hung under* the
-idea it repeats rather than folded into it. Both wordings stay readable, the list stops showing
-two rows that look like two decisions, and if the judgement was wrong the thought is still there
-to be dragged back out. Nothing a person has touched is moved at all.
+**It suggests, and a person presses (069).** It used to move the row itself, and that was defended
+on the ground that nothing was lost — both wordings stay readable and a wrong link can be dragged
+back out. The defence was true and the shape was wrong: a list that quietly reorganises itself
+between the moment somebody writes a thought and the moment they look at it is a list they stop
+trusting to hold what they put in it, and the cost of a wrong judgement was paid by whoever had to
+notice it. So the judgement is written down as a suggestion with two buttons on the card, and the
+reparenting happens on the press.
+
+**It never touches a word anybody wrote.** A judgement that two things are the same is a
+judgement, and this one is a model's. There is no statement in this program that writes `idea.text`
+and this module does not add one (docs/05-ideas.md) — so a repeat is *hung under* the idea it
+repeats rather than folded into it. Nothing a person has touched is offered at all.
 
 **It never groups two things that are merely near each other.** The failure this replaces is a
 list of near-duplicates; the failure it could introduce is worse — two different thoughts filed as
@@ -99,19 +105,20 @@ def _untouched(idea: Idea) -> bool:
     return idea.state == "new"
 
 
-async def place(store: Store, idea: Idea) -> str:
-    """Put one freshly captured idea where it belongs. Returns what was done, for the log.
+async def suggest(store: Store, idea: Idea) -> str:
+    """Ask whether one freshly captured idea repeats something, and write the answer down as an
+    offer. Returns what was decided, for the log.
 
     The three answers, and the first is the ordinary one:
 
     - `new` — nothing happens, which is the whole of the default;
-    - `under N` — it becomes a sub-idea of N;
-    - `same N` — the same, and the word is kept apart only so the log says which was meant.
+    - `under N` — a suggestion is written that this is part of N;
+    - `same N` — a suggestion is written that this is N said again.
 
-    Two answers and one action is deliberate. The action that `same` seems to want — fold the
+    Two answers and one offer is deliberate. The action that `same` seems to want — fold the
     wording into the idea it repeats — would be this program writing `idea.text`, which nothing in
-    it does. Hanging the repeat underneath loses nothing, reads the same in a list, and can be
-    undone by dragging.
+    it does. Hanging the repeat underneath loses nothing and can be undone by dragging; and it now
+    happens because somebody pressed, not because a model said so (069).
     """
     # Re-read rather than trust the row this was handed: a summariser ran between the capture and
     # this, and a person reading the list can touch a card in that gap. The same race the
@@ -136,6 +143,8 @@ async def place(store: Store, idea: Idea) -> str:
         return "new"
 
     match = pool[number - 1]
-    if not await store.set_idea_parent(idea.id, match.id):
-        return "new: it would have made a loop"
+    if await store.suggest_kin(idea.id, match.id, verdict) is None:
+        # Offered before. Somebody has already answered this pair, and asking again is a console
+        # arguing with them.
+        return "new: that pair has been offered already"
     return verdict

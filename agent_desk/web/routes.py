@@ -68,7 +68,7 @@ from agent_desk import (
 from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
-from agent_desk.ideas import appraise, bench, chart, describe, inbox, meeting, waking
+from agent_desk.ideas import appraise, bench, chart, describe, inbox, kin, meeting, waking
 from agent_desk.observe import attach, folder, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
@@ -88,6 +88,7 @@ from agent_desk.store.repo import (
     Idea,
     IdeaState,
     Kicking,
+    LooksLike,
     ProjectLink,
     Store,
     Task,
@@ -1404,6 +1405,10 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 idea=idea,
                 said=await describe_card("idea", id) if idea else "",
                 projects=await _project_choices(),
+                # What a model thought this repeats, waiting for somebody to say (069). On the card
+                # rather than in a column of its own: the moment to answer "is this the same
+                # thought" is the moment you are looking at the thought.
+                alike=await _looks_like(id) if idea else [],
             ),
             status_code=200 if idea else 404,
         )
@@ -3267,6 +3272,64 @@ async def write_down_what_is_known(request: Request) -> Response:
     return HTMLResponse("", status_code=204)
 
 
+async def _looks_like(idea_id: str) -> list[tuple[LooksLike, Idea]]:
+    """The unanswered suggestions about this idea, each with the idea it points at.
+
+    A suggestion whose other half has been deleted is dropped rather than rendered as a button
+    pointing at nothing.
+    """
+    found = []
+    for one in await store.suggestions(idea_id=idea_id):
+        other = await store.idea(one.like_id)
+        if other is not None:
+            found.append((one, other))
+    return found
+
+
+@router.post("/ideas/kin", response_class=HTMLResponse)
+async def settle_kin(request: Request) -> Response:
+    """Somebody says whether two ideas are one (069).
+
+    Joining is `set_idea_parent`, which is where the rule about loops lives; this does not
+    reimplement it. "They are different" writes nothing but the answer, and that answer is the
+    whole point of recording it — without it the same pair comes back on every pass.
+    """
+    form = await _form(request)
+    settled = await store.settle_suggestion(
+        form.get("id", "").strip(), "joined" if form.get("took") == "joined" else "apart"
+    )
+    if settled is not None and settled.took == "joined":
+        await store.set_idea_parent(settled.idea_id, settled.like_id)
+    idea = await store.idea(settled.idea_id) if settled else None
+    return HTMLResponse(
+        env.get_template("_card_idea.html").render(
+            idea=idea,
+            said=await describe_card("idea", idea.id) if idea else "",
+            projects=await _project_choices(),
+            alike=await _looks_like(idea.id) if idea else [],
+        ),
+        status_code=200 if idea else 404,
+    )
+
+
+@router.post("/ideas/kin/look", response_class=JSONResponse)
+async def look_for_kin() -> JSONResponse:
+    """Run the same check over the pool that is already there (01M21KTYGGRQA1511NMEY4VC47).
+
+    «Та же проверка задним числом: "эти две выглядят одной".» The check runs when a thought is
+    written, so everything written before it exists has never been looked at — and a notebook that
+    only de-duplicates what arrives after the feature was built is a notebook with all of its
+    duplicates still in it.
+
+    The same function, so there is one judgement and one set of rules about what may be offered.
+    """
+    asked = 0
+    for idea in await store.ideas(state="new"):
+        if await kin.suggest(store, idea) != "new":
+            asked += 1
+    return JSONResponse({"suggested": asked})
+
+
 @router.post("/cards/asked/answer", response_class=HTMLResponse)
 async def answer_a_question(request: Request) -> Response:
     """Somebody presses one of the options an agent offered (066).
@@ -3648,6 +3711,7 @@ async def point_idea_at_project(idea_id: str, request: Request) -> Response:
             idea=idea,
             said=await describe_card("idea", idea_id) if idea else "",
             projects=await _project_choices(),
+            alike=await _looks_like(idea_id) if idea else [],
         ),
         status_code=200 if idea else 404,
     )

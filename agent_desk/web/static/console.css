@@ -3135,3 +3135,21 @@ button.go:hover, button.yes:hover {
 .known-new { display: grid; gap: 4px; margin: 8px 0 0; }
 .known-new textarea, .known-new input { width: 100%; }
 .known-new textarea { resize: vertical; }
+
+/* A suggestion that two ideas are one (069-this-might-be-the-same.sql).
+
+   «Ответ — предложение с кнопками, а не автоматическое связывание.» Framed rather than coloured:
+   this is a question, not a warning, and a card that shouts at somebody about a possible duplicate
+   is a card they stop reading. */
+.looks-like {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 4px;
+}
+.looks-like-said { margin: 0; font-size: var(--t-sm); line-height: 1.35; }
+.looks-like button { justify-self: start; }
+/* The retrospective duplicate check, above the list it is about (069). */
+.look-for-kin { margin: 0 0 8px; }

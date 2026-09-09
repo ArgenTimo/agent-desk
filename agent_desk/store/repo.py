@@ -326,6 +326,23 @@ class Known(BaseModel):
         return [one.strip() for one in self.files.splitlines() if one.strip()]
 
 
+class LooksLike(BaseModel):
+    """A suggestion that two ideas are one, waiting for somebody to say (069)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    idea_id: str
+    like_id: str
+    # "same" or "under", as the model answered. Two sentences to a reader and one action.
+    kind: str
+    at: int = 0
+    # None while nobody has pressed. "joined" or "apart" once somebody has — and "apart" is kept,
+    # because a suggestion that comes back after being refused is noise with a memory problem.
+    took: str | None = None
+    settled_at: int | None = None
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -1997,8 +2014,17 @@ class Store:
         and only while nothing has happened to it. Anything a human has touched — a state, a
         summary, a draft — is not deleted by this program; `dropped` is the state for that
         (docs/05-ideas.md).
+
+        Unanswered suggestions naming it go first, on either side of the pair (069). They are this
+        console's own working note about a row that is about to stop existing, so nobody loses
+        anything — but the foreign key is real, and without this the delete raises and the
+        splitter's own placeholder stays in the list for ever.
         """
         async with self.engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM looks_like WHERE idea_id = :id OR like_id = :id"),
+                {"id": idea_id},
+            )
             await conn.execute(
                 text(
                     "DELETE FROM idea WHERE id = :id AND state = 'new' "
@@ -2638,6 +2664,63 @@ class Store:
         return [
             one for one in found if not one.about or any(named in wanted for named in one.about)
         ]
+
+    # --- a suggestion that two ideas are one (069-this-might-be-the-same.sql) -------------------
+    async def suggest_kin(self, idea_id: str, like_id: str, kind: str) -> LooksLike | None:
+        """Write down that these two might be one. `None` when that pair has been offered before.
+
+        Offered once. A person who said "these are different" has answered the question, and asking
+        it again on the next pass is a console arguing with them.
+        """
+        made = LooksLike(id=_new_id(), idea_id=idea_id, like_id=like_id, kind=kind, at=_now_ms())
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO looks_like (id, idea_id, like_id, kind, at) "
+                    "VALUES (:id, :idea_id, :like_id, :kind, :at)"
+                ),
+                made.model_dump(exclude={"took", "settled_at"}),
+            )
+            return made if done.rowcount else None
+
+    async def suggestions(self, *, idea_id: str = "", waiting: bool = True) -> list[LooksLike]:
+        """What has been suggested and not yet answered, newest first."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, idea_id, like_id, kind, at, took, settled_at FROM looks_like "
+                    "WHERE (:idea_id = '' OR idea_id = :idea_id) "
+                    "AND (:waiting = 0 OR settled_at IS NULL) "
+                    "ORDER BY at DESC LIMIT 200"
+                ),
+                {"idea_id": idea_id, "waiting": int(waiting)},
+            )
+            return [LooksLike(**row._mapping) for row in rows]
+
+    async def settle_suggestion(self, suggestion_id: str, took: str) -> LooksLike | None:
+        """Record what somebody pressed, and hand back the pair so a caller can act on it.
+
+        The write happens here and the linking does not: joining two ideas is `set_idea_parent`,
+        which has its own rule about loops, and a second place that reparented rows would be a
+        second place for that rule to be missing.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE looks_like SET took = :took, settled_at = :at "
+                    "WHERE id = :id AND settled_at IS NULL"
+                ),
+                {"id": suggestion_id, "took": took, "at": _now_ms()},
+            )
+            rows = await conn.execute(
+                text(
+                    "SELECT id, idea_id, like_id, kind, at, took, settled_at FROM looks_like "
+                    "WHERE id = :id"
+                ),
+                {"id": suggestion_id},
+            )
+            row = rows.first()
+            return None if row is None else LooksLike(**row._mapping)
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

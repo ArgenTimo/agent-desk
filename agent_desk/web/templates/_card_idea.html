@@ -37,6 +37,20 @@
       </select>
       <button type="submit" class="visually-hidden">point it at this project</button>
     </form>
+
+    {# «Ответ — предложение с кнопками, а не автоматическое связывание» (069). A judgement that two
+       thoughts are one is a judgement, and it belongs to whoever wrote them. Both answers are
+       recorded: "they are different" is what stops the same pair being offered on every pass. #}
+    {% for one, like in alike %}
+    <form class="looks-like" method="post" action="/ideas/kin"
+          hx-post="/ideas/kin" hx-target="closest .card-detail" hx-swap="outerHTML">
+      <input type="hidden" name="id" value="{{ one.id }}">
+      <p class="looks-like-said">{{ "You already wrote this" if one.kind == "same"
+         else "This looks like part of" }}: {{ like.summary }}</p>
+      <button type="submit" name="took" value="joined">put it under that one</button>
+      <button type="submit" name="took" value="apart">they are different</button>
+    </form>
+    {% endfor %}
   </div>
 
   <div class="technical-only" hidden>

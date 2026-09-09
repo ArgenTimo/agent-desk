@@ -358,7 +358,7 @@ async def _write_ideas(store: Store, block: Block, whole: Idea, rows: Sequence[B
 async def _place(store: Store, idea: Idea) -> None:
     """Put a freshly captured idea where it belongs, and never fail the capture over it."""
     try:
-        where = await kin.place(store, idea)
+        where = await kin.suggest(store, idea)
     except Exception:  # a judgement that fails leaves the row exactly where it is
         log.warning("ideas.place_failed", idea=idea.id)
         return

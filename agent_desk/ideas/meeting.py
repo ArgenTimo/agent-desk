@@ -124,7 +124,7 @@ async def read_meeting(
                 context={"from": "a meeting transcript"},
                 project_key=project_key,
             )
-            await kin.place(store, idea)
+            await kin.suggest(store, idea)
             written.append(idea)
     log.info("meeting.read", ideas=len(written))
     return written
