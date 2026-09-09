@@ -2870,6 +2870,38 @@ class Store:
             found = rows.first()
             return str(found[0]) if found else ""
 
+    async def combined_before(self, thread_id: str, pair: Sequence[str], said: str) -> Block | None:
+        """The answer these two cards already made under this rule, if they made one.
+
+        Either order. Dragging A onto B and B onto A is one act to the person doing it, and a
+        console that answers differently depending on which card they happened to pick up first is
+        the randomness generator this is written to stop. The stored order is still the order of
+        the gesture — that is provenance and stays a fact — but it is not what this asks by.
+
+        The rule is part of the question: the same pair under two rules is two questions, and
+        showing the first one's answer to the second would be worse than asking again (061).
+        """
+        if len(pair) != 2:
+            return None
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, thread_id, kind, state, input, answer, error, thread_set_by, "
+                    "created_at, finished_at, context, relates_to, from_repo, by_button, made_from "
+                    "FROM block WHERE thread_id = :thread_id AND state = 'answered' "
+                    "AND input = :said AND made_from IN (:one, :other) "
+                    "ORDER BY id DESC LIMIT 1"
+                ),
+                {
+                    "thread_id": thread_id,
+                    "said": said,
+                    "one": ",".join(pair),
+                    "other": ",".join(reversed(pair)),
+                },
+            )
+            found = rows.first()
+            return None if found is None else Block(**found._mapping)
+
     async def keep_template(
         self,
         *,

@@ -2331,7 +2331,9 @@ canvas?.addEventListener('pointerdown', (event) => {
   const pin = event.target.closest('.pin');
   if (!pin) return;
   event.preventDefault();
-  mixing = { from: pin, over: null };
+  // Held down: ask again even though these two have already made something. Without it a pair
+  // answers once and for ever, and "try it another way" would mean deleting the first answer.
+  mixing = { from: pin, over: null, again: event.shiftKey };
   pin.classList.add('joining');
   canvas.setPointerCapture?.(event.pointerId);
 });
@@ -2346,8 +2348,9 @@ window.addEventListener('pointerup', (event) => {
   if (!mixing) return;
   const from = mixing.from;
   const onto = mixing.over || (cardUnder(event) !== from ? cardUnder(event) : null);
+  const again = mixing.again;
   stopMixing();
-  if (onto) combine(cardName(from), cardName(onto));
+  if (onto) combine(cardName(from), cardName(onto), again);
 });
 window.addEventListener('pointercancel', stopMixing);
 
@@ -2360,7 +2363,7 @@ async function sayWhatCombiningAsks() {
   try {
     const answer = await fetch(`/workbench/combining?thread=${encodeURIComponent(activeThread())}`);
     const said = await answer.json();
-    button.title = `Combine — drag one card onto another and the two make a third (X)\n\nIt asks: ${said.said}`;
+    button.title = `Combine — drag one card onto another and the two make a third (X). Shift for another answer from a pair that already made one\n\nIt asks: ${said.said}`;
   } catch {
     // Leave the tooltip as the markup wrote it. A control that says nothing about its rule is
     // worse than one that says it wrongly, and both are better than a page that stopped working.
@@ -2390,7 +2393,36 @@ async function howCombiningWorks() {
   sayWhatCombiningAsks();
 }
 
-async function combine(from, onto) {
+// What these two already made, or nothing. Asked before spending the call: "собрал то же самое и
+// получил другое" is a world nobody can build in, and the answer somebody wants back is the card
+// they already have rather than a second one beside it saying almost the same.
+async function alreadyMade(from, onto) {
+  try {
+    const answer = await fetch(
+      `/workbench/made?thread=${encodeURIComponent(activeThread())}&pair=${encodeURIComponent(`${from},${onto}`)}`
+    );
+    return await answer.json();
+  } catch {
+    // A check that failed must not stop the gesture: worst case, it is asked twice.
+    return {};
+  }
+}
+
+function showItAgain(id) {
+  const card = surface?.querySelector(`.pin[data-name="answer:${CSS.escape(id)}"]`);
+  if (!card) return false;
+  bringIntoView(card);
+  card.classList.add('about-this');
+  setTimeout(() => card.classList.remove('about-this'), 2500);
+  say('These two already made this. Hold shift and drag to ask for another.');
+  return true;
+}
+
+async function combine(from, onto, again) {
+  if (!again) {
+    const had = await alreadyMade(from, onto);
+    if (had.block && showItAgain(had.block)) return;
+  }
   say(`Combining “${labelOf(from)}” and “${labelOf(onto)}”…`);
   const body = new URLSearchParams({
     thread: activeThread(),

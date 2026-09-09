@@ -1661,6 +1661,25 @@ async def what_a_combine_asks(thread: str = "") -> JSONResponse:
     return JSONResponse({"said": combining.rule(said), "its_own": bool(said.strip())})
 
 
+@router.get("/workbench/made", response_class=JSONResponse)
+async def what_these_two_already_made(thread: str = "", pair: str = "") -> JSONResponse:
+    """Whether these two cards have already made something under the rule in force.
+
+    "Иначе это не мир, а генератор случайностей: собрал то же самое и получил другое." Asked before
+    the combine rather than answered after it, because the point is not to spend the call twice —
+    and because what somebody wants back is the card they already have, not a second one saying
+    almost the same thing beside it.
+    """
+    two = [one for one in pair.split(",") if one]
+    if len(two) != 2:
+        return JSONResponse({})
+    said = combining.rule(await store.combining(thread))
+    before = await store.combined_before(thread, two, said)
+    if before is None:
+        return JSONResponse({})
+    return JSONResponse({"block": before.id, "said": (before.answer or "")[:200]})
+
+
 @router.post("/workbench/combining", response_class=JSONResponse)
 async def set_what_a_combine_asks(request: Request) -> JSONResponse:
     """Change it, or clear it back to what the console asks by default.

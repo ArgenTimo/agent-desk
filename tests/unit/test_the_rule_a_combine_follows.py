@@ -153,3 +153,135 @@ def _a_form(**fields: str) -> object:
         headers: ClassVar[dict[str, str]] = {"content-type": "application/x-www-form-urlencoded"}
 
     return Filled()
+
+
+# --- the same pair gives the same thing ---------------------------------------------------------
+async def _a_combine(desk: Store, thread: str, made_from: str, said: str, answer: str) -> str:
+    block = await desk.create_block(
+        thread_id=thread, kind="question", input=said, thread_set_by="human"
+    )
+    await desk.made_out_of(block.id, made_from.split(","))
+    await desk.finish_block(block.id, answer)
+    return block.id
+
+
+async def test_the_same_pair_is_remembered(desk: Store) -> None:
+    """ "Иначе это не мир, а генератор случайностей: собрал то же самое и получил другое.\" """
+    thread = await desk.create_thread("a chat")
+    made = await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam")
+
+    before = await desk.combined_before(thread.id, ["a", "b"], combining.DEFAULT)
+
+    assert before is not None and before.id == made
+
+
+async def test_either_order_is_the_same_pair(desk: Store) -> None:
+    """Dragging A onto B and B onto A is one act to the person doing it. The stored order stays the
+    order of the gesture — that is provenance — but it is not what this asks by."""
+    thread = await desk.create_thread("a chat")
+    await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam")
+
+    before = await desk.combined_before(thread.id, ["b", "a"], combining.DEFAULT)
+
+    assert before is not None
+
+
+async def test_a_different_rule_is_a_different_question(desk: Store) -> None:
+    """The same pair under two rules is two questions, and showing the first one's answer to the
+    second would be worse than asking again."""
+    thread = await desk.create_thread("a chat")
+    await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam")
+
+    assert await desk.combined_before(thread.id, ["a", "b"], "find the disagreement") is None
+
+
+async def test_an_answer_that_never_came_is_not_a_memory(desk: Store) -> None:
+    """A run that failed or is still going has nothing to show, and offering it as "you already
+    made this" would be the console reporting a status it does not have."""
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input=combining.DEFAULT, thread_set_by="human"
+    )
+    await desk.made_out_of(block.id, ["a", "b"])
+
+    assert await desk.combined_before(thread.id, ["a", "b"], combining.DEFAULT) is None
+
+
+async def test_another_bench_is_not_asked_about(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+    other = await desk.create_thread("another")
+    await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam")
+
+    assert await desk.combined_before(other.id, ["a", "b"], combining.DEFAULT) is None
+
+
+async def test_the_console_answers_with_the_card_it_already_has(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+    made = await _a_combine(desk, thread.id, "a,b", combining.DEFAULT, "steam and nothing else")
+
+    answer = await routes.what_these_two_already_made(thread=thread.id, pair="a,b")
+
+    assert made in answer.body.decode()
+    assert "steam and nothing else" in answer.body.decode()
+
+
+async def test_a_pair_that_has_made_nothing_says_nothing(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+
+    answer = await routes.what_these_two_already_made(thread=thread.id, pair="a,b")
+
+    assert answer.body.decode() == "{}"
+
+
+def test_asking_again_is_a_gesture_and_not_a_deletion() -> None:
+    """Without it a pair answers once and for ever, and "try it another way" would mean throwing
+    the first answer away first."""
+    source = _code()
+
+    assert "again: event.shiftKey" in source
+    assert "if (!again) {" in _body_of("combine")
+    assert "Shift for another answer" in BOARD.read_text(encoding="utf-8")
+
+
+def test_a_check_that_failed_does_not_stop_the_gesture() -> None:
+    """Worst case it is asked twice, which is what it did before this existed."""
+    assert "return {};" in _body_of("alreadyMade")
+
+
+async def test_setting_the_rule_says_what_it_now_asks(desk: Store) -> None:
+    """The reply is the rule in force, not an acknowledgement: somebody who mistyped finds out
+    from the answer rather than from the next combine."""
+    thread = await desk.create_thread("a chat")
+
+    answer = await routes.set_what_a_combine_asks(
+        _a_form(thread=thread.id, said="find+the+disagreement")
+    )
+
+    assert "find the disagreement" in answer.body.decode()
+    assert await desk.combining(thread.id) == "find the disagreement"
+
+
+async def test_clearing_it_says_it_went_back(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+    await desk.combine_with(thread.id, "something else")
+
+    answer = await routes.set_what_a_combine_asks(_a_form(thread=thread.id, said=""))
+
+    assert '"its_own":false' in answer.body.decode()
+    assert await desk.combining(thread.id) == ""
+
+
+async def test_a_rule_with_no_workbench_to_belong_to_is_refused(desk: Store) -> None:
+    """A rule belongs to one bench, and a chat nobody has opened is not one."""
+    answer = await routes.set_what_a_combine_asks(_a_form(said="anything"))
+
+    assert "Open a chat first" in answer.body.decode()
+
+
+async def test_one_card_is_not_a_pair(desk: Store) -> None:
+    """The check is asked with whatever the page had. Half a gesture is not a question."""
+    assert await desk.combined_before("t1", ["a"], combining.DEFAULT) is None
+
+    answer = await routes.what_these_two_already_made(thread="t1", pair="a")
+
+    assert answer.body.decode() == "{}"
