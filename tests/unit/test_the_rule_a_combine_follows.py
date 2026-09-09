@@ -344,3 +344,65 @@ def test_the_shelf_is_rebuilt_every_time_the_menu_opens() -> None:
     body = source[start : source.index("\n}\n", start)]
 
     assert "showShelf();" in body
+
+
+# --- and it has to be cheap, because it happens often -------------------------------------------
+async def _prompt_for(desk: Store, monkeypatch: pytest.MonkeyPatch, *, a_gesture: bool) -> str:
+    """What the answer engine is actually handed. Measured rather than reasoned about."""
+    from agent_desk.web import blocks
+
+    sent: list[str] = []
+
+    async def caught(store: Store, block: object, prompt: str, dirs: object) -> None:
+        sent.append(prompt)
+
+    monkeypatch.setattr(blocks, "_run", caught)
+
+    thread = await desk.create_thread("a chat")
+    earlier = await desk.create_block(
+        thread_id=thread.id, kind="question", input="what came before", thread_set_by="human"
+    )
+    await desk.finish_block(earlier.id, "an answer nobody asked this time")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input=combining.DEFAULT, thread_set_by="human"
+    )
+
+    await blocks._classify_and_answer(
+        desk, block, [], classify=False, a_gesture=a_gesture, surface=["1. water", "2. fire"]
+    )
+    return sent[0]
+
+
+async def test_a_combine_does_not_carry_the_conversation(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Соединение стоит один вызов и происходит часто… дёшево и быстро." By the tenth combine the
+    thread is nine answers long and every one of them was travelling with the eleventh question,
+    which is the whole cost. The two cards are in the prompt as the workbench — that is what was
+    pointed at."""
+    said = await _prompt_for(desk, monkeypatch, a_gesture=True)
+
+    assert "an answer nobody asked this time" not in said
+    assert "water" in said and "fire" in said, "it stopped carrying the two cards as well"
+
+
+async def test_a_typed_question_still_carries_it(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The carve-out is for gestures. Attaching a follow-up to a subject is only worth anything if
+    the subject then travels with it (docs/04-threads-and-blocks.md)."""
+    said = await _prompt_for(desk, monkeypatch, a_gesture=False)
+
+    assert "an answer nobody asked this time" in said
+
+
+def test_a_combine_is_not_aimed_at_the_whole_board() -> None:
+    """`aim` falls back to everything when the cards it was pointed at are not sessions — which two
+    ideas never are — so every session on the machine was being described to a question that had
+    nothing to do with any of them."""
+    source = (HERE / "agent_desk" / "web" / "blocks.py").read_text(encoding="utf-8")
+    start = source.index("    aimed, about = aim(rows, project, session, targets)")
+    after = source[start : start + 700]
+
+    assert "if made_from:" in after
+    assert 'aimed, about = [], ""' in after

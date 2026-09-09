@@ -674,6 +674,14 @@ async def submit(
     if dropped_ideas:
         await store.link_block_ideas(block.id, dropped_ideas)
     aimed, about = aim(rows, project, session, targets)
+    if made_from:
+        # "Соединение стоит один вызов и происходит часто… дёшево и быстро." A combine is about two
+        # cards and nothing else, so it carries neither. `aim` falls back to the whole board when
+        # the cards it was pointed at are not sessions — which two ideas never are — and every
+        # session on the machine was being described to a question that had nothing to do with any
+        # of them. On a board with a dozen projects that is most of the prompt.
+        aimed, about = [], ""
+
     deep = transcripts(rows, targets)
     written = await notes(store, targets)
     # Read now rather than when the run reaches the prompt: this is what was in front of the person
@@ -915,6 +923,7 @@ async def _work(
             block,
             rows,
             classify=classify,
+            a_gesture=a_gesture,
             about=about,
             deep=deep,
             history=history,
@@ -1745,6 +1754,7 @@ async def _classify_and_answer(
     rows: Sequence[BoardRow],
     *,
     classify: bool,
+    a_gesture: bool = False,
     about: str = "",
     deep: Sequence[str] = (),
     history: Sequence[str] = (),
@@ -1774,8 +1784,15 @@ async def _classify_and_answer(
 
     # Attached beats inherited: a page that could say exactly what to carry said it, and a page
     # that could not gets the thread it was classified into.
+    #
+    # And a gesture carries none of it. The conversation is not part of "what do these two cards
+    # make": by the tenth combine the thread is nine answers long and every one of them travels
+    # with the eleventh question, which is the whole cost. The two cards are in the prompt as the
+    # workbench, which is what was actually pointed at.
     earlier = (
-        await _attached(store, history)
+        []
+        if a_gesture
+        else await _attached(store, history)
         if history
         else await _thread_history(store, thread_id, exclude=block.id)
     )
