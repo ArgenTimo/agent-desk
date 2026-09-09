@@ -1032,6 +1032,68 @@ async function runTheCheck(holder) {
 // "Уникальная карточка, в которую можно закладывать разнообразный функционал… Хранятся в списке под
 // проектами, слева снизу." A button and a check both die with the workbench they were made on;
 // this is the same card kept under a name and put on any bench, as a fresh card each time.
+// --- a whole workbench as one file ---------------------------------------------------------------
+// "Вот всё, над чем я думал" as one thing. The console offers the document and the browser saves
+// it: this program writes into one tree and it is not somebody's Downloads folder (config.py).
+async function saveTheBench() {
+  let said;
+  try {
+    said = await (
+      await fetch(`/workbench/file?thread=${encodeURIComponent(activeThread())}`)
+    ).json();
+  } catch {
+    say('It could not be read.');
+    return;
+  }
+  const name = (said.name || 'workbench').replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 40);
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(said, null, 2)], { type: 'application/json' })
+  );
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${name || 'workbench'}.agent-desk.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  say(`Saved ${said.cards.length} cards and ${said.lines.length} lines.`);
+}
+
+async function openABench() {
+  const chooser = document.createElement('input');
+  chooser.type = 'file';
+  chooser.accept = '.json,application/json';
+  chooser.addEventListener('change', async () => {
+    const file = chooser.files?.[0];
+    if (!file) return;
+    let said;
+    try {
+      said = JSON.parse(await file.text());
+    } catch {
+      say('That file is not a workbench.');
+      return;
+    }
+    said.into = activeThread();
+    const answer = await fetch('/workbench/file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(said),
+    });
+    const back = await answer.json();
+    if (!answer.ok) {
+      say(back.why || 'That file is not a workbench.');
+      return;
+    }
+    // Said out loud, both halves. A bench that came back with eleven of fourteen cards and said
+    // nothing would be the console reporting a status it does not have.
+    say(
+      back.missing.length
+        ? `Opened ${back.opened} cards. ${back.missing.length} are not on this machine.`
+        : `Opened ${back.opened} cards.`
+    );
+    location.reload();
+  });
+  chooser.click();
+}
+
 async function showTools() {
   const into = document.getElementById('kept-tools');
   if (!into) return;
@@ -4742,6 +4804,8 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'button') addButton();
   else if (what === 'check') addCheck();
   else if (what === 'combining') howCombiningWorks();
+  else if (what === 'file') saveTheBench();
+  else if (what === 'open') openABench();
   else if (what === 'template') keepTemplate();
 });
 

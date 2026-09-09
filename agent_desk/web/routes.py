@@ -41,6 +41,7 @@ from agent_desk import (
     allowed,
     because,
     branching,
+    carrying,
     checking,
     combining,
     comparing,
@@ -2704,6 +2705,112 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
 # unreachable: `/cards/{kind}` is registered earlier and matched `/cards/why` with kind="why",
 # answering 404 to every request. The unit tests called the function and never went through the
 # router, so it looked fine until a browser asked for it.
+@router.get("/workbench/file", response_class=JSONResponse)
+async def the_whole_workbench(thread: str = "") -> JSONResponse:
+    """A whole workbench as one document (agent_desk/carrying.py).
+
+    "Вот всё, над чем я думал" as one thing: attach it to a ticket, put it in a repository beside
+    the code, open it in a month. It is also the backup this console does not otherwise have.
+
+    Cards, where they sat and the lines between them — and nothing a card's body holds. A file
+    somebody attaches to a ticket is a file somebody else reads, which is the surface
+    docs/07-security.md says redacts before it renders; a label is what is already visible on a
+    folded card across the room.
+    """
+    cards = [
+        carrying.Card(
+            name=one.name,
+            kind=one.kind,
+            label=one.label,
+            x=one.x,
+            y=one.y,
+            shown=one.shown,
+            spent=one.spent,
+            came=one.came,
+        )
+        for one in await store.bench_cards(thread)
+    ]
+    on_it = {one.name for one in cards}
+    lines = [
+        carrying.Line(from_name=tie.from_name, to_name=tie.to_name, kind=tie.kind, says=tie.says)
+        for tie in await store.card_ties()
+        if tie.from_name in on_it and tie.to_name in on_it
+    ]
+    thread_row = await store.thread(thread) if thread else None
+    return JSONResponse(
+        carrying.as_document(cards, lines, name=thread_row.subject if thread_row else "")
+    )
+
+
+@router.post("/workbench/file", response_class=JSONResponse)
+async def open_a_workbench(request: Request) -> JSONResponse:
+    """Put a document's cards and lines onto this chat's workbench.
+
+    Everything the document carries whose row is on this machine, and a count of what it does not
+    have. A bench that quietly came back with eleven of fourteen cards would be the fifth rule in a
+    file format, so the number is the answer rather than a detail.
+    """
+    said = await request.json()
+    bench = carrying.read_document(said)
+    if bench is None:
+        return JSONResponse(
+            {"why": "That is not a workbench this console can open."}, status_code=422
+        )
+    thread = str((said or {}).get("into", "")) if isinstance(said, dict) else ""
+    here: list[BenchCard] = []
+    missing: list[str] = []
+    for at, one in enumerate(bench.cards):
+        if not await _card_is_here(one.name):
+            missing.append(one.name)
+            continue
+        here.append(
+            BenchCard(
+                name=one.name,
+                kind=one.kind,
+                card_id=one.name.partition(":")[2],
+                label=one.label,
+                x=one.x,
+                y=one.y,
+                shown=one.shown,
+                spent=one.spent,
+                ord=at,
+                by_hand=True,
+                came="opened from a file",
+            )
+        )
+    await store.keep_bench(here, thread_id=thread)
+    on_it = {one.name for one in here}
+    for line in bench.lines:
+        if line.from_name in on_it and line.to_name in on_it:
+            await store.tie_cards(
+                from_name=line.from_name,
+                to_name=line.to_name,
+                kind=line.kind,
+                says=line.says,
+                thread_id=thread,
+            )
+    return JSONResponse({"opened": len(here), "missing": missing})
+
+
+async def _card_is_here(name: str) -> bool:
+    """Whether the thing a document names still exists on this machine.
+
+    Only for the kinds this console owns rows for. A session or a folder is named by what it is
+    rather than by a row, so it comes back as it was named and the machine decides whether it is
+    there — which is what the board already does for every other card of those kinds.
+    """
+    kind, _, ident = name.partition(":")
+    if kind == "idea":
+        return await store.idea(ident) is not None
+    if kind in ("block", "answer"):
+        return await store.block(ident) is not None
+    if kind == "button":
+        return await store.button_card(ident) is not None
+    if kind == "check":
+        return await store.check_card(ident) is not None
+    return True
+
+
 @router.get("/workbench/why", response_class=JSONResponse)
 async def why_it_is_here(name: str = "", thread: str = "") -> JSONResponse:
     """The chain of facts behind one card (agent_desk/because.py).
