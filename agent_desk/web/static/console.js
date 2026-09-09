@@ -3863,14 +3863,43 @@ const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', faile
 //
 // Offered only when there are two, because comparing one run with nothing is a table of one
 // column, and a control that produces one is a control somebody presses once.
+document.getElementById('describe-run')?.addEventListener('click', async (event) => {
+  const run = event.currentTarget.dataset.run;
+  if (!run) return;
+  say('Writing it…');
+  try {
+    const answer = await fetch('/workbench/describe', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ run, thread: activeThread() }),
+    });
+    const said = await answer.json();
+    if (!said.asked) say(said.why || 'It could not be written.');
+  } catch {
+    say('It could not be written.');
+  }
+});
+
 function runsOfThisBench() {
   const here = new Set(onBench().map(cardName));
   return runs.filter((one) => (one.cards || []).some((name) => here.has(name)));
 }
 
+// The newest finished run of what is on this bench, or nothing. A description of half a run is
+// half a lie, so it is offered only once there is a whole one.
+function lastFinishedRun() {
+  return runsOfThisBench().filter((one) => !one.going && !one.waiting).pop() || null;
+}
+
 function showCompare() {
   const button = document.getElementById('compare-runs');
   if (button) button.hidden = runsOfThisBench().length < 2;
+  const describe = document.getElementById('describe-run');
+  if (describe) {
+    const done = lastFinishedRun();
+    describe.hidden = !done;
+    if (done) describe.dataset.run = done.id;
+  }
   // The spread wants two runs as well: one run has no spread, and a table of one column is what a
   // person presses once and never again.
   const spread = document.getElementById('spread-runs');

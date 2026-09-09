@@ -46,6 +46,7 @@ from agent_desk import (
     combining,
     comparing,
     connectors,
+    describing,
     dispatch,
     handling,
     land,
@@ -2844,6 +2845,46 @@ async def _card_is_here(name: str) -> bool:
     if kind == "check":
         return await store.check_card(ident) is not None
     return True
+
+
+@router.post("/workbench/describe", response_class=JSONResponse)
+async def describe_the_change(request: Request) -> JSONResponse:
+    """Turn what a finished run did into the description of a change (agent_desk/describing.py).
+
+    "Кнопка «сделать описание PR» на завершённом прогоне. Дёшево, и попадает ровно в тот момент,
+    когда писать описание больше всего не хочется."
+
+    Sent as a gesture, so no card is drawn for the question and the classifier never sees it: the
+    words are the console's own and there is nothing in them for a reader to work out.
+    """
+    form = await _form(request)
+    run_id = form.get("run", "").strip()
+    the_run = next((one for one in await store.runs() if one.id == run_id), None)
+    if the_run is None:
+        return JSONResponse({"why": "That run is not here any more."})
+    if the_run.finished_at is None:
+        return JSONResponse(
+            {"why": "It is still going. A description of half a run is half a lie."}
+        )
+    labels = {card.name: card.label for card in await store.bench_cards()}
+    steps = [
+        describing.Step(
+            label=labels.get(one.name) or one.name,
+            state=one.state,
+            made=one.made,
+            detail=one.detail,
+        )
+        for one in await store.run_steps(run_id)
+    ]
+    made = await block_runs.submit(
+        store,
+        describing.what_to_write(the_run.given, steps),
+        [],
+        thread_id=form.get("thread", "").strip(),
+        a_gesture=True,
+    )
+    await store.sent_by_a_button(made.id)
+    return JSONResponse({"asked": made.id})
 
 
 @router.get("/workbench/why", response_class=JSONResponse)

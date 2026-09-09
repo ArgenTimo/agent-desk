@@ -301,6 +301,10 @@
             title="what every run of this produced, step by step">the spread</button>
     <button type="button" id="compare-runs" hidden
             title="what the last two runs of this produced, step by step">compare the last two runs</button>
+    {# What a finished run did, written out as the description of a change. "Попадает ровно в тот
+       момент, когда писать описание больше всего не хочется" (agent_desk/describing.py). #}
+    <button type="button" id="describe-run" hidden
+            title="write the description of this change from what the run actually did">describe the change</button>
     <aside id="compare-panel" class="compare" hidden>
       <header>two runs
         <span class="compare-said"></span>
