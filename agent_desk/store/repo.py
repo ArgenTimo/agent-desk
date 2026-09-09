@@ -269,6 +269,38 @@ class ButtonCard(BaseModel):
         return f"button:{self.id}"
 
 
+class Asked(BaseModel):
+    """A question an agent left for a person, and the answer it comes back for (066).
+
+    «Консоль — единственное место, где вопрос может подождать человека, не занимая ничьё окно.»
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    question: str
+    # One per line. Empty is a question with nothing to press, which is a question somebody answers
+    # in their own words — and this program has a field for that already.
+    options: str = ""
+    # What is already built and waiting on the answer, in the asker's words. Nothing here can see
+    # the inside of the work that stopped, so nothing here writes this sentence.
+    done: str = ""
+    who: str = ""
+    at: int = 0
+    # None until somebody presses. Distinct from "" so that an answer deliberately left blank is
+    # not the same row as one nobody has looked at.
+    answer: str | None = None
+    answered_at: int | None = None
+
+    @property
+    def choices(self) -> list[str]:
+        return [one.strip() for one in self.options.splitlines() if one.strip()]
+
+    @property
+    def waiting(self) -> bool:
+        return self.answered_at is None
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -2446,6 +2478,78 @@ class Store:
                 text("UPDATE check_card SET note = :note WHERE id = :id"),
                 {"note": note[:600], "id": card_id},
             )
+
+    # --- a question for a person (066-a-question-for-a-person.sql) -----------------------------
+    async def ask_a_person(
+        self, question: str, *, options: Sequence[str] = (), done: str = "", who: str = ""
+    ) -> Asked:
+        """Write a question down for somebody to press an answer to.
+
+        Nothing is sent anywhere. The row waits, which is the whole point: a question that had to
+        reach somebody now would be an interruption, and this program is the one that does not
+        make those (docs/adr/0002).
+        """
+        made = Asked(
+            id=_new_id(),
+            question=question.strip()[:2000],
+            options="\n".join(one.strip() for one in options if one.strip())[:2000],
+            done=done.strip()[:2000],
+            who=who.strip()[:80],
+            at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO asked (id, question, options, done, who, at) "
+                    "VALUES (:id, :question, :options, :done, :who, :at)"
+                ),
+                made.model_dump(exclude={"answer", "answered_at"}),
+            )
+        return made
+
+    async def questions(self, *, waiting: bool | None = None) -> list[Asked]:
+        """Questions left for a person, the ones nobody has answered first."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, question, options, done, who, at, answer, answered_at FROM asked "
+                    "WHERE (:waiting IS NULL "
+                    "  OR (:waiting = 1 AND answered_at IS NULL) "
+                    "  OR (:waiting = 0 AND answered_at IS NOT NULL)) "
+                    "ORDER BY answered_at IS NOT NULL, at DESC LIMIT 200"
+                ),
+                {"waiting": None if waiting is None else int(waiting)},
+            )
+            return [Asked(**row._mapping) for row in rows]
+
+    async def question(self, asked_id: str) -> Asked | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, question, options, done, who, at, answer, answered_at FROM asked "
+                    "WHERE id = :id"
+                ),
+                {"id": asked_id},
+            )
+            row = rows.first()
+            return None if row is None else Asked(**row._mapping)
+
+    async def answer_a_question(self, asked_id: str, said: str) -> bool:
+        """Record what somebody pressed. The first answer stands.
+
+        A second press is not a correction: the asker may already have read the first and acted on
+        it, and a question whose answer changes underneath the work it unblocked is worse than one
+        that was answered wrongly and can be asked again.
+        """
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text(
+                    "UPDATE asked SET answer = :answer, answered_at = :at "
+                    "WHERE id = :id AND answered_at IS NULL"
+                ),
+                {"id": asked_id, "answer": said[:2000], "at": _now_ms()},
+            )
+            return bool(done.rowcount)
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

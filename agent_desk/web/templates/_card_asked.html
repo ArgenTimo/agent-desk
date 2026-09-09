@@ -1,0 +1,46 @@
+{# A question an agent left for a person, with the options it offers (066).
+
+   "Не строка в логе: карточка, у которой видно, кто спросил, что предлагает и что стоит на паузе.
+   Человек отвечает нажатием, а не набором текста, потому что варианты уже перечислены."
+
+   Three things are on it because a question with none of them is one that waits behind everything
+   that has them: who is asking, what is already built and standing still, and the answers as
+   buttons. Once it is answered the buttons go: the first answer stands, because the asker may
+   already have acted on it. #}
+{% if not one %}
+<p class="empty small">that question is not here any more</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ one.question[:60] }}">
+  <div class="plain-only">
+    <p class="asked-question">{{ one.question }}</p>
+    {% if one.who %}<p class="small dim asked-who">asked by {{ one.who }}</p>{% endif %}
+    {% if one.done %}
+    {# The cost of not answering, in the asker's own words. Nothing here can see the inside of the
+       work that stopped, so nothing here writes this sentence. #}
+    <p class="asked-done">waiting on this: {{ one.done }}</p>
+    {% endif %}
+    {% if one.waiting %}
+      {% if one.choices %}
+      <form class="asked-options" method="post" action="/cards/asked/answer"
+            hx-post="/cards/asked/answer" hx-swap="none">
+        <input type="hidden" name="id" value="{{ one.id }}">
+        {% for choice in one.choices %}
+        <button type="submit" name="answer" value="{{ choice }}">{{ choice }}</button>
+        {% endfor %}
+      </form>
+      {% else %}
+      <form class="asked-words" method="post" action="/cards/asked/answer"
+            hx-post="/cards/asked/answer" hx-swap="none">
+        <input type="hidden" name="id" value="{{ one.id }}">
+        <label class="visually-hidden" for="asked-said-{{ one.id }}">what to tell it</label>
+        <textarea id="asked-said-{{ one.id }}" name="answer" rows="2"
+                  placeholder="it offered nothing to press — tell it in your own words"></textarea>
+        <button type="submit">tell it</button>
+      </form>
+      {% endif %}
+    {% else %}
+    <p class="asked-answer"><strong>you said:</strong> {{ one.answer }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

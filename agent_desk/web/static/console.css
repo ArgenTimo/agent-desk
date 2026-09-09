@@ -3102,3 +3102,19 @@ button.go:hover, button.yes:hover {
 /* What it will reach, said before it is pressed. A control that reaches for something different
    depending on the state of the bench has to say which. */
 .button-scope { margin: 4px 0 0; }
+
+/* A question an agent left for a person (067-a-question-for-a-person.sql).
+
+   «Человек отвечает нажатием, а не набором текста, потому что варианты уже перечислены.» So the
+   options are the largest thing on the card and they wrap rather than scroll: a question whose
+   third answer is off the edge is a question with two answers. */
+.asked-question { margin: 0 0 4px; font-size: var(--t-sm); line-height: 1.35; }
+.asked-who { margin: 0 0 4px; }
+/* What is already built and standing still. Amber, because it is the cost of not answering and the
+   palette keeps red for what has stopped. */
+.asked-done { margin: 0 0 6px; font-size: var(--t-xs); line-height: 1.3; color: var(--attention); }
+.asked-options { display: flex; flex-wrap: wrap; gap: 4px; }
+.asked-options button { flex: 0 1 auto; max-width: 100%; }
+.asked-words { display: grid; gap: 4px; }
+.asked-words textarea { width: 100%; resize: vertical; }
+.asked-answer { margin: 6px 0 0; font-size: var(--t-sm); line-height: 1.35; color: var(--busy); }

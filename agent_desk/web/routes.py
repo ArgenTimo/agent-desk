@@ -1506,6 +1506,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_check.html").render(card=checked),
             status_code=200 if checked else 404,
         )
+    if kind == "asked":
+        # A question an agent left for a person. The options are on the card because that is what
+        # answering one is — a press, not a paragraph (066).
+        waiting = await store.question(id)
+        return HTMLResponse(
+            env.get_template("_card_asked.html").render(one=waiting),
+            status_code=200 if waiting else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
@@ -3228,6 +3236,23 @@ async def run_a_check(request: Request) -> JSONResponse:
             "about": reading,
         }
     )
+
+
+@router.post("/cards/asked/answer", response_class=HTMLResponse)
+async def answer_a_question(request: Request) -> Response:
+    """Somebody presses one of the options an agent offered (066).
+
+    The first answer stands. A second press is not a correction: the asker may already have read
+    the first and acted on it, and a question whose answer changes underneath the work it unblocked
+    is worse than one that was answered wrongly and can be asked again.
+    """
+    form = await _form(request)
+    asked_id = form.get("id", "").strip()
+    said = form.get("answer", "").strip()
+    if not asked_id or not said:
+        return HTMLResponse("", status_code=204)
+    await store.answer_a_question(asked_id, said)
+    return HTMLResponse("", status_code=204)
 
 
 @router.post("/cards/button", response_class=JSONResponse)

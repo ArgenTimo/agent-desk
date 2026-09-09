@@ -13,10 +13,16 @@ session:
 - a question this console asked a model that came back an error;
 - a ticket or a pull request that somebody else's board says is waiting (docs/adr/0010).
 
-What is deliberately *not* here is what the placeholders promised: "waiting on a person" and
-"waiting on a run". Neither is on disk. The board renders the first as an inference, in amber, next
-to the observation it was made from, and it stays there — a red card claiming somebody is blocked
-is exactly the failure the column was drawn empty to avoid.
+- a question an agent wrote down for a person and nobody has answered (066).
+
+What is deliberately *not* here is what the placeholders promised: "waiting on a person" *inferred
+from a session's silence*, and "waiting on a run". Neither is on disk. The board renders the first
+as an inference, in amber, next to the observation it was made from, and it stays there — a red
+card claiming somebody is blocked is exactly the failure the column was drawn empty to avoid.
+
+The question card is the exception that proves the rule rather than a hole in it: nothing is
+inferred there. An agent said in writing that it is waiting, and said what for. That is the same
+kind of fact as a task this console started and watched fail.
 
 Red means stopped, and everything in this module is stopped. A rate limit is not: it is a wait, it
 comes back on its own, and it renders as a break rather than a blocker.
@@ -154,6 +160,7 @@ PLAINLY = {
     "project": "a project that switched itself off",
     "session": "a session that stopped being kept going",
     "answer": "a question that came back an error",
+    "asked": "a question waiting on you",
     "ticket": "a ticket waiting on a person",
     "pull": "a pull request waiting for review",
 }
@@ -169,6 +176,7 @@ ROUGHLY = {
     "branch": "as long as the gate takes, once the branch is fixed",
     "task": "as long as the task takes, once whatever stopped it is fixed",
     "answer": "moments — ask it again",
+    "asked": "moments — press one of the answers on the card",
 }
 
 
@@ -308,6 +316,27 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     action_says="ask it again",
                 )
             )
+
+    # A question an agent left for a person and nobody has answered (066). «Вопрос, который никто
+    # не заметил, — это агент, который стоит.» What it holds up is the asker's own sentence about
+    # what is already built and standing still, which is the only thing that can say so — nothing
+    # here can see the inside of the work that stopped.
+    for waiting in await store.questions(waiting=True):
+        found.append(
+            Blocker(
+                kind="asked",
+                ref=waiting.id,
+                what=waiting.question.splitlines()[0][:60],
+                why=(
+                    f"{waiting.who or 'an agent'} is waiting on an answer"
+                    + (f": {waiting.done}" if waiting.done else "")
+                ),
+                when=waiting.at,
+                # Dragged out of the column and answered there, because answering is pressing one
+                # of the options and the options are on the card.
+                card=f"asked:{waiting.id}",
+            )
+        )
 
     # And what somebody else's board says is stuck. A quotation with a key, never a judgement:
     # this program does not decide that a ticket is blocked, it repeats that the ticket says so

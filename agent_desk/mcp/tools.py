@@ -288,6 +288,51 @@ NOT_HERE: tuple[tuple[str, str], ...] = (
 )
 
 
+async def _ask(store: Store, given: dict[str, Any]) -> str:
+    """Leave a question for a person and go on with something else.
+
+    «Агент, упёршийся в решение, которое не его, сегодня умеет одно — остановиться и ждать.» This
+    is the call that makes waiting unnecessary: the question is written down where a person will
+    see it, and the caller takes up whatever does not depend on the answer.
+
+    Nothing is sent to anybody. Nothing is written into a running session's context either, which
+    is why this does not touch docs/adr/0002 — the row waits, a person presses, and the asker comes
+    back for it.
+    """
+    question = str(given.get("question", "")).strip()
+    if not question:
+        return "Nothing was asked: `question` was empty."
+    options = [str(one).strip() for one in given.get("options") or [] if str(one).strip()]
+    made = await store.ask_a_person(
+        question,
+        options=options,
+        done=str(given.get("done", "")),
+        who=str(given.get("who", "")),
+    )
+    where = "on the board, holding work" if options else "on the board"
+    return f"Asked as {made.id}, {where}. Nothing waits — ask answer when you need it."
+
+
+async def _answer(store: Store, given: dict[str, Any]) -> str:
+    """The answer to one question, or the words saying there is not one yet.
+
+    «Возвращает ответ или говорит, что его ещё нет — словами, а не пустотой.» An empty string back
+    is a caller that cannot tell "nobody has answered" from "somebody answered with nothing", and
+    the two mean opposite things about whether to carry on waiting.
+    """
+    one = await store.question(str(given.get("id", "")).strip())
+    if one is None:
+        return "There is no question with that id."
+    if one.waiting:
+        offered = ", ".join(one.choices)
+        return (
+            f"Nobody has answered yet. It offers: {offered}"
+            if offered
+            else "Nobody has answered yet."
+        )
+    return one.answer or "Somebody answered it with nothing at all."
+
+
 async def _what_is_here(store: Store, given: dict[str, Any]) -> str:
     """Everything this surface does, in one answer, with what each call gives back.
 
@@ -429,6 +474,41 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_answer_from,
         shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="ask",
+        says=(
+            "Leave a question for a person, with the options they can press, and carry on. "
+            "It waits on the board as something holding work."
+        ),
+        takes={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "what they can press; a question with none is answered in words",
+                },
+                "done": {"type": "string", "description": "what is already built and waiting"},
+                "who": {"type": "string", "description": "who is asking"},
+            },
+            "required": ["question"],
+        },
+        run=_ask,
+        writes=True,
+        shows="Asked as 01M22H…, on the board, holding work. Nothing waits — ask answer…",
+    ),
+    Tool(
+        name="answer",
+        says="What somebody pressed on a question, or the words saying nobody has yet.",
+        takes={
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
+        run=_answer,
+        shows="Nobody has answered yet. It offers: keep the column, drop it",
     ),
     Tool(
         name="what_is_here",
