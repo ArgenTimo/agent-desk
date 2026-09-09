@@ -675,6 +675,24 @@ button[disabled] { opacity: 0.5; cursor: default; }
    head was the only sign of it. Found by adding colours and seeing yellow come out blue. */
 /* The kept tools, under the projects. Same shape as the saved lists in the bench menu, because it
    is the same kind of list — things that outlive the chat you are in (065-a-tool-you-keep.sql). */
+/* The chain of facts behind a card. Numbered, because it is an argument in order, and each step
+   wears the column it was read out of — a step somebody does not believe is one they can go and
+   check (agent_desk/because.py). */
+.why-here {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--focus) 5%, transparent);
+}
+.why-here ol { margin: 0; padding-left: 18px; }
+.why-here li { font-size: var(--t-sm); line-height: 1.4; margin-bottom: 3px; }
+.why-from {
+  display: block;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--t-xs);
+  color: var(--fg-dim);
+}
 .tools-kept { margin-top: 10px; }
 .tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }

@@ -9,6 +9,7 @@ session at all.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -339,3 +340,37 @@ def test_the_registry_glob_is_never_widened() -> None:
         if "sessions" in literal and literal.rstrip("/").endswith("*")
     ]
     assert not offenders, f"the registry glob must end in *.json: {offenders}"
+
+
+@pytest.mark.unit
+def test_no_route_is_shadowed_by_a_wildcard_registered_before_it() -> None:
+    """A literal path that a parameterised one already matches is a route nobody can reach.
+
+    `/cards/why` was written under `/cards/{kind}`, which is registered earlier: FastAPI matched
+    it with `kind="why"` and answered 404 to every request. Every unit test called the function
+    directly, so it looked correct until a browser asked for the URL — which is exactly the class
+    of mistake a structural test is for, because it is invisible in the file where it is made.
+    """
+    from agent_desk.web import routes as web_routes
+    from agent_desk.web import sse
+
+    # The routers rather than `app.routes`: FastAPI wraps an included router in one object, so the
+    # paths are not on the application. Reading the wrong list is how this test would pass while
+    # being blind — which is what the first version of it did.
+    seen: list[tuple[str, re.Pattern[str], set[str]]] = []
+    for route in [*web_routes.router.routes, *sse.router.routes]:
+        path = getattr(route, "path", "")
+        methods = getattr(route, "methods", set()) or set()
+        if not path:
+            continue
+        if "{" not in path:
+            for earlier, pattern, ways in seen:
+                if methods & ways and pattern.fullmatch(path):
+                    raise AssertionError(
+                        f"{path} can never be reached: {earlier} is registered before it and "
+                        "matches the same URL"
+                    )
+        else:
+            shape = re.escape(path)
+            shape = re.sub(r"\\\{[^}]+\\\}", "[^/]+", shape)
+            seen.append((path, re.compile(shape), methods))

@@ -3730,7 +3730,7 @@ async function compareTheLastTwo() {
 // different things: here are two texts, what is different about them. A second panel would be a
 // second answer to "how is a difference shown", and the two would drift.
 async function showAnswersOn(holder) {
-  await showComparison(`/cards/answers?name=${encodeURIComponent(cardName(holder))}`);
+  await showComparison(`/workbench/answers?name=${encodeURIComponent(cardName(holder))}`);
 }
 
 // "Прогон N раз с показом разброса и доли прошедших проверок" — and the same control for a set of
@@ -4824,6 +4824,7 @@ function cardMenuFor(pin) {
     ...(linesOf(name).length > 1
       ? [{ what: `rub out all ${linesOf(name).length} of its lines`, act: () => rubOutLinesOf(name) }]
       : []),
+    { what: 'why is this here?', act: () => whyItIsHere(pin) },
     { what: 'a line', act: () => setView(pin, 'hint') },
     { what: 'what it is', act: () => setView(pin, 'metadata') },
     { what: 'everything', act: () => setView(pin, 'full') },
@@ -4841,6 +4842,55 @@ function cardMenuFor(pin) {
     },
     { what: 'take it off the workbench', act: () => { pin.remove(); syncTargets(); drawTies(); } },
   ];
+}
+
+// "Тыкнуть в карточку и получить не текст, а цепочку: вот эта задача упала с такой ошибкой,
+// поэтому эта идея не закрыта, поэтому этот блокер здесь."
+//
+// Every step carries the column it was read out of, and the page shows that: a chain whose steps
+// are only sentences is a paragraph with line breaks, and somebody who does not believe one still
+// has to take the console's word for it.
+async function whyItIsHere(holder) {
+  const name = cardName(holder);
+  let steps = [];
+  try {
+    const answer = await fetch(
+      `/workbench/why?name=${encodeURIComponent(name)}&thread=${encodeURIComponent(activeThread())}`
+    );
+    steps = (await answer.json()).steps || [];
+  } catch {
+    say('It could not be read.');
+    return;
+  }
+  const into = holder.querySelector('.pin-body');
+  if (!into) return;
+  let box = into.querySelector('.why-here');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'why-here';
+    into.prepend(box);
+  }
+  box.replaceChildren();
+  if (!steps.length) {
+    // "Nothing says" is an answer. An invented reason is the one this whole thing is against.
+    const none = document.createElement('p');
+    none.className = 'small dim';
+    none.textContent = 'Nothing here says why this is on the workbench.';
+    box.appendChild(none);
+  }
+  const list = document.createElement('ol');
+  for (const step of steps) {
+    const row = document.createElement('li');
+    row.textContent = step.said;
+    const source = document.createElement('span');
+    source.className = 'why-from';
+    source.textContent = step.from;
+    row.appendChild(source);
+    list.appendChild(row);
+  }
+  if (steps.length) box.appendChild(list);
+  // Opened, because a chain written into a folded card is a chain nobody sees.
+  if (holder.dataset.view === 'hint') setView(holder, 'metadata');
 }
 
 function labelOf(name) {

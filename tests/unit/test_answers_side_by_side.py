@@ -148,7 +148,7 @@ def test_it_is_the_panel_that_already_compares_two_things() -> None:
     source = _code()
 
     assert "async function showComparison(where)" in source
-    assert "showComparison(`/cards/answers?name=" in source
+    assert "showComparison(`/workbench/answers?name=" in source
     assert "showComparison(`/workbench/compare?runs=" in source
 
 

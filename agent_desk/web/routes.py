@@ -39,6 +39,7 @@ from markupsafe import Markup, escape
 
 from agent_desk import (
     allowed,
+    because,
     branching,
     checking,
     combining,
@@ -2648,7 +2649,11 @@ async def compare_two_runs(runs: str = "") -> JSONResponse:
     )
 
 
-@router.get("/cards/answers", response_class=JSONResponse)
+# Under `/workbench` for the reason `/workbench/why` is: `/cards/{kind}` is registered earlier and
+# matches `/cards/answers` with kind="answers", so this answered 404 to every request from the day
+# it was written. The control on the card did nothing and said nothing, and no test saw it because
+# every one of them called the function.
+@router.get("/workbench/answers", response_class=JSONResponse)
 async def answers_on_a_card(name: str = "") -> JSONResponse:
     """The several answers one card produced, side by side (01M1XA1V906B3KRJ84G4KHRE33).
 
@@ -2695,6 +2700,60 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
 # A button and a check are the two card kinds that hold behaviour rather than information, and both
 # die with the workbench they were made on. Somebody who writes "декомпозируй" as a button writes it
 # again in the next chat, and by the fourth chat they stop bothering. A tool is that card, kept.
+# Under `/workbench` and not `/cards`, which is where it was first written and where it was
+# unreachable: `/cards/{kind}` is registered earlier and matched `/cards/why` with kind="why",
+# answering 404 to every request. The unit tests called the function and never went through the
+# router, so it looked fine until a browser asked for it.
+@router.get("/workbench/why", response_class=JSONResponse)
+async def why_it_is_here(name: str = "", thread: str = "") -> JSONResponse:
+    """The chain of facts behind one card (agent_desk/because.py).
+
+    "На любое утверждение уметь показать, из чего оно следует." Every step here was already worked
+    out and thrown away — `came` when the card arrived, `relates_to` when the question was read,
+    `made_from` when two cards were dragged together. Nothing is computed and nothing is asked of a
+    model: this reads rows and turns them into sentences, each carrying the column it came from.
+
+    An empty chain is an answer. A card nobody can say anything about gets no steps rather than an
+    invented reason, which is the fifth rule in the one place it is easiest to break.
+    """
+    kind, _, ident = name.partition(":")
+    steps: list[because.Step] = []
+    if kind == "idea":
+        idea = await store.idea(ident)
+        if idea is not None:
+            block = await store.block(idea.block_id) if idea.block_id else None
+            parent = await store.idea(idea.parent_id) if idea.parent_id else None
+            filed = await store.filing_of(idea.id)
+            steps += because.about_an_idea(
+                summary=idea.summary or idea.text,
+                source_kind=idea.source_kind,
+                parent=(parent.summary or parent.text) if parent else "",
+                asked=block.input if block else "",
+                state=idea.state,
+                filed=f"{filed.tracker} {filed.issue_key}" if filed else "",
+            )
+    elif kind in ("answer", "block"):
+        block = await store.block(ident)
+        if block is not None:
+            if kind == "answer":
+                steps += because.about_an_answer(
+                    asked=block.input,
+                    made_from=tuple(one for one in block.made_from.split(",") if one),
+                    by_button=block.by_button,
+                )
+            else:
+                steps += because.about_a_question(
+                    kind=block.kind,
+                    relates_to=tuple(one for one in block.relates_to.split(",") if one),
+                )
+    # And how it got in front of somebody, which is true of every kind and is the line people
+    # actually want when they ask "why is this here".
+    for card in await store.bench_cards(thread):
+        if card.name == name and card.came:
+            steps += because.on_the_bench(card.came)
+    return JSONResponse({"steps": [{"said": one.said, "from": one.from_} for one in steps]})
+
+
 @router.post("/tools", response_class=JSONResponse)
 async def keep_a_tool(request: Request) -> JSONResponse:
     """Keep a card's behaviour under a name, from the card itself.
