@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 from collections.abc import AsyncIterator
 
 import pytest
 from agent_desk.answer import session
 from agent_desk.mcp import saying, server, tools
+from agent_desk.store import redact
 from agent_desk.store.repo import BenchCard, Store
 from agent_desk.web import blocks, routes
 
@@ -421,3 +423,61 @@ async def test_a_name_that_is_no_workbench_lists_the_ones_that_are(
 
 async def test_an_empty_workbench_says_so(desk: Store, no_board: None) -> None:
     assert _said(await tools.call(desk, "bench", {})) == "That workbench is empty."
+
+
+# --- what the console will hand over, and what it will not (01M21NAVDA1F781SY2C3F33JN0) --------
+async def test_a_credential_stays_shut_even_where_somebody_allowed_it(
+    desk: Store, no_board: None, tmp_path: pathlib.Path
+) -> None:
+    """The third of the five rules holds against a click, so it holds against a call.
+
+    Not a second check written for this surface: the tool reaches a file through the same gatherer
+    the console does, which reaches it through `observe.reading`, which refuses a credential
+    whatever the permission table says. A copy of the rule here is a copy that can be updated in
+    one place and not the other.
+    """
+    key = tmp_path / "session.key"
+    key.write_text("the socket token")
+    await desk.let_it_be_read(str(key))
+    await desk.keep_bench([_bench_card(f"file:{key}")])
+
+    said = _said(await tools.call(desk, "bench", {}))
+
+    assert "the socket token" not in said
+
+
+async def test_a_secret_inside_an_allowed_file_is_scrubbed_on_the_way_out(
+    desk: Store, no_board: None, tmp_path: pathlib.Path
+) -> None:
+    """Redaction runs at the boundary, so it runs for a caller that is not a browser too. They
+    asked for the file, not for the token on line two of it (docs/07-security.md)."""
+    notes = tmp_path / "notes.txt"
+    notes.write_text("deploy notes\nghp_" + "a" * 36 + "\n")
+    await desk.let_it_be_read(str(notes))
+    await desk.keep_bench([_bench_card(f"file:{notes}")])
+
+    said = _said(await tools.call(desk, "bench", {}))
+
+    assert "deploy notes" in said
+    assert "ghp_" not in said
+    assert redact.REDACTED in said
+
+
+def test_nothing_under_mcp_opens_a_file_itself() -> None:
+    """What an agent may read is the console's decision, not the caller's.
+
+    Every tool reaches what it answers with through the store or through the console's own
+    gatherers, and this is the rule that keeps that true as tools are added: a module here that
+    opened a path would be a second reader with its own idea of what may be opened, and the
+    permission table and the credential refusal both live on the other one.
+    """
+    # `open(` only where it is the builtin: `store.open()` is a database connection and the
+    # database is the thing these tools are for.
+    reads = re.compile(r"(?<![\w.])open\(|\.read_text\(|\.read_bytes\(|scandir\(|\.iterdir\(")
+    here = pathlib.Path(tools.__file__).parent
+    guilty = {
+        one.name: reads.findall(one.read_text(encoding="utf-8"))
+        for one in sorted(here.glob("*.py"))
+    }
+
+    assert {name: found for name, found in guilty.items() if found} == {}
