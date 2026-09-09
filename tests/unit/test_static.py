@@ -119,6 +119,48 @@ def test_full_size_is_the_default_and_the_way_back_to_it_is_one_press() -> None:
 
 
 @pytest.mark.unit
+def test_what_went_out_ends_up_in_front_of_you() -> None:
+    """ "Тот набор карточек, что взят сейчас в работу при отправке последнего запроса, должен
+    перемещаться в центр экрана."
+
+    The snapshot is placed clear of everything already on the bench, which means below it — and on
+    a bench of forty cards that is off the bottom of the window. Somebody pressed send and the
+    record of what they sent appeared where they could not see it, which is the same as it not
+    appearing."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    start = console.index("document.getElementById('ask').addEventListener('submit'")
+    body = console[start : console.index("\n});", start)]
+
+    assert "bringTheseIntoView(" in body
+    assert body.index("ringWhatWentWithIt();") < body.index("bringTheseIntoView("), (
+        "it looks for the ring before the ring exists"
+    )
+
+
+@pytest.mark.unit
+def test_bringing_a_group_into_view_moves_the_view_and_not_the_cards() -> None:
+    """A layout somebody arranged by hand is not the console's to rearrange because a question was
+    asked (042) — and moving the cards would take them out from under the lines drawn to them."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    start = console.index("function bringTheseIntoView(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "place(" not in body and "dataset.moved" not in body
+    assert "view.x =" in body and "view.y =" in body
+
+
+@pytest.mark.unit
+def test_it_zooms_out_to_fit_and_never_in() -> None:
+    """Sending a question is not a reason to magnify a bench, and a zoom that moved in both
+    directions on every send would be a surface nobody could hold still."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    start = console.index("function bringTheseIntoView(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "if (fits < view.scale) {" in body
+
+
+@pytest.mark.unit
 def test_the_wheel_zooms_the_bench_without_a_modifier() -> None:
     """ "Без нажатия ctrl колёсико мыши не задействовано — давай скейлинг на него повесим." It was
     doing nothing else: the canvas is `overflow: hidden`, so a plain wheel over the bench scrolled
@@ -870,3 +912,17 @@ def test_what_a_message_carries_is_cards_and_not_everything_inside_them() -> Non
 
     assert "'.pin[data-kind]" in carried, "the message carries elements that are not cards"
     assert "querySelectorAll('[data-kind]" not in carried
+
+
+@pytest.mark.unit
+def test_a_snapshot_of_sixty_cards_is_a_block_and_not_a_line() -> None:
+    """A row is what a group of four folded cards wants to be and what a group of sixty cannot be:
+    sixty in a line is seventeen thousand pixels, and the smallest zoom this console has still put
+    twelve of them on screen. Found by bringing the group into view and watching it arrive as a
+    sliver."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    start = console.index("function ringWhatWentWithIt(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "Math.ceil(Math.sqrt(went.length))" in body
+    assert "index % across" in body and "Math.floor(index / across)" in body

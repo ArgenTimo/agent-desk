@@ -4508,6 +4508,43 @@ function onTheScreen(pin) {
 
 // Put a card in the middle of the window. One copy of the arithmetic, used by the dots that reach
 // a card off the edge and by the console when it says what a question was taken to be about.
+// "Тот набор карточек, что взят сейчас в работу при отправке последнего запроса, должен
+// перемещаться в центр экрана."
+//
+// The snapshot of what went out is placed clear of everything already on the bench, which means
+// below it — and on a bench of forty cards that is off the bottom of the window. Somebody pressed
+// send and the record of what they sent appeared somewhere they could not see, which is the same
+// as it not appearing.
+//
+// The view moves, not the cards. A layout somebody arranged by hand is not the console's to
+// rearrange because a question was asked (042), and moving the cards would also move them out from
+// under the lines drawn to them.
+//
+// It zooms out to fit and never in. Sending a question is not a reason to magnify a bench, and a
+// zoom that changed in both directions on every send would be a surface nobody could hold still.
+function bringTheseIntoView(names) {
+  const spots = names
+    .map((name) => ({ at: placed.get(name), el: surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`) }))
+    .filter((one) => one.at && one.el);
+  const frame = canvas?.getBoundingClientRect();
+  if (!spots.length || !frame) return;
+  const left = Math.min(...spots.map((one) => one.at.x));
+  const top = Math.min(...spots.map((one) => one.at.y));
+  const right = Math.max(...spots.map((one) => one.at.x + (one.el.offsetWidth || CARD_WIDTH)));
+  const bottom = Math.max(...spots.map((one) => one.at.y + one.el.offsetHeight));
+  const pad = 40;
+  const fits = Math.min(
+    (frame.width - pad) / Math.max(1, right - left),
+    (frame.height - pad) / Math.max(1, bottom - top)
+  );
+  if (fits < view.scale) {
+    view.scale = ZOOMS.reduce((best, one) => (one <= fits && one > best ? one : best), ZOOMS[0]);
+  }
+  view.x = frame.width / 2 - ((left + right) / 2) * view.scale;
+  view.y = frame.height / 2 - ((top + bottom) / 2) * view.scale;
+  applyView();
+}
+
 function bringIntoView(pin) {
   const at = placed.get(cardName(pin));
   const frame = canvas?.getBoundingClientRect();
@@ -6066,6 +6103,10 @@ document.getElementById('ask').addEventListener('submit', () => {
   document.getElementById('say-history').value = attachedBlocks();
   lastSent = activeCards().map(cardName);
   ringWhatWentWithIt();
+  // And where it went. `ringWhatWentWithIt` has just placed the copies below everything, which on
+  // a bench of forty cards is off the bottom of the window.
+  const ring = surface?.querySelector('.ring.working:last-of-type');
+  bringTheseIntoView((ring?.dataset.holds || '').split(',').filter(Boolean));
 });
 
 function activeCards() {
@@ -6081,6 +6122,10 @@ function belowEverything() {
   if (!all.length) return { x: 20, y: 20 };
   return { x: 20, y: Math.max(...all.map((at) => at.y)) + 260 };
 }
+
+// How tall a folded card is, near enough to lay a block of them out before any of them has been
+// measured. Exact would mean reading the height of a card that is still being built.
+const FOLDED_HIGH = 64;
 
 let groups = 0;
 
@@ -6100,8 +6145,19 @@ function ringWhatWentWithIt() {
     copy.classList.remove('moving');
     setView(copy, 'hint');
     pins.appendChild(copy);
-    // Along a row, which is what a group of four folded cards wants to be.
-    place(copy, { x: at.x + index * (CARD_WIDTH + GAP), y: at.y }, { avoid: false });
+    // In a block, roughly square. A row is what a group of four folded cards wants to be and what
+    // a group of sixty cannot be: sixty in a line is seventeen thousand pixels, which is not a
+    // shape any zoom can show — the smallest this console has still put twelve of them on screen.
+    // Found by bringing the group into view and watching it arrive as a sliver.
+    const across = Math.min(8, Math.ceil(Math.sqrt(went.length)));
+    place(
+      copy,
+      {
+        x: at.x + (index % across) * (CARD_WIDTH + GAP),
+        y: at.y + Math.floor(index / across) * (FOLDED_HIGH + GAP),
+      },
+      { avoid: false }
+    );
     held.push(copy.dataset.name);
   });
 
