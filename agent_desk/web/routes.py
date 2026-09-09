@@ -1592,16 +1592,43 @@ async def new_instance(request: Request) -> Response:
     projects = shape(rows, await store.groups())
     named = next((project for project in projects if project.key == key), None)
     if named is None or not named.instances:
-        panel = env.get_template("_instance.html").render(
-            stage="failed", detail="that project has no checkout on this machine", key=key
+        # A project added by pointing at a repository is an address and nothing else, and this is
+        # the press that needs a directory. Cloning here rather than at the moment the address was
+        # typed is the whole of the difference: adding a project records where one lives
+        # (agent_desk/observe/attach.py), and this is a person asking for an agent in it, which is
+        # the click docs/adr/0006 requires. The checkout goes under `data_dir` — a checkout this
+        # console made is not one it reads over somebody's shoulder, so the second of the five
+        # rules is untouched (agent_desk/starting.py).
+        address = next((one.url for one in await store.links(key) if one.url), "")
+        if not address:
+            panel = env.get_template("_instance.html").render(
+                stage="failed",
+                detail="that project has no checkout on this machine and no address to clone from",
+                key=key,
+            )
+            return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+        made = await asyncio.to_thread(
+            starting.checkout,
+            settings.data_dir,
+            address,
+            token=kept.get(pasted.name_for((address,))),
         )
-        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
-
-    cwd = named.instances[0].path
+        if not made.ok:
+            panel = env.get_template("_instance.html").render(
+                stage="failed", detail=f"it could not be brought here: {made.detail}", key=key
+            )
+            return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+        cwd = made.cwd
+        # The repository's own name when the board has never seen this project: a panel that says
+        # "started in " and stops is a panel that has forgotten what it just did.
+        project_name = named.name if named is not None else made.name
+    else:
+        cwd = named.instances[0].path
+        project_name = named.name
     needed = [one.name for one in await store.env(key)]
     result = await asyncio.to_thread(
         dispatch.start,
-        dispatch.introduce(who, project=named.name, doing=doing, env_names=needed),
+        dispatch.introduce(who, project=project_name, doing=doing, env_names=needed),
         cwd=cwd,
         name=who,
     )
@@ -1615,7 +1642,7 @@ async def new_instance(request: Request) -> Response:
         agent_id=result.agent_id,
         who=who,
         key=key,
-        name=named.name,
+        name=project_name,
     )
     if _wants_fragment(request):
         return HTMLResponse(panel)

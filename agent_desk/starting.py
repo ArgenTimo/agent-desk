@@ -24,6 +24,11 @@ readable only by the same user this process already runs as.
 It does not start an agent. Queueing work and starting it are two acts here and the second is a
 click (docs/adr/0002, docs/adr/0007), and a route that cloned a repository *and* set something
 running on it would be the automatic queue those documents are built to avoid.
+
+`checkout` is the same clone asked for at the other end, by somebody pressing "make an instance"
+on a project that is only an address. That press is already the click adr/0006 requires, and the
+agent it starts is the thing it was pressed for — so the clone is part of one human act rather
+than a second one nobody asked for.
 """
 
 from __future__ import annotations
@@ -122,6 +127,27 @@ def clone(url: str, into: Path, *, token: str = "") -> Made:
         said = (done.stderr or done.stdout or "").strip().splitlines()
         return Made(False, detail=said[-1][:200] if said else f"git exited {done.returncode}")
     return Made(True, cwd=str(into), repo_key=repo_key, name=name)
+
+
+def checkout(data_dir: Path, url: str, *, token: str = "") -> Made:
+    """Where this repository is on this machine, cloning it if it is not here yet.
+
+    The difference from `clone` is what "already here" means. `clone` refuses a directory that
+    exists, which is right for the act of starting a project — doing it twice by accident should
+    not silently reuse whatever is in the way. This is asked by somebody making a *second* instance
+    of a project they already made a first one of, and there the answer to "it is already here" is
+    the path, not an error.
+
+    A directory that is there and is not a checkout is still a refusal. It is the one case where
+    the two readings differ and guessing would be writing an agent into somebody's stray folder.
+    """
+    into = where(data_dir, url)
+    repo_key, name = key_and_name(url)
+    if not into.exists():
+        return clone(url, into, token=token)
+    if not (into / ".git").exists():
+        return Made(False, cwd=str(into), detail=f"{into} is here but is not a checkout")
+    return Made(True, cwd=str(into), repo_key=repo_key, name=name, detail="already on this machine")
 
 
 def first_task(said: str, url: str, links: tuple[str, ...] = ()) -> str:

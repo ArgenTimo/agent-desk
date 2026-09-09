@@ -232,3 +232,85 @@ def _a_request() -> object:
         headers: ClassVar[dict[str, str]] = {}
 
     return Empty()
+
+
+# --- and the other end: a project that is only an address ---------------------------------------
+def _a_form(**fields: str) -> object:
+    body = "&".join(f"{name}={value}" for name, value in fields.items()).encode()
+
+    class Filled:
+        async def body(self) -> bytes:
+            return body
+
+        headers: ClassVar[dict[str, str]] = {"content-type": "application/x-www-form-urlencoded"}
+
+    return Filled()
+
+
+def test_a_second_instance_gets_the_path_rather_than_an_error(tmp_path: pathlib.Path) -> None:
+    """`clone` refuses a directory that is already there, which is right for starting a project and
+    wrong here: somebody making their second instance of a project is told "it is already here",
+    and the answer to that is the path."""
+    url = _a_repository(tmp_path / "origin.git")
+    first = starting.checkout(tmp_path / "own", url)
+
+    again = starting.checkout(tmp_path / "own", url)
+
+    assert first.ok and again.ok, again.detail
+    assert again.cwd == first.cwd
+    assert "already" in again.detail
+
+
+def test_a_directory_in_the_way_that_is_not_a_checkout_is_still_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The one case where the two readings differ, and guessing would be starting an agent in
+    somebody's stray folder."""
+    url = _a_repository(tmp_path / "origin.git")
+    starting.where(tmp_path / "own", url).mkdir(parents=True)
+
+    made = starting.checkout(tmp_path / "own", url)
+
+    assert not made.ok
+    assert "not a checkout" in made.detail
+
+
+async def test_making_an_instance_of_an_address_clones_it(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "При подключении проекта из гита необходим механизм клонирования при создании инстанса, а не
+    просто фраза «that project has no checkout on this machine»." The address is there, the console
+    knows what is missing, and the press is already the click adr/0006 asks for."""
+    url = _a_repository(tmp_path / "origin.git")
+    monkeypatch.setattr(routes, "settings", Settings(data_dir=tmp_path / "own"))
+    started: list[str] = []
+    monkeypatch.setattr(
+        routes.dispatch,
+        "start",
+        lambda said, *, cwd, name: started.append(cwd) or routes.dispatch.Started(True, "a1"),
+    )
+    await desk.set_link(repo_key="origin:acme/origin", name="repository", url=url)
+
+    await routes.new_instance(_a_form(key="origin%3Aacme%2Forigin", name="pat"))
+
+    assert started, "nothing was started, and nothing was cloned"
+    assert started[0].startswith(str(tmp_path / "own"))
+    assert pathlib.Path(started[0], ".git").is_dir()
+
+
+async def test_a_project_with_neither_a_checkout_nor_an_address_says_so(
+    desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal stays where it is the truth. What changed is that it now says which of the two
+    things is missing, because "no checkout" on a project with an address was a dead end."""
+    started: list[str] = []
+    monkeypatch.setattr(
+        routes.dispatch,
+        "start",
+        lambda said, *, cwd, name: started.append(cwd) or routes.dispatch.Started(True, "a1"),
+    )
+
+    answer = await routes.new_instance(_a_form(key="origin%3Aacme%2Fnothing", name="pat"))
+
+    assert not started
+    assert "no address to clone from" in answer.body.decode()

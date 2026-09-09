@@ -18,6 +18,12 @@ What this module does *not* do is clone anything. This program is a reader of re
 (CLAUDE.md, rule two): it will happily record where one lives, and it will not fetch it, create
 it, or write a line into it. A URL with no checkout on this machine is recorded as a project with
 a link and no instance, which is exactly what it is.
+
+Which is not the same as saying it never arrives. Pressing "make an instance" on such a project
+clones it then, into `data_dir` (`agent_desk/starting.py`) — a checkout this console made rather
+than one it reads over somebody's shoulder, so rule two holds either way. The difference is who
+asked: typing an address is somebody saying where a project lives, and pressing that button is
+somebody asking for an agent in it, which is the click docs/adr/0006 requires.
 """
 
 from __future__ import annotations
