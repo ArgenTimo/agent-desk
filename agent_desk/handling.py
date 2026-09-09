@@ -15,7 +15,7 @@ place things are put and becomes a thing you can arrange by talking.
 
 Six, and they cover every example in the letter:
 
-    mark   <numbers> <why>       point at some of the cards, and say why each
+    mark   [colour] <numbers> <why>   point at some of the cards, and say why each
     sort   <side> <numbers> <what they have in common>
     clear                        take the marks off
     fold   <numbers>             show only their line
@@ -73,6 +73,17 @@ from dataclasses import dataclass, field
 # is a worse answer to "разложи" than three.
 SIDES = ("left", "middle", "right")
 
+# What a mark may be painted. "Закрась ярко жёлтым те карточки, что тебе больше всего нравятся, и
+# т.д." — the "и т.д." is the request: a person wants to group cards by eye without moving them,
+# and one colour cannot say "these and *those*".
+#
+# Three, and the two that are missing are missing on purpose. This console's palette says red means
+# stopped or blocked and nothing else, and green means running; a model painting a card red would
+# be putting a status on it that nothing behind the card supports, which is the fifth rule wearing
+# a colour. These three carry no meaning anywhere else on the board, which is what makes them free
+# for somebody to give one.
+COLOURS = ("yellow", "blue", "violet")
+
 # The longest a reason may be. It sits on a card under its label, so it is a line rather than a
 # paragraph: a judgement nobody can read at a glance is a judgement nobody checks.
 WHY_CHARS = 120
@@ -89,6 +100,9 @@ class Marked:
 
     name: str
     why: str
+    # One of `COLOURS`, or "" for the ordinary mark. Not a free string: a colour nothing renders is
+    # a mark somebody cannot see, and a colour this board uses for a status is a lie about one.
+    colour: str = ""
 
 
 @dataclass(frozen=True)
@@ -138,6 +152,7 @@ def what_to_do(cards: Sequence[str]) -> str:
             "One action per line, in one of these six shapes:",
             "",
             "  mark 3,7 why these two and not the others",
+            "  mark yellow 1,2 why these are the yellow ones",
             "  sort left 1,4 what the ones on the left have in common",
             "  clear",
             "  fold 2,5,6",
@@ -145,6 +160,8 @@ def what_to_do(cards: Sequence[str]) -> str:
             "  take 4",
             "",
             f"`sort` puts cards on one side: {', '.join(SIDES)}. `clear` takes every mark off.",
+            f"A mark may name a colour: {', '.join(COLOURS)}. Use one when the request asks for",
+            "colours or asks for two groups; leave it out and every mark looks the same.",
             "`fold` shows only a card's line; `open` shows what it says.",
             "`take` takes cards off the workbench. Nothing is deleted and one press of undo brings",
             "them back — but take a card off only where the request asks for it.",
@@ -164,7 +181,12 @@ def what_to_do(cards: Sequence[str]) -> str:
 # The numbers are matched greedily and as a whole list. Written lazily — `[0-9][0-9,\s]*?` — the
 # first digit satisfied it and "mark 1,3 because…" was read as card 1 with the reason ",3 because…".
 _NUMBERS = r"(?:[0-9]+\s*,\s*)*[0-9]+"
-_MARK = re.compile(rf"\Amark\s+({_NUMBERS})\s*[-—:.]?\s*(.*)\Z", re.IGNORECASE | re.DOTALL)
+# The colour is optional and comes before the numbers, which is the order somebody says it in and
+# the order that keeps the old shape working unchanged: `mark 3,7 …` still parses as it always did.
+_MARK = re.compile(
+    rf"\Amark\s+(?:({'|'.join(COLOURS)})\s+)?({_NUMBERS})\s*[-—:.]?\s*(.*)\Z",
+    re.IGNORECASE | re.DOTALL,
+)
 _SORT = re.compile(
     rf"\Asort\s+({'|'.join(SIDES)})\s+({_NUMBERS})\s*[-—:.]?\s*(.*)\Z",
     re.IGNORECASE | re.DOTALL,
@@ -236,11 +258,15 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
             continue
         mark = _MARK.match(said)
         if mark is not None:
-            why = mark.group(2).strip()[:WHY_CHARS]
+            colour = (mark.group(1) or "").lower()
+            why = mark.group(3).strip()[:WHY_CHARS]
             # One reason for the group, carried onto each card in it: the answer is "these two,
             # because X", and splitting that into two cards each saying X is what the person then
             # reads on the bench.
-            marked.extend(Marked(name=name, why=why) for name in _named(mark.group(1), on_bench))
+            marked.extend(
+                Marked(name=name, why=why, colour=colour)
+                for name in _named(mark.group(2), on_bench)
+            )
     return Handling(
         marked=marked,
         sorted_=sorted_,
@@ -261,7 +287,9 @@ def as_json(asked: Handling) -> str:
     return json.dumps(
         {
             "handling": {
-                "marked": [{"name": one.name, "why": one.why} for one in asked.marked],
+                "marked": [
+                    {"name": one.name, "why": one.why, "colour": one.colour} for one in asked.marked
+                ],
                 "sorted": [
                     {"side": one.side, "names": one.names, "what": one.what}
                     for one in asked.sorted_
@@ -293,7 +321,11 @@ def read_json(said: str) -> Handling:
     if not isinstance(found, dict):
         return Handling(marked=[], sorted_=[])
     return Handling(
-        marked=[Marked(name=one["name"], why=one["why"]) for one in found.get("marked", [])],
+        marked=[
+            # A row written before colours existed has no key, and reads back as the ordinary mark.
+            Marked(name=one["name"], why=one["why"], colour=one.get("colour", ""))
+            for one in found.get("marked", [])
+        ],
         sorted_=[
             Sorted(side=one["side"], names=list(one["names"]), what=one["what"])
             for one in found.get("sorted", [])

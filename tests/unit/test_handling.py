@@ -400,3 +400,67 @@ def test_the_page_writes_the_layout_down_after_taking_cards_off() -> None:
     assert "said.taken" in body
     assert "pin.remove()" in body
     assert "rememberLayout()" in body
+
+
+# --- and a mark that carries a colour ------------------------------------------------------------
+@pytest.mark.unit
+def test_a_mark_may_name_a_colour() -> None:
+    """ "Закрась ярко жёлтым те карточки, что тебе больше всего нравятся, и т.д." The "и т.д." is
+    the request: grouping by eye without moving anything, and one colour cannot say "these and
+    *those*"."""
+    asked = handling.read("mark yellow 1,2 the ones I like", BENCH)
+
+    assert [one.colour for one in asked.marked] == ["yellow", "yellow"]
+    assert asked.marked[0].why == "the ones I like"
+
+
+@pytest.mark.unit
+def test_a_mark_without_a_colour_still_reads_as_it_always_did() -> None:
+    """The colour is optional and comes first, which is the order somebody says it in and the order
+    that leaves every earlier shape parsing unchanged."""
+    asked = handling.read("mark 3,7 why these two", BENCH)
+
+    assert [one.colour for one in asked.marked] == [""]
+    assert asked.marked[0].why == "why these two"
+
+
+@pytest.mark.unit
+def test_red_and_green_are_not_a_model_s_to_hand_out() -> None:
+    """On this board red means stopped or blocked and green means running. A card painted one of
+    those by a model wears a status nothing behind it supports — the fifth rule in a colour."""
+    assert "red" not in handling.COLOURS
+    assert "green" not in handling.COLOURS
+
+    asked = handling.read("mark red 1 it is broken", BENCH)
+
+    assert asked.empty, "a colour outside the list was accepted"
+
+
+@pytest.mark.unit
+def test_a_colour_survives_the_round_trip() -> None:
+    asked = handling.read("mark blue 1 one\nmark 2 two", BENCH)
+
+    again = handling.read_json(handling.as_json(asked))
+
+    assert [(one.name, one.colour) for one in again.marked] == [("idea:a", "blue"), ("idea:b", "")]
+
+
+@pytest.mark.unit
+def test_a_mark_written_before_colours_existed_is_the_ordinary_one() -> None:
+    older = (
+        '{"handling": {"marked": [{"name": "idea:a", "why": "x"}], "sorted": [], "clear": false}}'
+    )
+
+    (only,) = handling.read_json(older).marked
+
+    assert only.colour == ""
+
+
+@pytest.mark.unit
+def test_the_page_paints_only_the_three_and_takes_them_off_again() -> None:
+    """A colour left behind by `clear` is a mark somebody cannot get rid of."""
+    console = CONSOLE.read_text(encoding="utf-8")
+
+    assert "const MARK_COLOURS = ['yellow', 'blue', 'violet'];" in console
+    start = console.index("function clearMarks(")
+    assert "MARK_COLOURS.map" in console[start : console.index("\n}\n", start)]

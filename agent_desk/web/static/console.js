@@ -5266,8 +5266,14 @@ function syncBlocks() {
 // it to afterwards.
 const arranged = new Set();
 
-function markCard(pin, why) {
+// The three a mark may be painted, and no more. Red and green are missing on purpose: on this
+// board red means stopped or blocked and green means running, and a card painted one of those by a
+// model would be wearing a status nothing behind it supports.
+const MARK_COLOURS = ['yellow', 'blue', 'violet'];
+
+function markCard(pin, why, colour) {
   pin.classList.add('marked');
+  for (const one of MARK_COLOURS) pin.classList.toggle(`marked-${one}`, one === colour);
   let line = pin.querySelector('.pin-why');
   if (!line) {
     line = document.createElement('p');
@@ -5281,7 +5287,7 @@ function markCard(pin, why) {
 
 function clearMarks() {
   for (const pin of surface?.querySelectorAll('.pin.marked') || []) {
-    pin.classList.remove('marked');
+    pin.classList.remove('marked', ...MARK_COLOURS.map((one) => `marked-${one}`));
     pin.querySelector('.pin-why')?.remove();
   }
 }
@@ -5327,7 +5333,7 @@ function applyArrangement(said) {
   }
   for (const one of said.marked || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
-    if (pin) markCard(pin, one.why);
+    if (pin) markCard(pin, one.why, one.colour);
   }
 
   // Every height read before any card moves — placing one changes the layout the next measurement

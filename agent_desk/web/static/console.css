@@ -669,6 +669,17 @@ button[disabled] { opacity: 0.5; cursor: default; }
    So it is a band down the left edge rather than a change of the card's own colour: the two
    existing marks say what a card *is*, and this one says a question was asked about it. */
 .pin.marked { border-left: 3px solid var(--attention); }
+/* "Закрась ярко жёлтым те карточки, что тебе больше всего нравятся, и т.д." Three, so that two
+   groups can be told apart at a glance without moving anything — and none of them is red or green,
+   which on this board mean stopped and running and are not a model's to hand out. */
+.pin.marked-yellow { border-left-color: #d0a000; }
+.pin.marked-blue { border-left-color: #2f6ecf; }
+.pin.marked-violet { border-left-color: #7a4fbf; }
+@media (prefers-color-scheme: dark) {
+  .pin.marked-yellow { border-left-color: #e3c264; }
+  .pin.marked-blue { border-left-color: #7aa8f0; }
+  .pin.marked-violet { border-left-color: #b08ce0; }
+}
 .pin-why {
   margin: 0 0 4px 10px;
   font-family: var(--mono);
