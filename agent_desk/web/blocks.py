@@ -508,7 +508,7 @@ async def on_the_bench(
     names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
     said = await store.cards_said(names)
     chosen = await store.card_roles()
-    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    ideas = {f"idea:{one.id}": one for one in await store.ideas()}
     steps = {one.name: one.label for one in await store.step_cards()}
     cards: list[looking.OnBench] = []
     seen: set[str] = set()
@@ -1089,7 +1089,10 @@ async def _bring_one_over(store: Store, block: Block, rows: Sequence[BoardRow]) 
         tail = getattr(row, "tail", None)
         title = getattr(tail, "title", "") if tail else ""
         here.append((f"session:{session.session_id}", f"session · {title or session.name}"))
-    for idea in await store.ideas(limit=200):
+    # The whole pool rather than its newest two hundred: the bound that matters is the one below,
+    # which is about how much a model can be asked to look through, and applying a second one here
+    # meant "everything" quietly meaning "the recent half" (agent_desk/store/repo.py, `ideas`).
+    for idea in await store.ideas():
         if idea.state in ("new", "kept"):
             here.append((f"idea:{idea.id}", f"idea · {idea.summary}"))
     here = here[:MOST_TO_LOOK_THROUGH]
@@ -1119,7 +1122,7 @@ async def _where_a_run_goes(
     person chose. A drawing about nothing in particular has nowhere to run and `engine.begin` says
     so — except for a drawing made only of prompts, which touches nothing and needs nowhere.
     """
-    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    ideas = {f"idea:{one.id}": one for one in await store.ideas()}
     keys = [ideas[name].project_key for name in names if name in ideas and ideas[name].project_key]
     if not keys:
         return ("", "")
@@ -1955,7 +1958,7 @@ async def answer_it_instead(store: Store, block: Block, rows: Sequence[BoardRow]
     the pool is clean.
     """
     left_behind = []
-    for idea in await store.ideas(limit=400):
+    for idea in await store.ideas():
         if idea.block_id != block.id:
             continue
         await store.delete_idea(idea.id)

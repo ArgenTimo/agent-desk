@@ -76,7 +76,7 @@ async def bench_of(store: Store, names: list[str]) -> list[process.Card]:
     chosen = await store.card_roles()
     said = await store.card_fields()
     made = await store.cards_made()
-    labels = {f"idea:{one.id}": one.summary for one in await store.ideas(limit=400)}
+    labels = {f"idea:{one.id}": one.summary for one in await store.ideas()}
     # A step card's name is the one thing it holds that is its own, and a run whose steps were all
     # called "step:01M…" would be a run nobody can read.
     labels |= {one.name: one.label for one in await store.step_cards()}

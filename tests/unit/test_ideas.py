@@ -817,3 +817,31 @@ async def test_an_idea_cannot_need_itself_and_a_link_is_stored_once(desk: Store)
     # The same pair related a different way is a different statement, and both are kept.
     await desk.link_ideas(from_id=idea.id, to_id=other.id, kind="touches")
     assert len(await desk.idea_links()) == 2
+
+
+@pytest.mark.unit
+async def test_the_pool_is_read_whole_unless_somebody_asks_for_fewer(desk: Store) -> None:
+    """The default used to be two hundred, and every caller took it without meaning to. On a pool
+    of four hundred and fifty-eight that is a console showing half of somebody's thoughts, a count
+    above the list wrong by two hundred, and an idea recorded last month whose card no longer
+    appears on the bench that recorded it — none of it said anything.
+
+    A silent cap a caller inherits is the fifth rule at the bottom of a query."""
+    for at in range(205):
+        await desk.create_idea(text_=f"thought {at}", summary=f"thought {at}", source_kind="typed")
+
+    assert len(await desk.ideas()) == 205
+    assert len(await desk.ideas(limit=5)) == 5
+
+
+@pytest.mark.unit
+async def test_a_bound_belongs_to_whoever_has_a_reason_for_one(desk: Store) -> None:
+    """The pass that spends a model call per idea has one and asks for five. Reading a person's own
+    list does not."""
+    source = (
+        pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "store" / "repo.py"
+    ).read_text(encoding="utf-8")
+    start = source.index("    async def ideas(")
+    head = source[start : source.index('"""', start)]
+
+    assert "limit: int | None = None" in head

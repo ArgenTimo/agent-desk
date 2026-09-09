@@ -196,7 +196,7 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
     """
     found: list[Blocker] = []
     tasks = await store.tasks(limit=500)
-    ideas = {idea.id: idea for idea in await store.ideas(limit=500)}
+    ideas = {idea.id: idea for idea in await store.ideas()}
     claims = await store.claims()
 
     # Work that cannot start until its project is switched back on. Keyed by project, because that

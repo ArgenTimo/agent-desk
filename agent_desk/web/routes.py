@@ -2077,7 +2077,7 @@ async def workbench_ties(cards: str = "") -> HTMLResponse:
     rows, _ = await asyncio.to_thread(board)
     projects = shape(rows, await store.groups())
     stamped = [row for project in projects for one in project.instances for row in one.rows]
-    drawn = bench.lay_out(picked, stamped, await store.ideas(limit=400), await store.idea_links())
+    drawn = bench.lay_out(picked, stamped, await store.ideas(), await store.idea_links())
     ties = [{"from": tie.from_id, "to": tie.to_id, "says": tie.says} for tie in drawn.ties]
     # And the lines between cards that came from different places, named the way whoever recorded
     # them named it — a board's own "blocks", this console's own "filed as" (054). Never a line
@@ -2329,7 +2329,7 @@ async def _bench_cards(names: Sequence[str]) -> list[process.Card]:
     chosen = await store.card_roles()
     said = await store.card_fields()
     made = await store.cards_made()
-    labels = {f"idea:{one.id}": one.summary for one in await store.ideas(limit=400)}
+    labels = {f"idea:{one.id}": one.summary for one in await store.ideas()}
     labels |= {one.name: one.label for one in await store.step_cards()}
     cards = []
     for name in names:
@@ -2502,7 +2502,7 @@ async def _where_for(names: Sequence[str]) -> tuple[str, str]:
     person chose. A drawing whose cards are about nothing in particular has nowhere to run, and
     `engine.begin` says so rather than picking a project.
     """
-    ideas = {f"idea:{one.id}": one for one in await store.ideas(limit=400)}
+    ideas = {f"idea:{one.id}": one for one in await store.ideas()}
     keys = [ideas[name].project_key for name in names if name in ideas and ideas[name].project_key]
     if not keys:
         return ("", "")
@@ -3498,7 +3498,7 @@ async def workbench_diagram(cards: str = "") -> HTMLResponse:
             drawn=bench.lay_out(
                 picked,
                 stamped,
-                await store.ideas(limit=400),
+                await store.ideas(),
                 await store.idea_links(),
             ),
             width=chart.BOX_WIDTH,
@@ -3603,7 +3603,7 @@ async def idea_kin(idea_id: str) -> HTMLResponse:
 
     A tree, bounded: an idea with forty descendants is a workbench nobody can use.
     """
-    ideas = {one.id: one for one in await store.ideas(limit=500)}
+    ideas = {one.id: one for one in await store.ideas()}
     if idea_id not in ideas:
         return HTMLResponse("{}", media_type="application/json", status_code=404)
 
@@ -3647,7 +3647,7 @@ async def idea_map() -> HTMLResponse:
     what the column is for. Everything that is not discarded is on it, including what is built —
     half the shape of a pool is what is already there.
     """
-    ideas = [idea for idea in await store.ideas(limit=400) if idea.state != "dropped"]
+    ideas = [idea for idea in await store.ideas() if idea.state != "dropped"]
     return HTMLResponse(
         env.get_template("map.html").render(
             chart=chart.lay_out(ideas, await store.idea_links()),

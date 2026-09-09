@@ -1981,14 +1981,29 @@ class Store:
                     {"id": idea_id, "summary": summary, "only_if": only_if},
                 )
 
-    async def ideas(self, *, state: IdeaState | None = None, limit: int = 200) -> list[Idea]:
+    async def ideas(
+        self, *, state: IdeaState | None = None, limit: int | None = None
+    ) -> list[Idea]:
+        """The pool, newest first. Every idea unless a caller asks for fewer.
+
+        The default used to be two hundred, and every caller took it without meaning to. On a pool
+        of four hundred and fifty-eight that is a console showing half of somebody's thoughts, a
+        count above the list that is wrong by two hundred, and an idea recorded last month whose
+        card no longer appears on the bench that recorded it. None of it says anything: a silent
+        cap that a caller inherits is the fifth rule at the bottom of a query.
+
+        So the bound belongs to whoever has a reason for one — the pass that spends a model call
+        per idea has a reason, and asks for five. Reading a person's own list does not: a pool is
+        something somebody typed, one thought at a time, and SQLite is not troubled by it.
+        """
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT id, block_id, text, summary, state, source_kind, source_ref, "
                     "context, created_at, parent_id, project_key, size, shape, appraised_at, "
                     "wakes_at, wakes_when, woke_at, author FROM idea "
-                    "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC LIMIT :limit"
+                    "WHERE (:state IS NULL OR state = :state) ORDER BY id DESC "
+                    "LIMIT (CASE WHEN :limit IS NULL THEN -1 ELSE :limit END)"
                 ),
                 {"state": state, "limit": limit},
             )
