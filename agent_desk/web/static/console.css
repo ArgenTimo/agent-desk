@@ -720,6 +720,20 @@ button[disabled] { opacity: 0.5; cursor: default; }
   font-size: var(--t-xs);
   cursor: help;
 }
+/* What a step cost, as a width. "Дорогие шаги видно, не читая цифр": eight cards each saying $0.03
+   and one saying $0.19 all read as "some money" until one of them is five times wider than the
+   rest. The number stays — the bar is the glance, the number is the check. */
+.pin-cost.has-bar { position: relative; padding-bottom: 5px; }
+.pin-cost.has-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: var(--of-the-dearest, 0);
+  border-radius: 2px;
+  background: var(--attention);
+}
 .tools-kept { margin-top: 10px; }
 .tools-kept .saved-head { margin: 0 0 2px; }
 .pins > .pin.marked { border-left: 3px solid var(--attention); }

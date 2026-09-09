@@ -130,7 +130,7 @@ def test_it_is_on_the_card() -> None:
         if not line.lstrip().startswith("//")
     )
 
-    assert "writeCost(pin, step)" in source
+    assert "writeCost(pin, step, dearest)" in source
     assert "class = 'pin-cost'" in source or "line.className = 'pin-cost'" in source
 
 
@@ -146,3 +146,38 @@ def test_a_step_nobody_measured_says_nothing_rather_than_nothing_spent() -> None
 
     assert "if (!said.length) {" in body
     assert "line?.remove();" in body
+
+
+# --- and the same fact as a width -----------------------------------------------------------------
+@pytest.mark.unit
+def test_what_a_step_cost_is_a_width_as_well_as_a_number() -> None:
+    """ "Дорогие шаги видно, не читая цифр." Eight cards each saying $0.03 and one saying $0.19 all
+    read as "some money" until one of them is five times wider than the rest."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function writeCost(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "--of-the-dearest" in body
+    assert "step.usd / dearest" in body
+
+
+@pytest.mark.unit
+def test_the_bar_is_drawn_against_the_dearest_step_and_not_a_fixed_sum() -> None:
+    """A bar scaled to some number of dollars would be full on one pipeline and invisible on the
+    next, which is a picture of the scale rather than of the work."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function showRuns(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "Math.max(0, ...[...states.values()].map((step) => step.usd || 0))" in body
+
+
+@pytest.mark.unit
+def test_one_step_with_a_cost_gets_no_bar() -> None:
+    """It is the dearest and the cheapest at once, and a full-width bar under it would say
+    something about a comparison nobody has made."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function writeCost(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "dearest !== step.usd" in body

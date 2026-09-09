@@ -3785,6 +3785,11 @@ function showRuns() {
     if (one.going) going = one;
     for (const step of one.steps) states.set(step.name, step);
   }
+  // "Дорогие шаги видно, не читая цифр." The most expensive step on the bench, so every bar is
+  // drawn against the same thing and the widest one is the one to look at. Relative and not
+  // absolute: a bar scaled to some fixed number of dollars would be full on one pipeline and
+  // invisible on the next, which is a picture of the scale rather than of the work.
+  const dearest = Math.max(0, ...[...states.values()].map((step) => step.usd || 0));
   for (const pin of surface?.querySelectorAll('.pin') || []) {
     const step = states.get(cardName(pin));
     pin.dataset.step = step ? step.state : '';
@@ -3806,7 +3811,7 @@ function showRuns() {
     // never show is a request nobody asked for (01M1XA1V906B3KRJ84G4KHRE33).
     const answers = pin.querySelector('.pin-answers');
     if (answers) answers.hidden = ((step.made || '').match(/^## /gm) || []).length < 2;
-    writeCost(pin, step);
+    writeCost(pin, step, dearest);
   }
   showRunBar(going);
   showCompare();
@@ -3818,7 +3823,7 @@ function showRuns() {
 // Zero is not shown, and that is the honest reading rather than tidiness: nothing was measured.
 // An agent's work is not priced here, and a step that ran before this existed has no number — a
 // line saying "$0.00" would be this console claiming a step was free (058-what-a-step-cost.sql).
-function writeCost(pin, step) {
+function writeCost(pin, step, dearest = 0) {
   let line = pin.querySelector('.pin-cost');
   const said = [];
   if (step.usd) said.push(`$${step.usd < 0.01 ? step.usd.toFixed(4) : step.usd.toFixed(2)}`);
@@ -3833,6 +3838,17 @@ function writeCost(pin, step) {
     pin.querySelector('.pin-head')?.after(line);
   }
   line.textContent = said.join(' · ');
+  // And the same fact as a width, because "Дорогие шаги видно, не читая цифр" is the half a number
+  // cannot do: eight cards each saying $0.03 and one saying $0.19 all read as "some money" until
+  // one of them is five times wider than the rest.
+  //
+  // Only where something else was measured. A single step with a cost is the dearest and the
+  // cheapest at once, and a full-width bar under it would be saying something about a comparison
+  // that has not been made.
+  const bar = step.usd && dearest > 0 && dearest !== step.usd ? step.usd / dearest : 0;
+  line.style.setProperty('--of-the-dearest', bar ? `${Math.max(4, bar * 100).toFixed(0)}%` : '0');
+  line.classList.toggle('has-bar', Boolean(bar));
+  if (bar) line.title = `${(bar * 100).toFixed(0)}% of the dearest step in this run`;
 }
 
 const STEP_MARK = { waiting: '·', going: '◐', held: '⏸', done: '✓', failed: '✕' };
