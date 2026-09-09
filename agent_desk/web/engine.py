@@ -436,7 +436,7 @@ async def _one(store: Store, run: Run) -> int:
         return await _wait_for(store, run, card, step)
     if card.role == "decision":
         return await _decide(store, run, card, cards, lines)
-    return await _do(store, run, card, cards, lines)
+    return await _do(store, run, card, cards, lines, step)
 
 
 async def _do(
@@ -445,6 +445,7 @@ async def _do(
     card: process.Card,
     cards: list[process.Card],
     lines: list[process.Line],
+    step: RunStep | None = None,
 ) -> int:
     """An Action: a whole process of its own, asked when it is read-only, queued when it is not."""
     inside = (card.said.get("runs") or "").strip()
@@ -458,6 +459,11 @@ async def _do(
         if allowed.is_a_prompt(card.said)
         else allowed.leave_for((await store.card_leaves()).get(card.name))
     )
+    # A person does this one. Before anything is asked or started, because the whole of the
+    # permission is that nothing is: the run holds, says what is wanted, and waits for the press
+    # that already answers an Event (01M1XED1D09FG337BD6C0PFNAF).
+    if "hands" in given:
+        return await _wait_for_a_person(store, run, card, step)
     # A step whose work is a prompt sends that prompt, not a briefing written about it. The
     # briefing exists to turn a drawn process into instructions for an agent; a pipeline step is
     # the prompt somebody is testing, and wrapping it in a paragraph about the diagram would be
@@ -853,6 +859,28 @@ async def _wait_for(store: Store, run: Run, card: process.Card, step: RunStep | 
         detail=awaits or "waiting for something to happen",
     )
     log.info("engine.waiting", run=run.id, step=card.name)
+    return 1
+
+
+async def _wait_for_a_person(
+    store: Store, run: Run, card: process.Card, step: RunStep | None
+) -> int:
+    """An Action somebody said a person does. The run holds until they say it is done.
+
+    Held and not failed, exactly as an Event is: a run waiting for an approval is a run that is
+    fine, and this is the same wait with a different reason. It says what is wanted, from the
+    step's own words — a queue entry reading "waiting" and nothing else is one nobody can act on.
+    """
+    if step is not None and step.state == "held":
+        return 0
+    wanted = (card.said.get("do") or "").strip()
+    await store.set_run_step(
+        run_id=run.id,
+        name=card.name,
+        state="held",
+        detail=wanted or "waiting for somebody to do this one",
+    )
+    log.info("engine.waiting_for_a_person", run=run.id, step=card.name)
     return 1
 
 

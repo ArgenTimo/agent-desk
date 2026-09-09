@@ -73,6 +73,22 @@ ALLOWED: dict[str, Leave] = {
         held="enforced",
         how="the landing is asked to push, or asked not to",
     ),
+    # "У Action есть разрешения; добавить среди них «это делает человек» — и шаг встаёт в очередь к
+    # человеку, показывает, что от него нужно, ждёт нажатия и отдаёт результат дальше по цепочке."
+    #
+    # It belongs here rather than beside the roles because it is a fact about *this step*, not a
+    # sixth kind of thing: the same Action, done by a person. And it is enforced in the strongest
+    # sense any of these are — no agent is started, so there is nothing to obey or ignore.
+    #
+    # Without it every real process stops at the first approval. With it a drawing describes the
+    # whole of a piece of work rather than the part machines do.
+    "hands": Leave(
+        name="hands",
+        says="a person does this one",
+        means="wait for somebody to do it and say so, rather than starting anything",
+        held="enforced",
+        how="the run holds at this step and no agent is started at all",
+    ),
     "net": Leave(
         name="net",
         says="reach the network",

@@ -3749,6 +3749,9 @@ function showLeave(pin) {
   chip.hidden = given.length === 1 && given[0] === 'work';
   chip.textContent = given.map((one) => processSaid.allowed?.[one]?.says || one).join(' · ');
   chip.title = 'what this step is allowed to do — press to change';
+  // On the card itself, so the run bar can say "I have done it" rather than "it happened" without
+  // asking anything: what a step waits for is a property of the step, and the bar has the name.
+  pin.dataset.byHand = given.includes('hands') ? 'yes' : '';
 }
 
 document.addEventListener('click', (event) => {
@@ -4009,6 +4012,12 @@ function showRunBar(going) {
   happened.hidden = !held;
   happened.dataset.run = going.id;
   happened.dataset.name = held ? held.name : '';
+  // The same press answers two different waits, so it says which. An Event waits for the world;
+  // a step somebody said a person does waits for that person, and "it happened" is the wrong
+  // thing to press when what is being asked is whether *you* have done it.
+  const byHand =
+    held && surface?.querySelector(`.pin[data-name="${CSS.escape(held.name)}"]`)?.dataset.byHand;
+  happened.textContent = byHand ? 'I have done it' : 'it happened';
   for (const [what, when] of [
     ['[data-pause]', going.going],
     ['[data-carry-on]', going.canCarryOn],
