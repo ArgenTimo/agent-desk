@@ -22,6 +22,8 @@ from agent_desk.web import blocks, routes
 
 pytestmark = pytest.mark.unit
 
+HERE = pathlib.Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture
 async def desk(tmp_path: pathlib.Path) -> AsyncIterator[Store]:
@@ -606,3 +608,54 @@ async def test_a_step_that_has_said_nothing_says_what_it_is_doing(
 async def test_a_run_nobody_started_is_said_plainly(desk: Store, no_board: None) -> None:
     assert "no run" in _said(await tools.call(desk, "how_it_went", {"run": "nope"}))
     assert "no run" in _said(await tools.call(desk, "answer_from", {"run": "nope", "step": "x"}))
+
+
+# --- one call that says what is here (01M21NAVENB94GY6W6ZJ2VCTSD) ------------------------------
+async def test_one_call_lists_the_others_with_what_each_gives_back(desk: Store) -> None:
+    """ "Инструмент, о котором надо прочитать документацию, — инструмент, которым не пользуются."
+    An example answer is worth a paragraph of description: the caller sees the shape without
+    spending a call to find it out."""
+    said = _said(await tools.call(desk, "what_is_here", {}))
+
+    for one in tools.TOOLS:
+        if one.name == "what_is_here":
+            continue
+        assert one.name in said
+        assert one.shows in said
+
+
+def test_every_call_carries_a_one_line_example_of_what_it_answers() -> None:
+    """The rule rather than today's list: a tool added without one would be listed as a name and a
+    sentence, which is the documentation this call exists instead of.
+
+    One line, because the overview is read as a list and an example that wraps into three lines
+    stops being an example and starts being the paragraph it was meant to replace.
+    """
+    assert [one.name for one in tools.TOOLS if not one.shows or "\n" in one.shows] == []
+
+
+async def test_it_says_what_is_not_here_and_why(desk: Store) -> None:
+    """`docs/08-non-goals.md` records refusals with reasons. An agent that reads them first does
+    not spend three attempts on work this project decided against."""
+    said = _said(await tools.call(desk, "what_is_here", {}))
+
+    for what, why in tools.NOT_HERE:
+        assert f"{what}: {why}" in said
+
+
+def test_the_refusals_are_the_ones_the_document_records() -> None:
+    """Held level with `docs/08-non-goals.md` by its own numbered headings, so a non-goal added
+    there and not here fails rather than quietly going unsaid."""
+    doc = (HERE / "docs" / "08-non-goals.md").read_text(encoding="utf-8")
+    headings = re.findall(r"^## \d+\. (.+)$", doc, flags=re.MULTILINE)
+
+    assert headings == [what for what, _ in tools.NOT_HERE]
+
+
+async def test_what_is_here_fits_in_one_answer(desk: Store) -> None:
+    """Four hundred tokens read at the start of a piece of work. An overview that is cut in half by
+    the ceiling every other call is one nobody trusts to be complete."""
+    said = _said(await tools.call(desk, "what_is_here", {}))
+
+    assert saying.MORE.format(left=1, s="") not in said
+    assert len(said) < saying.MOST_CHARS

@@ -54,6 +54,10 @@ class Tool:
     # JSON Schema for the arguments, as MCP asks for it.
     takes: dict[str, Any]
     run: Callable[[Store, dict[str, Any]], Awaitable[str]]
+    # One line of what comes back. "Пример ответа стоит абзаца описания: агент видит форму и не
+    # пробует вызов, чтобы её узнать." Required in spirit and in `what_is_here`, which is the only
+    # place it is read.
+    shows: str = ""
     # Whether calling it changes anything. Said out loud because a caller deciding whether to ask
     # first deserves to know, and because a surface where that is obvious per tool cannot grow a
     # destructive one by accident.
@@ -267,6 +271,44 @@ async def _cards_for(store: Store, given: dict[str, Any]) -> tuple[list[str], st
     return [one.name for one in on_it if not wanted or one.name in wanted], ""
 
 
+# What this console has refused to do, and why, one line each (docs/08-non-goals.md). Written here
+# rather than read from the file because nothing under this package opens one — and a list an agent
+# reads in its first four hundred tokens is worth three attempts it does not spend on work this
+# project decided against. `tests/unit/test_mcp.py` holds it level with the document.
+NOT_HERE: tuple[tuple[str, str], ...] = (
+    ("Orchestrating sessions", "the board watches sessions it did not start; nothing steers one"),
+    ("Sending work to a busy session", "no queue picks a good moment; a human clicks send"),
+    ("`tmux send-keys` into a terminal", "an interruption wearing an automation costume"),
+    ("A backlog", "ideas have four states and no priority, assignee, estimate or ordering"),
+    ("Writing into an observed repository", "an idea becomes a draft here, carried over by review"),
+    ("Multi-user access", "one machine, one person; anything on the port can read ~/.claude"),
+    ("A desktop application", "several days of packaging to render the same HTML"),
+    ("Reading anything but Claude Code sessions", "each other one is a second integration"),
+    ("Transcript search, diff views, tool-call browsing", "the terminal is open and better at it"),
+)
+
+
+async def _what_is_here(store: Store, given: dict[str, Any]) -> str:
+    """Everything this surface does, in one answer, with what each call gives back.
+
+    «Инструмент, о котором надо прочитать документацию, — инструмент, которым не пользуются.» Not
+    documentation: an answer short enough to read at the start of a piece of work, after which a
+    caller knows which of its habits are unnecessary here.
+
+    The refusals are in it for the same reason. A caller that reads them first does not spend three
+    attempts on work this project decided against, and "no" with a reason attached is a shorter
+    read than the three failures it prevents.
+    """
+    said = [f"{len(TOOLS) - 1} calls, and what each gives back.", ""]
+    for one in TOOLS:
+        if one.name == "what_is_here":
+            continue
+        said += [f"{one.name} — {one.says}", f"  → {one.shows}"]
+    said += ["", "What this console will not do, and why (docs/08-non-goals.md):"]
+    said += [f"- {what}: {why}" for what, why in NOT_HERE]
+    return "\n".join(said)
+
+
 async def _which_bench(store: Store, name: str) -> tuple[str, str]:
     """Which chat's workbench that is: the id, or the sentence saying why there is none.
 
@@ -295,12 +337,14 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_keep,
         writes=True,
+        shows="Written down as 01M22F… — read the registry before the transcript",
     ),
     Tool(
         name="open_ideas",
         says="Every idea still open, one line each: id, state, summary.",
         takes={"type": "object", "properties": {}},
         run=_open_ideas,
+        shows="01M22F… [new] read the registry before the transcript",
     ),
     Tool(
         name="idea",
@@ -311,6 +355,7 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["id"],
         },
         run=_idea,
+        shows="01M22F… [new] read the registry before the transcript — then its whole text",
     ),
     Tool(
         name="close_idea",
@@ -322,6 +367,7 @@ TOOLS: tuple[Tool, ...] = (
         },
         run=_close,
         writes=True,
+        shows="01M22F… is done: commit b35ef0e",
     ),
     Tool(
         name="bench",
@@ -330,6 +376,7 @@ TOOLS: tuple[Tool, ...] = (
             "they say. Name a chat to get its bench, or nothing for the one outside the chats. "
             "Name cards to get only those."
         ),
+        shows="## The workbench / These 3 cards are on the workbench in front of the person…",
         takes={
             "type": "object",
             "properties": {
@@ -349,6 +396,7 @@ TOOLS: tuple[Tool, ...] = (
             "Run the drawing on a workbench and come straight back with a run id. Nothing waits: "
             "the console does the work and how_it_went reports it."
         ),
+        shows="Started as 01M22G…, over 2 cards. Nothing here waits for it — ask how_it_went.",
         takes={
             "type": "object",
             "properties": {
@@ -369,6 +417,7 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["run"],
         },
         run=_how_it_went,
+        shows="01M22G…: 2 done, 1 failed / failed: step:rewrite",
     ),
     Tool(
         name="answer_from",
@@ -379,6 +428,14 @@ TOOLS: tuple[Tool, ...] = (
             "required": ["run", "step"],
         },
         run=_answer_from,
+        shows="…what that one step said, and nothing else…",
+    ),
+    Tool(
+        name="what_is_here",
+        says="Everything this console can be asked, and what it has decided not to do.",
+        takes={"type": "object", "properties": {}},
+        run=_what_is_here,
+        shows="8 calls, and what each gives back. …",
     ),
 )
 
