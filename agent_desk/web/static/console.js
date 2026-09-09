@@ -5295,6 +5295,20 @@ function sideAt(side, index, tall) {
 
 function applyArrangement(said) {
   if (said.clear) clearMarks();
+
+  // "Сверни разверни все (либо выделенные) карточки." On a bench of thirty, folding everything
+  // except the four about the migration is a sentence and not thirty clicks. `setView` is the same
+  // function the fold button on a card calls, so a card folded by a request and one folded by hand
+  // are in the same state and neither knows which it was.
+  for (const [names, view] of [
+    [said.folded || [], 'hint'],
+    [said.opened || [], 'metadata'],
+  ]) {
+    for (const name of names) {
+      const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]`);
+      if (pin) setView(pin, view);
+    }
+  }
   for (const one of said.marked || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
     if (pin) markCard(pin, one.why);
@@ -5303,7 +5317,11 @@ function applyArrangement(said) {
   // Every height read before any card moves — placing one changes the layout the next measurement
   // would be answered from.
   const columns = (said.sorted || []).filter((one) => one.names.length);
-  if (!columns.length) return;
+  if (!columns.length) {
+    // Folding changes every card's height, so the ones below have to be let down again.
+    if ((said.folded || []).length || (said.opened || []).length) settleOverlaps();
+    return;
+  }
   const tall = new Map();
   for (const one of columns) {
     for (const name of one.names) {

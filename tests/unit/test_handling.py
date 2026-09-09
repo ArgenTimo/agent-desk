@@ -210,3 +210,117 @@ def test_the_mark_is_not_one_of_the_two_a_card_already_has() -> None:
 
     assert ".pin.marked" in css and ".pin-why" in css
     assert ".pin.spent" in css, "the two it has to differ from are gone, so this test proves less"
+
+
+# --- folding and opening, which is where the letter starts ---------------------------------------
+@pytest.mark.unit
+def test_fold_and_open_name_cards_the_way_everything_else_does() -> None:
+    """ "Сверни разверни все (либо выделенные) карточки." On a bench of thirty, folding everything
+    except the four about the migration is a sentence and not thirty clicks."""
+    asked = handling.read("fold 1,3\nopen 2", ["idea:a", "idea:b", "idea:c"])
+
+    assert asked.folded == ["idea:a", "idea:c"]
+    assert asked.opened == ["idea:b"]
+
+
+@pytest.mark.unit
+def test_folding_is_something_this_can_ask_for() -> None:
+    """The list is fixed, so a shape that is not in the instruction is a shape the model will not
+    produce — and one that is parsed but not in the instruction is a shape nobody tested."""
+    said = handling.what_to_do(["one", "two"])
+
+    assert "fold 2,5,6" in said
+    assert "open 1" in said
+    assert "five shapes" in said
+
+
+@pytest.mark.unit
+def test_a_fold_with_no_numbers_is_not_an_action() -> None:
+    """ "Fold" on its own is a sentence about folding. Reading it as "fold everything" is the
+    guessing this module exists to refuse."""
+    assert handling.read("fold", ["idea:a"]).empty
+    assert handling.read("fold them all", ["idea:a"]).empty
+
+
+@pytest.mark.unit
+def test_folding_survives_the_round_trip() -> None:
+    asked = handling.read("fold 1\nopen 2", ["idea:a", "idea:b"])
+
+    again = handling.read_json(handling.as_json(asked))
+
+    assert (again.folded, again.opened) == (["idea:a"], ["idea:b"])
+
+
+@pytest.mark.unit
+def test_a_block_written_before_folding_existed_asks_for_nothing() -> None:
+    older = '{"handling": {"marked": [], "sorted": [], "clear": false}}'
+
+    again = handling.read_json(older)
+
+    assert again.folded == [] and again.opened == []
+
+
+@pytest.mark.unit
+def test_what_was_folded_is_counted_rather_than_named() -> None:
+    """Folding is the one action whose result is plainly visible on the bench, so what a reader of
+    the conversation wants is how much of it happened."""
+    asked = handling.read("fold 1,2", ["idea:a", "idea:b"])
+
+    assert handling.as_words(asked) == "folded 2 cards"
+
+
+@pytest.mark.unit
+def test_a_fold_is_not_an_empty_handling() -> None:
+    """Otherwise the console renders "it could not read that" over a request it read perfectly."""
+    assert not handling.read("fold 1", ["idea:a"]).empty
+
+
+@pytest.mark.unit
+def test_the_page_applies_a_fold_with_the_same_function_a_person_uses() -> None:
+    """A card folded by a request and one folded by hand are in the same state, and neither knows
+    which it was."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function applyArrangement(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "said.folded" in body and "said.opened" in body
+    assert "setView(pin, view)" in body
+    assert "settleOverlaps()" in body, "folding changes heights and nothing lets the rest down"
+
+
+# --- and what the console does with an answer it could not read -----------------------------------
+@pytest.mark.unit
+async def test_an_answer_that_names_no_cards_changes_nothing_and_says_so(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model asked for actions will sometimes answer with a paragraph about the actions. The
+    block has to say that plainly — an empty rearrangement rendered as a success is a console
+    claiming it did something.
+
+    Written deterministically because it was being covered by accident: the branch was reached
+    only when a background pass happened to run during another test, which moved the suite's
+    coverage across its own floor between runs of the same code.
+    """
+    from agent_desk.store.repo import Store
+    from agent_desk.web import blocks
+
+    async def a_paragraph(prompt: str):  # type: ignore[no-untyped-def]
+        yield "I would put the interesting ones on the left."
+
+    monkeypatch.setattr(blocks.session, "stream_answer", a_paragraph)
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    try:
+        thread = await store.create_thread("a chat")
+        block = await store.create_block(
+            thread_id=thread.id, kind="handling", input="sort them", thread_set_by="human"
+        )
+
+        await blocks._rearrange(store, block, [], surface=["1. one"], on_bench=["idea:a"])
+
+        again = await store.block(block.id)
+        assert again is not None
+        assert "did not name" in (again.answer or "")
+        assert again.state == "answered"
+    finally:
+        await store.close()
