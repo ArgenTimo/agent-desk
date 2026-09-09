@@ -40,6 +40,7 @@ from markupsafe import Markup, escape
 from agent_desk import (
     allowed,
     because,
+    boxed,
     branching,
     carrying,
     checking,
@@ -3295,11 +3296,28 @@ async def keep_template(request: Request) -> JSONResponse:
 
 @router.get("/workbench/templates", response_class=JSONResponse)
 async def list_templates() -> JSONResponse:
+    # Saved first and boxed after, so the ones somebody made are the ones at the top of their own
+    # list. `boxed` is what stops a drawing that came with the console from offering a `×` that
+    # would delete it for ever (agent_desk/boxed.py).
     return JSONResponse(
         {
             "templates": [
-                {"name": one.name, "steps": len(one.steps), "lines": len(one.lines)}
+                {
+                    "name": one.name,
+                    "steps": len(one.steps),
+                    "lines": len(one.lines),
+                    "boxed": False,
+                }
                 for one in await store.templates()
+            ]
+            + [
+                {
+                    "name": one.name,
+                    "steps": len(one.steps),
+                    "lines": len(one.lines),
+                    "boxed": True,
+                }
+                for one in boxed.BOXED
             ]
         }
     )
@@ -3315,7 +3333,11 @@ async def use_template(request: Request) -> JSONResponse:
     """
     form = await _form(request)
     name = form.get("name", "").strip()
-    made = next((one for one in await store.templates() if one.name == name), None)
+    # Saved first: somebody who saved a drawing under the name of a boxed one meant theirs, and a
+    # console that reached past it to the built-in would be overruling a choice they made.
+    made = next((one for one in await store.templates() if one.name == name), None) or boxed.named(
+        name
+    )
     if made is None:
         return JSONResponse({"made": False, "why": "there is no template by that name"}, 404)
     fresh: dict[int, str] = {}

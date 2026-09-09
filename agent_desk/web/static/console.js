@@ -4405,6 +4405,15 @@ async function showTemplates() {
       hideMenu();
       useTemplate(one.name);
     });
+    if (one.boxed) {
+      // A drawing that came with the console. There is nothing to forget: it is a constant, and a
+      // `×` beside it would offer to delete something that would come back on the next reload —
+      // or, worse, look like it had not.
+      open.textContent = `${one.name} · ${one.steps} steps · in the box`;
+      row.append(open);
+      into.appendChild(row);
+      continue;
+    }
     const drop = document.createElement('button');
     drop.type = 'button';
     drop.className = 'saved-drop';
