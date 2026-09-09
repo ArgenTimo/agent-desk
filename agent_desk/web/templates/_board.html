@@ -182,8 +182,16 @@
                its own: closing a session throws away whatever it has not committed, and that is
                not a call a background loop gets to make (docs/adr/0002). #}
             <p class="small attention-line">🐤 It has stopped signing as <strong>{{ canary }}</strong>.
-              Its context has rolled past the brief — let it finish what it is on, then start a
-              fresh one from the project's <span class="hint-key">⋯</span> menu.</p>
+              Its context has rolled past the brief — let it finish what it is on, and start a
+              fresh one to carry the work forward.</p>
+            {# "Потерянная канарейка должна вести к действию, а не только к флажку." The action is
+               the half that costs nothing irreversible: a *new* session, with the brief, in the
+               same project. Nothing is closed and nothing is thrown away — the old one keeps
+               whatever it has not committed, and ending it stays a thing a person does in the
+               terminal that has it (docs/adr/0002). #}
+            <a class="chip" href="/projects/instance?key={{ project.key | urlencode }}"
+               hx-get="/projects/instance?key={{ project.key | urlencode }}" hx-target="#message"
+               title="start a fresh session in this project — this one is left exactly as it is">start a fresh one</a>
             {% endif %}
 
             {# The switch that will not let this session sit idle (docs/adr/0009). It is the

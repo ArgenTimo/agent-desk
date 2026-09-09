@@ -233,3 +233,35 @@ def test_a_session_that_stopped_signing_has_lost_the_brief_with_it() -> None:
     # Nobody else's session was told to sign anything, so an unsigned reply there means nothing.
     assert not lost_the_canary("I have finished the parser.", "")
     assert not lost_the_canary("   ", "biba")
+
+
+@pytest.mark.unit
+def test_a_lost_canary_leads_to_an_action_and_not_only_a_flag() -> None:
+    """ "Потерянная канарейка должна вести к действию, а не только к флажку."
+
+    The action is the half that costs nothing irreversible: a *new* session, with the brief, in the
+    same project. Nothing is closed and nothing is thrown away — the old one keeps whatever it has
+    not committed, and ending it stays a thing a person does in the terminal that has it
+    (docs/adr/0002)."""
+    markup = (
+        Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "templates" / "_board.html"
+    ).read_text(encoding="utf-8")
+    at = markup.index("It has stopped signing as")
+    around = markup[at : at + 1200]
+
+    assert "start a fresh one" in around
+    assert "/projects/instance?key=" in around
+
+
+@pytest.mark.unit
+def test_nothing_about_a_lost_canary_closes_anything() -> None:
+    """Closing a session throws away whatever it has not committed, and that is not a call this
+    console makes — by a loop or by a button somebody might press by mistake."""
+    markup = (
+        Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "templates" / "_board.html"
+    ).read_text(encoding="utf-8")
+    at = markup.index("It has stopped signing as")
+    around = markup[at : at + 1200]
+
+    for ending in ("/stop", "/close", "/end", "data-stop"):
+        assert ending not in around, f"the canary line offers {ending!r}"
