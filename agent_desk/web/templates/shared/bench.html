@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{# «Человек открывает ссылку и видит, как схема идёт.» Live without a line of JavaScript: the
+   person opening this is on an unknown device and is not here to debug a console, and a page that
+   reloads itself is what "live" costs when there is no script. #}
+<meta http-equiv="refresh" content="5">
+<title>the workbench · agent-desk</title>
+<style>
+  :root { --bg: #f7f7f5; --fg: #1c1b19; --dim: #6b6862; --line: #e0ddd6; --card: #fff;
+          --going: #b06500; --done: #4a7a3f; --failed: #a03028; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171614; --fg: #e8e5df; --dim: #8d8880; --line: #2c2a27; --card: #1e1d1a;
+            --going: #e0a250; --done: #86c06f; --failed: #e07a70; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; padding: 16px; max-width: 46rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 2px; }
+  h2 { font-size: 0.95rem; margin: 22px 0 6px; }
+  .who { color: var(--dim); font-size: 0.85rem; }
+  a { color: inherit; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
+    border-radius: 3px; padding: 8px 10px; margin-bottom: 8px;
+  }
+  .card.going { border-left-color: var(--going); }
+  .card.done { border-left-color: var(--done); }
+  .card.failed { border-left-color: var(--failed); }
+  .card.held { border-left-color: var(--going); opacity: 0.8; }
+  .state { float: right; color: var(--dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .label { overflow-wrap: anywhere; }
+  .kind { color: var(--dim); font-size: 0.8rem; }
+  .lines { margin: 6px 0 0; padding-left: 18px; color: var(--dim); font-size: 0.85rem; }
+  .empty { color: var(--dim); }
+  footer { margin-top: 28px; color: var(--dim); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>the workbench</h1>
+  <p class="who">shared with {{ viewer }} · <a href="/shared/{{ token }}">the ideas</a></p>
+</header>
+
+{% if not benches %}
+<p class="empty">Nothing is on a workbench right now.</p>
+{% endif %}
+{% for bench in benches %}
+<h2>{{ bench.name }}</h2>
+{% for card in bench.cards %}
+{# The label and what happened to it. Never what the card holds: a card's body is a transcript, a
+   file or an answer, and this is the surface docs/07-security.md says a second person can open. #}
+<article class="card {{ card.state }}">
+  {% if card.state %}<span class="state">{{ card.state }}</span>{% endif %}
+  <p class="label">{{ card.label }}</p>
+  <p class="kind">{{ card.kind }}</p>
+</article>
+{% endfor %}
+{% if bench.lines %}
+<ul class="lines">
+  {% for line in bench.lines %}
+  <li>{{ line }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endfor %}
+
+<footer>Read-only, and it refreshes itself. This page shows what is on a workbench and how far a
+run has got — never what a card holds, and nothing about the sessions, repositories or branches
+behind it.</footer>
+</body>
+</html>

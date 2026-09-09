@@ -109,7 +109,11 @@ def test_it_owns_no_store_and_opens_none() -> None:
 def test_its_templates_cannot_include_an_owner_fragment() -> None:
     """A separate loader rooted in a separate directory: unreachable, not merely unused."""
     assert shared.TEMPLATES.name == "shared"
-    assert {p.name for p in shared.TEMPLATES.glob("*.html")} == {"page.html", "gone.html"}
+    assert {p.name for p in shared.TEMPLATES.glob("*.html")} == {
+        "page.html",
+        "bench.html",
+        "gone.html",
+    }
 
 
 # --- the link is the identity ------------------------------------------------------------------
@@ -542,3 +546,145 @@ async def test_the_token_comes_from_the_system_generator(monkeypatch: pytest.Mon
 
     assert asked == [32], "256 bits, from `secrets`, and from nowhere else"
     assert len(token) >= 43
+
+
+# --- the workbench, live, for somebody who will never open the console ----------------------------
+async def _a_card(desk: Store, name: str, label: str, thread_id: str = "") -> None:
+    from agent_desk.store.repo import BenchCard
+
+    kind, _, card_id = name.partition(":")
+    on_it = await desk.bench_cards(thread_id)
+    await desk.keep_bench(
+        [
+            *on_it,
+            BenchCard(
+                name=name,
+                kind=kind,
+                card_id=card_id,
+                label=label,
+                x=10,
+                y=20 + 90 * len(on_it),
+                shown="hint",
+                spent=False,
+                ord=len(on_it),
+            ),
+        ],
+        thread_id=thread_id,
+    )
+
+
+@pytest.mark.unit
+async def test_a_viewer_sees_what_is_on_the_workbench(desk: Store) -> None:
+    """«Человек открывает ссылку и видит, как схема идёт.»"""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "read the failing logs", thread.id)
+
+    status, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert status == 200
+    assert "the migration" in body
+    assert "read the failing logs" in body
+
+
+@pytest.mark.unit
+async def test_it_says_what_is_done_what_is_going_and_where_it_stopped(desk: Store) -> None:
+    """ "Что сделано, что идёт, где встало" is the whole of what a watcher is watching."""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "read the logs", thread.id)
+    await _a_card(desk, "step:two", "open a branch", thread.id)
+    run = await desk.start_run(cards=["step:one", "step:two"], repo_key="", cwd="")
+    await desk.set_run_step(run_id=run.id, name="step:one", state="done", made="the answer")
+    await desk.set_run_step(run_id=run.id, name="step:two", state="failed", detail="it broke")
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert "done" in body
+    assert "failed" in body
+
+
+@pytest.mark.unit
+async def test_a_card_s_body_never_reaches_it(desk: Store) -> None:
+    """A card's body is a transcript, a file or an answer, and this is exactly the surface
+    docs/07-security.md is about. The label and what happened to it, and nothing else."""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "read the logs", thread.id)
+    run = await desk.start_run(cards=["step:one"], repo_key="", cwd="")
+    await desk.set_run_step(
+        run_id=run.id, name="step:one", state="done", made="the whole answer, in full"
+    )
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert "the whole answer, in full" not in body
+
+
+@pytest.mark.unit
+async def test_what_it_shows_is_scrubbed(desk: Store) -> None:
+    """The rule reads "any surface a second person can open redacts before it renders", and a card
+    label is a person's own words like any other."""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "the key is ghp_" + "a" * 36, thread.id)
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert "ghp_" not in body
+
+
+@pytest.mark.unit
+async def test_a_line_is_said_in_the_names_on_the_bench(desk: Store) -> None:
+    """A line between two cards nobody can name explains nothing."""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "read the logs", thread.id)
+    await _a_card(desk, "step:two", "open a branch", thread.id)
+    await desk.tie_cards(from_name="step:one", to_name="step:two", kind="then", says="")
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert "read the logs then open a branch" in body
+
+
+@pytest.mark.unit
+async def test_a_wrong_link_gets_the_same_answer_here_as_anywhere(desk: Store) -> None:
+    status, _, _ = await _request("GET", "/shared/nope/bench")
+
+    assert status == 404
+
+
+@pytest.mark.unit
+async def test_it_refreshes_itself_rather_than_running_a_script(desk: Store) -> None:
+    """ "Живьём" with no JavaScript: the person opening this is on an unknown device and is not here
+    to debug a console."""
+    _, token = await desk.create_viewer("a manager")
+    thread = await desk.create_thread("the migration")
+    await _a_card(desk, "step:one", "read the logs", thread.id)
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert 'http-equiv="refresh"' in body
+    assert "<script" not in body
+
+
+@pytest.mark.unit
+async def test_an_empty_workbench_says_so_rather_than_rendering_nothing(desk: Store) -> None:
+    _, token = await desk.create_viewer("a manager")
+
+    _, body, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert "Nothing is on a workbench" in body
+
+
+@pytest.mark.unit
+async def test_the_two_pages_reach_each_other(desk: Store) -> None:
+    """A watcher given one link should not have to be given the other."""
+    _, token = await desk.create_viewer("a manager")
+
+    _, ideas, _ = await _request("GET", f"/shared/{token}")
+    _, bench, _ = await _request("GET", f"/shared/{token}/bench")
+
+    assert f"/shared/{token}/bench" in ideas
+    assert f"/shared/{token}" in bench

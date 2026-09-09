@@ -41,7 +41,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from agent_desk.ideas import inbox
 from agent_desk.store.redact import scrub
-from agent_desk.store.repo import Store, Viewer
+from agent_desk.store.repo import BenchCard, Store, Viewer
 from agent_desk.web.origin import guard
 
 TEMPLATES = Path(__file__).parent / "templates" / "shared"
@@ -158,6 +158,82 @@ async def ideas_page(token: str, request: Request) -> Response:
             ],
         )
     )
+
+
+@app.get("/shared/{token}/bench", response_class=HTMLResponse)
+async def bench_page(token: str, request: Request) -> Response:
+    """What is on the workbenches, and how far a run has got (01M1XED1DHYENFPG5DQ80T0QHT).
+
+    «Человек открывает ссылку и видит, как схема идёт — что сделано, что идёт, где встало. Для
+    менеджера из письма это ровно то, ради чего он всё это придумал: собрать схему и показать её
+    тому, кто никогда не откроет консоль.»
+
+    The same four decisions the ideas list is held down by. It is this application, on this bind,
+    reaching neither `observe` nor `peer`. It shows a card's *label* and what happened to it and
+    never what the card holds — a body is a transcript, a file or an answer, and this is exactly
+    the surface docs/07-security.md is about. Everything is scrubbed on the way out. And there is no
+    JavaScript: "live" costs a meta refresh, which is what a page reloads itself with when the
+    person opening it is on an unknown device.
+    """
+    found = await _viewer(request, token)
+    if found is None:
+        return HTMLResponse(env.get_template("gone.html").render(), status_code=404)
+
+    store, viewer = found
+    benches = await _benches(store)
+    log.info("shared bench opened", viewer=viewer.name, benches=len(benches))
+    return HTMLResponse(
+        env.get_template("bench.html").render(viewer=viewer.name, token=token, benches=benches)
+    )
+
+
+async def _benches(store: Store) -> list[dict[str, object]]:
+    """Every chat that has something on its workbench, with how far its run has got.
+
+    A chat rather than one chosen bench: which one a watcher wants is not something this can know,
+    and picking would show them the wrong one exactly when something is running on the other.
+    """
+    steps: dict[str, str] = {}
+    for run in await store.runs():
+        for step in await store.run_steps(run.id):
+            # Newest run last is what `runs()` does not give, so the first answer for a card wins:
+            # the most recent run of it is the one somebody is watching.
+            steps.setdefault(step.name, step.state)
+
+    found: list[dict[str, object]] = []
+    for thread in await store.open_threads():
+        cards = await store.bench_cards(thread.id)
+        if not cards:
+            continue
+        here = {one.name for one in cards}
+        found.append(
+            {
+                "name": scrub(thread.subject),
+                "cards": [
+                    {
+                        "label": scrub(one.label or one.name),
+                        "kind": one.kind,
+                        "state": steps.get(one.name, ""),
+                    }
+                    for one in cards
+                ],
+                "lines": [
+                    scrub(
+                        f"{_label(cards, one.from_name)} {one.says or one.kind} "
+                        f"{_label(cards, one.to_name)}"
+                    )
+                    for one in await store.card_ties()
+                    if one.from_name in here and one.to_name in here
+                ],
+            }
+        )
+    return found
+
+
+def _label(cards: list[BenchCard], name: str) -> str:
+    """What a card is called on this bench. A line between two cards nobody can name explains
+    nothing, so it says the label rather than the `kind:id` the store keys by."""
+    return next((one.label or one.name for one in cards if one.name == name), name)
 
 
 @app.post("/shared/{token}/idea")
