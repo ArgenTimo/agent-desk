@@ -3153,3 +3153,17 @@ button.go:hover, button.yes:hover {
 .looks-like button { justify-self: start; }
 /* The retrospective duplicate check, above the list it is about (069). */
 .look-for-kin { margin: 0 0 8px; }
+
+/* The labelling screen (072-a-prompt-that-is-measured.sql).
+
+   «Экран разметки: строка, что решила консоль, шесть кнопок.» Answering is pressing, so the buttons
+   are the largest thing in a row and they wrap rather than scroll: a kind off the edge is a kind
+   nobody presses. */
+.labelling { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.labelling li { border-left: 2px solid var(--line-strong); padding-left: 8px; }
+.labelling-said { margin: 0; font-size: var(--t-md); line-height: 1.4; }
+.labelling-kinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 0; }
+/* What was measured last time, and the time before. A score with no history is one number, and one
+   number cannot answer "did my edit help". */
+.score { margin: 8px 0 0; white-space: pre-wrap; font-size: var(--t-sm); line-height: 1.4; }
+.measure { margin: 12px 0 0; }

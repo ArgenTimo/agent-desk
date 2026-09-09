@@ -51,6 +51,7 @@ from agent_desk import (
     describing,
     diagrams,
     dispatch,
+    grading,
     handling,
     land,
     pasted,
@@ -87,6 +88,7 @@ from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import (
     DRAFT_KINDS,
     BenchCard,
+    BlockKind,
     Group,
     Idea,
     IdeaState,
@@ -3326,6 +3328,96 @@ async def the_page_as_text() -> PlainTextResponse:
 def _console_script() -> str:
     """The console's own source, read once. It changes only when this process is restarted."""
     return (Path(__file__).parent / "static" / "console.js").read_text(encoding="utf-8")
+
+
+# What a person may say a line really was (072). The expensive decisions plus the ordinary two, and
+# `unsure` is deliberately not among them: that is the console saying it could not tell, which is
+# never what a line actually was.
+LABELS: tuple[BlockKind, ...] = (
+    "question",
+    "idea",
+    "instruction",
+    "master",
+    "handling",
+    "drawing",
+)
+
+# How many lines the labelling screen shows. Enough to build a set in a couple of minutes, and a
+# screen of five hundred is one nobody finishes.
+LABELLING_SHOWN = 60
+
+
+@router.get("/labelling", response_class=HTMLResponse)
+async def labelling() -> HTMLResponse:
+    """What the console decided each line was, and what a person says it really was.
+
+    «Экран разметки: строка, что решила консоль, шесть кнопок — "на самом деле это".» The set the
+    measurement runs against is built here, one press a line.
+    """
+    blocks = [one for one in await store.blocks(limit=LABELLING_SHOWN) if one.input.strip()]
+    return HTMLResponse(
+        env.get_template("labelling.html").render(
+            blocks=blocks,
+            kinds=LABELS,
+            # A block a person already corrected is a person having already said, so it arrives
+            # answered rather than asking them to do the same work twice.
+            labels={**grading.already_said(blocks), **await store.labels()},
+            score=await _last_scores(),
+        )
+    )
+
+
+@router.post("/labelling", response_class=HTMLResponse)
+async def say_what_it_was(request: Request) -> Response:
+    """Somebody presses one of the kinds."""
+    form = await _form(request)
+    block_id = form.get("id", "").strip()
+    kind = form.get("kind", "").strip()
+    block = await store.block(block_id)
+    if block is None or kind not in LABELS:
+        return HTMLResponse("", status_code=404)
+    await store.label_block(block_id, kind)
+    return HTMLResponse(
+        env.get_template("_labelled_row.html").render(block=block, said=kind, kinds=LABELS)
+    )
+
+
+@router.post("/labelling/run", response_class=HTMLResponse)
+async def measure_the_classifier() -> HTMLResponse:
+    """Run the classifier over the labelled set and record the score against this commit.
+
+    «Измерение промпта стоит десятков вызовов модели, и ни один из них не должен пройти через мой
+    контекст.» Fifty rows is fifty calls, and this is the one place they can be made without
+    anybody watching them go by.
+    """
+    blocks = [one for one in await store.blocks(limit=400) if one.input.strip()]
+    rows = grading.from_history(blocks, {**grading.already_said(blocks), **await store.labels()})
+    score = await grading.measure(rows)
+    if score.of:
+        await store.record_grade(
+            what="kind",
+            right_=score.right,
+            of=score.of,
+            commit_sha=grading.at_the_commit(Path(__file__).resolve().parents[2]),
+        )
+    return HTMLResponse(
+        escape(grading.as_text(score, await _grades_before(skip=1))), status_code=200
+    )
+
+
+async def _last_scores() -> str:
+    """What the last measurements said, for the top of the screen."""
+    before = await _grades_before(skip=0)
+    if not before:
+        return "Nothing has been measured yet."
+    return "Last measured: " + "; ".join(f"{was} at {sha[:7]}" for sha, was in before)
+
+
+async def _grades_before(*, skip: int) -> list[tuple[str, str]]:
+    """The scores already recorded, newest first. `skip` drops the one just written."""
+    return [
+        (one.commit_sha or "no commit", one.says) for one in (await store.grades("kind"))[skip:]
+    ]
 
 
 @router.get("/scripts", response_class=PlainTextResponse)

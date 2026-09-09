@@ -388,6 +388,37 @@ class Scratch(BaseModel):
     made_at: int = 0
 
 
+class Labelled(BaseModel):
+    """What a person said one line really was, apart from what the classifier decided (072)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    block_id: str
+    kind: BlockKind
+    at: int = 0
+
+
+class Graded(BaseModel):
+    """One measurement of one prompt, against the commit it was at (072).
+
+    `right_` and `of` rather than a share: 41 of 50 and 82% are the same number until the set
+    changes size, and then only one of them is still comparable to last week's.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    at: int
+    commit_sha: str = ""
+    what: str = "kind"
+    right_: int = 0
+    of: int = 0
+
+    @property
+    def says(self) -> str:
+        return f"{self.right_} of {self.of}"
+
+
 class CheckCard(BaseModel):
     """A card hung on an output that says one of two things about it (062)."""
 
@@ -2927,6 +2958,60 @@ class Store:
                 {"key": project_key.strip(), "name": name.strip()},
             )
             return bool(done.rowcount)
+
+    # --- a prompt that is measured (072-a-prompt-that-is-measured.sql) --------------------------
+    async def label_block(self, block_id: str, kind: BlockKind) -> None:
+        """A person saying what this line really was. Replaces their own earlier answer.
+
+        Kept apart from `block.kind`, which is what the classifier decided: a measurement that read
+        the classifier's answer as the truth would measure nothing at all.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT OR REPLACE INTO labelled (block_id, kind, at) "
+                    "VALUES (:block_id, :kind, :at)"
+                ),
+                {"block_id": block_id, "kind": kind, "at": _now_ms()},
+            )
+
+    async def labels(self) -> dict[str, BlockKind]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(text("SELECT block_id, kind FROM labelled"))
+            return {row[0]: row[1] for row in rows}
+
+    async def record_grade(
+        self, *, what: str, right_: int, of: int, commit_sha: str = ""
+    ) -> Graded:
+        made = Graded(
+            id=_new_id(),
+            at=_now_ms(),
+            commit_sha=commit_sha[:40],
+            what=what,
+            right_=right_,
+            of=of,
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO graded (id, at, commit_sha, what, right_, of) "
+                    "VALUES (:id, :at, :commit_sha, :what, :right_, :of)"
+                ),
+                made.model_dump(),
+            )
+        return made
+
+    async def grades(self, what: str = "", *, limit: int = 10) -> list[Graded]:
+        """The last measurements, newest first — which is the order "did my edit help" is read in."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, at, commit_sha, what, right_, of FROM graded "
+                    "WHERE (:what = '' OR what = :what) ORDER BY at DESC LIMIT :limit"
+                ),
+                {"what": what, "limit": limit},
+            )
+            return [Graded(**row._mapping) for row in rows]
 
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:

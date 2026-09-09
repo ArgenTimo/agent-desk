@@ -1,0 +1,13 @@
+{# One row of the labelling screen, after somebody has pressed (072). #}
+<li>
+  <p class="labelling-said">{{ block.input }}</p>
+  <p class="small dim">the console said <strong>{{ block.kind }}</strong>{% if said %} · you said <strong>{{ said }}</strong>{% endif %}</p>
+  <form class="labelling-kinds" method="post" action="/labelling"
+        hx-post="/labelling" hx-target="closest li" hx-swap="outerHTML">
+    <input type="hidden" name="id" value="{{ block.id }}">
+    {% for kind in kinds %}
+    <button type="submit" name="kind" value="{{ kind }}"
+            class="{{ 'yes' if said == kind }}">{{ kind }}</button>
+    {% endfor %}
+  </form>
+</li>

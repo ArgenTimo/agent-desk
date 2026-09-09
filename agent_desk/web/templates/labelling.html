@@ -1,0 +1,59 @@
+{# What the console decided a line was, and what a person says it really was (072).
+
+   «Экран разметки: строка, что решила консоль, шесть кнопок — "на самом деле это".» One row a
+   line, the decision beside it, and a button per kind. Answering is pressing, because the whole
+   point of the screen is that a set of fifty gets labelled in a couple of minutes.
+
+   The kinds a person can press are the expensive ones — the decisions that start an agent, draw a
+   process, or rearrange a workbench — plus the ordinary two. `unsure` is not among them: it is the
+   console saying it could not tell, which is never what a line really was. #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>what it really was · agent-desk</title>
+<link rel="stylesheet" href="{{ stamped('console.css') }}">
+</head>
+<body>
+<header class="bar">
+  <span class="brand">agent-desk · what it really was</span>
+  <nav aria-label="sections">
+    <a href="/">the board</a>
+    <a href="/ideas">ideas</a>
+  </nav>
+</header>
+
+<main>
+  <p class="fineprint">A test that asserts a prompt contains a sentence proves the sentence is
+    there. It says nothing about whether the prompt still decides correctly, which is the only
+    thing the prompt is for. Say what each of these really was, then run the measurement.</p>
+
+  <form class="measure" method="post" action="/labelling/run" hx-post="/labelling/run"
+        hx-target="#score" hx-swap="innerHTML">
+    <button type="submit">measure the classifier against these</button>
+  </form>
+  <pre id="score" class="score">{{ score }}</pre>
+
+  <ul class="labelling">
+    {% for block in blocks %}
+    <li>
+      <p class="labelling-said">{{ block.input }}</p>
+      <p class="small dim">the console said <strong>{{ block.kind }}</strong>{% if labels.get(block.id) %} · you said <strong>{{ labels[block.id] }}</strong>{% endif %}</p>
+      <form class="labelling-kinds" method="post" action="/labelling"
+            hx-post="/labelling" hx-target="closest li" hx-swap="outerHTML">
+        <input type="hidden" name="id" value="{{ block.id }}">
+        {% for kind in kinds %}
+        <button type="submit" name="kind" value="{{ kind }}"
+                class="{{ 'yes' if labels.get(block.id) == kind }}">{{ kind }}</button>
+        {% endfor %}
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if not blocks %}
+  <p class="empty small">Nothing has been typed into this console yet.</p>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -44,6 +44,14 @@ _SHORTER = re.compile(
     r"\A(?:shorter than|короче)\s+(\d{1,7})(?:\s*(?:characters|chars|символов|знаков))?\Z",
     re.IGNORECASE,
 )
+# The fifth form, and the only one whose answer is not on the card. «Проверка вида "равно
+# ожидаемому" — седьмая форма в checking.py, где ожидаемое берётся из входа.» What a run is
+# measured against changes with every row of the set, so it travels with the input rather than with
+# the check — which is exactly what makes one check card into a measurement over five hundred rows
+# instead of five hundred cards.
+_EXPECTED = re.compile(
+    r"\A(?:is\s+the\s+expected(?:\s+answer)?|равно\s+ожидаемому)\Z", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -51,7 +59,8 @@ class Check:
     """One thing an answer has to be."""
 
     kind: str
-    # What it is compared against: the text for `contains`, the number for `shorter`, "" for json.
+    # What it is compared against: the text for `contains`, the number for `shorter`, "" for json
+    # and for `expected` — where what to compare with arrives with the input instead.
     against: str = ""
 
     @property
@@ -63,6 +72,7 @@ class Check:
             "missing": f"does not contain {self.against}",
             "json": "is JSON",
             "shorter": f"shorter than {self.against} characters",
+            "expected": "is the expected answer",
         }[self.kind]
 
 
@@ -73,6 +83,8 @@ def read(said: str) -> Check | None:
         return None
     if _JSON.match(one):
         return Check(kind="json")
+    if _EXPECTED.match(one):
+        return Check(kind="expected")
     found = _SHORTER.match(one)
     if found:
         return Check(kind="shorter", against=found.group(1))
@@ -85,13 +97,27 @@ def read(said: str) -> Check | None:
     return None
 
 
-def passes(check: Check, answer: str) -> tuple[bool, str]:
+def passes(check: Check, answer: str, expected: str = "") -> tuple[bool, str]:
     """Whether the answer satisfies it, and what to say either way.
 
     The sentence matters as much as the verdict. "It failed" is a fact somebody has to go and
     investigate; "it does not contain 'ERROR', and the answer is 4kb of prose" is one they can act
     on — so a failure says what was asked and what was there instead.
+
+    `expected` is what this row of a set says the answer should have been, and only the `expected`
+    form reads it. A check whose answer is written on the card cannot measure a prompt over five
+    hundred rows; one whose answer comes with the row can.
     """
+    if check.kind == "expected":
+        # Compared as words rather than as characters: a reader that answers "idea." and one that
+        # answers "idea" have not disagreed about anything.
+        got = answer.strip().strip(".").strip().lower()
+        want = expected.strip().strip(".").strip().lower()
+        if not want:
+            return False, "nothing said what the answer should have been"
+        if got != want:
+            return False, f"it said “{answer.strip()[:80]}”, and the answer was “{expected}”"
+        return True, f"it said “{expected}”"
     if check.kind == "json":
         try:
             json.loads(answer)
