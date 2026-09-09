@@ -70,10 +70,10 @@ IdeaState = Literal["new", "kept", "promoted", "dropped", "done"]
 # and has to earn it.
 IdeaAuthor = Literal["human", "desk"]
 SourceKind = Literal["session", "typed", "meeting"]
-DraftKind = Literal["proposal", "ticket", "paste"]
+DraftKind = Literal["proposal", "ticket", "tickets", "paste"]
 # The same three, as values. Defined here so a route validating a path segment and the type that
 # describes it cannot drift apart.
-DRAFT_KINDS: tuple[DraftKind, ...] = ("proposal", "ticket", "paste")
+DRAFT_KINDS: tuple[DraftKind, ...] = ("proposal", "ticket", "tickets", "paste")
 ThreadSetBy = Literal["classifier", "human"]
 
 # How much workbench is kept. Not a tuning knob: a surface is something a person arranges by hand,

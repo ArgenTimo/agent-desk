@@ -235,11 +235,47 @@ def ticket_prompt(idea: Idea) -> str:
     )
 
 
-# The two drafts a model writes. `paste` is not here because nothing generates it: it is the idea
+def tickets_prompt(idea: Idea) -> str:
+    """A list of tickets rather than one.
+
+    *«Каждая идея при апруве преобразуется как минимум в часть документации, как максимум в
+    перечень тикетов» — именно перечень, а не один тикет.*
+
+    That is the difference between "we wrote it down" and "we planned it". A big idea filed as one
+    ticket is a ticket nobody can finish, and the work of cutting it up lands on whoever picks it
+    up — a week later, without the context that was in the room when it was written.
+
+    One rule does the cutting, and it is the same rule this repository uses for its own commits:
+    something is a ticket when it can be finished on its own. An idea that is one thing gets one
+    ticket, said as one, because a list of one that pretends to be three is worse than no list.
+    """
+    return "\n".join(
+        [
+            "Break the idea below into tickets: the smallest number of pieces that can each be",
+            "finished on their own.",
+            "",
+            "One per piece, numbered, each with a one-line summary and two or three lines saying",
+            "what it is and how anybody would know it is done. No priority, no estimate, no",
+            "assignee — this is a notebook entry becoming a plan, not a backlog.",
+            "",
+            "If the idea is one piece of work, answer with one ticket and say so in a line above",
+            "it. A list of one dressed up as three is worse than no list.",
+            "",
+            "## The idea, verbatim",
+            idea.text,
+            "",
+            "## Where it came from",
+            *_context_lines(idea),
+        ]
+    )
+
+
+# The drafts a model writes. `paste` is not here because nothing generates it: it is the idea
 # and its context, and the human is the transport.
 PROMPTS: dict[DraftKind, Callable[[Idea], str]] = {
     "proposal": proposal_prompt,
     "ticket": ticket_prompt,
+    "tickets": tickets_prompt,
 }
 
 

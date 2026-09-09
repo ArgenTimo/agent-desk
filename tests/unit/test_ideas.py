@@ -15,7 +15,7 @@ import pytest
 from agent_desk.answer import session
 from agent_desk.config import Settings
 from agent_desk.ideas import inbox
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import Idea, Store
 from agent_desk.web import blocks, routes
 
 from tests.unit.waiting import until
@@ -935,3 +935,74 @@ async def test_a_card_whose_whole_text_fits_is_not_retried_for_ever(desk: Store)
     idea = await desk.create_idea(text_="add hotkeys", summary="add hotkeys", source_kind="typed")
 
     assert appraise._still_a_truncation(await desk.idea(idea.id)) is False  # type: ignore[arg-type]
+
+
+# --- a list of tickets, not one -------------------------------------------------------------------
+@pytest.mark.unit
+def test_an_idea_can_be_broken_into_tickets() -> None:
+    """ "Каждая идея при апруве преобразуется как минимум в часть документации, как максимум в
+    перечень тикетов" — именно перечень, а не один тикет.
+
+    That is the difference between "we wrote it down" and "we planned it"."""
+    from agent_desk.store.repo import DRAFT_KINDS
+
+    assert "tickets" in DRAFT_KINDS
+    assert "tickets" in inbox.PROMPTS
+
+
+@pytest.mark.unit
+def test_the_cut_is_the_one_that_can_be_finished_on_its_own() -> None:
+    """The same rule this repository uses for its own commits. A big idea filed as one ticket is a
+    ticket nobody can finish."""
+    idea = Idea(
+        id="01M1X",
+        block_id=None,
+        text="rework the console and also add hotkeys",
+        summary="rework the console",
+        state="kept",
+        source_kind="typed",
+        source_ref=None,
+        context={},
+        created_at=1,
+    )
+
+    said = inbox.tickets_prompt(idea)
+
+    assert "finished on their own" in said
+    assert "rework the console and also add hotkeys" in said
+
+
+@pytest.mark.unit
+def test_an_idea_that_is_one_piece_gets_one_ticket_and_says_so() -> None:
+    """A list of one dressed up as three is worse than no list."""
+    idea = Idea(
+        id="01M1X",
+        block_id=None,
+        text="add hotkeys",
+        summary="add hotkeys",
+        state="kept",
+        source_kind="typed",
+        source_ref=None,
+        context={},
+        created_at=1,
+    )
+
+    said = inbox.tickets_prompt(idea)
+
+    assert "one ticket and say so" in said
+
+
+@pytest.mark.unit
+def test_it_is_offered_only_once_somebody_has_kept_the_idea() -> None:
+    """The step between a thought and a plan is somebody deciding it is worth doing."""
+    markup = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "agent_desk"
+        / "web"
+        / "templates"
+        / "_blocks.html"
+    ).read_text(encoding="utf-8")
+    at = markup.index('{% if idea.state in ("kept", "promoted") %}')
+    around = markup[at : markup.index("{% endif %}", at + 100)]
+
+    assert "/tickets" in around

@@ -102,6 +102,15 @@
           <input type="hidden" name="from" value="card">
           <button type="submit" title="write it up as a ticket, in this tool">draft a ticket</button>
         </form>
+        {# And the list. "Именно перечень, а не один тикет": a big idea filed as one ticket is one
+           nobody can finish, and the cutting-up lands on whoever picks it up a week later without
+           the context that was in the room (agent_desk/ideas/inbox.py). #}
+        <form method="post" action="/ideas/{{ idea.id }}/tickets"
+              hx-post="/ideas/{{ idea.id }}/tickets" hx-target="#blocks">
+          <input type="hidden" name="from" value="card">
+          <button type="submit"
+                  title="break it into the smallest pieces that can each be finished on their own">break it into tickets</button>
+        </form>
       {% endif %}
       {% if idea.id in filings %}
       <a class="as-button" href="{{ filings[idea.id].url }}" target="_blank" rel="noreferrer noopener"
