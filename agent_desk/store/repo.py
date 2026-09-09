@@ -269,6 +269,31 @@ class ButtonCard(BaseModel):
         return f"button:{self.id}"
 
 
+class CheckCard(BaseModel):
+    """A card hung on an output that says one of two things about it (062)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    label: str
+    # What the answer has to be: one of the four forms `checking.py` can decide, or a sentence
+    # somebody wrote, which is asked instead.
+    said: str = ""
+    # "", "passed" or "failed". Empty is "nobody has pressed it" — the absence of a verdict rather
+    # than a third one, and it renders as a card waiting rather than as a card unsure.
+    verdict: str = ""
+    why: str = ""
+    # Decided by the answer engine rather than by a rule. "It passed" from a regular expression and
+    # "it passed" from a model are not the same claim.
+    judged: bool = False
+    at: int = 0
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"check:{self.id}"
+
+
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
@@ -2264,6 +2289,73 @@ class Store:
         async with self.engine.connect() as conn:
             rows = await conn.execute(text("SELECT path FROM readable ORDER BY path"))
             return [str(row[0]) for row in rows]
+
+    async def add_check_card(self, label: str, said: str) -> CheckCard:
+        made = CheckCard(id=_new_id(), label=label[:80], said=said[:600], made_at=_now_ms())
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO check_card (id, label, said, made_at) "
+                    "VALUES (:id, :label, :said, :made_at)"
+                ),
+                {"id": made.id, "label": made.label, "said": made.said, "made_at": made.made_at},
+            )
+        return made
+
+    async def set_check_card(self, card_id: str, *, label: str, said: str) -> None:
+        """What it is called and what it checks — and the verdict goes with the edit.
+
+        A card that says "passed" under a condition somebody has just changed is a card telling you
+        something about a question nobody asked. Clearing it is the honest state: not decided yet.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE check_card SET label = :label, said = :said, verdict = '', "
+                    "why = '', judged = 0, at = 0 WHERE id = :id"
+                ),
+                {"label": label[:80], "said": said[:600], "id": card_id},
+            )
+
+    async def card_checked(self, card_id: str, *, passed: bool, why: str, judged: bool) -> None:
+        """Write down what it decided, and how. Stored rather than recomputed: a check that
+        quietly changes its mind between page loads is worse than no check (062)."""
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE check_card SET verdict = :verdict, why = :why, judged = :judged, "
+                    "at = :at WHERE id = :id"
+                ),
+                {
+                    "verdict": "passed" if passed else "failed",
+                    "why": why[:600],
+                    "judged": 1 if judged else 0,
+                    "at": _now_ms(),
+                    "id": card_id,
+                },
+            )
+
+    async def check_card(self, card_id: str) -> CheckCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, label, said, verdict, why, judged, at, made_at FROM check_card "
+                    "WHERE id = :id"
+                ),
+                {"id": card_id},
+            )
+            row = rows.first()
+            return None if row is None else CheckCard(**row._mapping)
+
+    async def check_cards(self) -> list[CheckCard]:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, label, said, verdict, why, judged, at, made_at FROM check_card "
+                    "ORDER BY made_at DESC"
+                )
+            )
+            return [CheckCard(**row._mapping) for row in rows]
 
     async def add_button_card(self, label: str, prompt: str) -> ButtonCard:
         made = ButtonCard(id=_new_id(), label=label[:80], prompt=prompt[:2000], made_at=_now_ms())

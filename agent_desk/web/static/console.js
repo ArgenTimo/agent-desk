@@ -840,6 +840,79 @@ async function pressTheButton(holder) {
   }
 }
 
+// A check reads one thing: an answer card, which already carries both halves of its exchange —
+// what was asked and what came back. So "what is it joined to" is the same question a button asks,
+// through the same line, and there was no second kind of wire to invent.
+function whatItChecks(holder) {
+  return (reaches(holder) || []).filter((name) => name.startsWith('answer:'));
+}
+
+function saysWhatItChecks(holder) {
+  const line = holder.querySelector('.check-scope');
+  if (!line) return;
+  const on = whatItChecks(holder);
+  line.textContent = !on.length
+    ? 'Joined to no answer yet. Draw a line from it to one.'
+    : on.length > 1
+      ? `Joined to ${on.length} answers. A check reads one — rub out the others.`
+      : `Reads “${labelOf(on[0])}” — what was asked and what came back.`;
+}
+
+function showCheck(holder) {
+  const button = holder.querySelector('.pin-check');
+  if (!button) return;
+  button.hidden = holder.dataset.kind !== 'check';
+  if (!button.hidden) saysWhatItChecks(holder);
+}
+
+async function runTheCheck(holder) {
+  const on = whatItChecks(holder);
+  try {
+    const answer = await fetch('/workbench/check', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ id: holder.dataset.id, on: on.join(',') }),
+    });
+    const said = await answer.json();
+    if (!said.verdict) {
+      say(said.why || 'It could not be checked.');
+      return;
+    }
+    say(`${said.verdict === 'passed' ? 'It passed' : 'It did not pass'} — ${said.why}`);
+    // Read back from the server rather than painted here: the verdict is stored, and a page
+    // writing its own copy would be a second answer to "what did it decide".
+    const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
+    if (body.ok) {
+      holder.querySelector('.pin-body').innerHTML = await body.text();
+      saysWhatItChecks(holder);
+    }
+  } catch {
+    say('It could not be checked.');
+  }
+}
+
+async function addCheck() {
+  const label = (prompt('What is the check called?', '') || '').trim();
+  if (!label) return;
+  const said = (
+    prompt(
+      'And what does the answer have to be?\n\n"contains ERROR", "does not contain TODO", "is JSON", "shorter than 400" — or a sentence, which is asked instead.',
+      ''
+    ) || ''
+  ).trim();
+  try {
+    const answer = await fetch('/cards/check', {
+      method: 'POST',
+      headers: FORM,
+      body: new URLSearchParams({ label, said }),
+    });
+    const made = await answer.json();
+    await pin({ kind: 'check', id: made.id, label: made.label }, { came: 'made as a check' });
+  } catch {
+    say('Could not add a check.');
+  }
+}
+
 function showPress(holder) {
   const button = holder.querySelector('.pin-press');
   if (!button) return;
@@ -995,6 +1068,7 @@ async function pin(card, how) {
     <span class="pin-label"></span>
     <button type="button" class="pin-view" title="a line — press for what it is">a line</button>
     <button type="button" class="pin-press" title="send what this button asks" hidden>press</button>
+    <button type="button" class="pin-check" title="read what this is joined to and say whether it is what it had to be" hidden>check</button>
     <button type="button" class="pin-run" title="run this card and everything after it" hidden>run from here</button>
     <button type="button" class="pin-answers" title="what each model answered, side by side" hidden>answers</button>
     <button type="button" class="pin-parts" title="put what this is made of on the workbench" hidden>parts</button>
@@ -1036,6 +1110,7 @@ async function pin(card, how) {
     showParts(holder);
     showRunFrom(holder);
     showPress(holder);
+    showCheck(holder);
     // Folded or open, as it was left. After the body rather than before it: `full` fetches the
     // technical half *into* the body, and the body is replaced by the line above.
     if (how?.shown && how.shown !== holder.dataset.view) setView(holder, how.shown);
@@ -1217,6 +1292,11 @@ document.addEventListener('click', (event) => {
   // about. This is that button, on the card it starts from.
   if (event.target.classList.contains('pin-press')) {
     pressTheButton(event.target.closest('.pin'));
+    return;
+  }
+
+  if (event.target.classList.contains('pin-check')) {
+    runTheCheck(event.target.closest('.pin'));
     return;
   }
 
@@ -4345,6 +4425,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'step') addStep();
   else if (what === 'about') beginWith();
   else if (what === 'button') addButton();
+  else if (what === 'check') addCheck();
   else if (what === 'combining') howCombiningWorks();
   else if (what === 'template') keepTemplate();
 });

@@ -1,0 +1,41 @@
+{# A card hung on an output that says one of two things about it (062-a-card-that-checks.sql).
+
+   "Временный блок-проверка… берёт вводный вопрос/карточку + то что мы получили от сервиса и
+   возвращает одно из двух."
+
+   The condition is on the card and editable there: a check whose condition you cannot read is one
+   whose verdict nobody trusts. And the verdict says how it was reached — "it passed" from a rule
+   and "it passed" from a model are not the same claim. #}
+{% if not card %}
+<p class="empty small">that check is not here any more</p>
+{% else %}
+<div class="card-detail" data-detail="plain" data-label="{{ card.label }}">
+  <div class="plain-only">
+    <form class="check-card" method="post" action="/cards/check/edit"
+          hx-post="/cards/check/edit" hx-swap="none">
+      <input type="hidden" name="id" value="{{ card.id }}">
+      <label class="visually-hidden" for="check-name-{{ card.id }}">what to call it</label>
+      <input id="check-name-{{ card.id }}" name="label" value="{{ card.label }}"
+             placeholder="what to call it">
+      <label class="visually-hidden" for="check-said-{{ card.id }}">what it has to be</label>
+      <textarea id="check-said-{{ card.id }}" name="said" rows="2"
+                placeholder="what the answer has to be — “contains ERROR”, “is JSON”, “shorter than 400”, or a sentence">{{ card.said }}</textarea>
+      <button type="submit">keep it</button>
+    </form>
+    {# What it will read. Written by the page, which is the only thing that knows what is joined to
+       what. #}
+    <p class="check-scope small dim"></p>
+    {% if card.verdict %}
+    <p class="check-verdict {{ card.verdict }}">
+      <strong>{{ "it passed" if card.verdict == "passed" else "it did not pass" }}</strong>
+      — {{ card.why }}
+      {# How it was decided, always said. A rule and a judgement are two different kinds of claim
+         and somebody acting on either deserves to know which they have. #}
+      <span class="small dim">{{ "judged by the answer engine" if card.judged else "decided by the rule on the card" }}</span>
+    </p>
+    {% else %}
+    <p class="small dim">nobody has pressed it yet</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

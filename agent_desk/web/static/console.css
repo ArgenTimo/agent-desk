@@ -2974,6 +2974,15 @@ button.go:hover, button.yes:hover {
   cursor: pointer;
 }
 .pin-press:hover { background: color-mix(in srgb, var(--focus) 16%, transparent); }
+/* A verdict of two, and neither of them is only a colour: the words say it and the mark repeats
+   it, because a bench read in a hurry is read by shape (062-a-card-that-checks.sql). */
+.check-verdict { margin: 6px 0 0; font-size: var(--t-sm); line-height: 1.35; }
+.check-verdict.passed { color: var(--busy); }
+.check-verdict.passed strong::before { content: "✓ "; }
+/* Red, and this is one of the two things it is for: a check that did not pass is a stop, not a
+   thing that merely wants a look (the palette's own rule, at the top of this file). */
+.check-verdict.failed { color: var(--flag); }
+.check-verdict.failed strong::before { content: "✗ "; }
 .button-card { display: grid; gap: 4px; }
 .button-card textarea { width: 100%; resize: vertical; }
 /* What it will reach, said before it is pressed. A control that reaches for something different

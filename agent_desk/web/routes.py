@@ -40,6 +40,7 @@ from markupsafe import Markup, escape
 from agent_desk import (
     allowed,
     branching,
+    checking,
     combining,
     comparing,
     connectors,
@@ -1489,6 +1490,15 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
             env.get_template("_card_button.html").render(card=made),
             status_code=200 if made else 404,
         )
+    if kind == "check":
+        # A card hung on an output. What it checks for is on the card and editable there, for the
+        # same reason a button's request is: a control whose condition you cannot read is one
+        # nobody trusts the verdict of (062).
+        checked = await store.check_card(id)
+        return HTMLResponse(
+            env.get_template("_card_check.html").render(card=checked),
+            status_code=200 if checked else 404,
+        )
     if kind == "blocker":
         # Recomputed rather than stored: a blocker is a view of facts that live elsewhere, and
         # "it is gone" is the ordinary outcome — it means the thing got unstuck.
@@ -2670,6 +2680,99 @@ async def answers_on_a_card(name: str = "") -> JSONResponse:
             ],
         }
     )
+
+
+@router.post("/cards/check", response_class=JSONResponse)
+async def add_check_card(request: Request) -> JSONResponse:
+    """A new check, with a name and what the answer has to be (062)."""
+    form = await _form(request)
+    made = await store.add_check_card(
+        form.get("label", "").strip() or "a check", form.get("said", "").strip()
+    )
+    return JSONResponse({"id": made.id, "name": made.name, "label": made.label})
+
+
+@router.post("/cards/check/edit", response_class=HTMLResponse)
+async def edit_check_card(request: Request) -> Response:
+    """What it is called and what it checks. The verdict goes with the edit: a card saying "passed"
+    under a condition somebody has just changed is a card answering a question nobody asked."""
+    form = await _form(request)
+    card_id = form.get("id", "").strip()
+    if card_id:
+        await store.set_check_card(
+            card_id,
+            label=form.get("label", "").strip() or "a check",
+            said=form.get("said", ""),
+        )
+    return HTMLResponse("", status_code=204)
+
+
+async def _decide(said: str, asked: str, got: str) -> tuple[bool, str, bool] | str:
+    """Whether this answer is what it had to be — mechanically if that is possible, else asked.
+
+    Returns `(passed, why, judged)`, or a sentence saying why nothing was decided. Nothing decided
+    is not a failure: a model that answered something else has not made a judgement, and writing
+    that down as "it did not pass" is a verdict invented from silence.
+    """
+    mechanical = checking.read(said)
+    if mechanical is not None:
+        passed, why = checking.passes(mechanical, got)
+        return passed, why, False
+    try:
+        reply = "".join(
+            [
+                chunk
+                async for chunk in answer_session.stream_answer(
+                    checking.judgement_prompt(asked, got, said)
+                )
+            ]
+        )
+    except (answer_session.AnswerFailed, OSError) as gone:
+        return f"it could not be checked: {str(gone)[:120]}"
+    verdict = checking.read_verdict(reply)
+    if verdict is None:
+        return "it did not come back with yes or no, so nothing was decided"
+    return verdict[0], verdict[1], True
+
+
+@router.post("/workbench/check", response_class=JSONResponse)
+async def run_a_check(request: Request) -> JSONResponse:
+    """Press a check card: read what it is joined to, and say one of two things about it.
+
+    The two inputs are one card. An answer card already carries both halves of its exchange — what
+    was asked is the block's input and what came back is its answer — so a check joined to one
+    answer card has everything it needs, and no second kind of wire had to be invented.
+    """
+    form = await _form(request)
+    card = await store.check_card(form.get("id", "").strip())
+    if card is None:
+        return JSONResponse({"why": "that check is not here any more"}, status_code=404)
+    if not card.said.strip():
+        return JSONResponse(
+            {"why": "That check has nothing to check for yet. Write it on the card."}
+        )
+    on = [one for one in form.get("on", "").split(",") if one.startswith("answer:")]
+    if not on:
+        return JSONResponse({"why": "Join it to an answer — a check needs something to check."})
+    if len(on) > 1:
+        # Found in a browser: joined to two answers it read the first and said nothing about the
+        # choice. One verdict about one of two things, with no way to tell which — a check has to
+        # be unambiguous or it is worse than none.
+        return JSONResponse(
+            {
+                "why": f"It is joined to {len(on)} answers. A check reads one — rub out the lines "
+                "to the ones it is not about."
+            }
+        )
+    block = await store.block(on[0].removeprefix("answer:"))
+    if block is None or not (block.answer or "").strip():
+        return JSONResponse({"why": "That answer has nothing in it yet."})
+    decided = await _decide(card.said, block.input, block.answer or "")
+    if isinstance(decided, str):
+        return JSONResponse({"why": decided})
+    passed, why, judged = decided
+    await store.card_checked(card.id, passed=passed, why=why, judged=judged)
+    return JSONResponse({"verdict": "passed" if passed else "failed", "why": why, "judged": judged})
 
 
 @router.post("/cards/button", response_class=JSONResponse)

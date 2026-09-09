@@ -110,3 +110,58 @@ def passes(check: Check, answer: str) -> tuple[bool, str]:
     if check.against.lower() not in answer.lower():
         return False, f"it does not contain “{check.against}”"
     return True, f"it contains “{check.against}”"
+
+
+# --- and the other half: a check nothing mechanical can decide ------------------------------------
+# "Временный блок-проверка, в первой итерации берёт вводный вопрос/карточку + то что мы получили от
+# сервиса и возвращает одно из двух."
+#
+# The four forms above are what a machine can decide on its own, and they cost nothing. Most of what
+# somebody actually wants checked is not one of them — "does this answer the question that was
+# asked" is a judgement, and the only thing here that can make one is the answer engine.
+#
+# So a check card reads its own sentence first. If it is one of the four, it is decided for free and
+# instantly; if it is not, it is asked. The card says which happened, because "it passed" from a
+# regular expression and "it passed" from a model are not the same claim and a person acting on
+# either deserves to know which they have.
+_VERDICT = re.compile(r"\A\s*(yes|no|да|нет)\b[\s.:,—-]*(.*)\Z", re.IGNORECASE | re.DOTALL)
+
+# What a judgement may say back. Long enough for a reason, short enough that a card holding it is
+# still a card.
+WHY_CHARS = 400
+
+
+def judgement_prompt(asked: str, got: str, said: str) -> str:
+    """Ask whether an answer meets a condition written in prose.
+
+    One word first and the reason after it, which is the shape every other short call in this
+    repository uses: a verdict buried in a paragraph is a verdict something has to parse out of
+    prose, and parsing prose is how a check starts inventing its own answers.
+
+    The condition goes last. It is the thing being decided, and a model that has read the question
+    and the answer before it reads what to look for is one that judges rather than pattern-matches.
+    """
+    return (
+        "Here is a question somebody asked, the answer they got, and what that answer had to be.\n"
+        "Say whether the answer meets the condition.\n\n"
+        "Reply with one word — yes or no — and then, on the same line, one sentence saying why.\n"
+        "Say no if you cannot tell: a check that guesses is worse than one that admits it.\n\n"
+        f"## What was asked\n{asked.strip()}\n\n"
+        f"## What came back\n{got.strip()}\n\n"
+        f"## What it had to be\n{said.strip()}\n"
+    )
+
+
+def read_verdict(reply: str) -> tuple[bool, str] | None:
+    """The verdict and its sentence, or `None` when the reply was not one.
+
+    `None` rather than a fail: a model that answered something else has not decided anything, and
+    recording that as "it did not pass" would be a failure invented from silence — the fifth rule,
+    in the one place where inventing one is easiest.
+    """
+    found = _VERDICT.match(reply.strip())
+    if found is None:
+        return None
+    yes = found.group(1).lower() in ("yes", "да")
+    why = " ".join(found.group(2).split())[:WHY_CHARS]
+    return yes, why or ("it does" if yes else "it does not")
