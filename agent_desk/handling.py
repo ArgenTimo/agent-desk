@@ -13,7 +13,7 @@ place things are put and becomes a thing you can arrange by talking.
 "Модель должна отвечать не текстом про карточки, а действиями из фиксированного списка… свободная
 формулировка «расположи покрасивее» не исполнима, и разбор её ответа превратится в угадайку."
 
-Six, and they cover every example in the letter:
+Seven, and they cover every example in the letter:
 
     mark   [colour] <numbers> <why>   point at some of the cards, and say why each
     sort   <side> <numbers> <what they have in common>
@@ -21,6 +21,7 @@ Six, and they cover every example in the letter:
     fold   <numbers>             show only their line
     open   <numbers>             show what they say
     take   <numbers>             take them off the workbench
+    tidy                         lay the whole bench out again
 
 `fold` and `open` are the two the letter opens with — "сверни разверни все (либо выделенные)
 карточки" — and they belong to this list rather than to a control of their own for the same reason
@@ -129,11 +130,20 @@ class Handling:
     # Cards to take off the surface. Not deleted: the card is a row in the store, the conversation
     # still holds it, and undo puts it back (041-bench-undo.sql).
     taken: list[str] = field(default_factory=list)
+    # Lay the whole bench out again. No numbers: it is about the arrangement rather than about any
+    # card, and it is the only action here that names nothing.
+    tidy: bool = False
 
     @property
     def empty(self) -> bool:
         return not (
-            self.marked or self.sorted_ or self.clear or self.folded or self.opened or self.taken
+            self.marked
+            or self.sorted_
+            or self.clear
+            or self.folded
+            or self.opened
+            or self.taken
+            or self.tidy
         )
 
 
@@ -149,7 +159,7 @@ def what_to_do(cards: Sequence[str]) -> str:
             "This is a request to change what is on the workbench, not a question about it.",
             "Answer with actions and nothing else — no preamble, no explanation, no closing line.",
             "",
-            "One action per line, in one of these six shapes:",
+            "One action per line, in one of these seven shapes:",
             "",
             "  mark 3,7 why these two and not the others",
             "  mark yellow 1,2 why these are the yellow ones",
@@ -158,6 +168,7 @@ def what_to_do(cards: Sequence[str]) -> str:
             "  fold 2,5,6",
             "  open 1",
             "  take 4",
+            "  tidy",
             "",
             f"`sort` puts cards on one side: {', '.join(SIDES)}. `clear` takes every mark off.",
             f"A mark may name a colour: {', '.join(COLOURS)}. Use one when the request asks for",
@@ -165,6 +176,8 @@ def what_to_do(cards: Sequence[str]) -> str:
             "`fold` shows only a card's line; `open` shows what it says.",
             "`take` takes cards off the workbench. Nothing is deleted and one press of undo brings",
             "them back — but take a card off only where the request asks for it.",
+            "`tidy` lays the whole bench out again and takes no numbers. It is the answer to",
+            '"перегруппируй, чтобы отображались корректнее", and it changes nothing else.',
             "",
             "Two rules matter more than the shape:",
             f"- Only the numbers above, 1 to {len(cards)}. A number that is not a card is ignored.",
@@ -192,6 +205,7 @@ _SORT = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _CLEAR = re.compile(r"\Aclear\b", re.IGNORECASE)
+_TIDY = re.compile(r"\Atidy\b", re.IGNORECASE)
 _FOLD = re.compile(rf"\Afold\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 _OPEN = re.compile(rf"\Aopen\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
 _TAKE = re.compile(rf"\Atake\s+({_NUMBERS})\s*\Z", re.IGNORECASE)
@@ -225,12 +239,16 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
     opened: list[str] = []
     taken: list[str] = []
     clear = False
+    tidy = False
     for raw in reply.splitlines():
         said = raw.strip().lstrip("-*• ").strip()
         if not said:
             continue
         if _CLEAR.match(said):
             clear = True
+            continue
+        if _TIDY.match(said):
+            tidy = True
             continue
         fold = _FOLD.match(said)
         if fold is not None:
@@ -274,6 +292,7 @@ def read(reply: str, on_bench: Sequence[str]) -> Handling:
         folded=folded,
         opened=opened,
         taken=taken,
+        tidy=tidy,
     )
 
 
@@ -298,6 +317,7 @@ def as_json(asked: Handling) -> str:
                 "folded": asked.folded,
                 "opened": asked.opened,
                 "taken": asked.taken,
+                "tidy": asked.tidy,
             }
         }
     )
@@ -336,6 +356,7 @@ def read_json(said: str) -> Handling:
         folded=[str(one) for one in found.get("folded", [])],
         opened=[str(one) for one in found.get("opened", [])],
         taken=[str(one) for one in found.get("taken", [])],
+        tidy=bool(found.get("tidy")),
     )
 
 
@@ -367,4 +388,6 @@ def as_words(asked: Handling) -> str:
     ):
         if names:
             said.append(f"{what} {len(names)} card{'' if len(names) == 1 else 's'}")
+    if asked.tidy:
+        said.append("laid the bench out again")
     return "\n".join(said)

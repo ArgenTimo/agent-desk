@@ -5331,6 +5331,11 @@ function applyArrangement(said) {
     syncTargets();
     emptyOrNot();
   }
+
+  // Last of the three that change the surface rather than a card, and last on purpose: laying the
+  // bench out again after cards have come off is the arrangement somebody asked for, and doing it
+  // before would leave holes where they were.
+  if (said.tidy) tidyUp();
   for (const one of said.marked || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
     if (pin) markCard(pin, one.why, one.colour);
@@ -5343,7 +5348,9 @@ function applyArrangement(said) {
     // Folding changes every card's height, so the ones below have to be let down again. Taking
     // cards off changes the surface itself, so the lines and the map are redrawn and the layout
     // is written down — otherwise a bench reloaded a minute later has them back.
-    if ((said.folded || []).length || (said.opened || []).length) settleOverlaps();
+    if (!said.tidy && ((said.folded || []).length || (said.opened || []).length)) {
+      settleOverlaps();
+    }
     if (took) {
       rememberLayout();
       drawTies();

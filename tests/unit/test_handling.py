@@ -50,7 +50,7 @@ def test_nothing_here_removes_work_or_starts_anything() -> None:
     documentation, which is the failure mode this repository keeps meeting."""
     offered = _verbs_offered()
 
-    assert offered == {"mark", "sort", "clear", "fold", "open", "take"}
+    assert offered == {"mark", "sort", "clear", "fold", "open", "take", "tidy"}
 
 
 def _verbs_offered() -> set[str]:
@@ -248,7 +248,7 @@ def test_folding_is_something_this_can_ask_for() -> None:
 
     assert "fold 2,5,6" in said
     assert "open 1" in said
-    assert "six shapes" in said
+    assert "seven shapes" in said
 
 
 @pytest.mark.unit
@@ -464,3 +464,34 @@ def test_the_page_paints_only_the_three_and_takes_them_off_again() -> None:
     assert "const MARK_COLOURS = ['yellow', 'blue', 'violet'];" in console
     start = console.index("function clearMarks(")
     assert "MARK_COLOURS.map" in console[start : console.index("\n}\n", start)]
+
+
+# --- and laying the whole thing out again ---------------------------------------------------------
+@pytest.mark.unit
+def test_the_bench_can_be_laid_out_again_by_asking() -> None:
+    """ "Перегруппируй их, чтобы они визуально корректней отображались." The one action here that
+    names no cards, because it is about the arrangement rather than about any of them."""
+    asked = handling.read("tidy", BENCH)
+
+    assert asked.tidy
+    assert not asked.empty
+    assert handling.as_words(asked) == "laid the bench out again"
+
+
+@pytest.mark.unit
+def test_laying_out_survives_the_round_trip_and_is_off_by_default() -> None:
+    """A block written before this existed must not rearrange a bench somebody spent an hour on."""
+    assert handling.read_json(handling.as_json(handling.read("tidy", BENCH))).tidy
+    assert not handling.read_json('{"handling": {"marked": [], "sorted": []}}').tidy
+
+
+@pytest.mark.unit
+def test_the_page_lays_it_out_after_taking_cards_off_and_not_before() -> None:
+    """Laying the bench out again after cards have come off is the arrangement somebody asked for.
+    Doing it first would leave holes where they were."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    start = console.index("function applyArrangement(")
+    body = console[start : console.index("\n}\n", start)]
+
+    assert "if (said.tidy) tidyUp();" in body
+    assert body.index("pin.remove()") < body.index("if (said.tidy) tidyUp();")
