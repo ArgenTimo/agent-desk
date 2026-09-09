@@ -2988,6 +2988,20 @@ button.go:hover, button.yes:hover {
 /* Back to full weight under the pointer: a card nobody can read is not out of the way, it is gone,
    and this one is still the record of a check somebody may want to reread. */
 .pin.checked:hover, .pin.checked:focus-within { opacity: 1; }
+/* Quarantine, not a bin: "плохие ответы уезжают в отдельную обведённую область, а не удаляются".
+   A wrong answer is what a right one is compared against. Grey and framed, and still readable —
+   this is a card somebody is about to work from, not one being thrown away. */
+.pin.quarantined { opacity: 0.55; border-left-color: var(--flag); }
+.pin.quarantined:hover, .pin.quarantined:focus-within { opacity: 1; }
+.ring.quarantine {
+  border-color: var(--flag);
+  border-style: dashed;
+  color: var(--flag);
+  font-size: var(--t-xs);
+  line-height: 1.3;
+  padding: 4px 8px;
+  overflow: hidden;
+}
 .check-verdict { margin: 6px 0 0; font-size: var(--t-sm); line-height: 1.35; }
 .check-verdict.passed { color: var(--busy); }
 .check-verdict.passed strong::before { content: "✓ "; }

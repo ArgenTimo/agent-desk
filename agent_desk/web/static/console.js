@@ -862,6 +862,55 @@ function saysWhatItChecks(holder) {
 // left to say and should stop asking to be read — but it does not disappear, because *that this
 // answer was checked* is a fact worth having tomorrow. So: dimmed, folded to its line, and the
 // button gone. Pressing it again is still possible, and it is the ordinary way — open the card.
+// "Блоки ответа становятся серыми и помещаются в одну очерченную область."
+//
+// Quarantine, not a bin. A wrong answer is what a right one is compared against, and deleting it
+// straight away throws away half of the working-out. So the answer a check failed is dimmed and
+// framed, and it is still there — still readable, still joined to everything it was joined to.
+//
+// Derived rather than stored: the verdict is on the check card and the line to the answer is on
+// the bench, so the frame is worked out from those two whenever the card is built. That is what
+// makes it survive a reload without a second place to keep it in step with.
+function quarantineFor(holder) {
+  const name = cardName(holder);
+  const failed = Boolean(holder.querySelector('.check-verdict.failed'));
+  const on = whatItChecks(holder);
+  const ring = surface?.querySelector(`.ring[data-check="${CSS.escape(name)}"]`);
+
+  for (const card of surface?.querySelectorAll(`.pin[data-quarantined="${CSS.escape(name)}"]`) || []) {
+    card.classList.remove('quarantined');
+    card.removeAttribute('data-quarantined');
+  }
+  if (!failed || !on.length) {
+    ring?.remove();
+    return;
+  }
+
+  const held = [];
+  for (const one of on) {
+    const card = surface?.querySelector(`.pin[data-name="${CSS.escape(one)}"]`);
+    if (!card) continue;
+    card.classList.add('quarantined');
+    card.dataset.quarantined = name;
+    held.push(one);
+  }
+  if (!held.length) {
+    ring?.remove();
+    return;
+  }
+  const frame = ring || document.createElement('div');
+  if (!ring) {
+    frame.className = 'ring quarantine';
+    frame.dataset.check = name;
+    surface.appendChild(frame);
+  }
+  frame.dataset.holds = held.join(',');
+  // What is wrong with it, on the frame. A grey card inside an outline says something is wrong;
+  // the sentence says what, and it is the sentence somebody acts on.
+  frame.textContent = holder.querySelector('.check-verdict')?.textContent?.trim().slice(0, 200) || '';
+  drawRings();
+}
+
 function showCheck(holder) {
   const button = holder.querySelector('.pin-check');
   if (!button) return;
@@ -869,7 +918,10 @@ function showCheck(holder) {
   const verdict = holder.querySelector('.check-verdict.passed') ? 'passed' : '';
   holder.classList.toggle('checked', isCheck && Boolean(verdict));
   button.hidden = !isCheck || Boolean(verdict);
-  if (isCheck) saysWhatItChecks(holder);
+  if (isCheck) {
+    saysWhatItChecks(holder);
+    quarantineFor(holder);
+  }
 }
 
 async function runTheCheck(holder) {
@@ -895,6 +947,7 @@ async function runTheCheck(holder) {
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
       // has to act on, and folding it away would hide the sentence saying what to do.
       if (said.verdict === 'passed') setView(holder, 'hint');
+      drawTies();
     }
   } catch {
     say('It could not be checked.');

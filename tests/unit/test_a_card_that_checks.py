@@ -319,3 +319,43 @@ async def test_a_check_that_is_gone_says_so_rather_than_breaking(desk: Store) ->
 
     assert answer.status_code == 404
     assert "not here any more" in answer.body.decode()
+
+
+# --- and what a failure does to the answer -------------------------------------------------------
+def test_a_failed_answer_is_quarantined_rather_than_deleted() -> None:
+    """ "Плохие ответы уезжают в отдельную обведённую область, а не удаляются." A wrong answer is
+    what a right one is compared against, and deleting it throws away half of the working-out."""
+    body = _body_of("quarantineFor")
+
+    assert "classList.add('quarantined')" in body
+    assert "remove()" in body, "nothing ever clears the frame"
+    assert "'ring quarantine'" in body
+
+
+def test_the_frame_says_what_is_wrong_and_not_only_that_something_is() -> None:
+    """A grey card inside an outline says something is wrong. The sentence says what, and it is the
+    sentence somebody acts on."""
+    body = _body_of("quarantineFor")
+
+    assert ".check-verdict" in body and "textContent" in body
+
+
+def test_a_quarantined_card_is_still_readable() -> None:
+    css = (HERE / "agent_desk" / "web" / "static" / "console.css").read_text(encoding="utf-8")
+
+    assert ".pin.quarantined:hover, .pin.quarantined:focus-within { opacity: 1; }" in css
+    assert ".pin.quarantined { opacity:" in css
+
+
+def test_the_quarantine_is_worked_out_rather_than_remembered() -> None:
+    """The verdict is on the check card and the line to the answer is on the bench. Working it out
+    from those two is what makes it survive a reload without a second place to keep in step."""
+    assert "quarantineFor(holder);" in _body_of("showCheck")
+
+
+def test_a_check_that_passes_lets_the_answer_out() -> None:
+    """Otherwise the first failure marks a card for ever, and nobody would use it twice."""
+    body = _body_of("quarantineFor")
+    start = body.index("if (!failed || !on.length)")
+
+    assert "classList.remove('quarantined')" in body[:start], "clearing happens after the test"
