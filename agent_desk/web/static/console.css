@@ -3167,3 +3167,12 @@ button.go:hover, button.yes:hover {
    number cannot answer "did my edit help". */
 .score { margin: 8px 0 0; white-space: pre-wrap; font-size: var(--t-sm); line-height: 1.4; }
 .measure { margin: 12px 0 0; }
+
+/* The workbench as it was (01M1XED1CVT7J0JTV5BTWJDT4J).
+
+   The slider is the whole control, so it is full width and the reading under it does not move as it
+   is dragged: a list that jumps under somebody's hand is one they cannot compare against the last
+   position. */
+.rewind-slider { width: 100%; }
+.rewind-said { margin: 6px 0 0; }
+.rewind-cards { margin: 4px 0 0; padding-left: 16px; font-size: var(--t-sm); line-height: 1.4; }

@@ -2815,6 +2815,54 @@ async def the_workbench_as_a_diagram(thread: str = "") -> JSONResponse:
     return JSONResponse({"said": diagrams.as_mermaid(nodes, edges), "cards": len(nodes)})
 
 
+@router.get("/workbench/moments", response_class=JSONResponse)
+async def when_the_workbench_changed(thread: str = "") -> JSONResponse:
+    """When this workbench changed, so a slider knows where its stops are (01M1XED1CVT7J0JTV5BTWJDT4J).
+
+    «У каждой строки в базе уже есть время… Это чтение, а не хранение.» Every one of these was
+    already written for undo, and nothing new is recorded to answer "how was it yesterday at two".
+    """
+    return JSONResponse({"at": await store.bench_moments(thread)})
+
+
+@router.get("/workbench/as-it-was", response_class=JSONResponse)
+async def the_workbench_as_it_was(at: int, thread: str = "") -> JSONResponse:
+    """The workbench as it stood at one moment, drawn the way the diagram control draws it now.
+
+    «Отвечает сразу на два вопроса, которые задают постоянно: "что я вчера делал" и "когда это
+    сломалось".» The same reader the present uses, so a surface an hour old and the one on screen
+    are described in the same words and can be compared without translating between two pictures.
+
+    A moment older than anything this remembers is said rather than answered with the oldest thing
+    there is: fifty changes back is a real limit and an answer that quietly meant something else
+    would make the slider lie at its left end.
+    """
+    cards, lines, known = await store.bench_as_it_was(at, thread)
+    chosen = await store.card_roles()
+    nodes = [
+        diagrams.Node(
+            name=one.name,
+            label=one.label or one.name,
+            role=roles.role_of(one.kind, chosen.get(one.name, "")).name,
+        )
+        for one in cards
+    ]
+    edges = [
+        diagrams.Edge(from_name=one.from_name, to_name=one.to_name, says=one.says or "")
+        for one in lines
+    ]
+    return JSONResponse(
+        {
+            "said": diagrams.as_mermaid(nodes, edges),
+            "cards": [
+                {"name": one.name, "label": one.label or one.name, "came": one.came}
+                for one in cards
+            ],
+            "known": known,
+        }
+    )
+
+
 @router.get("/workbench/file", response_class=JSONResponse)
 async def the_whole_workbench(thread: str = "") -> JSONResponse:
     """A whole workbench as one document (agent_desk/carrying.py).

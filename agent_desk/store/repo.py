@@ -3013,6 +3013,74 @@ class Store:
             )
             return [Graded(**row._mapping) for row in rows]
 
+    # --- the workbench as it was (01M1XED1CVT7J0JTV5BTWJDT4J) ------------------------------------
+    async def bench_moments(self, thread_id: str = "") -> list[int]:
+        """When this workbench last changed, oldest first — the stops a slider has.
+
+        Reading, not storing: every one of these rows was already written for undo
+        (041-bench-undo.sql), and nothing new is recorded to answer "how was it yesterday at two".
+        The history is bounded to the last fifty changes on this bench, which is a real limit and
+        the reason `bench_as_it_was` says when it has been asked for a moment before the first one
+        it has.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT made_at FROM bench_was WHERE thread_id = :thread_id ORDER BY made_at"),
+                {"thread_id": thread_id},
+            )
+            return [int(row[0]) for row in rows]
+
+    async def bench_as_it_was(
+        self, at: int, thread_id: str = ""
+    ) -> tuple[list[BenchCard], list[CardTie], bool]:
+        """What was on this workbench at that moment: the cards, the lines, and whether it is known.
+
+        A snapshot records the surface *before* the change that made it, so the state at a moment is
+        the snapshot of the first change after it — and when nothing has changed since, it is the
+        bench as it stands now. The third value is False when the moment is older than anything
+        this remembers, which is a different answer from an empty bench and has to read as one.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT made_at, surface FROM bench_was WHERE thread_id = :thread_id "
+                    "AND made_at >= :at ORDER BY made_at LIMIT 1"
+                ),
+                {"thread_id": thread_id, "at": at},
+            )
+            row = rows.first()
+            oldest = await conn.execute(
+                text("SELECT min(made_at) FROM bench_was WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
+            first = oldest.scalar()
+        if row is None:
+            # Nothing changed after that moment, so what it was then is what it is now.
+            cards = await self.bench_cards(thread_id)
+            here = {one.name for one in cards}
+            return (
+                cards,
+                [
+                    one
+                    for one in await self.card_ties()
+                    if one.from_name in here and one.to_name in here
+                ],
+                True,
+            )
+        was = json.loads(str(row._mapping["surface"]))
+        known = first is None or at >= int(first)
+        cards = [BenchCard(**one) for one in was.get("cards", [])]
+        here = {one.name for one in cards}
+        # The snapshot keeps what a line joins and what it says, which is what a picture of that
+        # moment needs. Its id and when it was drawn are not in it, and are not invented here: a
+        # line read out of history is a fact about a surface, not a row somebody can act on.
+        lines = [
+            CardTie(id="", created_at=0, **one)
+            for one in was.get("ties", [])
+            if one["from_name"] in here and one["to_name"] in here
+        ]
+        return cards, lines, known
+
     async def check_card(self, card_id: str) -> CheckCard | None:
         async with self.engine.connect() as conn:
             rows = await conn.execute(

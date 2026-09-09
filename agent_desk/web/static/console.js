@@ -1096,6 +1096,97 @@ async function showTheDiagram() {
   text.select();
 }
 
+// «Ползунок, который показывает верстак таким, каким он был вчера в 14:00: какие карточки лежали,
+// какие связи были.» Reading rather than storing — every stop on this slider is a row undo already
+// wrote, so nothing is recorded to answer "what was I doing yesterday" and "when did this break".
+//
+// Fifty changes back is a real limit, and the panel says when the slider has been dragged past the
+// oldest thing there is rather than showing the oldest and letting it read as that moment.
+async function showAsItWas() {
+  const thread = encodeURIComponent(activeThread());
+  let moments;
+  try {
+    moments = (await (await fetch(`/workbench/moments?thread=${thread}`)).json()).at || [];
+  } catch {
+    say('It could not be read.');
+    return;
+  }
+  const panel = document.getElementById('asif-panel');
+  const into = panel?.querySelector('.asif-body');
+  if (!into || !panel) return;
+  panel.hidden = false;
+  into.replaceChildren();
+  if (!moments.length) {
+    panel.querySelector('header').textContent = 'as it was';
+    const empty = document.createElement('p');
+    empty.className = 'empty small';
+    empty.textContent = 'This workbench has not changed since it was opened.';
+    into.appendChild(empty);
+    return;
+  }
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.className = 'rewind-slider';
+  slider.min = '0';
+  slider.max = String(moments.length);
+  slider.value = String(moments.length);
+  slider.setAttribute('aria-label', 'how far back');
+  const said = document.createElement('div');
+  said.className = 'rewind-said';
+  into.append(slider, said);
+
+  // The last stop is "now": a slider whose right-hand end was the last recorded change would have
+  // no position for the surface somebody is actually looking at.
+  const show = async () => {
+    const step = Number(slider.value);
+    const at = step >= moments.length ? Date.now() : moments[step];
+    let was;
+    try {
+      was = await (await fetch(`/workbench/as-it-was?thread=${thread}&at=${at}`)).json();
+    } catch {
+      said.textContent = 'It could not be read.';
+      return;
+    }
+    panel.querySelector('header').textContent =
+      step >= moments.length ? 'as it is now' : `as it was ${whenWas(moments[step])}`;
+    said.replaceChildren();
+    if (!was.known) {
+      const gone = document.createElement('p');
+      gone.className = 'empty small';
+      gone.textContent = 'Nothing is remembered from before that — fifty changes is as far back as this goes.';
+      said.appendChild(gone);
+    }
+    const list = document.createElement('ul');
+    list.className = 'rewind-cards';
+    for (const card of was.cards) {
+      const row = document.createElement('li');
+      row.textContent = card.came ? `${card.label} — ${card.came}` : card.label;
+      list.appendChild(row);
+    }
+    const count = document.createElement('p');
+    count.className = 'small dim';
+    count.textContent = `${was.cards.length} card${was.cards.length === 1 ? '' : 's'}`;
+    const drawn = document.createElement('textarea');
+    drawn.className = 'diagram-text';
+    drawn.readOnly = true;
+    drawn.rows = 10;
+    drawn.value = was.said;
+    said.append(count, list, drawn);
+  };
+  slider.addEventListener('input', show);
+  await show();
+}
+
+// How long ago, in the same words the board uses for everything else.
+function whenWas(at) {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
 async function saveTheBench() {
   let said;
   try {
@@ -5051,6 +5142,7 @@ benchMenu?.addEventListener('click', (event) => {
   else if (what === 'file') saveTheBench();
   else if (what === 'open') openABench();
   else if (what === 'diagram') showTheDiagram();
+  else if (what === 'rewind') showAsItWas();
   else if (what === 'template') keepTemplate();
 });
 
