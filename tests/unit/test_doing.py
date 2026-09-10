@@ -118,18 +118,21 @@ async def test_a_run_that_only_reads_files_still_says_something(
     # distinguishable, which is the point of writing them down — the shape says which one it was
     # without needing a second occurrence:
     #
-    #   - `OSError: [Errno 26] Text file busy` — **at the `stream_answer` call above, and not at
-    #     either assertion.** This test writes `fake`, chmods it and execs it, and a fork in another
-    #     thread between the write and the exec is the classic shape for ETXTBSY. Not theoretical
-    #     here: measured at 7 in 1500 execs with four threads forking beside them.
-    #     `create_subprocess_exec` raises it and `_run` catches only `FileNotFoundError` there, so
-    #     it never reaches the assertions at all. What makes it a poor fit for the one failure seen
+    #   - `AnswerFailed: the answer engine could not be started: … — Text file busy` — **at the
+    #     `stream_answer` call above, and not at either assertion.** This test writes `fake`, chmods
+    #     it and execs it, and a fork in another thread between the write and the exec is the
+    #     classic shape for ETXTBSY. Not theoretical here: measured at 7 in 1500 execs with four
+    #     threads forking beside them. `create_subprocess_exec` raises it before the run exists, so
+    #     it never reaches the assertions at all; on 2026-09-07 it would have read as a bare
+    #     `OSError: [Errno 26]`. What makes it a poor fit for the one failure seen
     #     is the other end of the sum — only a fork *off the main thread* can overlap a write the
     #     main thread is doing, and the suite has a handful of those per run, against the tens of
     #     thousands it took to land seven hits.
-    #   - `AnswerFailed: the run exited -9` — also at the `stream_answer` call. The child killed
-    #     before it printed, under the load of a machine running a live console and several agents
-    #     beside the suite.
+    #   - `AnswerFailed: the run was killed (SIGKILL)` — also at the `stream_answer` call. The
+    #     child killed before it printed, under the load of a machine running a live console and
+    #     several agents beside the suite. It used to read "the run exited -9", which is not an
+    #     exit status and sent a reader looking for exit code 9; `session._ended` names the signal
+    #     now, so this shape identifies itself the first time it appears here.
     #   - an empty `steps` or an empty `said` — the first or second assertion, and the only shape
     #     the closed mechanism above would have produced.
     #

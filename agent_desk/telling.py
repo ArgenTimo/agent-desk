@@ -291,6 +291,12 @@ _STOPPED: tuple[tuple[str, str, str], ...] = (
         "`claude` has to be on PATH for this console to ask anything.",
     ),
     (
+        "could not be started",
+        "The answer engine is on this machine but would not start.",
+        "Either the file is not executable, or something was still writing it at that moment. "
+        "Asking again in a moment settles the second; if it keeps happening, it is the first.",
+    ),
+    (
         "rate limit",
         "The model is rate limited.",
         "It comes back on its own; asking again now costs another refusal.",
@@ -299,6 +305,13 @@ _STOPPED: tuple[tuple[str, str, str], ...] = (
         "usage limit",
         "The account is out of budget.",
         "It comes back when the limit resets.",
+    ),
+    (
+        "the run was killed",
+        "The run was killed before it answered.",
+        "Nothing about the question was wrong — something outside this console ended the run, and "
+        "on a machine running the console beside several agents that is usually the kernel "
+        "reclaiming memory. Asking again is the whole of the fix.",
     ),
     (
         "no answer within",

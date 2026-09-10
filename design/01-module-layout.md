@@ -99,3 +99,24 @@ a substring search matches the comment explaining why a module does *not* do a t
 - **only `tracker/` opens a socket**, and every request it makes is https.
 - **nothing reads a credential file.** The paths are named in `.claude/settings.json`'s deny
   list; the test is the second lock.
+
+## The machine is not an input
+
+`tests/conftest.py` points `AGENT_DESK_CLAUDE_HOME`, `AGENT_DESK_DATA_DIR` and
+`AGENT_DESK_CLAUDE_BIN` at an empty temporary tree before `agent_desk` is imported, so a test that
+renders the board without redirecting anything sees no sessions rather than whatever is running on
+this machine, `web/routes.py`'s module-level `Store(settings.db_path)` opens a scratch file rather
+than the console's live database, and nothing the suite runs can reach the answer engine. Modules
+that want a populated `~/.claude` build their own `Settings` (the `home` fixture in
+`tests/unit/test_board.py`), and an explicit value still wins over the environment.
+
+The third of those is the one that is not a read. `settings.claude_bin` defaults to `claude`, and
+on the machine this suite runs on that is on PATH: `answer/session.py` would exec it and spend
+money, and `dispatch.start` would leave a headless agent running in whatever directory the test
+happened to name. Every test today overrides it, which is a convention rather than a mechanism —
+so the guard makes the default a name in the empty tree that nothing creates, and a test that
+forgets gets `needs_toolchain` or "is not installed here" instead.
+
+It is there because the alternative is a suite that flakes rather than fails: a test asserting
+that a word is *absent* from the board passes until an agent working beside it writes that word
+(`tests/unit/test_the_suite_does_not_read_this_machine.py`).

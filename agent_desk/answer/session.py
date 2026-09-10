@@ -113,6 +113,30 @@ class _Tail:
         return f" — {scrub(last.strip())[:200]}" if last.strip() else ""
 
 
+def _ended(code: int) -> str:
+    """What a finished run's return code says, in the words of the thing that actually happened.
+
+    A negative code is not an exit status. POSIX has a child either exit with a status of its own
+    or be terminated by a signal, and Python encodes the second as `-signum` — so "the run exited
+    -9" is that encoding shown to somebody who did not write it, and there is no such exit status.
+    docs/04-threads-and-blocks.md asks a failed block to say why; a number that is not the kind of
+    number it looks like says less than nothing, because it invites a search for exit code 9.
+
+    It is also the shape a failure here most often takes on this machine rather than a rare one:
+    the console runs beside the agents it is watching, and the kernel reclaiming memory ends a run
+    with SIGKILL. `test_a_run_that_only_reads_files_still_says_something` names it as one of the
+    three shapes that outlive the reader fix (01M1ZEN85PA2NYSV70H59ZZFWN), and a run killed under
+    the suite's own load reads the same way there as it does on a card.
+    """
+    if code >= 0:
+        return f"the run exited {code}"
+    try:
+        named = signal.Signals(-code).name
+    except ValueError:  # pragma: no cover - a signal number this platform does not name
+        named = f"signal {-code}"
+    return f"the run was killed ({named})"
+
+
 def _kill_run(process: asyncio.subprocess.Process) -> None:
     """Kill the run, not merely the process that started it.
 
@@ -378,6 +402,15 @@ async def _run(
             f"needs_toolchain: {binary or settings.claude_bin} is not on PATH, so nothing can "
             "answer a block"
         ) from exc
+    except OSError as exc:
+        # There, and it would not start: not executable, or held open for writing by something at
+        # that instant (ETXTBSY). Either way it said nothing and is not an answer — the engine is
+        # unavailable. Left raw it skipped the second engine, lost its errno, and reached a card as
+        # "PermissionError while running the answer engine" (01M1ZEN85PA2NYSV70H59ZZFWN).
+        raise AnswerFailed(
+            f"the answer engine could not be started: {binary or settings.claude_bin} — "
+            f"{exc.strerror or type(exc).__name__}"
+        ) from exc
 
     said_something = False
     result_text = ""
@@ -457,7 +490,7 @@ async def _run(
 
             code = await process.wait()
             if code != 0 and not said_something:
-                raise AnswerFailed(f"the run exited {code}{complaints.summary()}")
+                raise AnswerFailed(f"{_ended(code)}{complaints.summary()}")
             if not said_something and result_text:
                 # Nothing streamed, but the run summarised itself. Better than an empty answer,
                 # and it is the same text.
@@ -474,7 +507,8 @@ async def _run(
 
 
 # What makes a failure worth trying a second engine for. Every one of these is the engine being
-# *unavailable* — out of budget, not installed, unreachable — and none of them is an answer.
+# *unavailable* — out of budget, not installed, would not start, unreachable — and none of them is
+# an answer.
 #
 # The distinction is the whole of this feature and it is worth stating plainly: a refusal is an
 # answer. It arrives as text, `stream_answer` yields it, nothing raises, and no fallback can
@@ -488,6 +522,7 @@ UNAVAILABLE = (
     "usage limit",
     "quota",
     "needs_toolchain",
+    "could not be started",
     "no answer within",
     "could not reach",
     "connection",
