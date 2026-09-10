@@ -99,3 +99,17 @@ a substring search matches the comment explaining why a module does *not* do a t
 - **only `tracker/` opens a socket**, and every request it makes is https.
 - **nothing reads a credential file.** The paths are named in `.claude/settings.json`'s deny
   list; the test is the second lock.
+
+## The machine is not an input
+
+`tests/conftest.py` points `AGENT_DESK_CLAUDE_HOME` and `AGENT_DESK_DATA_DIR` at an empty
+temporary tree before `agent_desk` is imported, so a test that renders the board without
+redirecting anything sees no sessions rather than whatever is running on this machine, and
+`web/routes.py`'s module-level `Store(settings.db_path)` opens a scratch file rather than the
+console's live database. Modules that want a populated `~/.claude` build their own `Settings`
+(the `home` fixture in `tests/unit/test_board.py`), and an explicit value still wins over the
+environment.
+
+It is there because the alternative is a suite that flakes rather than fails: a test asserting
+that a word is *absent* from the board passes until an agent working beside it writes that word
+(`tests/unit/test_the_suite_does_not_read_this_machine.py`).
