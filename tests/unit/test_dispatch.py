@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shutil
 from collections.abc import AsyncIterator
 
 import pytest
@@ -33,6 +34,15 @@ def _fake_cli(tmp_path: pathlib.Path, script: str) -> pathlib.Path:
     binary.write_text(script)
     binary.chmod(0o755)
     return binary
+
+
+@pytest.mark.unit
+def test_nothing_in_this_suite_can_reach_the_real_cli() -> None:
+    """tests/conftest.py: a test that forgot to fake `dispatch.start` started a real agent at
+    every turn end, told "бери в работу" and nothing else. The CLI the suite sees must be one no
+    PATH resolves — a test that needs a CLI builds its own."""
+    assert shutil.which(dispatch.settings.claude_bin) is None
+    assert not pathlib.Path(dispatch.settings.claude_bin).exists()
 
 
 @pytest.mark.unit
