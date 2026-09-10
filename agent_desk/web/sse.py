@@ -51,6 +51,16 @@ async def board_events() -> AsyncIterator[str]:
     without a *named* event, the page could not put a time on what it is showing.
     """
     previous: dict[str, str] = {}
+    # What the store looked like when these three were last built. The stream has always been
+    # careful about the network — it holds the previous render and pushes only what changed — and
+    # careless about the work: every two seconds the whole conversation was assembled out of the
+    # store, formatted, compared against a byte-identical string and dropped. Measured on a real
+    # console with nobody touching it: 862 KiB and 184 ms, of which 90 ms was template rendering on
+    # this loop, nine per cent of it, for nothing.
+    #
+    # The board is not in this: it is built from the registry, which changes without anybody
+    # writing to the store, and it already goes through a thread.
+    written = ""
     while True:
         pushed = False
         # The groups are read every pass rather than once: a project somebody declares while the
@@ -58,6 +68,12 @@ async def board_events() -> AsyncIterator[str]:
         # board two seconds after the grouping appeared, and the grouping looked broken.
         groups = await routes.store.groups()
         links = await routes.board_links()
+        # Read before anything is built, and after the store reads above rather than before them:
+        # those are reads and move nothing, and taking the stamp last would let a write that landed
+        # during this pass be attributed to it and skipped on the next.
+        stamp = routes.store.written_at()
+        fresh = stamp != written
+        written = stamp
         for name, html in (
             (
                 "board",
@@ -76,11 +92,22 @@ async def board_events() -> AsyncIterator[str]:
                     await routes.board_ours(),
                 ),
             ),
-            ("blocks", await routes.render_blocks()),
-            ("ideas", await routes.render_column()),
-            # What has stopped. Pushed with the rest: a blocker somebody has just cleared should
-            # leave the column without a reload (agent_desk/web/blockers.py).
-            ("blockers", await routes.render_blockers()),
+            # Built only when the store has been written to since the last time they were.
+            # All three derive from it and from nothing else, so an untouched store cannot have
+            # changed any of them — and `written_at` is allowed to say "something happened" when
+            # nothing did (a checkpoint moves those bytes) but never the other way round, which is
+            # the direction that would cost an answer two ticks of delay.
+            *(
+                ()
+                if not fresh
+                else (
+                    ("blocks", await routes.render_blocks()),
+                    ("ideas", await routes.render_column()),
+                    # What has stopped. Pushed with the rest: a blocker somebody has just cleared
+                    # should leave the column without a reload (agent_desk/web/blockers.py).
+                    ("blockers", await routes.render_blockers()),
+                )
+            ),
         ):
             if previous.get(name) != html:
                 previous[name] = html

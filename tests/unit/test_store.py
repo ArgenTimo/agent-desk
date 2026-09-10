@@ -542,3 +542,40 @@ async def test_a_write_lands_while_something_is_reading(store: Store) -> None:
         )
 
     assert len(await store.blocks_in_thread(thread)) == 1
+
+
+@pytest.mark.unit
+async def test_the_store_can_say_whether_anything_has_been_written(tmp_path: pathlib.Path) -> None:
+    """For the one caller that needs to know whether it is worth *building* an answer at all.
+
+    `PRAGMA data_version` is SQLite's own answer to this and it is documented not to change for
+    commits made on the same connection — and this program writes and reads through one pooled
+    engine, so it would miss exactly the writes that matter. This is the filesystem instead, and
+    the write-ahead log is in it because in WAL mode a commit lands there while the database itself
+    goes untouched.
+    """
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    try:
+        quiet = store.written_at()
+
+        assert store.written_at() == quiet, "asking twice reported a write nobody made"
+
+        await store.create_idea(
+            text_="a thought", summary="a thought", source_kind="typed", author="human"
+        )
+
+        assert store.written_at() != quiet, "a write to the store went unnoticed"
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+def test_a_database_that_is_not_there_yet_is_an_answer_and_not_a_crash(
+    tmp_path: pathlib.Path,
+) -> None:
+    """It is asked on a path that may have no file and no write-ahead log beside it — on the way
+    up, and on any machine where this has never run."""
+    store = Store(tmp_path / "nothing" / "agent-desk.db")
+
+    assert store.written_at() == "-|-"

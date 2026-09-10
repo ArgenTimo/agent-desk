@@ -24,6 +24,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs
 
 import structlog
@@ -745,6 +746,20 @@ def render_tail(session_id: str) -> str:
     return env.get_template("_tail.html").render(tail=tail)
 
 
+async def _rendered(name: str, **fields: Any) -> str:
+    """One template, formatted off the event loop.
+
+    Jinja's work is CPU on this process's one thread, and the conversation is ninety milliseconds
+    of it. Held on the loop, that is ninety milliseconds in which nothing else this console does
+    can run — every other request, every other stream, every run reporting a step — which CLAUDE.md
+    names as one of the two async mistakes that hurt most here.
+
+    Only the formatting moves. The store reads that produce `fields` are awaited by the caller in
+    the ordinary way, because they already yield.
+    """
+    return await asyncio.to_thread(env.get_template(name).render, **fields)
+
+
 async def render_blocks() -> str:
     """Every recent block, for the workbench to place the open chat's on the surface.
 
@@ -781,7 +796,8 @@ async def render_blocks() -> str:
         for block_id, idea_ids in (await store.ideas_of_blocks()).items()
     }
     directives = {d.block_id: d for d in await store.directives()}
-    return env.get_template("_blocks.html").render(
+    return await _rendered(
+        "_blocks.html",
         blocks=rows,
         drafted=await store.drafted("ticket"),
         filings={filing.idea_id: filing for filing in await store.filings()},
@@ -907,9 +923,7 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
 async def render_blockers() -> str:
     """The top of the right column: what has stopped (agent_desk/web/blockers.py)."""
     only = await store.setting(FOCUS_KEY)
-    return env.get_template("_blockers.html").render(
-        found=await blockers.blockers(store, only), only=only
-    )
+    return await _rendered("_blockers.html", found=await blockers.blockers(store, only), only=only)
 
 
 UNDO_SAYS = {"drop": "discarded", "done": "marked built", "keep": "kept"}
@@ -964,7 +978,8 @@ async def render_ideas() -> str:
             children[idea.parent_id].append(idea)
         else:
             roots.append(idea)
-    return env.get_template("_ideas.html").render(
+    return await _rendered(
+        "_ideas.html",
         working=await store.ideas_in_flight(),
         roots=_sorted_roots(list(reversed(roots)), how),
         children=children,

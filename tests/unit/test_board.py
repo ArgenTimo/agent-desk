@@ -7,6 +7,7 @@ liveness check of docs/03-session-observation.md running for real rather than be
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -809,3 +810,115 @@ def test_a_finished_agent_says_so_on_the_board_without_wearing_the_flag(home: Ho
 
     assert "finished a turn" in html
     assert "may want you" not in html
+
+
+# --- what the stream does while nothing happens (docs/stories/05) ----------------------------------
+@pytest.mark.unit
+async def test_a_quiet_pass_does_not_build_the_conversation_to_prove_it_is_quiet(
+    home: Home, wired: Store
+) -> None:
+    """Measured on a real console with nobody touching it: 862 KiB of conversation HTML assembled
+    every two seconds, compared against a byte-identical string and dropped.
+
+    The stream has always been careful about the network — it holds the previous render and pushes
+    only what changed — and careless about the work.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    built: list[int] = []
+    real = routes.render_blocks
+
+    async def counted() -> str:
+        built.append(1)
+        return await real()
+
+    events = sse.board_events()
+    try:
+        routes.render_blocks = counted  # type: ignore[assignment]
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1], "the first pass has to build it — there is nothing to compare against"
+
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1], "a pass over an untouched store built the whole conversation again"
+    finally:
+        routes.render_blocks = real  # type: ignore[assignment]
+        await events.aclose()
+
+
+@pytest.mark.unit
+async def test_the_pass_after_a_write_builds_it_again(home: Home, wired: Store) -> None:
+    """The half that matters more. A staleness check that misses a change is worse than no check:
+    an answer shown two ticks late is a console people reload, and reloading is the thing a live
+    stream exists to remove."""
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    built: list[int] = []
+    real = routes.render_blocks
+
+    async def counted() -> str:
+        built.append(1)
+        return await real()
+
+    events = sse.board_events()
+    try:
+        routes.render_blocks = counted  # type: ignore[assignment]
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1]
+
+        await wired.create_idea(
+            text_="something happened",
+            summary="something happened",
+            source_kind="typed",
+            author="human",
+        )
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+
+        assert len(built) == 2, "a write to the store did not reach the next pass"
+    finally:
+        routes.render_blocks = real  # type: ignore[assignment]
+        await events.aclose()
+
+
+@pytest.mark.unit
+async def test_the_board_is_not_gated_on_the_store_because_it_is_not_read_from_it(
+    home: Home, wired: Store
+) -> None:
+    """A session going busy is not a write. If the board waited for one, the surface that exists to
+    show what is running would be the one thing on the page that could not."""
+    source = (Path(routes.__file__).parent / "sse.py").read_text(encoding="utf-8")
+
+    body = source[source.index("async def board_events(") :]
+    gated = body[body.index("if not fresh") : body.index("\n        ):")]
+
+    assert "render_blocks" in gated and "render_column" in gated and "render_blockers" in gated
+    assert "render_board" not in gated, "the board waits for somebody to write to the store"
+
+
+@pytest.mark.unit
+async def test_a_template_is_formatted_off_the_event_loop(wired: Store) -> None:
+    """Ninety milliseconds of Jinja on the loop is ninety milliseconds in which nothing else this
+    console does can run — every other request, every other stream, every run reporting a step."""
+    held: list[float] = []
+
+    async def beat() -> None:
+        last = time.perf_counter()
+        for _ in range(2000):
+            await asyncio.sleep(0)
+            now = time.perf_counter()
+            held.append(now - last)
+            last = now
+
+    ticking = asyncio.create_task(beat())
+    try:
+        await routes.render_blocks()
+    finally:
+        ticking.cancel()
+
+    assert held, "the loop never got a turn at all"
+    assert max(held) < 0.05, (
+        f"the loop was held for {max(held) * 1000:.0f}ms while a template was formatted"
+    )

@@ -1114,6 +1114,41 @@ class Store:
             raise RuntimeError("the store is not open")
         return self._engine
 
+    def written_at(self) -> str:
+        """A fingerprint of this database as the filesystem last saw it.
+
+        For the one caller that needs to know whether it is worth *building* an answer at all. The
+        stream that keeps the console live re-rendered the whole conversation every two seconds —
+        862 KiB, 90 ms of it on the event loop — to compare it against a byte-identical string and
+        throw it away.
+
+        **Why not `PRAGMA data_version`.** SQLite's own answer to this question is documented not
+        to change for commits made on the same connection, and this program writes and reads
+        through one pooled engine. It would miss exactly the writes that matter.
+
+        **Why the write-ahead log and not only the file.** In WAL mode a commit lands in `-wal` and
+        the database itself can go untouched for a long time; a fingerprint of the main file alone
+        would report a busy console as quiet.
+
+        **It is allowed to be wrong in one direction only.** A checkpoint moves these bytes without
+        changing anything anybody renders, and that costs one wasted render. Missing a write would
+        cost an answer arriving two ticks late, which is what makes people reload a page that a
+        live stream exists to stop them reloading. Those are not the same kind of wrong, and this
+        is deliberately the cheap, conservative one: it says "something was written", never "this
+        is what changed".
+        """
+        marks: list[str] = []
+        for where in (self.path, self.path.with_name(self.path.name + "-wal")):
+            try:
+                stat = where.stat()
+            except OSError:
+                # A `-wal` that is not there is an answer, and so is a database that has not been
+                # created yet: both are states this can be asked about and neither is an error.
+                marks.append("-")
+                continue
+            marks.append(f"{stat.st_size}:{stat.st_mtime_ns}")
+        return "|".join(marks)
+
     async def open(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
