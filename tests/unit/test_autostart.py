@@ -632,6 +632,31 @@ def test_the_branch_the_cli_actually_made_is_preferred_over_a_second_guess() -> 
 
 
 @pytest.mark.unit
+async def test_landing_later_reads_the_branch_from_the_job_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Land pressed an hour after `settle` still lands what the CLI made, and a task with no
+    agent or no job file falls back to the derivation rather than to nothing."""
+    task = Task(
+        id="t",
+        repo_key=KEY,
+        cwd="/tmp",
+        title="looking for something to fix in agent-desk",
+        instruction="",
+        source_kind="found",
+        queued_at=0,
+        agent_id="agent2",
+    )
+    recorded = {"agent2": JobEnd(state="done", worktreeBranch="worktree-looking-2")}
+    monkeypatch.setattr(autostart.jobs, "read_job", recorded.get)
+
+    assert await autostart.landing_worktree(task) == "looking-2"
+    derived = dispatch._worktree_name(task.title)
+    assert await autostart.landing_worktree(task.model_copy(update={"agent_id": "gone"})) == derived
+    assert await autostart.landing_worktree(task.model_copy(update={"agent_id": None})) == derived
+
+
+@pytest.mark.unit
 async def test_an_agent_still_working_settles_nothing_even_when_the_registry_forgot_it(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

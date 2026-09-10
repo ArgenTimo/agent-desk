@@ -727,9 +727,8 @@ async def _settle(store: Store, run: Run, card: process.Card, step: RunStep) -> 
     given = allowed.leave_for((await store.card_leaves()).get(card.name))
     made = task.detail or "it finished"
     if "land" in given and task.landed is None:
-        offered = await asyncio.to_thread(
-            land.land, task.cwd, autostart.worktree_of(task), push="push" in given
-        )
+        worktree = await autostart.landing_worktree(task)
+        offered = await asyncio.to_thread(land.land, task.cwd, worktree, push="push" in given)
         await store.task_landed(task.id, offered.detail, landed=offered.landed)
         made = offered.detail
         if not offered.landed:

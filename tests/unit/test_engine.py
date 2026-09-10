@@ -468,6 +468,43 @@ async def test_a_step_allowed_to_land_is_offered_to_the_gate(
 
 
 @pytest.mark.unit
+async def test_a_step_lands_the_worktree_the_cli_numbered_not_the_first_one(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same words, second agent: the CLI made `the-work-2`, and landing `the-work` would merge the
+    first agent's branch under this step's name (docs/adr/0008)."""
+    from agent_desk import land
+    from agent_desk.observe.model import JobEnd
+
+    offered: list[str] = []
+
+    def landing(cwd: str, worktree: str, *, push: bool = True) -> land.Landed:
+        offered.append(worktree)
+        return land.Landed(landed=True, detail="merged", branch="b")
+
+    monkeypatch.setattr(engine.land, "land", landing)
+    monkeypatch.setattr(
+        engine.autostart.jobs,
+        "read_job",
+        lambda short: JobEnd(state="done", worktreeBranch="worktree-the-work-2"),
+    )
+    await desk.set_card_role("idea:one", "action")
+    await desk.set_card_field("idea:one", "do", "the work")
+    await desk.set_card_leave("idea:one", ["work", "land"])
+    run, _ = await engine.begin(desk, names=["idea:one"], repo_key=KEY, cwd=str(tmp_path))
+    assert run is not None
+    await engine.tick(desk)
+
+    (task,) = await desk.tasks()
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent2")
+    await desk.finish_task(task.id)
+    await engine.tick(desk)
+
+    assert offered == ["the-work-2"]
+
+
+@pytest.mark.unit
 async def test_a_step_not_allowed_to_land_is_not_offered_to_the_gate(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
