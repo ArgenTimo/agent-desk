@@ -239,3 +239,41 @@ async def test_answering_it_instead_removes_the_idea_it_should_not_have_made(
     assert left == ["a real one"], "what could not be removed is not reported"
     again = await desk.block(block.id)
     assert again is not None and again.kind == "question"
+
+
+@pytest.mark.unit
+async def test_a_correction_survives_a_message_that_became_several_ideas(
+    desk: Store, tmp_path: pathlib.Path
+) -> None:
+    """The same button, on the shape the splitter actually produces.
+
+    "Add A, B is broken, and we should C" is one message and three ideas, and they hang under it
+    (docs/05-ideas.md). The test above uses two ideas side by side, which is why this went unseen:
+    with a *parent* and a kept child, deleting the parent hit `FOREIGN KEY constraint failed` and
+    the button answered with a 500.
+    """
+    from agent_desk.web import blocks as block_runs
+
+    thread = await desk.create_thread("s")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="idea", input="add A, B is broken", thread_set_by="human"
+    )
+    whole = await inbox.capture(desk, "add A, B is broken", block_id=block.id)
+    kept = await inbox.capture(desk, "B is broken", block_id=block.id, parent_id=whole.id)
+    loose = await inbox.capture(desk, "add A", block_id=block.id, parent_id=whole.id)
+    await desk.set_idea_state(kept.id, "kept")
+
+    async with asyncio.TaskGroup() as group:
+        block_runs.runs.attach(group)
+        try:
+            left = await block_runs.answer_it_instead(desk, block, [])
+        finally:
+            await block_runs.runs.stop_all()
+            block_runs.runs.attach(None)
+
+    assert await desk.idea(whole.id) is None, "the message it was not an idea of is still there"
+    assert await desk.idea(loose.id) is None
+    survived = await desk.idea(kept.id)
+    assert survived is not None, "an idea somebody kept was taken with its parent"
+    assert survived.parent_id is None, "it still points at a parent that is gone"
+    assert left == ["B is broken"]

@@ -1006,3 +1006,69 @@ def test_it_is_offered_only_once_somebody_has_kept_the_idea() -> None:
     around = markup[at : markup.index("{% endif %}", at + 100)]
 
     assert "/tickets" in around
+
+
+# --- what deleting one does to everything pointing at it ------------------------------------------
+@pytest.mark.unit
+async def test_nothing_written_down_is_not_an_idea(desk: Store) -> None:
+    """The asymmetry of 039 is about a bare "билд", which is a note somebody wrote to themselves
+    and costs nobody anything. A row with no words at all is not that: it is a line in the pool its
+    own author cannot recognise, and nine callers guarding it is eight more than the one function
+    that should."""
+    for nothing in ("", "   ", "\n\t\n"):
+        with pytest.raises(ValueError, match="nothing written"):
+            await inbox.capture(desk, nothing)
+
+
+@pytest.mark.unit
+async def test_a_bare_word_from_a_person_is_still_an_idea(desk: Store) -> None:
+    """The other half of the same rule, and the reason the guard above is about emptiness only."""
+    made = await inbox.capture(desk, "билд")
+
+    assert made.summary == "билд"
+
+
+@pytest.mark.unit
+async def test_deleting_an_idea_leaves_its_children_as_ideas_of_their_own(desk: Store) -> None:
+    """A message that turned out to be three thoughts is a parent with children (docs/05-ideas.md),
+    and removing the message must not depend on nobody having kept one of them.
+
+    Found by probing: this raised `FOREIGN KEY constraint failed`, which reached the console as a
+    500 from "this was not an idea — answer it instead".
+    """
+    whole = await inbox.capture(desk, "add A, B is broken, and we should C")
+    kids = [await inbox.capture(desk, part, parent_id=whole.id) for part in ("add A", "fix B")]
+    await desk.set_idea_state(kids[1].id, "kept")
+
+    await desk.delete_idea(whole.id)
+
+    assert await desk.idea(whole.id) is None
+    left = await desk.idea(kids[1].id)
+    assert left is not None, "an idea somebody kept was taken with its parent"
+    assert left.parent_id is None, "it still points at a parent that is gone"
+
+
+@pytest.mark.unit
+async def test_an_idea_that_was_filed_is_not_deleted(desk: Store) -> None:
+    """A filing says an issue exists in somebody else's tracker, and this row is the only record
+    this console has of it. Losing that to a correction is worse than leaving a line in the pool.
+
+    Filing sets the state to `done` two lines later in the route that files, so this is belt as
+    well as braces — but the braces are an ordering in another file.
+    """
+    made = await inbox.capture(desk, "worth filing")
+    await desk.record_filing(idea_id=made.id, tracker="jira", issue_key="AB-1", url="http://x/")
+
+    await desk.delete_idea(made.id)
+
+    assert await desk.idea(made.id) is not None
+
+
+@pytest.mark.unit
+async def test_an_idea_somebody_drafted_is_not_deleted(desk: Store) -> None:
+    made = await inbox.capture(desk, "worth drafting")
+    await desk.create_draft(idea_id=made.id, kind="proposal", body="a proposal")
+
+    await desk.delete_idea(made.id)
+
+    assert await desk.idea(made.id) is not None

@@ -273,3 +273,72 @@ def test_a_headless_entry_beside_a_human_one_leaves_the_board_intact(tmp_path: P
     read = registry.read_registry(pattern=pattern, proc_root=proc)
     assert [s.pid for s in read.sessions] == [human["pid"]]
     assert read.notices == []
+
+
+# --- what a CLI update does to this --------------------------------------------------------------
+@pytest.mark.unit
+def test_a_field_nobody_has_seen_before_does_not_cost_the_session(tmp_path: Path) -> None:
+    """The whole of docs/adr/0004 in one case: «нобody promised these are stable, and a CLI update
+    may change them without warning».
+
+    Adding a field is what an update does most often, and it must cost nothing. A reader strict
+    about extra keys would empty the board on the morning somebody upgraded — every session gone,
+    with no error anybody could act on.
+    """
+    entry = _entry(pid=4242, procStart="777", somethingNobodyHasSeen={"nested": [1, 2]})
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry), proc_root=_proc(tmp_path, 4242, "777")
+    )
+
+    assert [one.session_id for one in read.sessions] == [entry["sessionId"]]
+    assert read.notices == []
+
+
+@pytest.mark.unit
+def test_a_field_this_depends_on_going_missing_is_said_out_loud(tmp_path: Path) -> None:
+    """The other direction, and the opposite treatment. A field this reads and no longer has is a
+    shape that moved, and the honest answer is one loud failure naming it — not a session rendered
+    from half an entry (docs/adr/0004: "one module fails loudly with a message naming what changed
+    — instead of five call sites quietly reading `None`").
+    """
+    short = {key: value for key, value in _entry(pid=4243).items() if key != "cwd"}
+    (tmp_path / "sessions").mkdir(exist_ok=True)
+    (tmp_path / "sessions" / "4243.json").write_text(json.dumps(short))
+
+    read = registry.read_registry(
+        pattern=str(tmp_path / "sessions" / "*.json"),
+        proc_root=_proc(tmp_path, 4243, "777"),
+    )
+
+    assert read.sessions == []
+    assert len(read.notices) == 1
+    assert "cwd" in read.notices[0]
+
+
+@pytest.mark.unit
+def test_a_registry_file_that_is_not_json_says_so_and_costs_only_itself(tmp_path: Path) -> None:
+    """This reads files another program is writing, so catching one half-written is ordinary. The
+    session whose file it is loses its row; every other session keeps theirs."""
+    directory = tmp_path / "sessions"
+    directory.mkdir(exist_ok=True)
+    (directory / "9001.json").write_text("{ half a fi")
+    good = _entry(pid=9002, procStart="777")
+    (directory / "9002.json").write_text(json.dumps(good))
+
+    read = registry.read_registry(
+        pattern=str(directory / "*.json"), proc_root=_proc(tmp_path, 9002, "777")
+    )
+
+    assert [one.session_id for one in read.sessions] == [good["sessionId"]]
+    assert any("9001" in one for one in read.notices)
+
+
+@pytest.mark.unit
+def test_a_directory_that_is_not_there_is_an_empty_board_and_not_a_crash(tmp_path: Path) -> None:
+    """Every machine that has never run `claude` is in this state, and so is every machine on the
+    first second after the console starts."""
+    read = registry.read_registry(
+        pattern=str(tmp_path / "not-here" / "*.json"), proc_root=tmp_path / "proc"
+    )
+
+    assert read.sessions == []

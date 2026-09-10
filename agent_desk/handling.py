@@ -68,6 +68,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent_desk import roles, ties
 
@@ -442,19 +443,27 @@ def read_json(said: str) -> Handling:
     return Handling(
         marked=[
             # A row written before colours existed has no key, and reads back as the ordinary mark.
-            Marked(name=one["name"], why=one["why"], colour=one.get("colour", ""))
-            for one in found.get("marked", [])
+            Marked(
+                name=str(one["name"]),
+                why=str(one.get("why", "")),
+                colour=str(one.get("colour", "")),
+            )
+            for one in _rows(found, "marked", "name")
         ],
         sorted_=[
-            Sorted(side=one["side"], names=list(one["names"]), what=one["what"])
-            for one in found.get("sorted", [])
+            Sorted(
+                side=str(one["side"]),
+                names=[str(name) for name in one.get("names", []) or []],
+                what=str(one.get("what", "")),
+            )
+            for one in _rows(found, "sorted", "side")
         ],
         clear=bool(found.get("clear")),
         # A block written before these existed has neither key, and reads back as asking for
         # nothing — which is what it asked for.
-        folded=[str(one) for one in found.get("folded", [])],
-        opened=[str(one) for one in found.get("opened", [])],
-        taken=[str(one) for one in found.get("taken", [])],
+        folded=_names(found, "folded"),
+        opened=_names(found, "opened"),
+        taken=_names(found, "taken"),
         tidy=bool(found.get("tidy")),
         joined=[
             Joined(
@@ -463,15 +472,42 @@ def read_json(said: str) -> Handling:
                 kind=str(one["kind"]),
                 says=str(one.get("says", "")),
             )
-            for one in found.get("joined", [])
+            for one in _rows(found, "joined", "from", "to", "kind")
         ],
         named=[
-            Named(name=str(one["name"]), label=str(one["label"])) for one in found.get("named", [])
+            Named(name=str(one["name"]), label=str(one.get("label", "")))
+            for one in _rows(found, "named", "name")
         ],
         given=[
-            Given(name=str(one["name"]), role=str(one["role"])) for one in found.get("given", [])
+            Given(name=str(one["name"]), role=str(one["role"]))
+            for one in _rows(found, "given", "name", "role")
         ],
     )
+
+
+# What "not the shape written above" is allowed to look like, and it is allowed to look like
+# anything. This is read while the conversation is being rendered, so one unreadable row must cost
+# that row rather than the column — and the docstring above has promised exactly that since the
+# first version, while the reading underneath it raised `TypeError` on a `marked` that was a string
+# and `KeyError` on a line missing an end.
+def _rows(found: dict[str, Any], key: str, *needs: str) -> list[dict[str, Any]]:
+    """The entries under `key` that are objects carrying every field they are read by."""
+    said = found.get(key)
+    if not isinstance(said, list):
+        return []
+    return [
+        one
+        for one in said
+        if isinstance(one, dict) and all(one.get(name) is not None for name in needs)
+    ]
+
+
+def _names(found: dict[str, Any], key: str) -> list[str]:
+    """A list of card names, and nothing that is not one."""
+    said = found.get(key)
+    if not isinstance(said, list):
+        return []
+    return [str(one) for one in said if isinstance(one, str | int | float)]
 
 
 def as_words(asked: Handling) -> str:

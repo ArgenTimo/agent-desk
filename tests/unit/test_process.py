@@ -189,3 +189,73 @@ def test_a_permission_and_a_step_are_the_same_idea_of_step() -> None:
     ).read_text(encoding="utf-8")
     served = routes[routes.index('"leave": {') :]
     assert "card.role in process.STEPS" in served[: served.index("},")]
+
+
+@pytest.mark.unit
+def test_the_order_does_not_depend_on_the_order_the_lines_were_drawn() -> None:
+    """The tie above is broken by where the cards sit, which is what somebody arranged. The lines
+    must not get a vote — and they are the ones most likely to try.
+
+    `store.card_ties()` hands them back ordered by the names at their ends, which is an ordering by
+    id: arbitrary, and it changes as soon as somebody redraws one. A run whose steps came out in a
+    different order because a line was rubbed out and drawn again would be a drawing nobody can
+    compare against yesterday's (agent_desk/spread.py reads runs step by step).
+    """
+    import itertools
+
+    cards = [
+        card("a:1", "action"),
+        card("a:2", "action"),
+        card("a:3", "action"),
+        card("a:4", "action"),
+    ]
+    lines = [line("a:1", "a:2"), line("a:2", "a:4"), line("a:1", "a:3"), line("a:3", "a:4")]
+
+    orders = {
+        process.order(cards, list(shuffled)).steps for shuffled in itertools.permutations(lines)
+    }
+
+    assert orders == {("a:1", "a:2", "a:3", "a:4")}
+
+
+@pytest.mark.unit
+def test_the_same_drawing_gives_the_same_order_every_time() -> None:
+    """Said out loud because the failure it guards is invisible: a `set` somewhere in here would
+    pass every test that asks once."""
+    cards = [card("a:1", "action"), card("a:2", "action"), card("a:3", "action")]
+    lines = [line("a:1", "a:2"), line("a:1", "a:3")]
+
+    once = process.order(cards, lines).steps
+
+    assert all(process.order(cards, lines).steps == once for _ in range(50))
+
+
+@pytest.mark.unit
+def test_a_line_to_a_card_that_is_not_here_orders_what_is() -> None:
+    """A bench is a surface somebody arranges, and a line is a statement about two cards rather
+    than about a surface: dragging one end off leaves the line pointing at something not here."""
+    said = process.order([card("a:1", "action")], [line("a:1", "a:gone")])
+
+    assert said.steps == ("a:1",)
+    assert said.tangled == ()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("shape", ["deep", "wide"])
+def test_a_drawing_far_larger_than_anybody_draws_still_orders(shape: str) -> None:
+    """Three hundred steps is not a drawing anybody makes by hand — it is what "put a saved
+    workbench back" twice, or a template used on a full bench, can produce. A recursive walk would
+    meet the interpreter's limit at a few hundred and take the console down with it.
+    """
+    many = 300
+    cards = [card(f"a:{n}", "action") for n in range(many)]
+    lines = (
+        [line(f"a:{n}", f"a:{n + 1}") for n in range(many - 1)]
+        if shape == "deep"
+        else [line("a:0", f"a:{n}") for n in range(1, many)]
+    )
+
+    said = process.order(cards, lines)
+
+    assert len(said.steps) == many
+    assert said.tangled == ()

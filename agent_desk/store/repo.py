@@ -2191,10 +2191,22 @@ class Store:
         summary, a draft — is not deleted by this program; `dropped` is the state for that
         (docs/05-ideas.md).
 
-        Unanswered suggestions naming it go first, on either side of the pair (069). They are this
-        console's own working note about a row that is about to stop existing, so nobody loses
-        anything — but the foreign key is real, and without this the delete raises and the
-        splitter's own placeholder stays in the list for ever.
+        Three things point at an idea, and each is dealt with on its own terms.
+
+        **Unanswered suggestions go.** They are this console's own working note about a row that is
+        about to stop existing, so nobody loses anything (069).
+
+        **Children are orphaned.** An idea whose parent is being removed is a top-level idea, which
+        is what it now is. This is the reachable one: "this was not an idea — answer it instead"
+        deletes every idea a message produced, and a message that turned out to be three thoughts
+        has a parent with children. Any child somebody has *kept* survives on purpose — and the
+        parent delete then hit the foreign key and answered the button with a 500.
+
+        **A filed idea is refused**, like a drafted one. A filing says an issue exists in somebody
+        else's tracker, and the row here is the only record this console has of that; losing it to
+        a correction is worse than leaving a line in the pool. Filing sets the state to `done` two
+        lines later in the route that files, so this is belt as well as braces — but the braces are
+        an ordering in another file, and this is the function that must not raise.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
@@ -2202,9 +2214,14 @@ class Store:
                 {"id": idea_id},
             )
             await conn.execute(
+                text("UPDATE idea SET parent_id = NULL WHERE parent_id = :id"),
+                {"id": idea_id},
+            )
+            await conn.execute(
                 text(
                     "DELETE FROM idea WHERE id = :id AND state = 'new' "
-                    "AND NOT EXISTS (SELECT 1 FROM draft WHERE draft.idea_id = idea.id)"
+                    "AND NOT EXISTS (SELECT 1 FROM draft WHERE draft.idea_id = idea.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM filing WHERE filing.idea_id = idea.id)"
                 ),
                 {"id": idea_id},
             )
