@@ -253,7 +253,17 @@ async def test_both_loops_stop_when_the_cancel_lands_inside_a_pass(
 
         patch(slow)  # type: ignore[operator]
         running = asyncio.create_task(loop(desk))  # type: ignore[operator]
-        await inside.wait()
+        # Bounded: a bare wait turns any future change that stops a loop reaching its pass into a
+        # suite that stops for ever with no name on it, and a gate that says nothing is worse than
+        # one that says the wrong thing.
+        try:
+            async with asyncio.timeout(5):
+                await inside.wait()
+        except TimeoutError:  # pragma: no cover — reaching it is the failure
+            running.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await running
+            pytest.fail("a loop never reached its pass")
         running.cancel()
 
         _, pending = await asyncio.wait({running}, timeout=1)

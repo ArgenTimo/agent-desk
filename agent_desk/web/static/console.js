@@ -1090,7 +1090,7 @@ async function showTheDiagram() {
   const into = panel?.querySelector('.asif-body');
   if (!into || !panel) return;
   panel.hidden = false;
-  panel.querySelector('header').textContent = `as a diagram · ${said.cards} cards`;
+  panel.querySelector('.asif-title').textContent = `as a diagram · ${said.cards} cards`;
   into.replaceChildren();
   const text = document.createElement('textarea');
   text.className = 'diagram-text';
@@ -1124,7 +1124,7 @@ async function showAsItWas() {
   panel.hidden = false;
   into.replaceChildren();
   if (!moments.length) {
-    panel.querySelector('header').textContent = 'as it was';
+    panel.querySelector('.asif-title').textContent = 'as it was';
     const empty = document.createElement('p');
     empty.className = 'empty small';
     empty.textContent = 'This workbench has not changed since it was opened.';
@@ -1155,7 +1155,7 @@ async function showAsItWas() {
       said.textContent = 'It could not be read.';
       return;
     }
-    panel.querySelector('header').textContent =
+    panel.querySelector('.asif-title').textContent =
       step >= moments.length ? 'as it is now' : `as it was ${whenWas(moments[step])}`;
     said.replaceChildren();
     if (!was.known) {
@@ -2436,7 +2436,7 @@ function gripOf(target) {
 // could be entered and not left. One list, read by all three gestures — pan, band, and the click
 // that clears the choice — because "is this the bench itself" is one question, and three copies of
 // the answer is how the next control added here goes wrong the same way.
-const FURNITURE = '.pin, .ring, #tools, #bench-map, #run-bar, #bench-menu, #chosen-bar';
+const FURNITURE = '.pin, .ring, #tools, #bench-map, #run-bar, #bench-menu, #card-menu, #chosen-bar';
 
 function onBareBench(target) {
   return !target.closest(FURNITURE);
@@ -4727,6 +4727,14 @@ async function sketchFromWords() {
   }
 }
 
+// However it was opened, it closes the same way. Delegated on the panel rather than bound to the
+// button, because the button is the only thing in that header this program does not rewrite.
+document.getElementById('asif-panel')?.addEventListener('click', (event) => {
+  if (event.target.closest('[data-asif-off]')) {
+    document.getElementById('asif-panel').hidden = true;
+  }
+});
+
 document.getElementById('words-panel')?.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) return;
@@ -5132,52 +5140,42 @@ applyView();
 // with it, and this is a window people paste into all day — so a right-click on a card, a field
 // or a button is left entirely alone.
 const benchMenu = document.getElementById('bench-menu');
+// A card's menu is built for the card, so it has an element of its own. Sharing one with the
+// bench's menu meant building this destroyed that: `replaceChildren` took out every item authored
+// in board.html, and ten controls had no way in from the moment anybody first right-clicked.
+const cardMenu = document.getElementById('card-menu');
 
-function showMenu(x, y) {
-  if (!benchMenu) return;
+async function showMenu(menu, x, y) {
+  if (!menu) return;
   // Rebuilt every time it opens: a list kept in step by hand is a list that offers a workbench
   // somebody deleted.
+  //
+  // Awaited, and that is not tidiness: two of the three fetch, so measuring the menu before they
+  // answered measured a menu missing its two longest lists — and the clamp that keeps it inside
+  // the window was then computed against a height it grew past a moment later. It opened at the
+  // pointer and ran off the bottom of the screen, which is the thing the clamp exists to stop.
   showBenches();
-  showTemplates();
-  showShelf();
-  benchMenu.hidden = false;
+  await Promise.all([showTemplates(), showShelf()]);
+  menu.hidden = false;
   const frame = document.getElementById('bench-canvas').getBoundingClientRect();
   // Kept inside the window: a menu opened near the bottom edge that runs off it is a menu with
   // half its items unreachable.
-  const width = benchMenu.offsetWidth;
-  const height = benchMenu.offsetHeight;
-  benchMenu.style.left = `${Math.min(x, frame.right - width - 8)}px`;
-  benchMenu.style.top = `${Math.min(y, window.innerHeight - height - 8)}px`;
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  menu.style.left = `${Math.min(x, frame.right - width - 8)}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
 }
 
 function hideMenu() {
   if (benchMenu) benchMenu.hidden = true;
+  if (cardMenu) cardMenu.hidden = true;
 }
 
-const BACKGROUND_MENU = [
-  { what: 'Add a link…', add: 'link' },
-  { what: 'Add a file…', add: 'file' },
-  { what: 'Add a folder…', add: 'folder' },
-  { what: 'Add a note', add: 'note' },
-  { what: 'Lay it out again', add: 'tidy', apart: true },
-  { what: 'Fit everything on screen', add: 'fit' },
-  { what: 'Take everything off', add: 'clear' },
-];
-
+// The bench's own menu is the one written in board.html: what a workbench can be asked for is a
+// list of controls, and a list of controls belongs where the rest of the page is written. It used
+// to be rebuilt here from seven items in this file, which deleted the other ten.
 function showBackgroundMenu(x, y) {
-  if (!benchMenu) return;
-  benchMenu.replaceChildren();
-  for (const item of BACKGROUND_MENU) {
-    const row = document.createElement('li');
-    if (item.apart) row.className = 'sep';
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.add = item.add;
-    button.textContent = item.what;
-    row.appendChild(button);
-    benchMenu.appendChild(row);
-  }
-  showMenu(x, y);
+  return showMenu(benchMenu, x, y);
 }
 
 document.getElementById('bench-canvas')?.addEventListener('contextmenu', (event) => {
@@ -5191,7 +5189,7 @@ document.getElementById('bench-canvas')?.addEventListener('contextmenu', (event)
 });
 
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('#bench-menu')) hideMenu();
+  if (!event.target.closest('#bench-menu, #card-menu')) hideMenu();
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') hideMenu();
@@ -5482,8 +5480,8 @@ async function finishJoin(name) {
 }
 
 function showCardMenu(pin, x, y) {
-  if (!benchMenu) return;
-  benchMenu.replaceChildren();
+  if (!cardMenu) return;
+  cardMenu.replaceChildren();
   for (const item of cardMenuFor(pin)) {
     const row = document.createElement('li');
     const button = document.createElement('button');
@@ -5494,9 +5492,9 @@ function showCardMenu(pin, x, y) {
       item.act();
     });
     row.appendChild(button);
-    benchMenu.appendChild(row);
+    cardMenu.appendChild(row);
   }
-  showMenu(x, y);
+  return showMenu(cardMenu, x, y);
 }
 
 // A folder from this machine, as a card. It is a path somebody types, and it stays a path: what
@@ -6540,7 +6538,7 @@ function closePalette() {
 // the console can do", so a list that can be incomplete answers the wrong question. These are the
 // two places a control that acts on the workbench lives, so anything added to either is in the
 // palette on the same commit, without being mentioned twice.
-const ACTION_BARS = ['.bench-head', '#bench-menu'];
+const ACTION_BARS = ['.bench-head', '#bench-menu', '#card-menu'];
 
 function everyAction() {
   const seen = new Set();

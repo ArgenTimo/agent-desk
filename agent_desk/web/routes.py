@@ -3555,9 +3555,10 @@ async def labelling() -> HTMLResponse:
         env.get_template("labelling.html").render(
             blocks=blocks,
             kinds=LABELS,
-            # A block a person already corrected is a person having already said, so it arrives
-            # answered rather than asking them to do the same work twice.
-            labels={**grading.already_said(blocks), **await store.labels()},
+            # Only what a person actually said. A block whose *thread* somebody set by hand says
+            # nothing about its kind, and prefilling from it made the screen agree with the
+            # classifier on every row it had not been asked about (072).
+            labels=await store.labels(),
             score=await _last_scores(),
         )
     )
@@ -3587,7 +3588,7 @@ async def measure_the_classifier() -> HTMLResponse:
     anybody watching them go by.
     """
     blocks = [one for one in await store.blocks(limit=400) if one.input.strip()]
-    rows = grading.from_history(blocks, {**grading.already_said(blocks), **await store.labels()})
+    rows = grading.from_history(blocks, await store.labels())
     score = await grading.measure(rows)
     if score.of:
         await store.record_grade(

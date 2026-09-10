@@ -1005,6 +1005,13 @@ button.menu-item {
   background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius);
 }
 .arming .dim { flex: 1 0 100%; }
+/* The three switches read as one list, so their buttons start in the same place. Two of them have
+   a rate in front of the button and the third has none — nothing this console does to a session
+   happens at a rate — and without this the odd one out sits half an inch to the left of the other
+   two, which reads as a different kind of control rather than the same kind with one fewer
+   number (076). */
+.arming button:first-of-type { margin-left: calc(6ch + 22px); }
+.arming input[type="number"] + button { margin-left: 0; }
 .settings footer { margin-top: 8px; }
 
 .new-project { display: flex; gap: 6px; padding: 8px 2px 0; }
@@ -1857,6 +1864,11 @@ svg.map.bench .node.done rect { stroke-dasharray: 3 3; }
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: 0 8px 30px rgb(0 0 0 / 28%);
+  /* The bench's own menu is twenty items on a full workbench, which is taller than a short window.
+     Its own comment in console.js already says what that costs — "a menu with half its items
+     unreachable" — and clamping where it opens is only half the answer. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .bench-menu li { margin: 0; }
 .bench-menu li.sep { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }

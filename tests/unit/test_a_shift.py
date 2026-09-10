@@ -228,3 +228,17 @@ async def test_what_an_agent_spent_is_said_in_words_and_not_as_a_zero(desk: Stor
     said = await standing.where_it_stopped(desk)
 
     assert "not zero, not measured" in said
+
+
+@pytest.mark.parametrize(
+    ("many", "expected"),
+    [(1, "1 idea is open"), (2, "2 ideas are open"), (0, "0 ideas are open")],
+)
+async def test_it_counts_ideas_in_english(desk: Store, many: int, expected: str) -> None:
+    """Found in the browser: it said "1 idea are open". A line somebody reads first thing after a
+    compaction is a line that has to read."""
+    await desk.note_in_the_shift("note", "started")
+    for at in range(many):
+        await desk.create_idea(text_=f"idea {at}", summary=f"idea {at}", source_kind="typed")
+
+    assert expected in await standing.where_it_stopped(desk)

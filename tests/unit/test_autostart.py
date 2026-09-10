@@ -859,7 +859,18 @@ async def test_the_loop_stops_when_the_cancel_lands_inside_a_tick(
     monkeypatch.setattr(autostart, "tick", slow)
 
     running = asyncio.create_task(autostart.run(desk))
-    await in_a_tick.wait()
+    # Bounded, like the one above it. A bare wait here turns any future change that stops `run`
+    # reaching its tick into a suite that stops for ever with no name on it — which is what
+    # happened the day the board read was put in the loop: seventeen minutes of a gate saying
+    # nothing at all, and the test that could have named it in one line was the one hanging.
+    try:
+        async with asyncio.timeout(5):
+            await in_a_tick.wait()
+    except TimeoutError:  # pragma: no cover — reaching it is the failure
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
+        pytest.fail("the loop never reached a tick")
     running.cancel()
     _, pending = await asyncio.wait({running}, timeout=1)
 

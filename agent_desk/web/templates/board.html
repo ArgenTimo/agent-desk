@@ -194,8 +194,16 @@
       {# The dry run. Its own panel rather than a section of the process one: that panel answers
          "what is this drawing", and this answers "what would happen", which is a different
          question somebody asks at a different moment. #}
+      {# Four things open this panel and each writes its own title into the header: the dry run,
+         the diagram, a saved workbench and the slider that shows the bench as it was. Its only way
+         out was the chip labelled "as if", which is the name of one of the four — somebody who
+         opened it from the menu had a panel over a third of the workbench and nothing on it that
+         said how to put it away. Its sibling has had a × since it was written. #}
       <aside id="asif-panel" class="process-panel" hidden aria-label="what a run would do">
-        <header>as if it ran</header>
+        <header><span class="asif-title">as if it ran</span>
+          <span class="spacer"></span>
+          <button type="button" data-asif-off aria-label="close">×</button>
+        </header>
         <div class="asif-body"></div>
       </aside>
       <aside id="process-panel" class="process-panel" hidden aria-label="the workbench read as a process">
@@ -244,9 +252,18 @@
       <button type="button" data-many="none" title="stop choosing them (Escape)">done</button>
     </div>
 
+    {# Two menus and two elements, which is not tidiness. One element meant the card menu built
+       itself with `replaceChildren` into the bench's own — and every item authored below was
+       deleted by the first right-click anybody made. Ten controls were served, hidden, and gone:
+       "Add a step", "Add a button…", "Add a check…", "Save this as a process…", "As a diagram…",
+       "As it was…", "Save this workbench…" and the two lists of saved things. From the source they
+       all looked wired; nothing but opening the console in a browser could show it. #}
+    <menu id="card-menu" class="bench-menu" hidden></menu>
+
     <menu id="bench-menu" class="bench-menu" hidden>
       <li><button type="button" data-add="link">Add a link…</button></li>
       <li><button type="button" data-add="file">Add a file…</button></li>
+      <li><button type="button" data-add="folder">Add a folder…</button></li>
       <li><button type="button" data-add="note">Add a note</button></li>
       <li class="sep"><button type="button" data-add="tidy">Lay it out again</button></li>
       <li><button type="button" data-add="fit">Fit everything on screen</button></li>

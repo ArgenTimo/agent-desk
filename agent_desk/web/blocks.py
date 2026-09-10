@@ -2061,6 +2061,11 @@ async def take_it_as(store: Store, block: Block, rows: Sequence[BoardRow], kind:
     if kind not in ("question", "idea", "instruction", "master"):
         return
     await store.set_block_kind(block.id, kind)  # type: ignore[arg-type]
+    # A person pressing one of the kinds is a person saying what this line really was, which is the
+    # one thing a measurement of the classifier can be scored against (072). Written here because
+    # this is where it is said — and because nothing else in this program can tell a kind somebody
+    # chose from one the classifier decided.
+    await store.label_block(block.id, kind)  # type: ignore[arg-type]
     await store.set_block_running(block.id)
     if kind == "idea":
         await record_idea(store, block, rows)

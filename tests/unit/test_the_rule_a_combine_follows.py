@@ -340,12 +340,17 @@ async def test_the_shelf_says_what_each_one_was_made_of(desk: Store) -> None:
 
 
 def test_the_shelf_is_rebuilt_every_time_the_menu_opens() -> None:
-    """A list kept in step by hand is a list that offers a card somebody took off an hour ago."""
+    """A list kept in step by hand is a list that offers a card somebody took off an hour ago.
+
+    Asserted as "it is called" rather than as `showShelf();` with its semicolon: two of the three
+    lists fetch, and the day they had to be awaited this failed over the punctuation while the rule
+    it is about had not moved.
+    """
     source = _code()
     start = source.index("function showMenu(")
     body = source[start : source.index("\n}\n", start)]
 
-    assert "showShelf();" in body
+    assert "showShelf()" in body
 
 
 # --- and it has to be cheap, because it happens often -------------------------------------------

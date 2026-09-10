@@ -307,10 +307,17 @@ async def test_the_ceiling_is_only_named_once_it_is_worth_thinking_about(
 @pytest.mark.unit
 async def test_a_board_rendered_without_the_number_shows_no_number(desk: Store) -> None:
     """Rather than a confident `$0.00`, which is a different claim: one says "nobody read it" and
-    the other says "nothing was spent"."""
+    the other says "nothing was spent".
+
+    Asserted against the element the counter is, not against the word "today" anywhere on the
+    board. A board carries the last line of every live session on the machine, so the substring
+    version failed the moment somebody's conversation used the word — which it did, in a gate on
+    2026-09-09, over a sentence in this very session's transcript. The same failure this repository
+    keeps meeting: a substring check tripping over text it does not own.
+    """
     from agent_desk.web import routes
 
-    assert "today" not in routes.render_board()
+    assert 'class="tree-count spend' not in routes.render_board()
 
 
 # --- and it cannot take an answer down with it ---------------------------------------------------

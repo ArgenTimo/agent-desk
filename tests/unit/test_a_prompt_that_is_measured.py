@@ -134,21 +134,69 @@ async def test_a_line_nobody_labelled_is_not_in_the_set(desk: Store) -> None:
     assert grading.from_history([block], await desk.labels()) == []
 
 
-async def test_a_block_a_person_already_corrected_is_a_label_nobody_types_twice(
-    desk: Store,
-) -> None:
-    """ "Разметка берётся из уже исправленных блоков: `thread_set_by='human'` — это готовые метки."""
+async def test_a_thread_somebody_set_by_hand_is_not_a_label(desk: Store) -> None:
+    """ "Разметка берётся из уже исправленных блоков" — and the correction that counts is the one
+    about the *kind*.
+
+    Setting a block's thread by hand says what it was about; the kind on it is still whatever the
+    classifier decided. Taking that as ground truth made most of the set the classifier's own
+    answers, and a measurement over those scores near a hundred per cent and means nothing. Visible
+    the moment the screen was opened in a browser: every prefilled row read "the console said
+    question · you said question".
+    """
     thread = await desk.create_thread("a chat")
-    corrected = await desk.create_block(
+    moved = await desk.create_block(
         thread_id=thread.id, kind="idea", input="a thought", thread_set_by="human"
     )
-    untouched = await desk.create_block(
-        thread_id=thread.id, kind="idea", input="another", thread_set_by="classifier"
+
+    assert await desk.labels() == {}
+    assert grading.from_history([moved], await desk.labels()) == []
+
+
+async def test_pressing_one_of_the_kinds_is_a_label(desk: Store) -> None:
+    """It is a person saying what this line really was, in the one place they say it — and nothing
+    else in this program can tell a kind somebody chose from one the classifier decided."""
+    from agent_desk.web import blocks as block_runs
+
+    thread = await desk.create_thread("a chat")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="бери в работу", thread_set_by="classifier"
     )
 
-    said = grading.already_said([corrected, untouched])
+    await block_runs.take_it_as(desk, block, [], "master")
 
-    assert said == {corrected.id: "idea"}
+    assert await desk.labels() == {block.id: "master"}
+
+
+async def test_the_same_line_twice_is_one_row(desk: Store) -> None:
+    """Half of what this console has been asked is the sentence a combine writes for itself, and
+    fifty rows of one sentence is not a set — it is one measurement with a large number beside it.
+    Found by looking at the screen: eleven of the first fourteen rows were the same words."""
+    thread = await desk.create_thread("a chat")
+    made = []
+    for said in ("Make one thing out of these two.", "Make one thing out of these two.", "x y z"):
+        one = await desk.create_block(
+            thread_id=thread.id, kind="question", input=said, thread_set_by="human"
+        )
+        await desk.label_block(one.id, "question")
+        made.append(one)
+
+    rows = grading.from_history(made, await desk.labels())
+
+    assert [row.said for row in rows] == ["Make one thing out of these two.", "x y z"]
+
+
+async def test_the_same_line_with_different_spacing_is_still_one_row(desk: Store) -> None:
+    thread = await desk.create_thread("a chat")
+    made = []
+    for said in ("do  the   thing", "do the thing"):
+        one = await desk.create_block(
+            thread_id=thread.id, kind="question", input=said, thread_set_by="human"
+        )
+        await desk.label_block(one.id, "question")
+        made.append(one)
+
+    assert len(grading.from_history(made, await desk.labels())) == 1
 
 
 async def test_an_empty_line_is_left_out_rather_than_counted_as_an_easy_row(desk: Store) -> None:

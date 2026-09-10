@@ -84,7 +84,8 @@ async def where_it_stopped(store: Store) -> str:
 
     open_ = [one for one in await store.ideas() if one.state in ("new", "kept", "promoted")]
     said.append(
-        f"{len(open_)} idea{'' if len(open_) == 1 else 's'} are open."
+        f"{len(open_)} idea{'' if len(open_) == 1 else 's'} "
+        f"{'is' if len(open_) == 1 else 'are'} open."
         + (f" The newest is {open_[0].id}: {open_[0].summary}" if open_ else "")
     )
 
