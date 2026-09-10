@@ -5000,6 +5000,11 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
 
     Reached from the refusal panel: nothing can be said to a session that is already running, and
     this is the thing that *can* be done with the same words instead of ending at a wall.
+
+    The agent is briefed the way every other door briefs one: what the message was about, what the
+    project wrote down for anybody working in it, and the servers it lends. The words typed at a
+    refusal are usually short — "бери в работу" — and on their own they reach a cold session as an
+    instruction with no object.
     """
     form = await _form(request)
     text_ = form.get("text", "").strip()
@@ -5012,15 +5017,20 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
+    directive = await store.directive(directive_id) if directive_id else None
+    block = await store.block(directive.block_id) if directive is not None else None
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(
             text_,
             project=row.session.project,
             branch=(row.tail.git_branch if row.tail else "") or "",
+            notes=[block.context] if block is not None and block.context else [],
+            **await autostart.about(store, row.project_key),  # type: ignore[arg-type]
         ),
         cwd=row.session.cwd,
         name=text_[:40],
+        servers=await store.mcp_servers(row.project_key),
     )
     if result.started and directive_id:
         await store.mark_directive_dispatched(directive_id, result.agent_id)
