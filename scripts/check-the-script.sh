@@ -23,3 +23,9 @@ fi
 
 node --check "$script"
 echo "console.js parses."
+
+# And does it get to the end of itself? A file that parses can still stop dead on its first line of
+# execution — a `const` read before its declaration, a helper called before it exists — and the page
+# then looks exactly the way it looks after a syntax error: everything renders, nothing works. That
+# one was a line away from shipping and `node --check` was green on it.
+node "$here/scripts/the-script-runs.js" "$script"
