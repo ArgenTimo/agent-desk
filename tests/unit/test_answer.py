@@ -192,6 +192,60 @@ async def test_a_line_this_program_cannot_read_does_not_lose_the_answer(
     assert answered.answer == "still answered"
 
 
+# --- a pipe that breaks after the answer arrived --------------------------------------------------
+# Fed by hand rather than by a subprocess, and that is the point of them: a reset that lands
+# between two lines of a real run is a two-microsecond window nobody can aim at, which is exactly
+# how it reached the suite as a test that failed one run in an unknown number and passed the next
+# (01M1ZEN85PA2NYSV70H59ZZFWN). Here the window is the whole test.
+@pytest.mark.unit
+async def test_a_reset_after_the_answer_does_not_take_the_answer_with_it() -> None:
+    """`StreamReader` raises a stored exception ahead of its own buffer, so every complete line
+    still sitting there goes with the reset unless it is asked for again."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\nthree\n")
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    assert [line async for line in session._lines(stream)] == [b"one\n", b"two\n", b"three\n"]
+
+
+@pytest.mark.unit
+async def test_iterating_the_reader_itself_is_what_loses_them() -> None:
+    """The reason `_lines` exists, pinned — so that a future reader who thinks the helper is
+    ceremony can see what taking it out costs, and so this stops being true loudly if a later
+    asyncio changes it."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\nthree\n")
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    got: list[bytes] = []
+    with pytest.raises(ConnectionResetError):
+        async for line in stream:
+            got.append(line)
+
+    assert got == [], "asyncio started returning the buffer, and `_lines` can go"
+
+
+@pytest.mark.unit
+async def test_a_stream_that_simply_ends_is_unchanged() -> None:
+    """The ordinary path, and the reason only the reset needed saying: `feed_eof` leaves the
+    buffer alone, and a reader that was never given an exception is iterated exactly as before."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\n")
+    stream.feed_eof()
+
+    assert [line async for line in session._lines(stream)] == [b"one\n", b"two\n"]
+
+
+@pytest.mark.unit
+async def test_a_reset_before_anything_arrived_is_still_the_end_of_the_stream() -> None:
+    """Nothing to rescue is not an error either — the run said nothing, and the callers above
+    already have a sentence for a run that said nothing."""
+    stream = asyncio.StreamReader()
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    assert [line async for line in session._lines(stream)] == []
+
+
 @pytest.mark.unit
 async def test_a_run_that_only_summarises_itself_still_answers(
     fake_claude: pathlib.Path, store: Store

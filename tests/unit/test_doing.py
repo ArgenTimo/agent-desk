@@ -103,10 +103,39 @@ async def test_a_run_that_only_reads_files_still_says_something(
     said = [c async for c in session.stream_answer("q", on_step=steps.append)]
 
     # Both assertions carry what actually came back. This test failed once inside `make coverage`
-    # on 2026-09-07 and has not been seen again in several hundred runs since — in isolation, under
-    # CPU load, and in the full suite. A bare `assert` on the next occurrence would say only that it
-    # went, and which of the two goes is the first thing worth knowing
-    # (01M1ZEN85PA2NYSV70H59ZZFWN).
+    # on 2026-09-07 and has not been seen again — a further thousand runs since, under coverage,
+    # with a fresh event loop each time and under CPU load, and three whole suites. A bare `assert`
+    # on the next occurrence would say only that it went, and which of the two goes is the first
+    # thing worth knowing (01M1ZEN85PA2NYSV70H59ZZFWN).
+    #
+    # One mechanism that could have produced it has since been closed rather than caught: a reset
+    # on the run's stdout discarded every line the reader was still holding, which arrives here as
+    # an empty `steps`, an empty `said`, or both. See `session._lines` and the tests beside
+    # `test_a_reset_after_the_answer_does_not_take_the_answer_with_it`. That it was *this* failure
+    # is not known — the failure was never captured — and on Linux it may not even be reachable:
+    # reading a pipe whose writers have closed returns EOF, and `ECONNRESET` is a socket's error.
+    # So this note stays until a failure is captured, and three shapes outlive the fix. They are
+    # distinguishable, which is the point of writing them down — the shape says which one it was
+    # without needing a second occurrence:
+    #
+    #   - `OSError: [Errno 26] Text file busy` — **at the `stream_answer` call above, and not at
+    #     either assertion.** This test writes `fake`, chmods it and execs it, and a fork in another
+    #     thread between the write and the exec is the classic shape for ETXTBSY. Not theoretical
+    #     here: measured at 7 in 1500 execs with four threads forking beside them.
+    #     `create_subprocess_exec` raises it and `_run` catches only `FileNotFoundError` there, so
+    #     it never reaches the assertions at all. What makes it a poor fit for the one failure seen
+    #     is the other end of the sum — only a fork *off the main thread* can overlap a write the
+    #     main thread is doing, and the suite has a handful of those per run, against the tens of
+    #     thousands it took to land seven hits.
+    #   - `AnswerFailed: the run exited -9` — also at the `stream_answer` call. The child killed
+    #     before it printed, under the load of a machine running a live console and several agents
+    #     beside the suite.
+    #   - an empty `steps` or an empty `said` — the first or second assertion, and the only shape
+    #     the closed mechanism above would have produced.
+    #
+    # One thing the idea's own title gets wrong, since it is the reason this reads as
+    # unreproducible rather than as rare: "about one run in three" is not a measured rate. There is
+    # exactly one observation, and everything since is consistent with something far rarer.
     assert steps == ["reading store/repo.py"], f"steps={steps!r} said={said!r}"
     assert said == ["done"], f"the note about the run leaked into its answer: said={said!r}"
 

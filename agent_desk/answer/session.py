@@ -306,6 +306,39 @@ class Tally:
 tally = Tally()
 
 
+async def _lines(stream: asyncio.StreamReader) -> AsyncIterator[bytes]:
+    """Every line the run printed — including the ones the stream is still holding when its pipe
+    breaks under it.
+
+    A `StreamReader` raises a stored exception *ahead of* its own buffer: `readuntil` checks
+    `self._exception` before it looks for a separator, so a reset that arrives after the answer
+    does takes the answer with it. Measured, and it is not a near miss — three complete lines fed
+    in, `set_exception`, and iterating the reader yields **none** of them. The end of a stream
+    behaves the other way round: `feed_eof` leaves the buffer alone and every line still comes out,
+    which is why only this one case needs saying.
+
+    So the reset is turned back into the end of a stream, which is what it actually is: the pipe is
+    gone, the transport has already reported it, and nothing further can be fed. What was in the
+    buffer is what the run said, and it is an answer.
+    """
+    try:
+        async for raw in stream:
+            yield raw
+    except ConnectionResetError:
+        # `set_exception(None)` is how a reader is told to stop raising; typeshed says a reader is
+        # only ever given a real exception, which is true of the callers it was written for.
+        #
+        # It is only safe with nothing waiting on the stream: `set_exception` hands its argument
+        # to a pending waiter, and `Future.set_exception(None)` is a `TypeError`. Here there is
+        # none — the exception that brought us into this branch cleared the waiter on its way out
+        # — and the line matters because it is the condition a later refactor could take away
+        # without noticing. Reading this stream from two places at once is what would do it.
+        stream.set_exception(None)  # type: ignore[arg-type]
+        stream.feed_eof()
+        async for raw in stream:
+            yield raw
+
+
 async def _run(
     prompt: str,
     *,
@@ -375,52 +408,52 @@ async def _run(
         async with asyncio.timeout(settings.answer_timeout_seconds):
             # A run that exits the moment it has finished printing can close the pipe while it is
             # still being read, and asyncio raises `ConnectionResetError` out of the middle of the
-            # loop. Everything already read is still good — the answer is *in* those lines — so
-            # this is the end of the stream rather than a failure, and treating it as one threw
-            # away an answer that had arrived. Caught here rather than left to `OSError` above,
-            # because that path marks the block failed and loses what was said.
-            with contextlib.suppress(ConnectionResetError):
-                async for raw in stdout:
-                    line = raw.decode(errors="replace").strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        # The CLI's own format, and it is not a contract either (docs/adr/0004). A
-                        # line this program cannot read is skipped rather than raised on: the run may
-                        # still answer, and an unreadable line is not evidence that it will not.
-                        continue
-                    if not isinstance(event, dict):
-                        continue
+            # loop. That is the end of the stream rather than a failure, and treating it as one
+            # threw away an answer that had arrived — so it is handled here rather than left to
+            # the `OSError` branch above, which marks the block failed and loses what was said.
+            #
+            # Suppressing it was not enough, and the difference is the whole of this: the lines
+            # the reader was still holding go with the exception unless they are asked for again.
+            # `_lines` asks.
+            async for raw in _lines(stdout):
+                line = raw.decode(errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    # The CLI's own format, and it is not a contract either (docs/adr/0004). A
+                    # line this program cannot read is skipped rather than raised on: the run may
+                    # still answer, and an unreadable line is not evidence that it will not.
+                    continue
+                if not isinstance(event, dict):
+                    continue
 
-                    kind = event.get("type")
-                    if kind == "assistant":
-                        # What it is doing, before what it has said: a turn that only used a tool has
-                        # no text in it, and it is exactly those turns that make the silence.
-                        if on_step is not None and (step := _step_of(event)):
-                            on_step(step)
-                        text = _text_of(event)
-                        if text:
-                            said_something = True
-                            yield text
-                    elif kind == "result":
-                        # What it cost, as the run itself reported it — before the error check, because
-                        # a run that failed after spending money still spent it. Read defensively: the
-                        # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
-                        # cannot be read is recorded as nothing rather than as a guess.
-                        with contextlib.suppress(TypeError, ValueError):
-                            spent = float(event.get("total_cost_usd") or 0)
-                            await tally.note(spent)
-                            # And to whoever asked, so a step can say what it cost rather than only
-                            # the day's total being able to (058-what-a-step-cost.sql).
-                            if on_cost is not None:
-                                on_cost(spent)
-                        if event.get("is_error"):
-                            raise AnswerFailed(
-                                str(event.get("subtype") or "the run reported an error")
-                            )
-                        result_text = str(event.get("result") or "")
+                kind = event.get("type")
+                if kind == "assistant":
+                    # What it is doing, before what it has said: a turn that only used a tool has
+                    # no text in it, and it is exactly those turns that make the silence.
+                    if on_step is not None and (step := _step_of(event)):
+                        on_step(step)
+                    text = _text_of(event)
+                    if text:
+                        said_something = True
+                        yield text
+                elif kind == "result":
+                    # What it cost, as the run itself reported it — before the error check, because
+                    # a run that failed after spending money still spent it. Read defensively: the
+                    # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
+                    # cannot be read is recorded as nothing rather than as a guess.
+                    with contextlib.suppress(TypeError, ValueError):
+                        spent = float(event.get("total_cost_usd") or 0)
+                        await tally.note(spent)
+                        # And to whoever asked, so a step can say what it cost rather than only
+                        # the day's total being able to (058-what-a-step-cost.sql).
+                        if on_cost is not None:
+                            on_cost(spent)
+                    if event.get("is_error"):
+                        raise AnswerFailed(str(event.get("subtype") or "the run reported an error"))
+                    result_text = str(event.get("result") or "")
 
             code = await process.wait()
             if code != 0 and not said_something:
