@@ -1192,17 +1192,40 @@ class Store:
                 )
 
     async def _recover_interrupted(self) -> None:
-        """A block that was running when the process died comes back `failed`, never `answered`.
+        """A block that did not finish comes back `failed`, never `answered`, and says which way.
 
         A restart that silently promoted an unfinished block would produce an empty answer that
-        looks complete (design/02-data-model.md, "Crash behaviour"). A `queued` block is left
-        queued: it never started, and nothing about it is lost by running it now.
+        looks complete (design/02-data-model.md, "Crash behaviour").
+
+        **Both unfinished states, not just one.** A block is created `queued` and the same request
+        starts the run that moves it on; a process that dies in that window leaves it queued, and
+        nothing anywhere reads a queued block afterwards. This used to leave it alone, reasoning
+        that "nothing about it is lost by running it now" — which was true and described something
+        no code does. One in the author's own store sat that way for forty-five hours: on the page,
+        in a state that reads as *about to happen*, with somebody waiting for it.
+
+        The two reasons are kept apart because they are different facts and lead to different
+        decisions. `interrupted` means an answer was being written and part of it may be true;
+        `never started` means the question was never asked and re-asking costs exactly what asking
+        it the first time would have. `telling.stopped` says each of them in words, and a settled
+        block already carries the one press that acts on it.
+
+        Startup-only, and that is the whole of the licence this takes. "Nothing is running it" is
+        not something the store can see while the console is up — that would be an inference from
+        silence — but "this process has just started and did not queue that" is a fact.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "UPDATE block SET state = 'failed', error = 'interrupted', finished_at = :t "
                     "WHERE state = 'running'"
+                ),
+                {"t": _now_ms()},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = 'failed', error = 'never started', finished_at = :t "
+                    "WHERE state = 'queued'"
                 ),
                 {"t": _now_ms()},
             )

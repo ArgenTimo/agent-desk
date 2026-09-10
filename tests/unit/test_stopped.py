@@ -154,3 +154,38 @@ def test_a_dispatched_message_is_marked_before_the_block_says_answered() -> None
     assert starting.index("mark_directive_dispatched") < starting.index('"On it —'), (
         "the block is settled before the message beside it is marked"
     )
+
+
+@pytest.mark.unit
+def test_a_question_that_never_started_says_so_and_says_what_it_costs() -> None:
+    """One in the author's own store sat in `queued` for forty-five hours — on the page, in a state
+    that reads as *about to happen*, with nothing anywhere that would ever read it.
+
+    The two unfinished states lead to different decisions, which is why they are two sentences.
+    "Nothing was spent" is the fact that makes the decision easy, and it is a fact rather than a
+    reassurance: the run never reached the model.
+    """
+    what, act = telling.stopped("never started")
+
+    assert what == "This question was never asked."
+    assert "nothing was spent" in act.lower()
+    assert "asking again" in act.lower()
+
+
+@pytest.mark.unit
+def test_an_answer_cut_off_halfway_says_that_instead() -> None:
+    """It kept the runner's own word — `interrupted` — and offered no next step, which reads as
+    "this console does not know what to suggest". It does know: none of a half-written answer is
+    kept, so asking again is safe."""
+    what, act = telling.stopped("interrupted")
+
+    assert what != "interrupted", "the runner's word is shown to a person unchanged"
+    assert "stopped while this was being answered" in what
+    assert "safe" in act.lower()
+
+
+@pytest.mark.unit
+def test_the_two_ways_a_run_can_be_cut_short_are_never_the_same_sentence() -> None:
+    """A page that said one thing about both would be telling somebody an answer may exist when
+    none was ever attempted, or that nothing was spent when something was."""
+    assert telling.stopped("never started") != telling.stopped("interrupted")

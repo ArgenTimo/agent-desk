@@ -128,11 +128,17 @@ async def test_a_failed_block_says_why_and_stays(store: Store) -> None:
 
 
 @pytest.mark.unit
-async def test_a_block_that_was_running_when_the_process_died_comes_back_failed(
+async def test_a_block_that_did_not_finish_comes_back_failed_and_says_which_way(
     tmp_path: pathlib.Path,
 ) -> None:
     """Never `answered`: an empty answer that looks complete is the worst of both
-    (design/02-data-model.md, "Crash behaviour")."""
+    (design/02-data-model.md, "Crash behaviour").
+
+    Both unfinished states, and the two reasons kept apart because they are different facts.
+    `interrupted` means an answer was being written and part of it may be true; `never started`
+    means the question was never asked, so re-asking costs what asking it the first time would
+    have. `telling.stopped` says each in words and a settled block carries the press that acts.
+    """
     path = tmp_path / "agent-desk.db"
     store = Store(path)
     await store.open()
@@ -153,8 +159,17 @@ async def test_a_block_that_was_running_when_the_process_died_comes_back_failed(
     assert after.state == "failed"
     assert after.error == "interrupted"
     assert after.answer is None
-    # A queued block never started; nothing about it is lost by leaving it queued.
-    assert (await reopened.block(queued.id)).state == "queued"  # type: ignore[union-attr]
+    # And the one that never started, said as the other thing that it is. This used to be left
+    # queued, on the reasoning that nothing is lost by running it now — which was true and
+    # described something no code does. One in the author's own store sat that way for forty-five
+    # hours: on the page, in a state that reads as *about to happen*, with somebody waiting.
+    never = await reopened.block(queued.id)
+    assert never is not None
+    assert never.state == "failed"
+    assert never.error == "never started", (
+        "the two are the same word, so the page cannot say which of them happened"
+    )
+    assert never.answer is None
     await reopened.close()
 
 

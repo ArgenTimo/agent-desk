@@ -301,6 +301,17 @@ _STOPPED: tuple[tuple[str, str, str], ...] = (
         "It comes back when the limit resets.",
     ),
     (
+        "never started",
+        "This question was never asked.",
+        "The console stopped before it reached it — nothing was spent, and asking again costs "
+        "exactly what asking it the first time would have.",
+    ),
+    (
+        "interrupted",
+        "The console stopped while this was being answered.",
+        "Part of an answer may have been written and none of it was kept. Asking again is safe.",
+    ),
+    (
         "no answer within",
         "The run took longer than it is allowed to.",
         "AGENT_DESK_ANSWER_TIMEOUT_SECONDS gives it longer; a question about a whole repository "
