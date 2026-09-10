@@ -39,6 +39,7 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | [0009](adr/0009-a-session-that-is-not-allowed-to-idle.md) | a switched-on session is kept working, and every bound is a test |
 | [0010](adr/0010-reading-a-tracker-back.md) | somebody else's board is quoted, never decided about |
 | [0011](adr/0011-the-workbench-is-a-constructor.md) | the workbench builds things: typed cards, typed lines, an engine that queues |
+| [0012](adr/0012-the-one-irreversible-thing.md) | this console may close a session, and only with all four conditions true |
 
 ## Keeping this map honest
 

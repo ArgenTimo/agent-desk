@@ -504,7 +504,7 @@ async def test_the_loop_survives_a_tick_that_raises(
     # test guessing how long that takes.
     went_round_twice = asyncio.Event()
 
-    async def explodes(store: Store, live: set[str] | None = None) -> None:
+    async def explodes(store: Store, live: set[str] | None = None, **rest: object) -> None:
         calls.append(1)
         if len(calls) >= 2:
             went_round_twice.set()

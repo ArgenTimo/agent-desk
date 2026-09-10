@@ -265,6 +265,30 @@
     </span>
   </form>
 
+  {# The third switch, and the one that had to be argued rather than assumed (076). «Закрытие
+     сессии выбрасывает то, что она не закоммитила. Это единственное необратимое действие во всей
+     консоли.» So it says what it will do, and what it will not do, before it is pressed. #}
+  <form class="arming" method="post" action="/tidy-sessions"
+        hx-post="/tidy-sessions" hx-target="#message">
+    <input type="hidden" name="key" value="{{ key }}">
+    <input type="hidden" name="tidying" value="{{ 'no' if arming.tidying else 'yes' }}">
+    <button type="submit" class="{{ '' if arming.tidying else 'send' }}">
+      {{ "Stop closing sessions that lost the canary" if arming.tidying
+         else "Close sessions that lost the canary" }}
+    </button>
+    <span class="small dim">
+      {% if arming.tidying %}
+      On. A session in this project is closed only when all four are true: it has stopped signing,
+      it is idle, it has been idle for half an hour, and `git status` in its checkout is clean.
+      A checkout that cannot be read counts as not clean. Nothing that has uncommitted work is
+      touched.
+      {% else %}
+      Off. A session that has stopped signing is flagged, and closing one stays something you do
+      in the terminal that has it. This is the only irreversible thing this console can do.
+      {% endif %}
+    </span>
+  </form>
+
   {# The half of the connector list an agent can actually call (074). «Возможность подключить MCP
      сервер.» Every agent this console starts in this project is given these, through a config file
      under `data_dir` — never a `.mcp.json` in somebody's checkout, which is the write CLAUDE.md's

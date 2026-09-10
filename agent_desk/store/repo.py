@@ -533,10 +533,18 @@ class Autostart(BaseModel):
     # Where this project is on disk, recorded by the panel that pressed the switch: an exploration
     # is the first task in a project and has none to inherit a directory from.
     cwd: str | None = None
+    # The third thing a project may be allowed to do on its own (076): close a session whose canary
+    # is lost, once it is idle and its checkout is clean. Off, like the other two, and for a
+    # sharper reason — closing a session is the one irreversible act in this console.
+    tidying_at: int | None = None
 
     @property
     def armed(self) -> bool:
         return self.armed_at is not None
+
+    @property
+    def tidying(self) -> bool:
+        return self.tidying_at is not None
 
     @property
     def exploring(self) -> bool:
@@ -1663,7 +1671,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day, cwd FROM autostart WHERE repo_key = :repo_key"
+                    "exploring_at, per_day, cwd, tidying_at FROM autostart WHERE repo_key = :repo_key"
                 ),
                 {"repo_key": repo_key},
             )
@@ -1675,7 +1683,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day, cwd FROM autostart "
+                    "exploring_at, per_day, cwd, tidying_at FROM autostart "
                     "WHERE armed_at IS NOT NULL OR exploring_at IS NOT NULL"
                 )
             )
@@ -1823,6 +1831,43 @@ class Store:
                     "per_day": max(1, min(per_day, 12)),
                     "cwd": cwd or None,
                 },
+            )
+
+    async def tidying_projects(self) -> list[Autostart]:
+        """Projects switched on to close a session whose canary is lost (076).
+
+        Its own reader, and not a filter over `armed_projects`: a project switched on only for this
+        is not armed for anything else, and returning it from there put it through the whole of the
+        loop — the queue, the tracker, the exploration. The switches are three permissions and the
+        readers have to be three as well.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
+                    "exploring_at, per_day, cwd, tidying_at FROM autostart "
+                    "WHERE tidying_at IS NOT NULL"
+                )
+            )
+            return [Autostart(**row._mapping) for row in rows]
+
+    async def tidy_sessions(self, repo_key: str, *, on: bool, cwd: str = "") -> None:
+        """Switch tidying on or off for one project (076).
+
+        Its own switch, beside arming and exploring, because it is its own permission: "close a
+        session that has stopped signing" is a different thing to allow from "start what I queued",
+        and the difference matters more here than anywhere else — this is the one irreversible act
+        in the console.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
+                    "disarmed_why, tidying_at, cwd) VALUES (:repo_key, NULL, 2, 0, "
+                    "NULL, :t, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
+                    "tidying_at = :t, cwd = COALESCE(:cwd, autostart.cwd)"
+                ),
+                {"repo_key": repo_key, "t": _now_ms() if on else None, "cwd": cwd or None},
             )
 
     async def explored_since(self, repo_key: str, since_ms: int) -> int:

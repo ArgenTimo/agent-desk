@@ -1904,6 +1904,34 @@ async def remove_project_link(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
+@router.post("/tidy-sessions", response_class=HTMLResponse)
+async def switch_tidying(request: Request) -> Response:
+    """Let this project close a session whose canary is lost, or stop letting it (076).
+
+    «Закрытие сессии выбрасывает то, что она не закоммитила. Это единственное необратимое действие
+    во всей консоли, и решение о нём должно приниматься с открытыми глазами, а не заодно с
+    кнопкой.» So it is its own switch, off by default, on the project's own settings, and the panel
+    says what it will do before it is pressed.
+    """
+    form = await _form(request)
+    key = form.get("key", "").strip()
+    where = next(
+        (
+            one.instances[0].path
+            for one in shape(
+                (await asyncio.to_thread(board))[0],
+                await store.groups(),
+                await store.seen_projects(),
+            )
+            if one.key == key and one.instances
+        ),
+        "",
+    )
+    await store.tidy_sessions(key, on=form.get("tidying", "") == "yes", cwd=where)
+    panel = await render_project(key)
+    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+
+
 @router.post("/mcp-servers", response_class=HTMLResponse)
 async def add_mcp_server(request: Request) -> Response:
     """Attach an MCP server to a project (074).

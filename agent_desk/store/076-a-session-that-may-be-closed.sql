@@ -1,0 +1,33 @@
+-- The switch that lets this console close a session whose canary is lost.
+--
+-- «Закрывать сессию с потерянной канарейкой автоматически — со своим переключателем и проверкой.»
+--
+-- The first half of that idea is built: a session that has stopped signing says so, and offers to
+-- start a fresh one in the same project. Nothing is closed and nothing is thrown away.
+--
+-- This is the second half, and it was left apart on purpose. «Закрытие сессии выбрасывает то, что
+-- она не закоммитила. Это единственное необратимое действие во всей консоли, и решение о нём должно
+-- приниматься с открытыми глазами, а не заодно с кнопкой.»
+--
+-- ## Three things, and none of them is optional
+--
+-- **A switch per project.** Like everything that acts unattended (docs/adr/0008), and off.
+-- The whole decision, with what the alternatives would have cost, is docs/adr/0012. A
+-- console that closed sessions on a machine nobody armed would be the failure that document exists
+-- to prevent, wearing a canary as an excuse.
+--
+-- **A reading, first.** `git status` in the session's own checkout, which is a read and therefore
+-- allowed (CLAUDE.md, rule two). Anything uncommitted and it is not closed — the reading is the
+-- whole safety argument, and a closure that skipped it once would be the one that lost work.
+--
+-- **An order.** Idle first, and idle for long enough that "let it finish what it is on" is real
+-- time rather than a race with a status field. A session mid-turn is a session with something in
+-- flight, and this waits.
+--
+-- ## Why a third column and not a third table
+--
+-- It is the third thing one project is allowed to do on its own, beside starting queued work and
+-- going looking for some (037, 0008). A table of its own would be a second place to ask "may this
+-- project act", and the day the two disagree is the day somebody reads the wrong one.
+
+ALTER TABLE autostart ADD COLUMN tidying_at INTEGER;

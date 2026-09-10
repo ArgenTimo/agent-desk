@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import structlog
 
 from agent_desk import dispatch, land
+from agent_desk import tidying as tidying_
 from agent_desk.observe import jobs, registry
-from agent_desk.observe.model import JobEnd
+from agent_desk.observe.model import JobEnd, lost_the_canary, now_ms
 from agent_desk.store.repo import Autostart, BenchCard, Pull, Store, Task
 from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
@@ -280,6 +282,79 @@ async def _back_where_it_started(store: Store, task: Task) -> None:
     )
 
 
+def _stopped_signing(row: object, name: str) -> bool:
+    """Whether the last thing this session said was unsigned (023-canary.sql).
+
+    The same reading the board renders, written here rather than imported from the routes: this is
+    a loop, and a loop that imported a web module would be the console's own dependency arrow
+    pointing backwards (docs/02-architecture.md).
+    """
+    tail = getattr(row, "tail", None)
+    last = getattr(tail, "last_entry", None) if tail else None
+    if last is None or last.role != "assistant" or not last.text:
+        return False
+    return lost_the_canary(last.text, name)
+
+
+async def tidy_lost_canaries(store: Store, rows: Sequence[object] | None) -> list[str]:
+    """Close the sessions a switched-on project has said may be closed (076).
+
+    «Закрывать сессию с потерянной канарейкой автоматически — со своим переключателем и проверкой.»
+
+    Three readings before anything happens, and `agent_desk/tidying.py` holds the order: the switch,
+    the canary, the status, the checkout. This function is the part that reads a disk and calls the
+    door — the decision is over there, where it can be tested without a machine.
+
+    «Закрытие сессии выбрасывает то, что она не закоммитила.» So the `git status` is not a nicety:
+    it is the whole safety argument, and a pass that skipped it once would be the one that lost
+    somebody's work. A checkout that cannot be read at all counts as not clean.
+
+    Never raises: this is one line of a tick that has other things to do.
+    """
+    tidying = {one.repo_key for one in await store.tidying_projects()}
+    if not tidying:
+        # The ordinary case on every console: no switch, no reading, no thread.
+        return []
+    if rows is None:
+        # Nobody read the board, so nothing is known about any session — and not knowing is a
+        # reason not to close something (docs/adr/0012).
+        return []
+    canaries = await store.canaries()
+    now = now_ms()
+    closed: list[str] = []
+    for row in rows:
+        session = getattr(row, "session", None)
+        if session is None or getattr(row, "project_key", "") not in tidying:
+            continue
+        short = session.session_id.split("-")[0]
+        name = canaries.get(short, "")
+        if not name:
+            # Not a session this console started and told to sign. An unsigned reply from anybody
+            # else's session means nothing at all (023-canary.sql), and closing one on the strength
+            # of it would be closing a stranger's work.
+            continue
+        clean, why = await asyncio.to_thread(land.nothing_uncommitted, session.cwd)
+        may = tidying_.may_close(
+            armed=True,
+            canary_lost=_stopped_signing(row, name),
+            status=session.status,
+            clean=clean,
+            idle_for_ms=max(0, now - session.status_updated_at),
+        )
+        if not may.yes:
+            log.debug("tidy.left", session=short, why=may.why or why)
+            continue
+        done = await asyncio.to_thread(dispatch.stop, short)
+        log.info(
+            "tidy.closed" if done.started else "tidy.would_not",
+            session=short,
+            why=may.why if done.started else done.detail,
+        )
+        if done.started:
+            closed.append(short)
+    return closed
+
+
 async def _destination(store: Store, repo_key: str) -> jira.Destination | None:
     """Where this project's tracker is, if it has one somebody named a credential for.
 
@@ -515,17 +590,39 @@ async def _explore(store: Store, arming: Autostart) -> Task | None:
     return task
 
 
-async def tick(store: Store, live: set[str] | None = None) -> Task | None:
-    """One pass: settle what has finished, then start at most one thing that may start."""
+async def tick(
+    store: Store, live: set[str] | None = None, rows: Sequence[object] | None = None
+) -> Task | None:
+    """One pass: settle what has finished, then start at most one thing that may start.
+
+    `rows` is the board as it stands, for the one thing here that is about sessions rather than
+    about tasks. `None` is the ordinary case and means "read it if it is needed" — which is only
+    where a project has been switched on for tidying, because reading the board is a registry read
+    and a transcript tail per session (docs/adr/0012). A caller that has already read it passes it
+    in; a test passes what it wants the board to be.
+    """
     armed = await store.armed_projects()
     started = await store.tasks()
-    if not armed and not any(task.started_at and not task.finished_at for task in started):
+    # The third switch is asked about here rather than further down, because it is one of the three
+    # reasons a tick has anything to do at all — and a tick that returned before reaching it would
+    # be a switch somebody pressed that does nothing (076).
+    tidying = await store.tidying_projects()
+    nothing_going = not any(task.started_at and not task.finished_at for task in started)
+    if not armed and not tidying and nothing_going:
         # The ordinary case on most consoles, and it costs nothing: no registry read, no thread.
         return None
     if live is None:
         live = await asyncio.to_thread(live_agents)
 
     await settle(store, live)
+    # Sessions a switched-on project has said may be closed (076). After settling, because a
+    # session that has just finished a task is one whose checkout has just changed.
+    #
+    # The board is read here rather than by the loop above, so that `run` stays one call: a loop
+    # that did work of its own before the tick is a loop a test cannot stand in for, and standing
+    # in for it is how the cancellation rule above is tested at all.
+    if tidying:
+        await tidy_lost_canaries(store, rows if rows is not None else await _the_board(store))
     # Anything somebody said was cleared, checked against what is actually true now. Before
     # starting work, because a blocker that has gone may be the reason something can start.
     await check_claims(store)
@@ -574,3 +671,25 @@ async def run(store: Store) -> None:
         except Exception:
             log.exception("autostart.tick_failed")
         await asyncio.sleep(TICK_SECONDS)
+
+
+async def _the_board(store: Store) -> Sequence[object] | None:
+    """The sessions as they stand, for the one thing a tick does that is about sessions.
+
+    Only where a project has been switched on for it: this is a registry read and a transcript tail
+    per session, and a console where nobody pressed that switch should pay nothing for it.
+
+    Read here rather than inside the tick, so a test can hand a tick the board it wants without a
+    registry on the machine — and a read that fails is a tick that tidies nothing, which is the safe
+    direction (docs/adr/0012).
+    """
+    if not await store.tidying_projects():
+        return None
+    from agent_desk.web import routes
+
+    try:
+        rows, _ = await asyncio.to_thread(routes.board)
+    except Exception:
+        log.exception("autostart.board_unreadable")
+        return None
+    return rows

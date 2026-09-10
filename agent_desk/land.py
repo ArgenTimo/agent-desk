@@ -101,6 +101,25 @@ def _theirs(status: str) -> bool:
     return any(".claude/worktrees/" not in line for line in lines)
 
 
+def nothing_uncommitted(cwd: str) -> tuple[bool, str]:
+    """Whether a checkout has any of somebody's own uncommitted work in it.
+
+    A reading, which is what CLAUDE.md's second rule allows and this is the whole safety argument
+    for `agent_desk/tidying.py`: nothing is closed until this says the work is safe. The same
+    `_theirs` the gate uses, so "clean" means the same thing to the thing that merges and the thing
+    that closes a session.
+
+    A checkout that cannot be read at all answers `False`, and that is the safe direction: not
+    knowing is a reason not to close something.
+    """
+    code, said = _git(cwd, "status", "--porcelain")
+    if code != 0:
+        return False, f"its checkout could not be read: {said[:120]}"
+    if _theirs(said):
+        return False, "it still has uncommitted work in its checkout"
+    return True, "its checkout is clean"
+
+
 def _make(where: Path, target: str, timeout: float) -> tuple[int, str]:
     try:
         done = subprocess.run(  # noqa: S603 — a list, no shell, and the binary is resolved above
