@@ -70,8 +70,20 @@ def branch_for(worktree_name: str) -> str:
 
 
 def worktree_for(cwd: str, worktree_name: str) -> Path:
-    """Where that branch is checked out: inside the repository, under `.claude/worktrees/`."""
-    return Path(cwd) / ".claude" / "worktrees" / worktree_name
+    """Where that branch is checked out: under the main checkout's `.claude/worktrees/`.
+
+    Not under `cwd` when `cwd` is a second checkout. The CLI makes every worktree of a repository
+    under its main checkout: the agents dispatched from `agent-desk-shift` on 2026-09-10 all landed
+    in `agent-desk/.claude/worktrees/`, and looking under `agent-desk-shift` would have called each
+    of their worktrees gone.
+
+    `--git-common-dir` names the main checkout's `.git` from any of its worktrees. Whatever git
+    cannot answer for — not a checkout, a bare repository, no git at all — is read at `cwd`.
+    """
+    code, common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    main = Path(common)
+    root = main.parent if code == 0 and main.name == ".git" else Path(cwd)
+    return root / ".claude" / "worktrees" / worktree_name
 
 
 def _git(cwd: Path | str, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> tuple[int, str]:
