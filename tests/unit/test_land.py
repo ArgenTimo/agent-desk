@@ -154,6 +154,30 @@ def test_a_directory_that_is_not_a_checkout_is_refused(tmp_path: pathlib.Path) -
 
 
 @pytest.mark.unit
+def test_a_task_dispatched_from_a_second_checkout_is_found_at_the_main_one(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The CLI makes every worktree under the main checkout, whichever checkout started it.
+
+    A second checkout beside the main one (`agent-desk-shift` beside `agent-desk`) has no
+    `.claude/worktrees/` of its own, and reading there called a finished agent's worktree gone.
+    """
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    second = tmp_path / "project-shift"
+    _run(root, "git", "worktree", "add", "-q", "-b", "shift", str(second))
+
+    agents_own = root / ".claude" / "worktrees" / "found-project"
+    for start in (root, second, agents_own):
+        assert land.worktree_for(str(start), "found-project") == agents_own, start
+
+    result = land.land(str(second), "found-project", push=False)
+
+    assert result.landed, result.detail
+    assert (second / "fixed.md").exists()
+
+
+@pytest.mark.unit
 def test_the_branch_name_is_the_cli_s_convention_written_down_once() -> None:
     """Checked against a real `claude --bg --worktree` session: the branch is `worktree-<name>`
     and the checkout is `<repo>/.claude/worktrees/<name>`. When that changes, one line moves."""
