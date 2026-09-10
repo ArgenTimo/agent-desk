@@ -1726,6 +1726,70 @@ async def _secrets_for(store: Store, repo_keys: Sequence[str]) -> dict[str, str]
     return found
 
 
+# The words people use to say "start on *that*". With a card dropped in they name the work as
+# clearly as naming a session (agent_desk/answer/classify.py); with nothing in front of them they
+# name nothing, and an agent started on them has only a guess to go on. Not hypothetical: a bare
+# "бери в работу" started agent after agent here, each left to decide what it had been pointed at,
+# and most of them settled on the same open idea at once (pull requests #5 and #6). Matched as the
+# whole line, so a go-ahead with the work after it ("бери в работу парсер реестра") is not this.
+GO_AHEAD = frozenset(
+    {
+        "бери в работу",
+        "берите в работу",
+        "возьми в работу",
+        "взять в работу",
+        "делай",
+        "сделай",
+        "сделай это",
+        "сделай сейчас",
+        "сделай это сейчас",
+        "реализуй",
+        "реализуем",
+        "запусти",
+        "запускай",
+        "поехали",
+        "take it on",
+        "take it",
+        "do it",
+        "do it now",
+        "go",
+        "go ahead",
+        "start",
+        "start it",
+    }
+)
+_POLITE = frozenset({"пожалуйста", "please"})
+
+
+def names_nothing(said: str) -> bool:
+    """Is this line a go-ahead and nothing else — a pointer with nothing at the end of it?"""
+    words = [word for word in re.sub(r"[^\w\s]", " ", said.lower()).split() if word not in _POLITE]
+    return " ".join(words) in GO_AHEAD
+
+
+async def _go_ahead_at_nothing(store: Store, block: Block) -> bool:
+    """A go-ahead that names no work, sent with nothing in front of it: say so, and start nothing.
+
+    docs/adr/0006 starts no work where nothing says *where*; this is the same guess one step on,
+    where nothing says *what*. Anything the person put in front of the line — an idea, a card, an
+    earlier answer, text written on the workbench — is what the words point at, and then they are
+    an instruction like any other.
+    """
+    if not names_nothing(block.input):
+        return False
+    # Re-read: what the line was sent with is written after the block object was made.
+    written = await store.block(block.id)
+    if (written is not None and written.context) or (await store.ideas_of_blocks()).get(block.id):
+        return False
+    await store.finish_block(
+        block.id,
+        "Understood, but I could not tell what to take on: nothing was on the workbench, and the "
+        "line names no work. Drop its card onto the workbench and say it again, or say what should "
+        "be done, and I will get it started.",
+    )
+    return True
+
+
 async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A request about this console: "tidy up the ideas", "put a button here".
 
@@ -1738,6 +1802,8 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
     """
     await store.set_block_kind(block.id, "master")
     await store.set_block_running(block.id)
+    if await _go_ahead_at_nothing(store, block):
+        return
 
     here = own_checkout()
     if (here / ".git").exists():
@@ -1776,6 +1842,8 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
     """
     await store.set_block_kind(block.id, "instruction")
     await store.set_block_running(block.id)
+    if await _go_ahead_at_nothing(store, block):
+        return
 
     pinned = [idea for idea in await _pinned_ideas(store, block) if idea.state != "done"]
     if pinned:
