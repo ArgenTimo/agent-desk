@@ -5011,6 +5011,19 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
             started=False, detail="that session is not on the board any more"
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+    # A go-ahead was meant for the session that proposed the work, and it is the one thing a new
+    # agent cannot be handed: "бери в работу" sent from here started a dozen agents on 2026-09-10,
+    # each left to guess what "it" was. The same rule the workbench keeps
+    # (docs/04-threads-and-blocks.md), at the other door that reaches dispatch. A directive is the
+    # exception, because the workbench already applied that rule before it wrote one.
+    if not directive_id and block_runs.names_nothing(text_):
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail=f"«{text_}» names no work, and a new agent knows nothing of what that session "
+            "proposed — it would only have a guess at what to take on. Say what should be done, "
+            "or wait until the session is idle and send it the go-ahead.",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
     result = await asyncio.to_thread(
         dispatch.start,

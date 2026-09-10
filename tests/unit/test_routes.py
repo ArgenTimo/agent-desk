@@ -326,6 +326,62 @@ async def test_dispatching_from_a_session_card_starts_work_in_its_checkout(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("said", ["бери в работу", "Take it on, please."])
+async def test_a_go_ahead_from_a_refusal_starts_no_agent(
+    home: Home, desk: Store, started: list[dict[str, str]], said: str
+) -> None:
+    """docs/04-threads-and-blocks.md: a go-ahead and nothing else names no work, so it starts
+    nothing. The refusal panel is where such a line lands — it was meant for the session that
+    proposed the work — and a new agent started on it only has a guess at what "it" was."""
+    session_id = _a_session(home)
+
+    status, panel = await _post(f"/sessions/{session_id}/dispatch", {"text": said})
+
+    assert status == 200
+    assert "no agent was started" in panel
+    assert "names no work" in panel
+    assert started == []
+
+
+@pytest.mark.unit
+async def test_a_go_ahead_with_the_work_after_it_is_still_carried_out(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    session_id = _a_session(home)
+
+    status, panel = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу парсер реестра"}
+    )
+
+    assert "an agent is on it" in panel
+    (call,) = started
+    assert "парсер реестра" in call["instruction"]
+
+
+@pytest.mark.unit
+async def test_a_go_ahead_that_came_with_a_directive_is_carried_out(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """A directive exists only after the workbench found something the words point at."""
+    session_id = _a_session(home)
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="бери в работу",
+        thread_set_by="human",
+    )
+    directive = await desk.record_directive(
+        block_id=block.id, session_id=session_id, session_name="alpha", text_="бери в работу"
+    )
+
+    await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу", "directive": directive.id}
+    )
+
+    assert len(started) == 1
+
+
+@pytest.mark.unit
 async def test_dispatching_at_a_session_that_has_gone_says_so(
     home: Home, desk: Store, started: list[dict[str, str]]
 ) -> None:
