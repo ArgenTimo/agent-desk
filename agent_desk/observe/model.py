@@ -248,6 +248,12 @@ class AttentionHint(BaseModel):
 
     waiting: bool
     observation: str
+    # The same silence, read for a session nobody can answer. A `--bg` agent that has gone quiet
+    # after its own last word has finished a turn; it is not waiting, because there is no prompt to
+    # wait at. Kept apart from `waiting` rather than folded into it: one of them is a reason to
+    # stop what you are doing and the other is not, and a board that said them with one word made
+    # nine rows in ten say "look here".
+    finished: bool = False
 
 
 def since(then_ms: int, now: int) -> str:
@@ -266,6 +272,13 @@ def since(then_ms: int, now: int) -> str:
     return f"{seconds // 86_400}d"
 
 
+# The kinds of session that have somebody at a prompt. A `--bg` agent does not, and that is not a
+# guess about it: `dispatch.build_task` writes the sentence into the brief of every one this console
+# starts — "you are running in a git worktree of your own and **cannot be asked anything once you
+# start**". Anything else is a terminal a person opened.
+ASKABLE_KINDS: tuple[str, ...] = ("bg", "background")
+
+
 def attention_hint(
     session: Session,
     tail: TranscriptTail | None,
@@ -278,18 +291,32 @@ def attention_hint(
     All three, and never fewer: an idle session whose last entry is the human's is one that was
     interrupted or has already been answered, and a session idle for ten seconds is one that is
     about to be busy again.
+
+    **And a session somebody could actually be asked in.** Those three conditions are sound and
+    their reasoning is unchanged; what was wrong is where they were applied. A `--bg` agent has no
+    prompt for anybody to wait at, so the same silence means it has *finished a turn* — a different
+    fact, worth showing, and not a reason to put down what you are doing.
+
+    Measured before this: thirty-four of thirty-eight rows on a real board said "may want you", all
+    thirty-four were background agents, and the one session a person was sitting in said nothing. A
+    flag on nine rows in ten is not a flag.
+
+    This is CLAUDE.md's fifth rule in its subtlest form. Nothing here reported a status as known —
+    the flag has always said "a guess, not a signal" and carried the observation behind it. What it
+    did was apply a guess where its premise was false, and no hedging in the wording repairs that.
     """
     last = tail.last_entry if tail else None
     seen = f"{session.status} {since(session.status_updated_at, now)}"
     seen += f" · last entry: {last.role}" if last else " · no transcript entry read"
 
-    waiting = (
+    quiet = (
         session.status == "idle"
         and last is not None
         and last.role == "assistant"
         and (now - session.status_updated_at) >= after_seconds * 1000
     )
-    return AttentionHint(waiting=waiting, observation=seen)
+    asked = session.kind not in ASKABLE_KINDS
+    return AttentionHint(waiting=quiet and asked, finished=quiet and not asked, observation=seen)
 
 
 # What can honestly be said about where a session came from. Three answers and no fourth, because

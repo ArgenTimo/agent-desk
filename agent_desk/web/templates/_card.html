@@ -56,6 +56,11 @@
     <p class="hint small"><span aria-hidden="true">⚑</span> It may be waiting for you
       <span class="evidence">— {{ row.hint.observation }}; a guess, not a signal</span></p>
     {% endif %}
+    {% if row.hint.finished %}
+    <p class="hint small">It has finished a turn
+      <span class="evidence">— {{ row.hint.observation }}; started in the background, so there is
+      no prompt for it to be waiting at</span></p>
+    {% endif %}
   </div>
 
   {# --- and the technical half, for whoever wants it ------------------------------------- #}

@@ -782,3 +782,30 @@ def test_a_board_rendered_without_asking_says_nothing_about_who_started_what(hom
     html = routes.render_board()
 
     assert "started here" not in html
+
+
+@pytest.mark.unit
+def test_a_finished_agent_says_so_on_the_board_without_wearing_the_flag(home: Home) -> None:
+    """Both halves in the rendered page: the sentence a background agent gets, and the flag it does
+    not get. Thirty-four rows wore that flag on a real board and not one of them could be waiting
+    for anybody."""
+    now = int(time.time() * 1000)
+    home.session(
+        os.getpid(),
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        cwd="/home/dev/alpha/.claude/worktrees/w",
+        kind="bg",
+        status="idle",
+        updatedAt=now - 20 * MINUTE,
+        statusUpdatedAt=now - 20 * MINUTE,
+    )
+    home.transcript(
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        _entry("user", "fix the thing"),
+        _entry("assistant", "fixed it and opened a branch"),
+    )
+
+    html = routes.render_board()
+
+    assert "finished a turn" in html
+    assert "may want you" not in html

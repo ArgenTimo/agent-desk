@@ -142,6 +142,13 @@
               {% if row.hint.waiting %}
               <span class="pill attention" title="{{ row.hint.observation }} — a guess, not a signal">⚑ may want you</span>
               {% endif %}
+              {# The same silence, read for a session nobody can answer. A background agent has no
+                 prompt to wait at — this console wrote that into its brief — so quiet after its own
+                 last word means it has finished a turn. Worth knowing, and not a reason to put
+                 down what you are doing, which is why it does not wear the flag. #}
+              {% if row.hint.finished %}
+              <span class="pill quiet" title="{{ row.hint.observation }} — it has no prompt to wait at, so this is a turn that ended">finished a turn</span>
+              {% endif %}
               {# The canary (023-canary.sql). This session was told to begin every reply with its
                  own name, in the first message of the conversation — so a reply that has stopped
                  carrying it is a window that has rolled far enough to lose the brief with it.
