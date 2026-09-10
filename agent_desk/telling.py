@@ -409,3 +409,37 @@ def as_drawn(steps: list[dict[str, str]], lines: list[dict[str, str]]) -> str:
         word = one["says"] or one["kind"]
         said.append(f"   {one['from']} → {one['to']} ({word})")
     return "\n".join(said)
+
+
+def carried_by_kind(context: str) -> list[tuple[str, list[str]]]:
+    """The lines a block recorded, gathered under the word each one begins with.
+
+    Two dozen flat lines answer "what exactly" and not "what was this about", and the second is the
+    question somebody opening a record a week later actually has. The largest one in this store is
+    ninety-six lines long.
+
+    The grouping is the lines' own first word — `idea · …`, `session · …`, `earlier · …` — rather
+    than a vocabulary invented here. The console wrote those words when it wrote the line, and a
+    second set of names for the same things would be a second answer to what a card is.
+
+    A line with no `·` in it keeps its own place under an empty name, in the order it arrived: the
+    lines `pasted.as_lines` writes and the note somebody typed on the workbench are sentences
+    rather than cards, and folding them under a heading they do not have would file them as
+    something they are not.
+    """
+    found: list[tuple[str, list[str]]] = []
+    under: dict[str, list[str]] = {}
+    for line in context.splitlines():
+        kind, sep, said = line.partition(" · ")
+        name = kind.strip() if sep else ""
+        if name not in under:
+            under[name] = []
+            found.append((name, under[name]))
+        under[name].append(said.strip() if sep else line)
+    return found
+
+
+def carried_shape(context: str) -> str:
+    """How many of each, in one line, for the summary somebody reads before opening it."""
+    counted = [(name, len(lines)) for name, lines in carried_by_kind(context) if name]
+    return " · ".join(f"{name} {many}" for name, many in counted)

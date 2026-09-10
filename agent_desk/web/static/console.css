@@ -3260,3 +3260,13 @@ button.go:hover, button.yes:hover {
    colour on the card: colour on this page means status and nothing else (docs/06-console.md), and
    "this is new to you" is not a status the card is in — it is a fact about the reader. */
 .pin.arrived-since { box-shadow: -3px 0 0 0 var(--focus); }
+
+/* The word a group of carried lines is filed under. Small and quiet: it is a heading over three
+   lines, not a section of the page. */
+.carried-kind {
+  margin: 6px 0 2px;
+  font-size: var(--t-xs);
+  color: var(--fg-dim);
+  text-transform: lowercase;
+}
+.carried-kind + ul { margin-top: 0; }

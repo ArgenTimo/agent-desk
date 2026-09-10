@@ -649,6 +649,10 @@ class Carried:
     surface: list[str]
     written: list[str]
     on_bench: list[str]
+    # Cards there was no room for in the digest. Carried out of `looking.Look` rather than counted
+    # again here: "why did it not know about X" is the other half of "why did it say that", and the
+    # only place that knows the answer is the thing that did the cutting.
+    left_out: int = 0
 
 
 async def carried_from_the_bench(
@@ -673,6 +677,7 @@ async def carried_from_the_bench(
         surface=looking.as_lines(look),
         written=await notes(store, targets),
         on_bench=[card.name for card in look.cards],
+        left_out=look.left_out,
     )
 
 
@@ -746,7 +751,21 @@ async def submit(
         # The address, where a control can reach it (056). The offer to start a project from it is
         # a button; nothing here clones anything.
         await store.set_block_repo(block.id, found.repos[0])
-    carried = pasted.as_lines(found) + await _context_lines(store, rows, targets, history)
+    # Read here rather than after the record is written, and that order is the point: what a block
+    # says it carried is now derived from the same reading the prompt is built from, so the two
+    # cannot say different things. They did — a bench with one card named twice recorded four
+    # things and asked with two, and the largest message in this store says it carried ninety-six
+    # of which twenty-two are distinct. docs/04: a block that cannot say what it carried is a block
+    # whose answer cannot be explained afterwards, and one that says ninety-six is worse than one
+    # that says nothing, because somebody will reason from it.
+    #
+    # Read now rather than when the run reaches the prompt: this is what was in front of the person
+    # when they pressed send, and a bench read a minute later is a different bench.
+    bench = await carried_from_the_bench(store, rows, targets, made_from)
+    written, surface, on_bench = bench.written, bench.surface, bench.on_bench
+    carried = pasted.as_lines(found) + await _context_lines(
+        store, rows, targets, history, carried=on_bench, left_out=bench.left_out
+    )
     if notes_.strip():
         # Blocks somebody wrote on the workbench themselves — a link, a paragraph of a document, a
         # snippet of code. They are text rather than a card this console read, so they are carried
@@ -767,10 +786,6 @@ async def submit(
         aimed, about = [], ""
 
     deep = transcripts(rows, targets)
-    # Read now rather than when the run reaches the prompt: this is what was in front of the person
-    # when they pressed send, and a bench read a minute later is a different bench.
-    bench = await carried_from_the_bench(store, rows, targets, made_from)
-    written, surface, on_bench = bench.written, bench.surface, bench.on_bench
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
@@ -834,16 +849,35 @@ async def _context_lines(
     rows: Sequence[BoardRow],
     targets: Sequence[str],
     history: Sequence[str],
+    *,
+    carried: Sequence[str],
+    left_out: int = 0,
 ) -> list[str]:
     """What this question is being sent with, in the words the console used for it.
 
     Written before the run starts, so that a block that is still answering can already say what it
     was given. "Why did it say that" is a question about the context, and the context was a
     decision somebody made in a second and has already forgotten.
+
+    `carried` is the cards `on_the_bench` actually built the prompt from, and it is required rather
+    than optional. This function used to walk `targets` on its own, which made it a *second*
+    reading of "what does this message carry" — and a second reading of one question is two answers
+    to it. It gave two: a card named twice was recorded twice while the prompt saw it once, and a
+    block card that `on_the_bench` deliberately leaves out was recorded as carried, on this console
+    as `block · no longer on the board`, which reads like something went wrong.
+
+    What is still decided here is the *wording* — how many sessions a name matched, whether a whole
+    transcript went. What is decided by `on_the_bench` is which cards there are, which is the part
+    that must not be answered twice.
     """
+    # Walked in the prompt's order and not the browser's, because the prompt numbers these cards
+    # and a record in a different order is a record whose third line is not the model's third card.
+    # `targets` is consulted only for what it alone knows: whether a whole transcript went.
+    whole = {f"{kind}:{ident}" for kind, ident, deep in map(_card, targets) if deep}
     lines: list[str] = []
-    for target in targets:
-        kind, ident, deep = _card(target)
+    for name in carried:
+        kind, _, ident = name.partition(":")
+        deep = name in whole
         if kind == "idea":
             idea = await store.idea(ident)
             lines.append(f"idea · {idea.summary}" if idea else "idea · no longer in the inbox")
@@ -852,14 +886,33 @@ async def _context_lines(
         if not found:
             lines.append(f"{kind} · no longer on the board")
             continue
-        whole = " · whole transcript" if deep else ""
+        said = " · whole transcript" if deep else ""
         lines.append(
-            f"{kind} · {label} ({len(found)} session{'' if len(found) == 1 else 's'}){whole}"
+            f"{kind} · {label} ({len(found)} session{'' if len(found) == 1 else 's'}){said}"
         )
     for block_id in history:
         earlier = await store.block(block_id)
         if earlier is not None:
             lines.append(f"earlier · {earlier.input[:80]}")
+    # And what did not go, which is the other half of the question this record is kept to answer.
+    # Two reasons a card is missing from the list above, and they are not the same reason: one is a
+    # budget and the other is a rule, so a record that reported them as one number would be telling
+    # somebody the digest was full when nothing had been cut.
+    conversation = sum(
+        1
+        for kind, ident, _ in map(_card, targets)
+        if kind in ("block", "answer") and f"{kind}:{ident}" not in set(carried)
+    )
+    if conversation:
+        lines.append(
+            f"not listed · {conversation} card{'' if conversation == 1 else 's'} of this "
+            "conversation, which travel as the thread's own history"
+        )
+    if left_out:
+        lines.append(
+            f"not listed · {left_out} more card{'' if left_out == 1 else 's'} that did not fit "
+            "the digest"
+        )
     return lines
 
 

@@ -115,9 +115,15 @@ def test_a_restored_answer_keeps_its_place_and_is_not_drawn_twice() -> None:
 
 def test_an_answer_is_not_counted_as_a_card_the_next_message_carries() -> None:
     """`on_the_bench` drops it from the prompt, so counting it would say the message carries twice
-    what it carries."""
-    assert ":not(.answer-card)" in _body("syncTargets")
-    assert ":not(.answer-card)" in _body("pinnedTargets")
+    what it carries.
+
+    Stated once, in the one place that answers what a message carries — and both the count and the
+    field are asserted to be asking it rather than deciding for themselves. They used to decide
+    separately, and they decided differently.
+    """
+    assert ":not(.answer-card)" in _body("cardsBeingCarried")
+    assert "cardsBeingCarried()" in _body("syncTargets")
+    assert "cardsBeingCarried()" in _body("pinnedTargets")
 
 
 def test_the_prompt_leaves_both_halves_out() -> None:

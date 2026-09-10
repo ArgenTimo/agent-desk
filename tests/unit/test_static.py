@@ -818,12 +818,17 @@ def test_a_card_put_away_is_not_on_the_bench() -> None:
         "the count of ideas on the bench includes the idea lines inside the answers"
     )
 
-    for asks in ("pinnedTargets", "activeCards"):
+    # `cardsBeingCarried` is where `pinnedTargets` gets its set from now — one reading for the
+    # names and the count both — so the rule is asserted there and `pinnedTargets` is asserted to
+    # be asking rather than gathering.
+    for asks in ("cardsBeingCarried", "activeCards"):
         body = console[console.index(f"function {asks}(") :]
         body = body[: body.index("\n}\n")]
         assert ":not(.put-away)" in body, (
             f"{asks} carries cards that have been folded away into the next message"
         )
+    spelled = console[console.index("function pinnedTargets(") :]
+    assert "cardsBeingCarried()" in spelled[: spelled.index("\n}\n")]
 
 
 @pytest.mark.unit
@@ -860,7 +865,7 @@ def test_a_choice_is_the_context_when_there_is_one() -> None:
     """
     console = (STATIC / "console.js").read_text(encoding="utf-8")
 
-    carried = console[console.index("function pinnedTargets(") :]
+    carried = console[console.index("function cardsBeingCarried(") :]
     carried = carried[: carried.index("\n}\n")]
     assert "chosenCards()" in carried, "a selection does not change what the message carries"
     assert "chosen.length" in carried, "there is no fallback to the whole bench"
@@ -900,14 +905,15 @@ def test_what_a_message_carries_is_cards_and_not_everything_inside_them() -> Non
 
     `[data-kind]` matched every element carrying that attribute *inside* a card as well — the idea
     lines a block card lists — so every message went out with every idea ever mentioned in the
-    conversation attached to it. Silently, because the count beside the field measures `.pin` and
-    the targets did not.
+    conversation attached to it. Silently, because the count beside the field measured `.pin` and
+    the targets did not — a divergence that has since been closed by making both of them read the
+    same set, which is what this now asserts against.
 
     The same mistake `pin()` made once, for the same reason: `[data-kind]` is not a card.
     """
     console = (STATIC / "console.js").read_text(encoding="utf-8")
 
-    carried = console[console.index("function pinnedTargets(") :]
+    carried = console[console.index("function cardsBeingCarried(") :]
     carried = carried[: carried.index("\n}\n")]
 
     assert "'.pin[data-kind]" in carried, "the message carries elements that are not cards"

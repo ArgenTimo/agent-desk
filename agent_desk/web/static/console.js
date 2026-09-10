@@ -603,11 +603,16 @@ function showBenchToggle() {
 //
 // A note is not a card the server can look up — it is text that exists only here — so it is
 // carried in its own field rather than named as a target that would 404.
-function pinnedTargets() {
+// The one answer to "what will this message carry". The names and the number both come from here,
+// because they were coming from two selectors that did not match — the count kept `.own` and did
+// not require `[data-kind]`, so the sentence under the bench and the field the message is built
+// from were describing different sets. A number beside a Send button that is not the number being
+// sent is the shape of mistake this console exists to not make.
+function cardsBeingCarried() {
   const chosen = chosenCards().filter(
     (pin) => pin.dataset.kind && !pin.classList.contains('own')
   );
-  const carried = chosen.length
+  return chosen.length
     ? chosen
     : // `.pin` matters. Without it this matched every element carrying `data-kind` *inside* a
       // card as well — the idea lines a block card lists — and a bench showing seven cards was
@@ -615,7 +620,10 @@ function pinnedTargets() {
       // count beside the field was measuring something else. The same mistake `pin()` made once
       // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
       [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
-  return carried
+}
+
+function pinnedTargets() {
+  return cardsBeingCarried()
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -635,15 +643,14 @@ function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
-  const picked = chosenCards().filter((pin) => pin.dataset.kind).length;
-  // An answer card is not one of them. What it says travels with the next message already, as the
-  // thread it belongs to, and `on_the_bench` drops it from the prompt for that reason — so
-  // counting it here would tell somebody their message carries twice what it carries.
-  const live =
-    picked ||
-    pins.querySelectorAll(
-      '.pin:not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)'
-    ).length;
+  // The same set the message is built from, counted rather than measured a second way. An answer
+  // card is not one of them: what it says travels with the next message already, as the thread it
+  // belongs to, and `on_the_bench` drops it from the prompt for that reason — so counting it here
+  // would tell somebody their message carries twice what it carries.
+  const live = cardsBeingCarried().length;
+  const picked = chosenCards().filter(
+    (pin) => pin.dataset.kind && !pin.classList.contains('own')
+  ).length;
   const carried = live + attached;
   // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
   // sentence somebody reads twice; "asking about these 3 only" is one they read once.

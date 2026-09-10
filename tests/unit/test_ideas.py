@@ -503,10 +503,11 @@ async def test_an_idea_dropped_into_a_question_travels_as_what_was_written(
         "- cache the probe results: cache the probe results"
     ]
     assert await blocks.notes(desk, ["idea:no-such-idea"]) == []
-    # And it is named in what the block says it carried.
-    assert await blocks._context_lines(desk, [], [f"idea:{idea.id}"], []) == [
-        "idea · cache the probe results"
-    ]
+    # And it is named in what the block says it carried — which is now derived from the cards the
+    # prompt was built from rather than from a second walk over the targets.
+    assert await blocks._context_lines(
+        desk, [], [f"idea:{idea.id}"], [], carried=[f"idea:{idea.id}"]
+    ) == ["idea · cache the probe results"]
 
 
 # --- where a project also lives ------------------------------------------------------------------

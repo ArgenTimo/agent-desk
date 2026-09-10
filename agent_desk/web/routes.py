@@ -276,6 +276,8 @@ env.filters["at"] = _at
 env.filters["stopped"] = telling.stopped
 # What this console decided a message was, in words rather than as a class on the article.
 env.filters["taken_as"] = telling.taken_as
+env.filters["by_kind"] = telling.carried_by_kind
+env.filters["shape_of"] = telling.carried_shape
 
 
 @dataclass(frozen=True)
