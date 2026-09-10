@@ -385,6 +385,30 @@ def _worktree_name(name: str) -> str:
     return (slug or "desk-task")[:40].strip("-") or "desk-task"
 
 
+def _free_worktree_name(cwd: Path, name: str) -> str:
+    """`_worktree_name`, or that with `-2`, `-3`… when an agent is already working under it.
+
+    The name comes from what was typed, and what is typed is often the same three words: "бери в
+    работу" four times in one night gave `beri-v-rabotu` four times, and `--worktree` with a name
+    that exists does not refuse — it puts the new agent into the old one's checkout. Four agents
+    then shared one worktree and one branch, committed over each other, and one pull request had
+    to be cut out of another to keep two fixes apart. docs/adr/0006 gives each agent a worktree
+    *of its own*; this is what makes that true when the words repeat.
+
+    Read from the directory the CLI makes them in, and nothing is written there. The branch a
+    suffixed name produces is found again by `autostart.worktree_of`, which reads it from the
+    job file rather than re-deriving it.
+    """
+    base = _worktree_name(name)
+    taken = cwd / ".claude" / "worktrees"
+    candidate, number = base, 1
+    while (taken / candidate).exists():
+        number += 1
+        suffix = f"-{number}"
+        candidate = base[: 40 - len(suffix)].rstrip("-") + suffix
+    return candidate
+
+
 def _read_id(output: str) -> str:
     """The short id out of `backgrounded · 79586f63`.
 
@@ -419,7 +443,11 @@ def start(
     if shutil.which(settings.claude_bin) is None and not Path(settings.claude_bin).exists():
         return Started(False, detail=f"{settings.claude_bin} is not installed here")
 
-    command = argv(instruction, worktree=_worktree_name(name), mcp_config=write_mcp_config(servers))
+    command = argv(
+        instruction,
+        worktree=_free_worktree_name(directory, name),
+        mcp_config=write_mcp_config(servers),
+    )
     forbidden = [flag for flag in command if flag in NEVER]
     if forbidden:  # pragma: no cover — the argv builder cannot produce one; the check is the rule
         return Started(False, detail=f"refusing to start an agent with {forbidden[0]}")
