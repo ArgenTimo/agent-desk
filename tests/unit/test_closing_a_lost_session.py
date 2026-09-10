@@ -9,6 +9,7 @@ an order that lets the session finish and commit before anything happens to it.
 
 from __future__ import annotations
 
+import itertools
 import pathlib
 import urllib.parse
 from collections.abc import AsyncIterator
@@ -418,3 +419,51 @@ async def test_a_board_that_cannot_be_read_tidies_nothing(
     monkeypatch.setattr(real, "board", broken)
 
     assert await autostart._the_board(desk) is None
+
+
+# --- and the whole of it at once -------------------------------------------------------------------
+@pytest.mark.unit
+def test_the_only_irreversible_thing_says_yes_to_exactly_one_shape() -> None:
+    """The input space of this decision is small enough to state rather than sample, and what it
+    guards — «единственное необратимое действие во всей консоли» — is worth stating.
+
+    Four conditions and a clock, enumerated: `yes` is true for every combination where all five
+    hold and for no other, and no answer is ever wordless — a card that says no and not why sends
+    somebody to the session they were about to close to find out.
+    """
+    quiet = tidying.QUIET_FOR_MS
+    space = list(
+        itertools.product(
+            (True, False),
+            (True, False),
+            ("idle", "busy", "shell", "unknown", ""),
+            (True, False),
+            (-1, 0, 60_000, quiet - 60_001, quiet - 1, quiet, quiet + 1, 10 * quiet),
+        )
+    )
+
+    said = {
+        one: tidying.may_close(
+            armed=one[0], canary_lost=one[1], status=one[2], clean=one[3], idle_for_ms=one[4]
+        )
+        for one in space
+    }
+
+    assert all(answer.why.strip() for answer in said.values())
+    allowed = {one for one in space if one[0] and one[1] and one[2] == "idle" and one[3]}
+    allowed = {one for one in allowed if one[4] >= quiet}
+    assert {one for one, answer in said.items() if answer.yes} == allowed
+
+
+@pytest.mark.unit
+def test_the_wait_never_counts_down_to_nothing_and_stays_there() -> None:
+    """Floor division says "0 more minutes" for the whole last minute, against a card that is
+    refusing to close the session — which reads as the console being stuck rather than waiting."""
+    for left_ms in (1, 1000, 59_999, 60_000):
+        why = _may(idle_for_ms=tidying.QUIET_FOR_MS - left_ms).why
+
+        assert "0 more" not in why
+        assert "1 more minute" in why or "2 more minutes" in why
+
+    assert "1 more minute'" not in _may(idle_for_ms=0).why  # and it is not always one, either
+    assert "30 more minutes" in _may(idle_for_ms=0).why

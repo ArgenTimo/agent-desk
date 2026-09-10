@@ -987,3 +987,40 @@ async def test_a_ticket_and_a_pull_request_do_not_erase_each_other(
 
     keys = {one.key for one in await desk.tracker_blockers()}
     assert keys == {"DUCK-3", "#12"}
+
+
+@pytest.mark.unit
+async def test_one_project_having_a_bad_day_does_not_cost_the_others_theirs(
+    desk: Store, tmp_path: pathlib.Path, started: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run` already refuses to let a bad tick take the console down. Inside the tick the same
+    thing was true one level up and not one level down: a project whose tracker raised — a token
+    that expired at two in the morning — skipped every project below it in the list, and the next
+    tick raised in the same place, and the one after that.
+
+    A queue that stops moving and says nothing is the failure this whole file is written against.
+    So the cost of a project's bad day is that project's turn.
+    """
+    other = "origin:acme/other"
+    await desk.arm(KEY, per_hour=5)
+    await desk.arm(other, per_hour=5)
+    # Only the second has anything queued, so the tick walks past the first into the part of a
+    # project's turn that talks to something outside this machine.
+    await desk.queue_task(
+        repo_key=other, cwd=str(tmp_path), title="t", instruction="do it", source_kind="typed"
+    )
+    order = [one.repo_key for one in await desk.armed_projects()]
+    assert order[0] == KEY, "this test needs the cranky project to be the one that goes first"
+
+    async def cranky(store: Store, arming: object) -> int:
+        if getattr(arming, "repo_key", "") == KEY:
+            raise RuntimeError("the token expired at 2am")
+        return 0
+
+    monkeypatch.setattr(autostart, "pull_requests", cranky)
+
+    task = await autostart.tick(desk, live=set())
+
+    assert task is not None
+    assert task.repo_key == other
+    assert len(started) == 1 and started[0].startswith("do it")

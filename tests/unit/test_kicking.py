@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import json
 import pathlib
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -333,3 +335,68 @@ async def test_a_session_coming_back_is_told_what_it_was_doing(
     generic = kicking.carry_on(Kicking(short_id=SHORT), _session())
     assert "If the work you were doing is not finished" in generic
     assert "“" not in generic
+
+
+@pytest.mark.unit
+def test_the_one_decision_says_yes_to_exactly_one_shape() -> None:
+    """The permission to write into a running session's context without a click is the narrowest
+    one in this program (docs/adr/0009), and its input space is small enough to state.
+
+    Enumerated rather than sampled: `why_not_kick` is where the card and the loop agree, so a
+    combination that slips through it is a turn nobody asked for landing in somebody's work.
+    """
+    space = list(
+        itertools.product(
+            (None, NOW),
+            (None, NOW - 1, NOW + 1, NOW + 60_000),
+            (0, 1, 4, 5),
+            (None, NOW, NOW - kicking.WINDOW_MS),
+            (0, 1, 4),
+            (None, "idle", "busy", "shell"),
+            ("bg", "background", "terminal"),
+        )
+    )
+
+    allowed = set()
+    for armed_at, resume_at, kicks, kicked_at, per_hour, status, kind in space:
+        arming = Kicking(
+            short_id="abc12345",
+            armed_at=armed_at,
+            resume_at=resume_at,
+            kicks=kicks,
+            kicked_at=kicked_at,
+            per_hour=per_hour,
+        )
+        session = None if status is None else _session(status=status, kind=kind)
+        why = kicking.why_not_kick(arming, session, NOW, kicking._spent(arming, NOW))
+        assert why.strip() or not why, "a refusal without words sends somebody to find out why"
+        if not why:
+            allowed.add((armed_at, resume_at, kicks, kicked_at, per_hour, status, kind))
+
+    assert allowed, "the space has to contain at least one yes or this asserts nothing"
+    for armed_at, resume_at, kicks, kicked_at, per_hour, status, kind in allowed:
+        assert armed_at is not None
+        assert resume_at is None or resume_at <= NOW
+        assert status == "idle"
+        assert kind in kicking.KICKABLE_KINDS
+        assert (
+            kicking._spent(
+                Kicking(short_id="a", kicks=kicks, kicked_at=kicked_at, per_hour=per_hour), NOW
+            )
+            < per_hour
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("left_ms", [1, 1000, 59_999, 60_000, 60_001, 120_000, 30 * 60_000])
+def test_the_wait_for_a_limit_never_counts_down_to_nothing(left_ms: int) -> None:
+    """Floor division said "another 0 minutes" for the whole last minute of the wait, and "1
+    minutes" for the one before it. The card shows this sentence beside a session that is doing
+    nothing — a countdown at zero reads as a console that has stopped rather than one waiting."""
+    arming = Kicking(short_id="abc12345", armed_at=NOW, resume_at=NOW + left_ms, per_hour=4)
+
+    why = kicking.why_not_kick(arming, _session(), NOW, 0)
+
+    assert "another 0 minutes" not in why
+    assert not why.endswith("1 minutes")
+    assert re.search(r"another (1 minute|[2-9]\d* minutes|\d\d+ minutes)\Z", why), why

@@ -112,7 +112,12 @@ def nothing_uncommitted(cwd: str) -> tuple[bool, str]:
     A checkout that cannot be read at all answers `False`, and that is the safe direction: not
     knowing is a reason not to close something.
     """
-    code, said = _git(cwd, "status", "--porcelain")
+    # `--untracked-files=all` for the same reason `land` passes it: without it an untracked
+    # `.claude/` collapses to one line that does not name the worktrees under it, `_theirs` counts
+    # it as somebody's own new folder, and a session whose work is finished and merged is held open
+    # for ever by a directory this program made. The two readings are one reading or they are two
+    # answers to the same question.
+    code, said = _git(cwd, "status", "--porcelain", "--untracked-files=all")
     if code != 0:
         return False, f"its checkout could not be read: {said[:120]}"
     if _theirs(said):
@@ -229,9 +234,10 @@ def land(cwd: str, worktree_name: str, *, push: bool = True) -> Landed:
         first = merged.splitlines()[0] if merged else "it conflicted"
         return Landed(False, f"not merged: {first[:200]}", branch)
 
-    if push:
-        code, pushed = _git(repository, "push", "origin", "HEAD")
-        if code != 0:
-            first = pushed.splitlines()[-1] if pushed else "the push failed"
-            return Landed(True, f"merged here, not pushed: {first[:200]}", branch)
+    if not push:
+        return Landed(True, f"merged — {said}", branch)
+    code, pushed = _git(repository, "push", "origin", "HEAD")
+    if code != 0:
+        first = pushed.splitlines()[-1] if pushed else "the push failed"
+        return Landed(True, f"merged here, not pushed: {first[:200]}", branch)
     return Landed(True, f"merged and pushed — {said}", branch)

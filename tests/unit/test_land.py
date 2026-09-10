@@ -338,3 +338,59 @@ def test_a_repository_whose_gate_says_nothing_at_all_still_fails_clearly(
 
     assert not result.landed
     assert "`make verify` failed" in result.detail
+
+
+@pytest.mark.unit
+def test_a_merge_that_was_not_pushed_does_not_say_it_was(tmp_path: pathlib.Path) -> None:
+    """The detail is shown against the task and read as what happened. `push=False` is how every
+    test and every dry run reaches this, and it said "merged and pushed" for all of them."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+
+    result = land.land(str(root), "found-project", push=False)
+
+    assert result.landed
+    assert "pushed" not in result.detail
+
+
+@pytest.mark.unit
+def test_the_worktrees_this_program_made_are_not_somebody_elses_work(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`nothing_uncommitted` is what decides whether a finished session may be closed, and its
+    docstring says it is the same reading `land` makes. It was not.
+
+    Without `--untracked-files=all` an untracked `.claude/` collapses to that one line — the
+    worktrees under it are never named — so `_theirs` sees a folder it does not recognise and
+    answers "somebody's own work". Which means: a repository that does not track `.claude/` holds
+    every finished session open for ever, and the reason is a directory this program created.
+    """
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    # What the CLI leaves in its own worktree while it works, and nothing of anybody else's.
+    (land.worktree_for(str(root), "found-project") / "scratch.txt").write_text("mid-turn\n")
+
+    assert _run(root, "git", "status", "--porcelain") == "?? .claude/"
+
+    clean, said = land.nothing_uncommitted(str(root))
+
+    assert clean, said
+    # And the two readings agree, which is the thing the docstring claims.
+    _, dirty = land._git(root, "status", "--porcelain", "--untracked-files=all")
+    assert not land._theirs(dirty)
+
+
+@pytest.mark.unit
+def test_a_file_of_somebody_elses_still_counts_when_the_worktrees_are_there_too(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The other direction of the same change: discounting the worktrees must not discount the
+    checkout around them."""
+    root = _repo(tmp_path)
+    _agent_worked(root, "found-project")
+    (root / "half-written.md").write_text("mine, and not finished\n")
+
+    clean, said = land.nothing_uncommitted(str(root))
+
+    assert not clean
+    assert "uncommitted" in said

@@ -628,30 +628,39 @@ async def tick(
     await check_claims(store)
 
     for arming in armed:
-        if not await why_not(store, arming.repo_key, live):
-            task = await store.take_next_task(arming.repo_key)
-            if task is not None:
-                await _start(store, task)
-                # One start per tick, across every project. Nothing here is urgent, and a burst is
-                # the thing this file exists to not do.
-                return task
+        # Per project, for the reason `run` gives per tick: a loop that takes the console down with
+        # it is a worse failure than anything it was started to do. Here the blast radius is the
+        # projects *after* this one — a token that expired at two in the morning raises in the
+        # first project's tracker, every project below it is skipped, and the next tick raises in
+        # the same place. A queue that stops moving and says nothing is the shape of failure this
+        # whole file is written against, and it costs one project's turn instead of the console's.
+        try:
+            if not await why_not(store, arming.repo_key, live):
+                task = await store.take_next_task(arming.repo_key)
+                if task is not None:
+                    await _start(store, task)
+                    # One start per tick, across every project. Nothing here is urgent, and a
+                    # burst is the thing this file exists to not do.
+                    return task
 
-        # Nothing queued here, but there may be something on the project's own board. A ticket
-        # somebody wrote comes before anything an agent would find for itself (docs/adr/0010),
-        # which is why this sits above the exploration and below the queue.
-        # And what is waiting on a person over on GitHub, which never becomes queued work —
-        # a review is not something an agent can give (docs/adr/0010).
-        await pull_requests(store, arming)
+            # Nothing queued here, but there may be something on the project's own board. A ticket
+            # somebody wrote comes before anything an agent would find for itself (docs/adr/0010),
+            # which is why this sits above the exploration and below the queue.
+            # And what is waiting on a person over on GitHub, which never becomes queued work —
+            # a review is not something an agent can give (docs/adr/0010).
+            await pull_requests(store, arming)
 
-        if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
-            if await pull_tickets(store, arming):
-                return None
+            if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
+                if await pull_tickets(store, arming):
+                    return None
 
-        # Nothing queued, and this project was told it may find something (docs/adr/0008).
-        if not await _may_explore(store, arming, live):
-            found = await _explore(store, arming)
-            if found is not None:
-                return found
+            # Nothing queued, and this project was told it may find something (docs/adr/0008).
+            if not await _may_explore(store, arming, live):
+                found = await _explore(store, arming)
+                if found is not None:
+                    return found
+        except Exception:
+            log.exception("autostart.project_failed", repo=arming.repo_key)
     return None
 
 

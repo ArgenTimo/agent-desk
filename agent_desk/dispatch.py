@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -90,7 +91,13 @@ def as_mcp_config(servers: Sequence[McpServer]) -> dict[str, Any]:
         if one.kind == "http":
             found[one.name] = {"type": "http", "url": one.address}
         else:
-            parts = shlex.split(one.address)
+            try:
+                parts = shlex.split(one.address)
+            except ValueError:
+                # An unbalanced quote, from a field somebody typed into. `start` promises never to
+                # raise and this is called before its try block, so a half-written command line
+                # would have taken down the route that renders the failure instead of being one.
+                continue
             if not parts:
                 continue
             found[one.name] = {"command": parts[0], "args": parts[1:]}
@@ -385,6 +392,14 @@ def _worktree_name(name: str) -> str:
     return (slug or "desk-task")[:40].strip("-") or "desk-task"
 
 
+# What an id looks like: the leading hex of a session uuid, which is what `attach`, `logs` and
+# `stop` take. Matched rather than counted from the end of the line, because reading the last token
+# means a line that grows a suffix — `backgrounded · 79586f63 (worktree: foo)` — yields `foo)`, and
+# a wrong id is worse than none: it is stored, shown, and passed to `stop` for something that does
+# not exist.
+_AN_ID = re.compile(r"\A[0-9a-f]{6,}\Z")
+
+
 def _read_id(output: str) -> str:
     """The short id out of `backgrounded · 79586f63`.
 
@@ -393,8 +408,11 @@ def _read_id(output: str) -> str:
     """
     for line in output.splitlines():
         parts = line.split()
-        if parts and parts[0] == "backgrounded" and len(parts) >= 3:
-            return parts[-1].strip()
+        if not parts or parts[0] != "backgrounded":
+            continue
+        found = [one for one in parts[1:] if _AN_ID.match(one)]
+        if found:
+            return found[0]
     return ""
 
 

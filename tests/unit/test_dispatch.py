@@ -7,12 +7,13 @@ permission flags, the worktree, the click, and once.
 from __future__ import annotations
 
 import pathlib
+import re
 from collections.abc import AsyncIterator
 
 import pytest
 from agent_desk import dispatch
 from agent_desk.config import Settings
-from agent_desk.store.repo import Store
+from agent_desk.store.repo import McpServer, Store
 from agent_desk.web import routes
 
 
@@ -290,3 +291,102 @@ def test_a_limit_is_told_apart_from_something_being_broken() -> None:
     assert dispatch.looks_like_a_limit("out of quota for now")
     assert not dispatch.looks_like_a_limit("Error creating worktree: Invalid worktree name")
     assert not dispatch.looks_like_a_limit("")
+
+
+# What a person types into the name field, and what a person types into a server row. Both fields
+# are free text, both are read before the CLI is ever reached, and neither had anything under it
+# saying what the whole range of them does.
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "",
+        " ",
+        ".",
+        "..",
+        "-",
+        "---",
+        "_",
+        "/",
+        "../..",
+        "a/b",
+        "идея про парсер",
+        "Ё",
+        "ъъъ",
+        "щи",
+        "🙂",
+        "日本語",
+        "ω",
+        "naïve",
+        "ＡＢＣ",
+        "x" * 200,
+        "и" * 200,
+        "щ" * 30,
+        "  leading and trailing  ",
+        "-start",
+        "end-",
+        "a--b",
+        "\n",
+        "\t\t",
+        "a\x00b",
+        "%20",
+        "a\\b",
+        "a:b",
+        "a|b",
+        "--flag",
+        "0",
+    ],
+)
+def test_whatever_is_typed_into_the_name_field_the_cli_will_accept_it(typed: str) -> None:
+    """The property, over the range rather than over four examples.
+
+    `--worktree` is checked by the CLI before a token is spent, so every way this can go wrong is a
+    dispatch that dies for free — which is what happened to six of them at once. The name also
+    becomes a directory, so it is bounded and never starts with the character that would make it
+    read as a flag.
+    """
+    name = dispatch._worktree_name(typed)
+
+    assert 0 < len(name) <= 40
+    assert name.isascii()
+    assert re.fullmatch(r"[A-Za-z0-9._-]+", name)
+    assert not name.startswith("-") and not name.endswith("-")
+
+
+@pytest.mark.unit
+def test_a_command_line_with_a_quote_left_open_costs_that_server_and_not_the_dispatch() -> None:
+    """`shlex.split` raises on an unbalanced quote, and this is read *before* `start`'s try block —
+    so a half-typed command in one server row would have come out of a function whose first
+    promise is that it never raises, through the route that exists to render the failure."""
+    half = McpServer(repo_key="p", name="half", kind="stdio", address='py -c "print(1)')
+    whole = McpServer(repo_key="p", name="whole", kind="stdio", address="py -c ok")
+
+    found = dispatch.as_mcp_config([half, whole])
+
+    assert list(found["mcpServers"]) == ["whole"]
+
+
+@pytest.mark.unit
+def test_a_dispatch_survives_the_server_row_that_will_not_parse(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fake_cli(tmp_path, "#!/bin/sh\nprintf 'backgrounded \\302\\267 1a2b3c4d\\n'\n")
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin=str(binary)))
+    half = McpServer(repo_key="p", name="half", kind="stdio", address="py -c 'x")
+
+    result = dispatch.start("carry on", cwd=str(tmp_path), name="probe", servers=[half])
+
+    assert result.started
+
+
+@pytest.mark.unit
+def test_a_line_that_grew_a_suffix_still_gives_the_id_and_not_the_suffix() -> None:
+    """Reading the last token is reading by position, which is what the docstring above says this
+    does not do. A wrong id is worse than none: it is stored, shown, and handed to `stop` for
+    something that was never there."""
+    assert dispatch._read_id("backgrounded · 79586f63 (worktree: foo)") == "79586f63"
+    assert dispatch._read_id("backgrounded · foo · 79586f63") == "79586f63"
+    # And a line that names no id at all still names none.
+    assert dispatch._read_id("backgrounded · zzzzzz") == ""
+    assert dispatch._read_id("backgrounded ·") == ""
+    assert dispatch._read_id("Backgrounded · 79586f63") == ""

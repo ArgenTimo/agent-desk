@@ -68,7 +68,10 @@ def may_close(
     if not clean:
         return Maybe(False, "it still has uncommitted work in its checkout")
     if idle_for_ms < QUIET_FOR_MS:
-        left = (QUIET_FOR_MS - idle_for_ms) // 60_000
+        # Rounded up, not down. Floor says "0 more minutes" for the last minute of the wait, which
+        # reads as "it may go now" against a card that is refusing to let it — and a countdown that
+        # reaches zero and stays is the one thing this sentence exists to avoid.
+        left = -(-(QUIET_FOR_MS - idle_for_ms) // 60_000)
         return Maybe(
             False, f"it went quiet recently — {left} more minute{'' if left == 1 else 's'}"
         )

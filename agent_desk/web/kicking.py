@@ -107,8 +107,12 @@ def why_not_kick(arming: Kicking, session: Session | None, now_ms: int, spent: i
     if not arming.armed:
         return "not switched on"
     if arming.waiting(now_ms):
-        left = max(0, (arming.resume_at or 0) - now_ms) // 60_000
-        return f"the account is out of budget for another {left} minutes"
+        # Rounded up, and singular when it is one. `waiting` is only true while `resume_at` is
+        # still ahead of now, so there is always at least a minute to say — and floor division said
+        # "another 0 minutes" for the whole last minute of it, which reads as a console that has
+        # stopped counting rather than one that is waiting.
+        left = -(-max(0, (arming.resume_at or 0) - now_ms) // 60_000)
+        return f"the account is out of budget for another {left} minute{'' if left == 1 else 's'}"
     if spent >= arming.per_hour:
         return f"the hour's budget is spent ({spent} of {arming.per_hour})"
     if session is None:
