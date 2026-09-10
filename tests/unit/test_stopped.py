@@ -34,6 +34,7 @@ def test_the_failures_this_program_can_actually_produce_are_all_covered() -> Non
     with the one thing that changes it."""
     for error, expected in (
         ("needs_toolchain: claude is not on PATH", "not on this machine"),
+        ("the answer engine could not be started: claude — Text file busy", "would not start"),
         ("rate limit reached", "rate limited"),
         ("usage limit reached for this account", "out of budget"),
         ("no answer within 180s", "longer than it is allowed"),

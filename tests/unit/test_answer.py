@@ -515,6 +515,57 @@ def test_a_killed_run_is_not_read_as_an_engine_this_machine_does_not_have() -> N
 
 
 @pytest.mark.unit
+async def test_an_engine_that_is_there_but_will_not_start_says_so_rather_than_its_class_name(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """Found, and refused by exec — here because it is not executable; ETXTBSY takes the same
+    path. It used to escape `_run` as a bare `OSError` and reach the card as "PermissionError while
+    running the answer engine", which names a class and not a cause (01M1ZEN85PA2NYSV70H59ZZFWN).
+
+    Refused for real rather than by a patched exec: the claim is about what the kernel hands back.
+    """
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\necho never\n")
+    binary.chmod(0o644)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert failed.state == "failed"
+    assert "could not be started" in (failed.error or "")
+    assert "Permission denied" in (failed.error or "")
+    assert "while running the answer engine" not in (failed.error or "")
+
+
+@pytest.mark.unit
+async def test_an_engine_that_will_not_start_is_one_the_second_engine_stands_in_for(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It said nothing, so trying the other one cannot repeat anything — the same footing as an
+    engine that is not installed at all, which already falls back."""
+    primary = tmp_path / "claude"
+    primary.write_text("#!/bin/sh\necho never\n")
+    primary.chmod(0o644)
+    local = tmp_path / "local"
+    local.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"local"}]}}\\n\'\n'
+        'printf \'{"type":"result","result":"local"}\\n\'\n'
+    )
+    local.chmod(0o755)
+    monkeypatch.setattr(
+        session,
+        "settings",
+        Settings(claude_bin=str(primary), local_model_bin=str(local), daily_usd=0.0),
+    )
+
+    assert [c async for c in session.stream_answer("q")] == ["local"]
+
+
+@pytest.mark.unit
 async def test_what_a_run_complains_about_is_scrubbed_too(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
 ) -> None:

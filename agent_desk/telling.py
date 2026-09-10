@@ -291,6 +291,12 @@ _STOPPED: tuple[tuple[str, str, str], ...] = (
         "`claude` has to be on PATH for this console to ask anything.",
     ),
     (
+        "could not be started",
+        "The answer engine is on this machine but would not start.",
+        "Either the file is not executable, or something was still writing it at that moment. "
+        "Asking again in a moment settles the second; if it keeps happening, it is the first.",
+    ),
+    (
         "rate limit",
         "The model is rate limited.",
         "It comes back on its own; asking again now costs another refusal.",

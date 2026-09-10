@@ -402,6 +402,15 @@ async def _run(
             f"needs_toolchain: {binary or settings.claude_bin} is not on PATH, so nothing can "
             "answer a block"
         ) from exc
+    except OSError as exc:
+        # There, and it would not start: not executable, or held open for writing by something at
+        # that instant (ETXTBSY). Either way it said nothing and is not an answer — the engine is
+        # unavailable. Left raw it skipped the second engine, lost its errno, and reached a card as
+        # "PermissionError while running the answer engine" (01M1ZEN85PA2NYSV70H59ZZFWN).
+        raise AnswerFailed(
+            f"the answer engine could not be started: {binary or settings.claude_bin} — "
+            f"{exc.strerror or type(exc).__name__}"
+        ) from exc
 
     said_something = False
     result_text = ""
@@ -498,7 +507,8 @@ async def _run(
 
 
 # What makes a failure worth trying a second engine for. Every one of these is the engine being
-# *unavailable* — out of budget, not installed, unreachable — and none of them is an answer.
+# *unavailable* — out of budget, not installed, would not start, unreachable — and none of them is
+# an answer.
 #
 # The distinction is the whole of this feature and it is worth stating plainly: a refusal is an
 # answer. It arrives as text, `stream_answer` yields it, nothing raises, and no fallback can
@@ -512,6 +522,7 @@ UNAVAILABLE = (
     "usage limit",
     "quota",
     "needs_toolchain",
+    "could not be started",
     "no answer within",
     "could not reach",
     "connection",
