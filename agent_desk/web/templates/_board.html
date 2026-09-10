@@ -14,6 +14,18 @@
 
 <div class="tree-head">
   <span class="tree-count">{{ rows | length }} session{{ "" if rows | length == 1 else "s" }}</span>
+  {# Of those, the ones this console started. A board of thirty-six that says nothing about which
+     of them it is answerable for presents all thirty-six as though it knows what they are, and it
+     knows what four of them are (CLAUDE.md, rule five). Said only when the two differ, because a
+     count that always equals the one beside it is a count nobody reads. #}
+  {% set asked = rows | selectattr("whose") | list | length %}
+  {% set started_here = rows | selectattr("whose", "equalto", "ours") | list | length %}
+  {# `asked` guards the same rule one level up: a caller that did not hand in what this console
+     started gets no sentence about it, rather than a confident "0 started here" about a question
+     nobody put. #}
+  {% if asked and started_here != rows | length %}
+  <span class="tree-count" title="the rest are sessions this console did not start — it can say they are running and nothing more">{{ started_here }} started here</span>
+  {% endif %}
   {% if flagged %}<span class="tree-count flagged-count">{{ flagged }} may want you</span>{% endif %}
   {# What the asking has cost today, as the runs themselves reported it (043-spending.sql). Here
      rather than on a page of its own, because "это та вещь, отсутствие которой обнаруживается в
@@ -63,18 +75,29 @@
 
   <div class="card-body">
     {% for instance in project.instances %}
-    <details class="node card instance" open
+    {# Folded when there are more sessions here than anybody reads one by one. One worktree on a
+       real console held twenty-three, and the board — thirty-six rows — was mostly that single
+       directory written out flat. Folded is not hidden: the head says how many are inside, how
+       many of them may want somebody, and one press opens it. #}
+    <details class="node card instance{% if instance.crowded %} crowded{% endif %}"
+             {% if not instance.crowded %}open{% endif %}
              data-kind="instance" data-id="{{ instance.path }}" data-label="{{ instance.name }}"
              draggable="true">
       <summary class="card-head">
         <span class="twist" aria-hidden="true"></span>
         <span class="card-name">{{ instance.name }}</span>
         <span class="pill">{{ instance.rows | length }}</span>
+        {# Whose they are, and only when it is worth saying. A directory of agents this console
+           started is a different thing from a directory of sessions it knows nothing about, and
+           the board said the same about both (CLAUDE.md, rule five). #}
+        {% if instance.mine %}<span class="pill whose-person" title="sessions somebody is sitting in">{{ instance.mine }} yours</span>{% endif %}
+        {% if instance.ours %}<span class="pill whose-ours" title="agents this console started and can account for">{{ instance.ours }} started here</span>{% endif %}
+        {% if instance.flagged %}<span class="pill whose-flagged" title="may want a person">{{ instance.flagged }} may want you</span>{% endif %}
       </summary>
 
       <div class="card-body">
         {% for row in instance.rows %}
-        <details class="node card session {{ row.session.status }}{% if row.session.kind == "bg" %} bg{% endif %}{% if row.hint.waiting %} flagged{% endif %}" open
+        <details class="node card session {{ row.session.status }}{% if row.whose %} whose-{{ row.whose }}{% endif %}{% if row.session.kind == "bg" %} bg{% endif %}{% if row.hint.waiting %} flagged{% endif %}" open
                  data-session="{{ row.session.session_id }}"
                  data-kind="session" data-id="{{ row.session.session_id }}"
                  data-label="{{ row.tail.title if row.tail and row.tail.title else row.session.name }}"

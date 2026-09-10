@@ -31,6 +31,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _live_pids(how_many: int) -> list[int]:
+    """Processes that are actually running, for a registry that is keyed by pid.
+
+    Two entries naming one pid are one entry to the reader, so a test about a directory holding a
+    dozen sessions cannot be written by alternating between this process and its parent.
+    """
+    found = [
+        int(name)
+        for name in sorted(os.listdir("/proc"), key=lambda one: one.isdigit() and int(one))
+        if name.isdigit() and Path(f"/proc/{name}/stat").exists()
+    ]
+    assert len(found) >= how_many, "this machine is not running enough processes to key a registry"
+    return found[:how_many]
+
+
 def _starttime(pid: int) -> str:
     stat = Path(f"/proc/{pid}/stat").read_text()
     return stat[stat.rfind(")") + 1 :].split()[22 - 3]
@@ -624,3 +639,146 @@ def test_a_card_opens_in_plain_words_and_keeps_the_technical_half_a_press_away(
     plain = card.split('class="plain-only"')[1].split('class="technical-only"')[0]
     assert "pid" not in plain
     assert str(os.getpid()) not in plain
+
+
+# --- whose session this is (docs/stories/03) -------------------------------------------------------
+@pytest.mark.unit
+def test_a_row_says_nothing_about_whose_it_is_until_somebody_asks(home: Home) -> None:
+    """Thirty callers of `board` want the rows in order to find the sessions a question is about
+    and have no use for this reading.
+
+    A default of `"agent"` would have every one of them quietly asserting something nobody looked
+    up — CLAUDE.md's fifth rule broken to make a field tidier. Absent is a real answer.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    rows, _ = routes.board()
+
+    assert [row.whose for row in rows] == [""]
+
+
+@pytest.mark.unit
+def test_the_board_tells_what_it_started_from_what_it_merely_found(home: Home) -> None:
+    """Measured on a real console: thirty-six rows, of which this console had started **none** —
+    and the board said the same thing about all thirty-six.
+
+    `bg` is how this console starts a session and it is also how anything else does, so the
+    registry alone cannot answer it. What can is that the console wrote the id down when it
+    started one.
+    """
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+    home.session(
+        os.getppid(), "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    rows, _ = routes.board({"aaaaaaaa"})
+    whose = {row.session.session_id.split("-")[0]: row.whose for row in rows}
+
+    assert whose["aaaaaaaa"] == "ours"
+    assert whose["bbbbbbbb"] == "agent", (
+        "a background session nobody here started is presented as one that was"
+    )
+
+
+@pytest.mark.unit
+def test_a_session_somebody_is_sitting_in_is_not_an_agent(home: Home) -> None:
+    """One of the thirty-six was the person's own terminal, and it read exactly like the other
+    thirty-five."""
+    home.session(
+        os.getpid(),
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        cwd="/home/dev/alpha",
+        kind="interactive",
+    )
+
+    rows, _ = routes.board(set())
+
+    assert [row.whose for row in rows] == ["person"]
+
+
+@pytest.mark.unit
+def test_a_directory_holding_more_sessions_than_anybody_reads_arrives_folded(home: Home) -> None:
+    """One worktree on a real console held twenty-three sessions, and the board — thirty-six rows —
+    was mostly that single directory written out flat.
+
+    Folded is not hidden: the head says how many are inside and one press opens it. A board that
+    quietly showed twelve of thirty-six would be wrong in a way nobody can see.
+    """
+    # Real pids, because the registry is keyed by one and this file's liveness check is the one in
+    # docs/03-session-observation.md running for real rather than stubbed.
+    many = _live_pids(routes.MANY_IN_ONE_PLACE + 1)
+    for n, pid in enumerate(many):
+        home.session(
+            pid,
+            f"aaaaaaaa-0000-4000-8000-{n:012d}",
+            cwd="/home/dev/alpha/.claude/worktrees/one-piece-of-work",
+        )
+
+    html = routes.render_board()
+
+    crowded = html[html.index('class="node card instance') :]
+    crowded = crowded[: crowded.index("</summary>")]
+    assert "crowded" in crowded
+    assert " open\n" not in crowded and " open " not in crowded, (
+        "a directory of two dozen sessions is written out in full"
+    )
+    assert f'class="pill">{routes.MANY_IN_ONE_PLACE + 1}<' in crowded, (
+        "the folded head does not say how many it folded"
+    )
+
+
+@pytest.mark.unit
+def test_a_handful_in_one_place_is_still_a_list(home: Home) -> None:
+    """A checkout with a person and a couple of agents in it is a list, not a wall."""
+    for n, pid in enumerate(_live_pids(2)):
+        home.session(pid, f"aaaaaaaa-0000-4000-8000-{n:012d}", cwd="/home/dev/alpha")
+
+    html = routes.render_board()
+
+    instance = html[html.index('class="node card instance') :]
+    assert "crowded" not in instance[: instance.index("</summary>")]
+
+
+@pytest.mark.unit
+def test_the_header_says_how_many_of_them_this_console_started(home: Home) -> None:
+    """A board of thirty-six that says nothing about which of them it is answerable for presents
+    all thirty-six as though it knows what they are."""
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+    home.session(
+        os.getppid(), "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    html = routes.render_board(ours={"aaaaaaaa"})
+
+    assert "2 sessions" in html
+    assert "1 started here" in html
+
+
+@pytest.mark.unit
+def test_a_board_that_started_all_of_them_does_not_say_so_twice(home: Home) -> None:
+    """A count that always equals the one beside it is a count nobody reads."""
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    html = routes.render_board(ours={"aaaaaaaa"})
+
+    head = html[html.index('class="tree-head"') : html.index("</div>", html.index("tree-head"))]
+    assert "1 session" in head
+    assert "started here" not in head
+
+
+@pytest.mark.unit
+def test_a_board_rendered_without_asking_says_nothing_about_who_started_what(home: Home) -> None:
+    """The same rule one level up from the row. A caller that did not hand in what this console
+    started gets no sentence about it, rather than a confident `0 started here` about a question
+    nobody put — which would read as "this console started none of them"."""
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    html = routes.render_board()
+
+    assert "started here" not in html

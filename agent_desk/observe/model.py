@@ -12,6 +12,7 @@ what it does not name, this program does not depend on.
 from __future__ import annotations
 
 import time
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path
 
@@ -289,6 +290,33 @@ def attention_hint(
         and (now - session.status_updated_at) >= after_seconds * 1000
     )
     return AttentionHint(waiting=waiting, observation=seen)
+
+
+# What can honestly be said about where a session came from. Three answers and no fourth, because
+# the fourth would be a guess:
+#
+#   `ours`   — this console started it. The short id is one it recorded against a task it
+#              dispatched, which is a fact rather than an inference.
+#   `agent`  — a background session it did not start. `--bg` is how this console starts one and it
+#              is also how anything else does, so "background" is the whole of what can be read
+#              from the registry about it.
+#   `person` — an interactive session: somebody is sitting in it.
+#
+# Measured on a real console, this is the difference between a board that can be scanned and one
+# that cannot: thirty-six rows, of which four were this console's, one was the person's own
+# terminal, and thirty-one were background sessions nothing here knows anything about — all
+# rendered identically, so all thirty-six read as things that might need answering.
+#
+# `ours` is handed in for the same reason `now` is: this is a reading of a session and the set of
+# ids belongs to the store, which `observe/` does not open.
+WHOSE: tuple[str, ...] = ("ours", "agent", "person")
+
+
+def whose(session: Session, ours: Collection[str]) -> str:
+    """Whether this console started this session, merely found it, or a person is sitting in it."""
+    if session.session_id.split("-")[0] in ours:
+        return "ours"
+    return "agent" if session.kind in ("bg", "background") else "person"
 
 
 def triage_rank(session: Session, hint: AttentionHint) -> int:

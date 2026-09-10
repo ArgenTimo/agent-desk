@@ -3270,3 +3270,17 @@ button.go:hover, button.yes:hover {
   text-transform: lowercase;
 }
 .carried-kind + ul { margin-top: 0; }
+
+/* --- whose session this is ----------------------------------------------------------------------- */
+/* A mark on the edge, never a colour on the card: colour on this page means status and nothing else
+   (docs/06-console.md), and "this console started it" is not a status a session is in. */
+.card.session.whose-person { border-left: 2px solid var(--fg-soft); }
+.card.session.whose-ours { border-left: 2px solid var(--temporary); }
+.pill.whose-person, .pill.whose-ours, .pill.whose-flagged { font-size: var(--t-xs); }
+.pill.whose-flagged { color: var(--attention); border-color: var(--attention); }
+/* A directory holding more sessions than anybody reads one by one arrives folded, and says so. */
+.card.instance.crowded > .card-head .card-name::after {
+  content: " · folded";
+  color: var(--fg-dim);
+  font-size: var(--t-xs);
+}

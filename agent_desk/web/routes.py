@@ -20,7 +20,7 @@ import hashlib
 import io
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,6 +86,7 @@ from agent_desk.observe.model import (
     now_ms,
     since,
     triage_rank,
+    whose,
 )
 from agent_desk.observe.shape import repository_of
 from agent_desk.store import repo
@@ -291,6 +292,20 @@ class BoardRow:
     # without the shape being rebuilt to answer the question.
     project_key: str = ""
     project_name: str = ""
+    # Whether this console started it, merely found it, or a person is sitting in it. A fact for
+    # the first, a reading of the registry for the other two, and never a guess about which piece
+    # of work an agent it did not start belongs to (CLAUDE.md, rule five).
+    #
+    # Empty means the question was not asked. Most callers of `board` want the rows in order to
+    # find the sessions a question is about and have no use for this; a default of `"agent"` would
+    # have every one of them quietly asserting something nobody looked up, which is the same rule
+    # broken to make a field tidier.
+    whose: str = ""
+
+
+# More sessions in one directory than anybody reads one by one. Six because a checkout with a
+# person and a handful of agents in it is still a list; twenty-three is a wall.
+MANY_IN_ONE_PLACE = 6
 
 
 @dataclass(frozen=True)
@@ -308,6 +323,27 @@ class Instance:
     @property
     def flagged(self) -> int:
         return sum(1 for row in self.rows if row.hint.waiting)
+
+    @property
+    def mine(self) -> int:
+        """Sessions somebody is sitting in. A person's own terminal is not a thing to answer."""
+        return sum(1 for row in self.rows if row.whose == "person")
+
+    @property
+    def ours(self) -> int:
+        """Agents this console started and is therefore answerable for."""
+        return sum(1 for row in self.rows if row.whose == "ours")
+
+    @property
+    def crowded(self) -> bool:
+        """Whether this directory holds more sessions than anybody scans.
+
+        One worktree on a real console held twenty-three, and the whole board — thirty-six rows —
+        was mostly that one directory rendered out flat. Folded rather than hidden: the head says
+        how many are inside, and one press opens it. A board that quietly showed twelve of
+        thirty-six would be wrong in a way nobody can see.
+        """
+        return len(self.rows) > MANY_IN_ONE_PLACE
 
 
 @dataclass(frozen=True)
@@ -437,15 +473,28 @@ def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) 
     return projects
 
 
-def board() -> tuple[list[BoardRow], list[str]]:
-    """Read the registry, then the tail of each live session. Blocking; call it in a thread."""
+def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str]]:
+    """Read the registry, then the tail of each live session. Blocking; call it in a thread.
+
+    `ours` is the short ids this console recorded against tasks it dispatched, handed in for the
+    same reason `spent` is handed to `render_board`: this runs in a thread and the store is not
+    here. `None` means the question was not asked and every row says so, rather than a default
+    that would have thirty callers asserting something none of them looked up.
+    """
     read = registry.read_registry()
     now = now_ms()
     rows: list[BoardRow] = []
     for session in read.sessions:
         tail = transcript.read_tail(session.session_id)
         hint = attention_hint(session, tail, now=now, after_seconds=settings.idle_hint_seconds)
-        rows.append(BoardRow(session=session, tail=tail, hint=hint))
+        rows.append(
+            BoardRow(
+                session=session,
+                tail=tail,
+                hint=hint,
+                whose="" if ours is None else whose(session, ours),
+            )
+        )
     # Triage first; within a group, most recent movement first, and the name to keep the order
     # stable between two ticks that are otherwise identical.
     rows.sort(key=lambda r: (triage_rank(r.session, r.hint), -r.session.updated_at, r.session.name))
@@ -513,6 +562,16 @@ async def board_plans(rows: list[BoardRow], kicks: dict[str, Kicking]) -> str:
     )
 
 
+async def board_ours() -> set[str]:
+    """The short ids this console started, out of its own queue.
+
+    A fact, and the only one available: a session in the registry says it is `bg`, which is how
+    this console starts one and also how anything else does. What separates the four it is
+    responsible for from the thirty-one it is not is that it wrote the id down when it started them.
+    """
+    return {task.agent_id for task in await store.tasks(limit=500) if task.agent_id}
+
+
 async def board_canaries() -> dict[str, str]:
     """The signature each session this console started was told to keep (023-canary.sql)."""
     return await store.canaries()
@@ -570,6 +629,7 @@ def render_board(
     canaries: dict[str, str] | None = None,
     plans_html: str = "",
     spent: Spent | None = None,
+    ours: Collection[str] | None = None,
 ) -> str:
     """The fragment the page holds and every server-sent event replaces.
 
@@ -577,7 +637,7 @@ def render_board(
     the counter is simply not rendered, which is deliberate: a caller that forgot to read it should
     show nothing rather than a confident `$0.00`, which is a different claim entirely.
     """
-    rows, notices = board()
+    rows, notices = board(ours)
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
         rows=rows,
@@ -1082,7 +1142,7 @@ async def render_page(message: str = "") -> str:
     field offers when you point a question at a project or a session.
     """
     groups = await store.groups()
-    rows, notices = await asyncio.to_thread(board)
+    rows, notices = await asyncio.to_thread(board, await board_ours())
     projects = shape(rows, groups, await store.seen_projects())
     # Written from the read that happened anyway, never on a schedule of its own (073). A project
     # this console has seen stays on the board after its last session ends, because everything
