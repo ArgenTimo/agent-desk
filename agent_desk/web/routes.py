@@ -5019,13 +5019,21 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
 
     directive = await store.directive(directive_id) if directive_id else None
     block = await store.block(directive.block_id) if directive is not None else None
+    # The one object a refusal always has: the session the words were typed at. Without it "бери в
+    # работу" sent six agents, one after another, to dig through transcripts for what "it" was.
+    # A fact, not a reading of it — where to look, never what that session was doing.
+    said_at = (
+        f"These words were typed at session {row.session.session_id}, working in "
+        f"{row.session.cwd}. It was running, so they could not be sent to it; its transcript is "
+        "where to look for what they refer to."
+    )
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(
             text_,
             project=row.session.project,
             branch=(row.tail.git_branch if row.tail else "") or "",
-            notes=[block.context] if block is not None and block.context else [],
+            notes=[said_at, *([block.context] if block is not None and block.context else [])],
             **await autostart.about(store, row.project_key),  # type: ignore[arg-type]
         ),
         cwd=row.session.cwd,

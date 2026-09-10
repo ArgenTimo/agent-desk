@@ -379,6 +379,23 @@ async def test_dispatching_from_a_refusal_briefs_the_agent_like_every_other_door
     assert servers == ["the board"]
 
 
+@pytest.mark.unit
+async def test_words_typed_at_a_refusal_name_the_session_they_were_typed_at(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """ "бери в работу" with no directive behind it has one object, the session whose refusal it
+    was typed into. Six agents on 2026-09-10 started without it, each one working out from
+    transcripts which session "it" was."""
+    session_id = _a_session(home)
+
+    status, _ = await _post(f"/sessions/{session_id}/dispatch", {"text": "бери в работу"})
+
+    assert status == 200
+    (call,) = started
+    assert f"typed at session {session_id}" in call["instruction"]
+    assert f"working in {home.root.parent}." in call["instruction"]
+
+
 # --- ideas, from the other side ---------------------------------------------------------------------
 @pytest.mark.unit
 async def test_implementing_the_ideas_a_message_is_about(
