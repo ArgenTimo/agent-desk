@@ -239,6 +239,28 @@
   {% if grouped %}
   <span class="tree-count">in {{ grouped }} group{{ "" if grouped == 1 else "s" }}</span>
   {% endif %}
+  {# The two numbers docs/09-roadmap.md says this project is judged by, and until now the product
+     showed neither. Here rather than on a page of its own, for the reason the spend counter is on
+     the board rather than behind a link: a number behind a link is a number nobody is shown.
+
+     Over a week, because an all-time total stops moving and a number that stops moving is one
+     nobody looks at twice. #}
+  {% if worked.captured %}
+  <span class="tree-count{% if worked.draining %} flagged-count{% endif %}"
+        title="thoughts written down in the last seven days, and how many of them became something — docs/09-roadmap.md, `What is measured`">
+    {{ worked.built }} of {{ worked.captured }} built this week
+  </span>
+  {% endif %}
+  {# The honest half of the roadmap's other measure. A terminal somebody opens themselves is
+     invisible from here and always will be; this is the times the board sent them to one, which is
+     a different number and says so. Nothing is shown when there were none, because "0" every day
+     is a number people stop reading — and zero is the answer phase one exists to produce. #}
+  {% if worked.terminals %}
+  <span class="tree-count"
+        title="times the board sent you to a terminal in the last seven days — a terminal you opened yourself is not visible from here">
+    {{ worked.terminals }} → a terminal
+  </span>
+  {% endif %}
   <span class="spacer"></span>
   {# Sixty ideas are not read from the end, they are searched — so the column can be ordered.
      A form rather than a script: it works with no JavaScript, and the choice is kept in the

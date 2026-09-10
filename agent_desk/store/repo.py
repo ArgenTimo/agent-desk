@@ -3555,6 +3555,52 @@ class Store:
                 {"short_id": short_id, "name": name, "t": _now_ms()},
             )
 
+    async def went_to_a_terminal(self, session_id: str) -> None:
+        """Record that the board sent somebody to a terminal (077).
+
+        The honest half of the roadmap's first measure. A press of `go to it` is this console
+        handing somebody back to a terminal because the board did not answer their question, and
+        driving that to zero is what docs/09-roadmap.md says phase one exists for.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO went_to_a_terminal (session_id, at) VALUES (:session_id, :at)"),
+                {"session_id": session_id, "at": _now_ms()},
+            )
+
+    async def terminals_since(self, since_ms: int) -> int:
+        """How many times, in a window. A window because an all-time total stops moving, and a
+        number that stops moving is one nobody looks at twice."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT COUNT(*) FROM went_to_a_terminal WHERE at >= :since"),
+                {"since": since_ms},
+            )
+            return int(rows.scalar_one())
+
+    async def ideas_since(self, since_ms: int) -> tuple[int, int]:
+        """Thoughts written down in a window, and how many of them were built.
+
+        The second of the two numbers docs/09-roadmap.md says this project is judged by, and it has
+        been derivable since the first migration without ever being shown. Counted in SQL rather
+        than by reading every idea into memory: the pool is four hundred and seventy-nine rows on
+        the author's machine and this is asked on a surface that renders every couple of seconds.
+
+        `done` and not `promoted`: the roadmap's word for the far end is "promoted", and the state
+        that actually means a thought became something is `done` — `promoted` is one step on the way
+        and a count that used it would report an idea that was built as though it had stalled.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT COUNT(*), COALESCE(SUM(state = 'done'), 0) FROM idea "
+                    "WHERE created_at >= :since"
+                ),
+                {"since": since_ms},
+            )
+            captured, built = rows.one()
+            return int(captured), int(built)
+
     async def canaries(self) -> dict[str, str]:
         """Every session this console told to sign its replies, by short id."""
         async with self.engine.connect() as conn:

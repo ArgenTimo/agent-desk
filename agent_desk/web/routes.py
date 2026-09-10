@@ -1012,7 +1012,51 @@ async def render_ideas() -> str:
         # than worked out in the template: which of the three words to show is a fact about what
         # happened, not about how it is drawn.
         undo=await _undone(),
+        # The second of the two numbers docs/09-roadmap.md says this project is judged by, and the
+        # honest half of the first. In this column rather than on a page of its own, for the reason
+        # the spend counter is on the board rather than behind a link: a number behind a link is a
+        # number nobody is shown.
+        worked=await _did_this_work(),
     )
+
+
+# How far back the two measures look. A week because that is the unit somebody actually asks in —
+# "has this been worth it lately" — and because an all-time total stops moving, and a number that
+# stops moving is one nobody looks at twice.
+MEASURED_OVER_MS = 7 * 24 * 60 * 60 * 1000
+
+
+@dataclass(frozen=True)
+class DidThisWork:
+    """What docs/09-roadmap.md said it would judge this by, over a week.
+
+    `captured` and `built` are the second measure, and they are facts about rows.
+
+    `terminals` is the honest half of the first. The roadmap asks for terminal opens per day and
+    that is not knowable from here — a terminal somebody opens themselves is invisible to this
+    program, and an estimate of it would be a guessed status wearing a number. What this counts is
+    the times the board sent them to one, which is a different thing and says so (077).
+    """
+
+    captured: int
+    built: int
+    terminals: int
+
+    @property
+    def draining(self) -> bool:
+        """Whether thoughts are going in without coming out.
+
+        The one state worth a sentence. "Capture with no promotion means the inbox is a drain, not
+        a notebook" — and a counter that says something reassuring all day teaches people to stop
+        reading it, which is this console's own argument about its spend counter.
+        """
+        return self.captured >= 5 and self.built * 2 < self.captured
+
+
+async def _did_this_work() -> DidThisWork:
+    since = now_ms() - MEASURED_OVER_MS
+    captured, built = await store.ideas_since(since)
+    return DidThisWork(captured=captured, built=built, terminals=await store.terminals_since(since))
 
 
 async def render_inbox() -> str:
@@ -3707,6 +3751,13 @@ async def open_a_session(session_id: str) -> JSONResponse:
     text into a context, and this puts a person in front of one.
     """
     done = await asyncio.to_thread(opening.open_it, session_id)
+    if done.ok:
+        # The half of the roadmap's first measure this console can stand behind (077). A terminal
+        # somebody opens themselves is not visible from here and never will be; this one is, and it
+        # is this console handing them back to a terminal because the board did not answer their
+        # question. Recorded only when one actually opened: a press that failed sent nobody
+        # anywhere.
+        await store.went_to_a_terminal(session_id)
     return JSONResponse({"opened": done.ok, "why": done.detail})
 
 

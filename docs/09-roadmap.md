@@ -128,3 +128,17 @@ Two numbers, from the beginning, because they are the ones that say whether this
 - **Terminal opens to check status**, per day. Phase 1 exists to drive this to zero.
 - **Ideas captured, and of those, promoted.** Capture with no promotion means the inbox is a
   drain, not a notebook — and the fix is in [05-ideas.md](05-ideas.md), not in more capture.
+
+**Both are now on the page, and one of them is only half answered.** They are in the head of the
+idea column, over a week, because a number behind a link is a number nobody is shown and an
+all-time total is a number that stops moving.
+
+The second is exact: they are rows, and the far end is `done` rather than `promoted` — `promoted`
+is a step on the way, and a count that used it would report a built idea as a stalled one.
+
+The first cannot be. A terminal somebody opens themselves is invisible to this program and an
+estimate of it would be a guessed status wearing a number (CLAUDE.md, rule five). What is counted
+instead is **the times the board sent you to a terminal** — every press of `go to it`, which is
+this console handing somebody back to a terminal because the board did not answer their question.
+That is a different number, it is recorded under a name that says which it is (migration 077), and
+it is shown only when it is not zero, because zero is the answer phase 1 exists to produce.
