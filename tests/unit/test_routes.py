@@ -336,6 +336,49 @@ async def test_dispatching_at_a_session_that_has_gone_says_so(
     assert started == []
 
 
+@pytest.mark.unit
+async def test_dispatching_from_a_refusal_briefs_the_agent_like_every_other_door(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "бери в работу" at a refusal reached an agent as that bare line and nothing else: no
+    context of the message, no project note, no glossary, no servers (2026-09-10)."""
+    session_id = _a_session(home)
+    rows, _ = routes.board()
+    key = rows[0].project_key
+    await desk.set_project_note(key, "Commit messages name the document the change serves.")
+    await desk.add_term(repo_key=key, term="смена", means="one stretch of work")
+    await desk.add_mcp_server(key, "the board", "stdio", "npx -y a-server")
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="бери в работу",
+        thread_set_by="human",
+    )
+    await desk.set_block_context(block.id, "idea · the check card goes grey once it passes")
+    directive = await desk.record_directive(
+        block_id=block.id, session_id=session_id, session_name="alpha", text_="бери в работу"
+    )
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_start(instruction: str, *, servers: object = (), **rest: object) -> dispatch.Started:
+        calls.append((instruction, [one.name for one in servers]))  # type: ignore[attr-defined]
+        return dispatch.Started(True, agent_id="agent1")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+
+    status, panel = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу", "directive": directive.id}
+    )
+
+    assert status == 200
+    assert "an agent is on it" in panel
+    ((instruction, servers),) = calls
+    assert "the check card goes grey once it passes" in instruction
+    assert "Commit messages name the document the change serves." in instruction
+    assert "**смена** — one stretch of work" in instruction
+    assert servers == ["the board"]
+
+
 # --- ideas, from the other side ---------------------------------------------------------------------
 @pytest.mark.unit
 async def test_implementing_the_ideas_a_message_is_about(
