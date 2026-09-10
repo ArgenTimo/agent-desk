@@ -499,6 +499,11 @@ async def on_the_bench(
     message happened to be carrying. Dragging a result onto another card is somebody saying "these
     two", and a digest that then describes one of them is a digest that cannot be answered.
     """
+    # A card a *gesture* named is here because the gesture named it. It used to have to appear in
+    # `dropped` as well, which meant the page had to keep sending every block card on the bench in
+    # case one of them turned out to be half of a combine — and that is why the count under the
+    # bench said thirty-seven where the model saw twenty-seven. A coupling, not a rule.
+    dropped = [*dropped, *(one for one in named if one not in set(dropped))]
     names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
     said = await store.cards_said(names)
     chosen = await store.card_roles()

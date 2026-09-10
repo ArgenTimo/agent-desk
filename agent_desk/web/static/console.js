@@ -608,6 +608,13 @@ function showBenchToggle() {
 // not require `[data-kind]`, so the sentence under the bench and the field the message is built
 // from were describing different sets. A number beside a Send button that is not the number being
 // sent is the shape of mistake this console exists to not make.
+//
+// `.block-card` is out for the same reason `.answer-card` always was, and it took a change on the
+// server to be able to say so. The two are the halves of one exchange and travel as the thread's
+// own history; `on_the_bench` has always dropped them from the digest. The page went on sending
+// them because a card a *gesture* named had to be among the targets to survive — so on a real
+// bench the strip said `carrying 37 cards` while the model was shown twenty-seven. That coupling
+// is gone: a named card is now included wherever it came from, and this can say what it means.
 function cardsBeingCarried() {
   const chosen = chosenCards().filter(
     (pin) => pin.dataset.kind && !pin.classList.contains('own')
@@ -619,7 +626,7 @@ function cardsBeingCarried() {
       // sending a hundred and twenty-three targets with every message. Silently, because the
       // count beside the field was measuring something else. The same mistake `pin()` made once
       // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
-      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
+      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.block-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
 }
 
 function pinnedTargets() {

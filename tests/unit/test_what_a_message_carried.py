@@ -192,3 +192,83 @@ def test_the_record_on_the_page_shows_the_shape_and_the_groups() -> None:
     assert "| shape_of" in said, "a record of two dozen things opens as two dozen flat lines"
     assert "| by_kind" in said
     assert "carried-kind" in said
+
+
+# --- and the two halves of one rule, checked against each other (docs/stories/08) -------------------
+CARRIED = "cardsBeingCarried"
+
+
+def _selector() -> str:
+    """The selector the page builds the message from."""
+    console = CONSOLE.read_text(encoding="utf-8")
+    body = console[console.index(f"function {CARRIED}(") :]
+    return body[: body.index("\n}\n")]
+
+
+def test_the_page_does_not_send_the_conversation_as_things_to_ask_about() -> None:
+    """Counted on the author's busiest bench: the page sent 37 targets and the model was shown 27,
+    and all ten of the difference were block cards.
+
+    `on_the_bench` has always dropped a block or an answer — they are the two halves of one exchange
+    and travel as the thread's own history. The page went on sending them because a card a *gesture*
+    named had to be among the targets to survive, which is a coupling rather than a rule.
+    """
+    said = _selector()
+
+    assert ":not(.answer-card)" in said
+    assert ":not(.block-card)" in said, (
+        "the conversation is counted as things the message asks about"
+    )
+
+
+async def test_a_card_a_gesture_named_is_in_the_digest_wherever_it_came_from(desk: Store) -> None:
+    """The change that let the page stop working around the server. Dragging one answer onto
+    another is somebody saying "these two", and a digest that described neither would be a digest
+    that cannot be answered."""
+    thread = await desk.create_thread("a subject")
+    one = await desk.create_block(
+        thread_id=thread.id, kind="question", input="the first", thread_set_by="human"
+    )
+    two = await desk.create_block(
+        thread_id=thread.id, kind="question", input="the second", thread_set_by="human"
+    )
+    named = [f"block:{one.id}", f"block:{two.id}"]
+
+    # Sent the way the page now sends it: the gesture names them and the targets do not.
+    look = await blocks.on_the_bench(desk, [], [], named)
+
+    assert {card.name for card in look.cards} == set(named)
+
+
+async def test_the_number_the_page_shows_is_the_number_the_model_sees(desk: Store) -> None:
+    """The two rules live in two languages and two files, and nothing had ever compared them.
+
+    A bench of every kind of card, sent the way the page sends it, and the count asserted against
+    what `on_the_bench` actually produces.
+    """
+    thread = await desk.create_thread("a subject")
+    block = await desk.create_block(
+        thread_id=thread.id, kind="question", input="a message", thread_set_by="human"
+    )
+    ideas = [await _an_idea(desk, f"a thought {n}") for n in range(3)]
+
+    # What is on the bench: three ideas, one block card, one answer card.
+    on_the_bench_now = [
+        *(f"idea:{one}" for one in ideas),
+        f"block:{block.id}",
+        f"answer:{block.id}",
+    ]
+    # What the page sends after this change: the selector excludes `.answer-card` and
+    # `.block-card`, and those are exactly the two kinds `on_the_bench` drops.
+    excluded = {"answer", "block"}
+    sent = [one for one in on_the_bench_now if one.split(":", 1)[0] not in excluded]
+
+    look = await blocks.on_the_bench(desk, [], sent)
+
+    assert len(sent) == len(look.cards), (
+        f"the page would say {len(sent)} and the model is shown {len(look.cards)}"
+    )
+    # And the selector really does name those two kinds, so this stays true when either side moves.
+    said = _selector()
+    for kind in excluded:
+        assert f":not(.{kind}-card)" in said
