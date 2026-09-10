@@ -385,6 +385,63 @@ def _worktree_name(name: str) -> str:
     return (slug or "desk-task")[:40].strip("-") or "desk-task"
 
 
+def _free_worktree_name(cwd: Path, name: str) -> str:
+    """`_worktree_name`, or that with `-2`, `-3`… when an agent is already working under it.
+
+    The name comes from what was typed, and what is typed is often the same three words: "бери в
+    работу" four times in one night gave `beri-v-rabotu` four times, and `--worktree` with a name
+    that exists does not refuse — it puts the new agent into the old one's checkout. Four agents
+    then shared one worktree and one branch, committed over each other, and one pull request had
+    to be cut out of another to keep two fixes apart. docs/adr/0006 gives each agent a worktree
+    *of its own*; this is what makes that true when the words repeat.
+
+    Read from the directory the CLI makes them in (`_worktrees_of`), and nothing is written there.
+    The branch a suffixed name produces is found again by `autostart.worktree_of`, which reads it
+    from the job file rather than re-deriving it.
+    """
+    base = _worktree_name(name)
+    taken = _worktrees_of(cwd)
+    candidate, number = base, 1
+    while (taken / candidate).exists():
+        number += 1
+        suffix = f"-{number}"
+        candidate = base[: 40 - len(suffix)].rstrip("-") + suffix
+    return candidate
+
+
+def _worktrees_of(cwd: Path) -> Path:
+    """The directory the CLI makes a worktree in when it is started at `cwd`.
+
+    Not `cwd` itself when `cwd` is a second checkout — a session in `agent-desk-shift`, or an agent
+    in one of these very directories. The CLI puts every worktree of a repository under its main
+    checkout: two agents dispatched on 2026-09-10, one from `agent-desk-shift` and one from
+    `.claude/worktrees/dispatch-own-worktree`, both landed in `agent-desk/.claude/worktrees/`, and
+    counting names under `cwd` would have found nothing in either.
+
+    `--git-common-dir` names the main checkout's `.git` from any of its worktrees. Whatever git
+    cannot answer for — not a checkout, a bare repository, no git at all — is read at `cwd`.
+    """
+    try:
+        done = subprocess.run(  # noqa: S603 — a list, no shell, and it only reads
+            [
+                shutil.which("git") or "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=START_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return cwd / ".claude" / "worktrees"
+    common = Path(done.stdout.strip())
+    root = common.parent if done.returncode == 0 and common.name == ".git" else cwd
+    return root / ".claude" / "worktrees"
+
+
 def _read_id(output: str) -> str:
     """The short id out of `backgrounded · 79586f63`.
 
@@ -419,7 +476,11 @@ def start(
     if shutil.which(settings.claude_bin) is None and not Path(settings.claude_bin).exists():
         return Started(False, detail=f"{settings.claude_bin} is not installed here")
 
-    command = argv(instruction, worktree=_worktree_name(name), mcp_config=write_mcp_config(servers))
+    command = argv(
+        instruction,
+        worktree=_free_worktree_name(directory, name),
+        mcp_config=write_mcp_config(servers),
+    )
     forbidden = [flag for flag in command if flag in NEVER]
     if forbidden:  # pragma: no cover — the argv builder cannot produce one; the check is the rule
         return Started(False, detail=f"refusing to start an agent with {forbidden[0]}")

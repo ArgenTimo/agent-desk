@@ -6,7 +6,9 @@ permission flags, the worktree, the click, and once.
 
 from __future__ import annotations
 
+import os
 import pathlib
+import subprocess
 from collections.abc import AsyncIterator
 
 import pytest
@@ -80,6 +82,96 @@ def test_a_russian_name_survives_as_something_the_cli_will_accept() -> None:
         assert name and name.isascii()
         assert all(character.isalnum() or character in "._-" for character in name)
         assert not name.startswith("-") and not name.endswith("-")
+
+
+@pytest.mark.unit
+def test_the_same_words_twice_do_not_put_two_agents_in_one_worktree(
+    tmp_path: pathlib.Path,
+) -> None:
+    """docs/adr/0006: a worktree *of its own*. "бери в работу" sent four times gave four agents
+    one directory and one branch, because `--worktree` joins a name that exists."""
+    worktrees = tmp_path / ".claude" / "worktrees"
+
+    assert dispatch._free_worktree_name(tmp_path, "бери в работу") == "beri-v-rabotu"
+
+    (worktrees / "beri-v-rabotu").mkdir(parents=True)
+    assert dispatch._free_worktree_name(tmp_path, "бери в работу") == "beri-v-rabotu-2"
+
+    (worktrees / "beri-v-rabotu-2").mkdir()
+    assert dispatch._free_worktree_name(tmp_path, "бери в работу") == "beri-v-rabotu-3"
+
+    # Different words are not held up by somebody else's name.
+    assert dispatch._free_worktree_name(tmp_path, "fix the ports") == "fix-the-ports"
+
+
+@pytest.mark.unit
+def test_a_numbered_name_still_fits_the_bound(tmp_path: pathlib.Path) -> None:
+    """The suffix is paid for out of the name, not added past the 40 characters a directory gets,
+    and cutting to make room does not leave a dash in front of it."""
+    base = dispatch._worktree_name("a" * 38 + " b")
+    assert base == "a" * 38 + "-b"
+    (tmp_path / ".claude" / "worktrees" / base).mkdir(parents=True)
+
+    numbered = dispatch._free_worktree_name(tmp_path, "a" * 38 + " b")
+
+    assert numbered == "a" * 38 + "-2"
+    assert len(numbered) <= 40
+    assert "--" not in numbered
+
+
+@pytest.mark.unit
+def test_the_agent_is_started_under_the_free_name(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: the name that reaches the CLI is the free one, not the one the words make."""
+    said = tmp_path / "argv"
+    binary = _fake_cli(
+        tmp_path,
+        f'#!/bin/sh\nfor a in "$@"; do echo "$a"; done > {said}\n'
+        "printf 'backgrounded \\302\\267 1a2b3c4d\\n'\n",
+    )
+    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin=str(binary)))
+    (tmp_path / ".claude" / "worktrees" / "beri-v-rabotu").mkdir(parents=True)
+
+    result = dispatch.start("бери в работу", cwd=str(tmp_path), name="бери в работу")
+
+    assert result.started
+    command = said.read_text(encoding="utf-8").splitlines()
+    assert command[command.index("--worktree") + 1] == "beri-v-rabotu-2"
+
+
+def _git(cwd: pathlib.Path, *args: str) -> None:
+    """Git with nothing of this machine's configuration in it — no identity, no signing, no hooks."""
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],  # noqa: S607
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+
+
+@pytest.mark.unit
+def test_a_checkout_that_is_itself_a_worktree_counts_names_at_the_main_one(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The collision this was written for came from second checkouts: agents dispatched from
+    `agent-desk-shift` and from `.claude/worktrees/dispatch-own-worktree` both landed under the
+    main checkout's `.claude/worktrees/`. Names counted under the directory the dispatch came from
+    would have found none of them taken."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _git(main, "init", "-q")
+    _git(main, "commit", "-q", "--allow-empty", "-m", "start")
+    agent = main / ".claude" / "worktrees" / "dispatch-own-worktree"
+    _git(main, "worktree", "add", "-q", str(agent), "-b", "worktree-dispatch-own-worktree")
+    second = tmp_path / "repo-shift"
+    _git(main, "worktree", "add", "-q", str(second), "-b", "shift")
+    (main / ".claude" / "worktrees" / "beri-v-rabotu").mkdir()
+
+    assert dispatch._free_worktree_name(main, "бери в работу") == "beri-v-rabotu-2"
+    assert dispatch._free_worktree_name(agent, "бери в работу") == "beri-v-rabotu-2"
+    assert dispatch._free_worktree_name(second, "бери в работу") == "beri-v-rabotu-2"
 
 
 @pytest.mark.unit
