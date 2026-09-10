@@ -48,6 +48,16 @@ RECENT = 12
 # the third time is always about a different thing.
 _NOISE = re.compile(r"[0-9]+|[A-Za-z]*\d[\w-]*")
 
+# How much of a question this reads before deciding what shape it is. The shape is the first three
+# words, so the rest was never going to be looked at — but `_NOISE` above is quadratic on a long
+# run of letters with no digit in it, because `[A-Za-z]*` consumes the run and backtracks a
+# character at a time looking for the `\d` that is not there. On a paste with no spaces in it — a
+# base64 blob, a minified line, a URL — that is 2.4 seconds at twenty thousand characters and 59
+# at a hundred thousand, in `GET /workbench/again`, which is an async route with no thread under
+# it: the whole console stops, and it stops for every session on it and not only for whoever
+# pasted. Far more text than any question opens with, and a bound rather than a hope.
+MOST_TEXT = 500
+
 
 @dataclass(frozen=True)
 class Shape:
@@ -91,7 +101,8 @@ def shape_of(said: str, context: str) -> Shape:
             if " · " in line and not line.startswith("earlier · ")
         )
     )
-    words = tuple(one for one in _NOISE.sub("", said.lower()).split() if one.isalpha())[:WORDS]
+    opening = said[:MOST_TEXT].lower()
+    words = tuple(one for one in _NOISE.sub("", opening).split() if one.isalpha())[:WORDS]
     return Shape(kinds=kinds, words=words)
 
 

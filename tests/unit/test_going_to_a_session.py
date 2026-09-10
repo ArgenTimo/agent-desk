@@ -137,3 +137,23 @@ def test_the_copy_handler_does_not_fire_as_well() -> None:
     code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("//"))
 
     assert "button.hasAttribute('data-open')" in code
+
+
+@pytest.mark.parametrize("said", ["\x00", "a\x00b", "\x00" * 40])
+def test_a_null_byte_from_a_url_is_an_answer_and_not_a_crash(
+    said: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`session_id` is a path parameter and nothing between the URL and here narrows it.
+
+    `POST /sessions/%00/open` decodes to exactly this, and `Popen` refuses a null byte with a
+    `ValueError` — which is neither of the two this caught, so it came out of a function whose
+    first line of documentation is that it never does, into a route with nothing left to render.
+    """
+    # The real `Popen`, and a terminal that is not on this machine: the null byte is refused while
+    # the arguments are encoded, before anything is forked, so this spawns nothing either way.
+    monkeypatch.setattr(opening.shutil, "which", lambda name: "/nowhere/" + name)
+
+    done = opening.open_it(said)
+
+    assert not done.ok
+    assert "would not open" in done.detail

@@ -97,6 +97,10 @@ def open_it(session_id: str) -> Opened:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        # `ValueError` because `session_id` is a path parameter and nothing between the URL and
+        # here narrows it: `POST /sessions/%00/open` decodes to a null byte, which `Popen` refuses
+        # with a `ValueError` — out of a function whose first promise is that it never raises, into
+        # a route that then has nothing to render.
         return Opened(False, f"it would not open: {type(exc).__name__}")
     return Opened(True, f"opened in {command[0]}")

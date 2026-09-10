@@ -364,7 +364,15 @@ def read_what_went_wrong(raw: bytes) -> list[str]:
     said = json.loads(raw)
     if not isinstance(said, dict):
         raise ValueError("that was not an object")
-    return [str(one)[:300] for one in (said.get("said") or [])[:MOST_ERRORS]]
+    found = said.get("said") or []
+    # The shape as well as the type of the envelope, because "raises `ValueError` on anything
+    # unusable" is the whole of what the route above knows: it catches that and answers 400, and
+    # everything else leaves by the other door as a 500. `{"said": 5}` was a `TypeError` and
+    # `{"said": {…}}` a `KeyError`, and a string was read one character at a time as though each
+    # letter were something the script threw.
+    if not isinstance(found, list):
+        raise ValueError("`said` is the list of what the script threw")
+    return [str(one)[:300] for one in found[:MOST_ERRORS]]
 
 
 def as_text(nodes: list[Node], controls: list[Control], errors: list[str]) -> str:

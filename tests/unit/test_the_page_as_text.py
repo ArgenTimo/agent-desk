@@ -239,3 +239,51 @@ def test_the_console_has_no_control_bound_to_nothing() -> None:
     _, controls = seen.read(page, script=script)
 
     assert [one.as_line() for one in controls if one.dead] == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b"not json at all",
+        b"[]",
+        b"5",
+        b"null",
+        b'{"said": 5}',
+        b'{"said": "one message, not a list of them"}',
+        b'{"said": {"a": 1}}',
+    ],
+)
+def test_a_page_posting_a_shape_this_cannot_read_is_a_four_hundred(raw: bytes) -> None:
+    """ "Raises `ValueError` on anything unusable, which the route answers with a 400" is the whole
+    of the contract between this and `the_script_fell_over`, which catches that and nothing else.
+
+    Three shapes left by another door: `{"said": 5}` as a `TypeError`, `{"said": {…}}` as a
+    `KeyError`, and a bare string as a list of its own characters — eight letters read as eight
+    things a script threw. A page posting nonsense is a bug in this program and a 500 hides it,
+    which is the opposite of what this whole module is for.
+    """
+    with pytest.raises(ValueError):
+        seen.read_what_went_wrong(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        (b"{}", []),
+        (b'{"said": null}', []),
+        (b'{"said": []}', []),
+        (b'{"said": [null, 5, {}]}', ["None", "5", "{}"]),
+        (b'{"said": ["TypeError: x is not a function"]}', ["TypeError: x is not a function"]),
+    ],
+)
+def test_what_a_page_can_post_it_reads(raw: bytes, want: list[str]) -> None:
+    """A page with nothing to report says so, and the entries are stringified rather than trusted
+    to be strings — the script posts what a browser handed it."""
+    assert seen.read_what_went_wrong(raw) == want
+
+
+def test_a_page_that_threw_more_than_anybody_will_read_is_cut() -> None:
+    thrown = json.dumps({"said": [f"error {n}" for n in range(500)]}).encode()
+
+    assert len(seen.read_what_went_wrong(thrown)) == seen.MOST_ERRORS
