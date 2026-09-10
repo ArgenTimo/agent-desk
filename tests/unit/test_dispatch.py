@@ -6,7 +6,9 @@ permission flags, the worktree, the click, and once.
 
 from __future__ import annotations
 
+import os
 import pathlib
+import subprocess
 from collections.abc import AsyncIterator
 
 import pytest
@@ -136,6 +138,40 @@ def test_the_agent_is_started_under_the_free_name(
     assert result.started
     command = said.read_text(encoding="utf-8").splitlines()
     assert command[command.index("--worktree") + 1] == "beri-v-rabotu-2"
+
+
+def _git(cwd: pathlib.Path, *args: str) -> None:
+    """Git with nothing of this machine's configuration in it — no identity, no signing, no hooks."""
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],  # noqa: S607
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+
+
+@pytest.mark.unit
+def test_a_checkout_that_is_itself_a_worktree_counts_names_at_the_main_one(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The collision this was written for came from second checkouts: agents dispatched from
+    `agent-desk-shift` and from `.claude/worktrees/dispatch-own-worktree` both landed under the
+    main checkout's `.claude/worktrees/`. Names counted under the directory the dispatch came from
+    would have found none of them taken."""
+    main = tmp_path / "repo"
+    main.mkdir()
+    _git(main, "init", "-q")
+    _git(main, "commit", "-q", "--allow-empty", "-m", "start")
+    agent = main / ".claude" / "worktrees" / "dispatch-own-worktree"
+    _git(main, "worktree", "add", "-q", str(agent), "-b", "worktree-dispatch-own-worktree")
+    second = tmp_path / "repo-shift"
+    _git(main, "worktree", "add", "-q", str(second), "-b", "shift")
+    (main / ".claude" / "worktrees" / "beri-v-rabotu").mkdir()
+
+    assert dispatch._free_worktree_name(main, "бери в работу") == "beri-v-rabotu-2"
+    assert dispatch._free_worktree_name(agent, "бери в работу") == "beri-v-rabotu-2"
+    assert dispatch._free_worktree_name(second, "бери в работу") == "beri-v-rabotu-2"
 
 
 @pytest.mark.unit
