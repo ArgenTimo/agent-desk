@@ -301,6 +301,13 @@ _STOPPED: tuple[tuple[str, str, str], ...] = (
         "It comes back when the limit resets.",
     ),
     (
+        "the run was killed",
+        "The run was killed before it answered.",
+        "Nothing about the question was wrong — something outside this console ended the run, and "
+        "on a machine running the console beside several agents that is usually the kernel "
+        "reclaiming memory. Asking again is the whole of the fix.",
+    ),
+    (
         "no answer within",
         "The run took longer than it is allowed to.",
         "AGENT_DESK_ANSWER_TIMEOUT_SECONDS gives it longer; a question about a whole repository "

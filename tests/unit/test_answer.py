@@ -464,6 +464,57 @@ async def test_a_failed_run_says_more_than_its_exit_code(
 
 
 @pytest.mark.unit
+async def test_a_run_that_was_killed_says_so_rather_than_reporting_a_negative_exit_code(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """`-9` is not an exit status and there is no exit code 9 to look up.
+
+    POSIX has a child either exit with a status of its own or be terminated by a signal, and
+    Python encodes the second as `-signum`; `str(exc)` is what `fail_block` writes and what a
+    person then reads on the card, so the encoding was reaching them raw
+    (docs/04-threads-and-blocks.md: a block that fails says why).
+
+    Killed for real rather than by a patched return code, because the whole claim is about what
+    `process.wait()` hands back from a signal death: the fake ends itself with SIGKILL after
+    reading the prompt and printing nothing (01M1ZEN85PA2NYSV70H59ZZFWN, the third of the three
+    shapes `test_a_run_that_only_reads_files_still_says_something` names).
+    """
+    binary = tmp_path / "killed" / "claude"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\ncat > /dev/null\nkill -9 $$\n")
+    binary.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert failed.state == "failed"
+    assert "killed" in (failed.error or "") and "SIGKILL" in (failed.error or "")
+    assert "-9" not in (failed.error or "")
+
+
+@pytest.mark.unit
+def test_an_exit_status_is_still_a_number_and_a_signal_is_still_a_name() -> None:
+    """Both halves, because a fix that renamed the ordinary case too would make every failure read
+    like a kill. Only a negative code is a signal."""
+    assert session._ended(0) == "the run exited 0"
+    assert session._ended(3) == "the run exited 3"
+    assert session._ended(-9) == "the run was killed (SIGKILL)"
+    assert session._ended(-11) == "the run was killed (SIGSEGV)"
+
+
+@pytest.mark.unit
+def test_a_killed_run_is_not_read_as_an_engine_this_machine_does_not_have() -> None:
+    """The wording changed on a string that decides whether a second engine is tried, so this is
+    the property that had to survive it: a kill is not the engine being *unavailable*. The kernel
+    reclaiming memory would take a local model with it, and retrying inside the same second would
+    be the console answering a question it had not thought about."""
+    assert not session.unavailable("the run was killed (SIGKILL)")
+
+
+@pytest.mark.unit
 async def test_what_a_run_complains_about_is_scrubbed_too(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
 ) -> None:

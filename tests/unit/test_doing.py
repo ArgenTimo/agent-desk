@@ -127,9 +127,11 @@ async def test_a_run_that_only_reads_files_still_says_something(
     #     is the other end of the sum — only a fork *off the main thread* can overlap a write the
     #     main thread is doing, and the suite has a handful of those per run, against the tens of
     #     thousands it took to land seven hits.
-    #   - `AnswerFailed: the run exited -9` — also at the `stream_answer` call. The child killed
-    #     before it printed, under the load of a machine running a live console and several agents
-    #     beside the suite.
+    #   - `AnswerFailed: the run was killed (SIGKILL)` — also at the `stream_answer` call. The
+    #     child killed before it printed, under the load of a machine running a live console and
+    #     several agents beside the suite. It used to read "the run exited -9", which is not an
+    #     exit status and sent a reader looking for exit code 9; `session._ended` names the signal
+    #     now, so this shape identifies itself the first time it appears here.
     #   - an empty `steps` or an empty `said` — the first or second assertion, and the only shape
     #     the closed mechanism above would have produced.
     #

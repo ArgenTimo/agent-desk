@@ -30,13 +30,14 @@ def test_a_failure_is_said_in_words_and_comes_with_a_next_step() -> None:
 
 @pytest.mark.unit
 def test_the_failures_this_program_can_actually_produce_are_all_covered() -> None:
-    """Not a general translator — a list of the four things that stop this console, each with the
-    one thing that changes it."""
+    """Not a general translator — a list of the things that actually stop this console, each
+    with the one thing that changes it."""
     for error, expected in (
         ("needs_toolchain: claude is not on PATH", "not on this machine"),
         ("rate limit reached", "rate limited"),
         ("usage limit reached for this account", "out of budget"),
         ("no answer within 180s", "longer than it is allowed"),
+        ("the run was killed (SIGKILL)", "killed before it answered"),
     ):
         what, act = telling.stopped(error)
         assert expected in what, error
@@ -47,7 +48,7 @@ def test_the_failures_this_program_can_actually_produce_are_all_covered() -> Non
 def test_a_failure_nobody_has_met_keeps_its_own_words_and_suggests_nothing() -> None:
     """Inventing a next step for a failure this program has never seen is exactly the guess the
     fifth rule forbids. Saying nothing reads as "something went wrong and this console does not
-    know what to suggest", which is honest and visibly different from the four it does know."""
+    know what to suggest", which is honest and visibly different from the ones it does know."""
     what, act = telling.stopped("the run exited 4")
 
     assert what == "the run exited 4"
