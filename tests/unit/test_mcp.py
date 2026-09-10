@@ -659,3 +659,166 @@ async def test_what_is_here_fits_in_one_answer(desk: Store) -> None:
 
     assert saying.MORE.format(left=1, s="") not in said
     assert len(said) < saying.MOST_CHARS
+
+
+# --- the two promises this surface makes about every call it has ----------------------------------
+# "Every answer goes through `saying.within`. A tool that can return the whole pool is one that will
+# one day return the whole pool into somebody's context window." Both promises are about *every*
+# tool, so both are asserted over every tool rather than over the handful somebody remembered.
+BADLY = [
+    {},
+    {"id": ""},
+    {"id": "   "},
+    {"id": None},
+    {"id": 5},
+    {"id": ["a"]},
+    {"id": {"a": 1}},
+    {"id": "nothing-with-this-id"},
+    {"id": "x" * 5000},
+    {"name": ""},
+    {"name": None},
+    {"name": 12},
+    {"name": "no such bench"},
+    {"text": ""},
+    {"text": None},
+    {"text": "   "},
+    {"text": "a" * 50_000},
+    {"note": ""},
+    {"note": None},
+    {"question": ""},
+    {"answer": ""},
+    {"body": ""},
+    {"steps": "not a list"},
+    {"steps": []},
+    {"id": "a", "note": "b", "text": "c", "name": "d", "question": "e", "answer": "f"},
+]
+
+
+@pytest.mark.parametrize("given", BADLY)
+async def test_no_tool_answers_a_wrong_shaped_call_with_anything_but_text(
+    desk: Store, given: dict[str, object]
+) -> None:
+    """An agent calling this has no schema validator between it and here, and the arguments it
+    sends are whatever a model produced. `call` catches, so this is really about what is under it:
+    every tool run against every shape of nonsense, answering text every time."""
+    for tool in tools.TOOLS:
+        said = await tools.call(desk, tool.name, dict(given))
+
+        content = said["content"]
+        assert isinstance(content, list) and len(content) == 1
+        assert content[0]["type"] == "text"
+        assert isinstance(content[0]["text"], str)
+        assert len(content[0]["text"]) <= saying.MOST_CHARS
+
+
+async def test_no_tool_can_return_the_whole_pool(desk: Store) -> None:
+    """The ceiling, against a store with far more in it than fits — which is the state the console
+    is actually in and the state nothing was ever asked in."""
+    for n in range(400):
+        await desk.create_idea(
+            text_=f"idea number {n} " + "words " * 20,
+            summary=f"idea number {n} " + "words " * 6,
+            source_kind="typed",
+            author="human",
+        )
+
+    for tool in tools.TOOLS:
+        for given in ({}, {"id": "a", "name": "a", "text": "a", "note": "a"}):
+            said = await tools.call(desk, tool.name, dict(given))
+
+            assert len(said["content"][0]["text"]) <= saying.MOST_CHARS, tool.name
+
+
+def test_the_surface_declares_itself_once_and_without_a_collision() -> None:
+    """`what_is_here` is how an agent finds out what it may call, and `tools/list` is how a client
+    does. Both read these fields, and a name that answers to two tools is a call whose result
+    depends on list order."""
+    names = [one.name for one in tools.TOOLS]
+    aliases = [one for tool in tools.TOOLS for one in tool.aliases]
+
+    assert len(names) == len(set(names))
+    assert len(aliases) == len(set(aliases))
+    assert not set(aliases) & set(names)
+    for tool in tools.TOOLS:
+        assert tool.says.strip(), tool.name
+        assert tool.shows.strip(), tool.name
+        assert tool.takes.get("type") == "object", tool.name
+        assert "properties" in tool.takes, tool.name
+
+
+# --- and the ceiling itself -----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("what", "said"),
+    [
+        ("empty", ""),
+        ("one short line", "a line"),
+        ("exactly the ceiling", "x" * saying.MOST_CHARS),
+        ("one over", "x" * (saying.MOST_CHARS + 1)),
+        ("one line, enormous", "x" * 100_000),
+        ("two lines, the second enormous", "short\n" + "x" * 100_000),
+        ("many short lines", "\n".join(f"line {n}" for n in range(50_000))),
+        ("nothing but newlines", "\n" * 50_000),
+        ("a line then nothing but newlines", "a\n" + "\n" * 50_000),
+        ("not ascii", "ы" * 50_000),
+        ("windows newlines", "a\r\n" * 20_000),
+    ],
+)
+def test_whatever_it_is_handed_what_comes_back_fits(what: str, said: str) -> None:
+    """Including the shapes that make the arithmetic awkward: a single line longer than the whole
+    budget has nowhere to be cut on a boundary, and a file of empty lines has a count far larger
+    than the text it describes."""
+    assert len(saying.within(said)) <= saying.MOST_CHARS, what
+
+
+def test_a_line_that_was_cut_is_counted_and_counted_in_its_own_number() -> None:
+    """ "то, что не влезло, называется числом" — and when the number is one it is a line."""
+    many = saying.within("\n".join(f"line {n}" for n in range(10_000)))
+    assert re.search(r"… and \d+ more lines\. Ask for the ones you need by name\.\Z", many)
+
+    # A single cut line takes some finding: the count's own digits are part of the budget, so the
+    # input is searched for rather than guessed at.
+    for length in range(1, saying.MOST_CHARS):
+        one = saying.within("x" * length + "\n" + "y" * 200)
+        if one.endswith("1 more line. Ask for the ones you need by name."):
+            break
+    else:  # pragma: no cover — the loop above finds one
+        pytest.fail("no input at all produces a single cut line")
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        {},
+        {"id": 1},
+        {"id": 1, "method": "nope"},
+        {"id": 1, "method": "tools/call"},
+        {"id": 1, "method": "tools/call", "params": None},
+        {"id": 1, "method": "tools/call", "params": {"name": "nope"}},
+        {"id": 1, "method": "tools/call", "params": {"name": "idea", "arguments": None}},
+        {"id": 1, "method": "tools/call", "params": {"name": "idea", "arguments": "not an object"}},
+        {"method": "initialized"},
+        {"id": 0, "method": "ping"},
+        {"id": None, "method": "ping"},
+        {"id": 1, "method": "tools/list"},
+    ],
+)
+async def test_the_protocol_layer_answers_whatever_is_put_on_the_wire(
+    desk: Store, wire: dict[str, object]
+) -> None:
+    """A client on the other end of a pipe is not this program's code, and a request that is
+    missing a field or carries the wrong type for one is what a half-implemented client sends.
+
+    `id: 0` is in here for its own reason: it is falsy and it is not absent, and a notification is
+    told from a request by *absence*. Reading it as a notification would leave that client waiting
+    for an answer that was never going to come.
+    """
+    back = await server.answer(desk, dict(wire))
+
+    if wire.get("id") is None:
+        assert back is None
+    else:
+        assert back is not None
+        assert back["jsonrpc"] == "2.0"
+        assert back["id"] == wire["id"]
+        assert ("result" in back) != ("error" in back)
+    json.dumps(back)  # it has to survive the wire it is going onto
