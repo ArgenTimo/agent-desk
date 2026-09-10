@@ -4575,7 +4575,8 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
         # branch exactly where it is and says why, which is what it did the first time.
         task = next((t for t in await store.tasks() if t.id == task_id), None)
         if task is not None and task.finished_at is not None:
-            offered = await asyncio.to_thread(land.land, task.cwd, autostart.worktree_of(task))
+            worktree = await autostart.landing_worktree(task)
+            offered = await asyncio.to_thread(land.land, task.cwd, worktree)
             await store.task_landed(task.id, offered.detail, landed=offered.landed)
     elif action == "retry":
         task = next((t for t in await store.tasks() if t.id == task_id), None)

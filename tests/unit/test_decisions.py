@@ -286,6 +286,40 @@ async def test_running_the_gate_again_on_a_branch_that_would_not_merge(
 
 
 @pytest.mark.unit
+async def test_the_land_button_offers_the_worktree_the_cli_numbered(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second agent on the same words is in `a-change-2`. Landing `a-change` from the button
+    would run the gate on, and merge, the first agent's branch."""
+    from agent_desk import land
+    from agent_desk.observe.model import JobEnd
+
+    task = await desk.queue_task(
+        repo_key=KEY, cwd=str(tmp_path), title="a change", instruction="x", source_kind="found"
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "agent2")
+    await desk.finish_task(task.id)
+
+    offered: list[str] = []
+
+    def landing(cwd: str, worktree: str, *, push: bool = True) -> land.Landed:
+        offered.append(worktree)
+        return land.Landed(landed=True, detail="merged", branch="worktree-a-change-2")
+
+    monkeypatch.setattr(routes.land, "land", landing)
+    monkeypatch.setattr(
+        routes.autostart.jobs,
+        "read_job",
+        lambda short: JobEnd(state="done", worktreeBranch="worktree-a-change-2"),
+    )
+
+    await _post(f"/tasks/{task.id}/land", {"key": KEY})
+
+    assert offered == ["a-change-2"]
+
+
+@pytest.mark.unit
 async def test_a_task_that_never_finished_is_not_offered_to_the_gate(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

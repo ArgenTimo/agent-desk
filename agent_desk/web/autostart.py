@@ -172,6 +172,19 @@ def worktree_of(task: Task, ended: JobEnd | None = None) -> str:
     return dispatch._worktree_name(task.title)
 
 
+async def landing_worktree(task: Task) -> str:
+    """`worktree_of` for a caller that has no `JobEnd` in hand: the job file is read for it.
+
+    A Land button and an engine step both land long after `settle` saw the job end, and without
+    this they fell back to the derivation. The CLI numbers a name that is already taken — three
+    dispatches of "бери в работу" on 2026-09-10 asked for `beri-v-rabotu` and were given `-2`, `-3`
+    and `-4` — so the derivation named the first agent's worktree, and the gate ran on and merged
+    somebody else's branch (docs/adr/0008). Read in a thread: it is a file, and this is the loop.
+    """
+    ended = await asyncio.to_thread(jobs.read_job, task.agent_id) if task.agent_id else None
+    return worktree_of(task, ended)
+
+
 async def settle(store: Store, live: set[str]) -> list[str]:
     """Notice the agents that are over, and mark what they were dispatched for as built.
 
