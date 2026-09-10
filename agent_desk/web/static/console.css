@@ -3226,3 +3226,37 @@ button.go:hover, button.yes:hover {
   color: var(--fg-soft);
 }
 .again-said { flex: 1 1 auto; }
+
+/* --- a search over the workbench ---------------------------------------------------------------- */
+/* Quiet, never hidden. The arrangement is what somebody built and what lets them find anything at
+   all, so a search may not take it away — a card that did not match steps back and stays exactly
+   where it was put. `filter` rather than `opacity` alone so the text goes as well as the frame:
+   a dimmed card whose words are still crisp still reads as something to read. */
+.bench-find { display: inline-flex; }
+.bench-find input {
+  width: 11rem;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+}
+.bench-find input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.bench-found { min-width: 6rem; }
+.pin.unmatched {
+  opacity: 0.22;
+  filter: saturate(0.4);
+  transition: opacity 120ms ease-out;
+}
+/* Still reachable: a card that did not match is quiet, not switched off. Somebody who can see it
+   over there can still press it, and a search that made two thirds of the bench inert would be a
+   worse surface than one with no search on it. */
+.pin.unmatched:hover, .pin.unmatched:focus-within { opacity: 0.75; }
+.tie.unmatched, .tie-label.unmatched { opacity: 0.15; }
+
+/* A card that arrived while the window was in the background. A mark on the edge rather than a
+   colour on the card: colour on this page means status and nothing else (docs/06-console.md), and
+   "this is new to you" is not a status the card is in — it is a fact about the reader. */
+.pin.arrived-since { box-shadow: -3px 0 0 0 var(--focus); }

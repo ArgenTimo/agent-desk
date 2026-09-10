@@ -1708,6 +1708,36 @@ function markHintCounts(holder, joined) {
   dot.title = `joined to ${joined} other card${joined === 1 ? '' : 's'}`;
 }
 
+// --- the whole of a name that did not fit --------------------------------------------------------
+//
+// `.pin-label` is one line with an ellipsis on it, which is right — a head that wrapped would push
+// every card taller than the thing it describes. What was wrong is that the half of a name that
+// went off the end was unreadable without opening the card, and on a bench of thirty-seven that is
+// thirty-seven presses to find out what is in front of you.
+//
+// Measured when the pointer arrives rather than when the card is written. Asking for `scrollWidth`
+// makes the browser settle the layout before it can answer, and doing that once per card while a
+// bench is being built is exactly the read-after-write loop `tests/unit/test_bench_speed.py`
+// exists about. On hover it is one read, on one element, after everything has already settled.
+//
+// And nothing at all on a label that fits: a tooltip that repeats what is already on the screen
+// teaches somebody that tooltips here say nothing, which costs the ones that do.
+function sayTheWholeName(label) {
+  const whole = label.textContent.trim();
+  // A pixel of tolerance, because a sub-pixel width makes `scrollWidth` a rounding away from
+  // `clientWidth` on a label that is plainly not clipped.
+  if (whole && label.scrollWidth > label.clientWidth + 1) label.title = whole;
+  else label.removeAttribute('title');
+}
+
+// Delegated, so it covers the card written a moment ago, the one whose name arrived with its body
+// (`nameItProperly`), and the one somebody renames — rather than three call sites of which two
+// would be found by whoever adds the fourth.
+pins?.addEventListener('pointerover', (event) => {
+  const label = event.target?.closest?.('.pin-label');
+  if (label) sayTheWholeName(label);
+});
+
 function setView(holder, view) {
   holder.dataset.view = view;
   // "Когда" is written when the card is made and read when somebody opens it, so it is worked out
@@ -2004,6 +2034,248 @@ document.addEventListener('mouseleave', () => lightUp(''), true);
 const surface = document.getElementById('bench-surface');
 const canvas = document.getElementById('bench-canvas');
 const ties = document.getElementById('bench-ties');
+
+/* --- finding one card among thirty-seven --------------------------------------------------------- */
+//
+// Everything else on the bench head acts on the surface as a whole. None of it answers "where is
+// the card I put down ten minutes ago", and on a real console that is the question — a bench fills
+// up because the thinking went well, not because anything went wrong.
+//
+// Two rules hold this to being a *search* rather than a rearrangement:
+//
+// **Nothing moves.** A search that laid the matches out in a row would destroy the arrangement,
+// which is the thing the person built and the reason they can find anything at all. What changes
+// is one class.
+//
+// **Nothing goes away.** The cards that did not match go quiet, not hidden: the shape of the bench
+// is part of what somebody reads, and a search that empties the surface answers a question nobody
+// asked. Clearing the box puts it back exactly, because there was never anything to put back.
+const benchFind = document.getElementById('bench-find');
+const benchFound = document.getElementById('bench-found');
+
+// What a card can be found by: its kind, its name, and the words it is showing. Assembled from the
+// three rather than taken off the card whole — `pin.textContent` sweeps in every control on the
+// head, so a bench would light up on "press", "brief" and "a line", which are this console's words
+// and not the card's.
+function benchWords(pin) {
+  const label = pin.querySelector('.pin-label')?.textContent || '';
+  const body = pin.querySelector('.pin-body')?.textContent || '';
+  return `${pin.dataset.kind || ''} ${label} ${body}`.toLowerCase();
+}
+
+function filterBench() {
+  if (!benchFind) return;
+  const said = benchFind.value.trim().toLowerCase();
+  const cards = onBench();
+  let lit = 0;
+  for (const pin of cards) {
+    const hit = !said || benchWords(pin).includes(said);
+    pin.classList.toggle('unmatched', !hit);
+    if (hit) lit += 1;
+  }
+  // A line is only as loud as its quieter end: a bright line running into a card that has gone
+  // quiet reads as the line pointing at something, which is the opposite of what it means here.
+  for (const drawn of ties?.querySelectorAll('[data-from]') || []) {
+    const from = surface?.querySelector(`.pin[data-name="${CSS.escape(drawn.dataset.from)}"]`);
+    const to = surface?.querySelector(`.pin[data-name="${CSS.escape(drawn.dataset.to)}"]`);
+    drawn.classList.toggle(
+      'unmatched',
+      Boolean(from?.classList.contains('unmatched') || to?.classList.contains('unmatched'))
+    );
+  }
+  if (benchFound) {
+    benchFound.textContent = !said
+      ? ''
+      : lit
+        ? `${lit} of ${cards.length}`
+        : 'nothing on the bench matches';
+  }
+}
+
+benchFind?.addEventListener('input', filterBench);
+benchFind?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  // The first Escape clears the search and the second gives the bench back the keyboard, so that
+  // the key that means "never mind" does not also mean "and stay in this box".
+  if (benchFind.value) {
+    benchFind.value = '';
+    filterBench();
+  } else {
+    benchFind.blur();
+  }
+  event.stopPropagation();
+});
+
+/* --- what arrived while you were looking somewhere else ------------------------------------------ */
+//
+// A bench left up while an agent worked is thirty-seven cards to re-read, and the one thing
+// somebody coming back wants is which of them are new. Every card has recorded when it arrived
+// since migration 045 (`cameAt`, written by whoever made the card) and nothing has ever read that
+// as *recently*.
+//
+// Bounded to "while this window was in the background". A mark that meant "since some time this
+// morning" would be on most of the bench most of the time, which is a mark that says nothing —
+// and the moment somebody actually wants it is the moment they come back to the tab.
+//
+// What this does **not** claim is that a card *changed*: nothing here records a per-card time of
+// last change, and a mark that quietly meant something narrower than it said would be CLAUDE.md's
+// fifth rule broken on the surface it is most read from.
+let lookedAwayAt = 0;
+
+function markWhatArrivedSince(since) {
+  let fresh = 0;
+  for (const pin of onBench()) {
+    const came = Number(pin.dataset.cameAt || 0);
+    const isNew = came > since;
+    pin.classList.toggle('arrived-since', isNew);
+    if (isNew) fresh += 1;
+  }
+  const chip = document.getElementById('bench-new');
+  if (chip) {
+    chip.hidden = fresh === 0;
+    chip.textContent = fresh ? `${fresh} arrived while you were away` : '';
+  }
+  return fresh;
+}
+
+function forgetWhatArrived() {
+  for (const pin of surface?.querySelectorAll('.pin.arrived-since') || []) {
+    pin.classList.remove('arrived-since');
+  }
+  const chip = document.getElementById('bench-new');
+  if (chip) {
+    chip.hidden = true;
+    chip.textContent = '';
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // The moment the window went away, remembered rather than worked out later: a tab restored
+    // from the background has no other way to say how long it was gone.
+    lookedAwayAt = Date.now();
+    return;
+  }
+  if (!lookedAwayAt) return;
+  markWhatArrivedSince(lookedAwayAt);
+  lookedAwayAt = 0;
+});
+
+// Looking is what clears it. The mark is there to be read once, and a bench that kept it until
+// somebody dismissed it would have added a chore to coming back — which is the opposite of the
+// point.
+document.getElementById('bench-new')?.addEventListener('click', forgetWhatArrived);
+canvas?.addEventListener('pointerdown', forgetWhatArrived);
+
+/* --- the cards that are underneath another one --------------------------------------------------- */
+//
+// A card completely covered by another is indistinguishable from a card that was never added, and
+// what somebody does about that is put down a second copy of it. Placement avoids collisions, but
+// cards are also dragged by hand, restored from a saved workbench and laid out again — and any of
+// those can leave one card exactly on top of another.
+//
+// Worked out from the sizes `drawTies` has already measured. Asking for `offsetHeight` again after
+// the lines have been written is the read-after-write that `tests/unit/test_bench_speed.py` exists
+// about; this costs one pass over a map that was built anyway.
+let underneath = [];
+
+function markWhatIsUnderneath(sizes) {
+  const cards = [...sizes.entries()].map(([name, one]) => ({
+    pin: one.pin,
+    at: placed.get(name),
+    w: one.w,
+    h: one.h,
+  }));
+  underneath = [];
+  for (let n = 0; n < cards.length; n += 1) {
+    const under = cards[n];
+    if (!under.at) continue;
+    // Only a card painted *after* this one can be covering it: they are siblings on one surface
+    // with no stacking of their own, so the later one is the one on top. A card that merely
+    // overlaps is not this — half a card is still a card somebody can see and press.
+    const covered = cards.slice(n + 1).some(
+      (over) =>
+        over.at &&
+        over.at.x <= under.at.x &&
+        over.at.y <= under.at.y &&
+        over.at.x + over.w >= under.at.x + under.w &&
+        over.at.y + over.h >= under.at.y + under.h
+    );
+    if (covered) underneath.push(under.pin);
+  }
+  const chip = document.getElementById('bench-under');
+  if (!chip) return;
+  chip.hidden = underneath.length === 0;
+  chip.textContent = underneath.length
+    ? `${underneath.length} underneath — move ${underneath.length === 1 ? 'it' : 'them'} out`
+    : '';
+}
+
+document.getElementById('bench-under')?.addEventListener('click', () => {
+  // Only the cards nobody can see move. Whatever is visible stays exactly where it was put, which
+  // is the difference between this and `tidy up` — one of them is somebody's arrangement and the
+  // other is a card that has effectively gone missing inside it.
+  for (const pin of underneath) {
+    const at = placed.get(cardName(pin));
+    if (at) place(pin, freeSpot(pin, at), { avoid: false });
+  }
+  drawTies();
+  drawRings();
+  markOffEdge();
+});
+
+/* --- holding a few cards in front --------------------------------------------------------------- */
+//
+// Between "leave everything where it is" and "take them all off" there was nothing. Somebody whose
+// next twenty minutes are about six cards wants the other thirty-one out of the way and still
+// there, and the only control for reducing what is in front of them was the destructive one — with
+// undo as the only way back, which is why nobody presses it twice.
+//
+// **It reuses `put-away` rather than inventing a second kind of hidden.** A card set aside is a
+// card that is not on the bench, and eight places in this file already say what that means: it is
+// not in the next message, no line is drawn to it, it is not counted in "carrying 37 cards", and
+// the panel that reads the bench as a process does not read it. A second class would be eight
+// selectors to remember and the ninth would be the bug.
+//
+// **And it says *why* it went away.** `foldConversation` toggles `put-away` over the conversation's
+// own cards; without this, folding and unfolding the conversation would hand back cards somebody
+// had deliberately set aside — the console undoing a decision on their behalf.
+function holdTheseCards(keep) {
+  const held = new Set(keep);
+  let aside = 0;
+  for (const pin of surface?.querySelectorAll('.pin[data-kind]') || []) {
+    if (held.has(pin)) continue;
+    pin.classList.add('put-away');
+    pin.dataset.aside = 'yes';
+    aside += 1;
+  }
+  if (aside) sayWhatIsAside();
+  return aside;
+}
+
+function bringBackWhatWasSetAside() {
+  for (const pin of surface?.querySelectorAll('.pin[data-aside="yes"]') || []) {
+    pin.classList.remove('put-away');
+    delete pin.dataset.aside;
+  }
+  sayWhatIsAside();
+}
+
+// A bench quietly holding back eleven cards and not saying so is a bench that has lost them.
+function sayWhatIsAside() {
+  const chip = document.getElementById('bench-aside');
+  if (!chip) return;
+  const many = surface?.querySelectorAll('.pin[data-aside="yes"]').length || 0;
+  chip.hidden = many === 0;
+  chip.textContent = many ? `bring back ${many} set aside` : '';
+}
+
+document.getElementById('bench-aside')?.addEventListener('click', () => {
+  bringBackWhatWasSetAside();
+  syncTargets();
+  drawTies();
+  drawRings();
+});
 
 const CARD_WIDTH = 260;
 // Where a new card lands: down and to the right of the last one, the way a stack of paper falls.
@@ -3087,6 +3359,11 @@ document.getElementById('chosen-bar')?.addEventListener('click', (event) => {
   } else if (button.dataset.many === 'fold') {
     const anyOpen = many.some((pin) => pin.dataset.view !== 'hint');
     for (const pin of many) setView(pin, anyOpen ? 'hint' : 'metadata');
+  } else if (button.dataset.many === 'hold') {
+    // The choice is what stays. Nothing moves, and the cards that went are exactly where they
+    // were when they come back.
+    holdTheseCards(many);
+    chooseNone();
   } else if (button.dataset.many === 'none') {
     chooseNone();
   }
@@ -4942,6 +5219,10 @@ function drawTies() {
       `M ${from.x} ${from.y} H ${bend} V ${to.y} H ${to.x}`
     );
     path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
+    // Which two cards this runs between, so that a search can quieten a line whose ends have gone
+    // quiet without working the pair out again from the geometry.
+    path.dataset.from = tie.from;
+    path.dataset.to = tie.to;
     path.setAttribute('fill', 'none');
     path.setAttribute('marker-end', 'url(#tie-end)');
     made.appendChild(path);
@@ -4951,6 +5232,8 @@ function drawTies() {
     label.setAttribute('y', String((from.y + to.y) / 2 - 4));
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('class', `tie-label${tie.kind ? ` is-${tie.kind}` : ''}`);
+    label.dataset.from = tie.from;
+    label.dataset.to = tie.to;
     label.textContent = tie.says;
     if (tie.drawn) {
       // Only a line somebody drew can be changed. The ones this console works out for itself —
@@ -4971,6 +5254,17 @@ function drawTies() {
   ties.replaceChildren(made);
   ties.hidden = drew === 0;
   for (const [name, one] of pins) markHintCounts(one.pin, joined.get(name) || 0);
+  // The lines were just made again, so whatever a search had quietened is loud once more — and a
+  // card that arrived while the box had something in it has never been looked at at all. The pool
+  // re-applies its own filter after every replacement for exactly this reason.
+  filterBench();
+  // And the count of what is held back, which stops being true the moment one of those cards is
+  // taken off the bench for good.
+  sayWhatIsAside();
+  // From the sizes measured at the top of this function, before anything was written — a second
+  // pass asking the browser for them again is the read-after-write this whole function was
+  // rewritten to stop doing.
+  markWhatIsUnderneath(pins);
 }
 
 // Whether a card is on the screen right now. Arithmetic, not `getBoundingClientRect` — the surface
@@ -5235,6 +5529,10 @@ function foldConversation() {
   // distinction, and it is recorded when the card arrives (`bringItsKin`) rather than guessed at
   // now.
   for (const card of [...cards, ...surface.querySelectorAll('.pin[data-brought="yes"]')]) {
+    // A card somebody set aside stays aside. Folding the conversation is about what the
+    // conversation brought; handing back a card that was deliberately put out of the way would be
+    // this console undoing a decision on somebody's behalf.
+    if (card.dataset.aside === 'yes') continue;
     card.classList.toggle('put-away', folding);
     if (folding) {
       card.dataset.viewBefore = card.dataset.view || 'hint';

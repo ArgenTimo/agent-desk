@@ -926,3 +926,273 @@ def test_a_snapshot_of_sixty_cards_is_a_block_and_not_a_line() -> None:
 
     assert "Math.ceil(Math.sqrt(went.length))" in body
     assert "index % across" in body and "Math.floor(index / across)" in body
+
+
+@pytest.mark.unit
+def test_a_name_that_did_not_fit_can_be_read_without_opening_the_card() -> None:
+    """`.pin-label` is one line with an ellipsis, which is right — a wrapping head makes every card
+    taller than the thing it describes. What was wrong is that the half that went off the end could
+    only be read by opening the card, and a bench of thirty-seven is thirty-seven presses to find
+    out what is in front of you.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    body = console[console.index("function sayTheWholeName(") :]
+    body = body[: body.index("\n}\n")]
+    assert "scrollWidth" in body and "clientWidth" in body, (
+        "the whole name is offered whether or not any of it was cut off"
+    )
+    assert "removeAttribute('title')" in body, (
+        "a label that fits keeps a tooltip repeating what is already on the screen"
+    )
+
+
+@pytest.mark.unit
+def test_the_whole_name_is_measured_on_hover_and_not_while_the_bench_is_built() -> None:
+    """`scrollWidth` makes the browser settle the layout before it can answer.
+
+    Asked once per card as a bench is written it is the read-after-write loop
+    `tests/unit/test_bench_speed.py` exists about — 35 cards were enough to make a pan drop frames.
+    Asked when the pointer arrives it is one read on one element, after everything has settled.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    called = [
+        line
+        for line in console.splitlines()
+        if "sayTheWholeName(" in line and "function" not in line
+    ]
+
+    assert len(called) == 1, f"the measurement is made from {len(called)} places, not one"
+    where = console.index("sayTheWholeName(label)", console.index("addEventListener('pointerover'"))
+    listener = console[console.rindex("pins?.addEventListener", 0, where) : where]
+    assert "'pointerover'" in listener, "the measurement is not on a pointer event"
+    assert "closest?.('.pin-label')" in listener, (
+        "the listener is bound per card rather than delegated, so a card added later has no name"
+    )
+
+
+@pytest.mark.unit
+def test_the_workbench_can_be_searched_and_the_field_survives_a_redraw() -> None:
+    """The pool has had `find a thought…` since it held twenty rows. The bench holds more cards
+    than the pool holds ideas and had nothing — and every other control on that row acts on the
+    surface as a whole, so none of them answers "where is the card I put down ten minutes ago".
+
+    The field is outside `#pins` for the reason `#idea-find` is outside `#idea-list`: that element
+    is replaced whenever the surface changes, and a field inside it loses what somebody had typed
+    mid-word.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'id="bench-find"' in board
+    before, _ = board.split('<div id="pins"', 1)
+    assert 'id="bench-find"' in before, (
+        "the search field is inside the surface it filters, so a redraw takes what was typed"
+    )
+    assert "function filterBench(" in console
+    ties = console[console.index("function drawTies(") :]
+    ties = ties[: ties.index("\n}\n")]
+    assert "filterBench()" in ties, (
+        "the filter is not re-applied after the lines are drawn again, so the first redraw undoes "
+        "the search and a card that arrived during one was never looked at"
+    )
+
+
+@pytest.mark.unit
+def test_a_search_over_the_bench_moves_nothing_and_hides_nothing() -> None:
+    """Two rules, and both are what makes this a search rather than a rearrangement.
+
+    The arrangement is the thing somebody built and the reason they can find anything at all, so a
+    search may not lay the matches out in a row. And the cards that did not match go quiet rather
+    than away: the shape of a bench is part of what is read, and a search that empties the surface
+    answers a question nobody asked.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    body = console[console.index("function filterBench(") :]
+    body = body[: body.index("\n}\n")]
+    assert "classList.toggle('unmatched'" in body
+    for moving in ("placeAt(", "settleOverlaps(", "layOut(", "style.left", "style.top"):
+        assert moving not in body, f"a search moves the cards ({moving})"
+
+    quiet = css[css.index(".pin.unmatched {") :]
+    quiet = quiet[: quiet.index("}")]
+    assert "display: none" not in quiet, "a card that did not match is taken off the bench"
+    assert "opacity" in quiet
+    assert ".pin.unmatched:hover" in css, (
+        "a card that did not match cannot be read or pressed, so two thirds of the bench went inert"
+    )
+
+
+@pytest.mark.unit
+def test_a_card_is_found_by_what_a_person_can_see_on_it() -> None:
+    """`pin.textContent` sweeps in every control on the head, so a bench would light up on
+    "press", "brief" and "a line" — this console's words, not the card's."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    body = console[console.index("function benchWords(") :]
+    body = body[: body.index("\n}\n")]
+
+    assert ".pin-label" in body and ".pin-body" in body and "dataset.kind" in body
+    assert "pin.textContent" not in body, (
+        "the haystack is the whole card, so every card matches this console's own button labels"
+    )
+
+
+@pytest.mark.unit
+def test_a_line_is_no_louder_than_its_quieter_end() -> None:
+    """A bright line running into a card that has gone quiet reads as the line pointing at
+    something, which is the opposite of what it means once a search is on."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    css = (STATIC / "console.css").read_text(encoding="utf-8")
+
+    ties = console[console.index("function drawTies(") :]
+    ties = ties[: ties.index("\n}\n")]
+    assert "path.dataset.from" in ties and "path.dataset.to" in ties, (
+        "a line does not say which cards it runs between, so nothing can quieten it with them"
+    )
+    assert "label.dataset.from" in ties, "the word on a line stays loud while the line goes quiet"
+
+    body = console[console.index("function filterBench(") :]
+    body = body[: body.index("\n}\n")]
+    assert "[data-from]" in body
+    assert ".tie.unmatched" in css and ".tie-label.unmatched" in css
+
+
+@pytest.mark.unit
+def test_a_few_cards_can_be_held_in_front_and_the_rest_set_aside() -> None:
+    """Between "leave everything where it is" and "take them all off" there was nothing.
+
+    Somebody whose next twenty minutes are about six cards wants the other thirty-one out of the
+    way and still there, and the only control for reducing what is in front of them was the
+    destructive one — with undo as the only way back, which is why nobody presses it twice.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'data-many="hold"' in board, "there is no way to hold a few cards in front"
+    assert 'id="bench-aside"' in board, (
+        "a bench holding back eleven cards with nothing saying so has lost them"
+    )
+    assert "function holdTheseCards(" in console
+    assert "function bringBackWhatWasSetAside(" in console
+
+    body = console[console.index("function holdTheseCards(") :]
+    body = body[: body.index("\n}\n")]
+    assert "put-away" in body, (
+        "setting a card aside invents a second kind of hidden, so the eight places that already "
+        "know what `put-away` means do not apply to it"
+    )
+    for moving in ("placeAt(", "settleOverlaps(", "style.left", "remove()"):
+        assert moving not in body, (
+            f"holding a few cards in front moves or destroys the rest ({moving})"
+        )
+
+
+@pytest.mark.unit
+def test_folding_the_conversation_does_not_hand_back_a_card_set_aside() -> None:
+    """`foldConversation` toggles `put-away` over the conversation's own cards. Without a reason
+    recorded on the card, unfolding would return a card somebody had deliberately put out of the
+    way — the console undoing a decision on their behalf."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    body = console[console.index("function foldConversation(") :]
+    body = body[: body.index("\n}\n")]
+
+    assert "dataset.aside" in body, (
+        "unfolding the conversation gives back cards that were set aside"
+    )
+    assert body.index("dataset.aside") < body.index("classList.toggle('put-away'"), (
+        "the card is toggled before the reason it went away is looked at"
+    )
+
+
+@pytest.mark.unit
+def test_the_bench_says_which_cards_are_completely_underneath_another() -> None:
+    """A card fully covered by another is indistinguishable from a card that was never added, and
+    what somebody does about that is put down a second copy of it.
+
+    Placement avoids collisions, but cards are also dragged by hand, restored from a saved
+    workbench and laid out again — and any of those can leave one exactly on top of another.
+    """
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+    board = (TEMPLATES / "board.html").read_text(encoding="utf-8")
+
+    assert 'id="bench-under"' in board
+    body = console[console.index("function markWhatIsUnderneath(") :]
+    body = body[: body.index("\n}\n")]
+    assert "cards.slice(n + 1)" in body, (
+        "a card is reported as hidden by one painted before it, which is the one underneath"
+    )
+    # Containment, not overlap: half a card is still a card somebody can see and press.
+    for edge in (
+        "<= under.at.x",
+        "<= under.at.y",
+        ">= under.at.x + under.w",
+        ">= under.at.y + under.h",
+    ):
+        assert edge in body, f"an overlap is being read as a card that has gone missing ({edge})"
+
+
+@pytest.mark.unit
+def test_what_is_underneath_is_worked_out_from_sizes_already_measured() -> None:
+    """`offsetHeight` asked for again after the lines have been written is the read-after-write
+    `tests/unit/test_bench_speed.py` exists about — it cost `syncTargets` 36.8ms a frame on 35
+    cards. `drawTies` measures every card before it writes anything; this reuses that."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    body = console[console.index("function markWhatIsUnderneath(") :]
+    body = body[: body.index("\n}\n")]
+    assert "offsetWidth" not in body and "offsetHeight" not in body, (
+        "the sizes are measured a second time, after the lines were written"
+    )
+    assert "getBoundingClientRect" not in body
+
+    ties = console[console.index("function drawTies(") :]
+    ties = ties[: ties.index("\n}\n")]
+    assert "markWhatIsUnderneath(pins)" in ties, (
+        "nothing works out what is hidden, so the chip says whatever it last said"
+    )
+
+
+@pytest.mark.unit
+def test_moving_the_hidden_cards_out_leaves_the_visible_arrangement_alone() -> None:
+    """The difference between this and `tidy up`: one of them is somebody's arrangement and the
+    other is a card that has effectively gone missing inside it."""
+    console = (STATIC / "console.js").read_text(encoding="utf-8")
+
+    where = console.index("document.getElementById('bench-under')")
+    press = console[where : console.index("\n});\n", where)]
+
+    assert "for (const pin of underneath)" in press, (
+        "the press moves cards that were not the ones nobody could see"
+    )
+    assert "querySelectorAll('.pin" not in press, "the press reaches every card on the bench"
+
+
+@pytest.mark.unit
+def test_the_gate_asks_whether_the_script_runs_and_not_only_whether_it_parses() -> None:
+    """`node --check` parses. A file that parses can still stop dead on its first line of
+    *execution* — a `const` read before its declaration, a helper called before it exists — and the
+    page then looks exactly the way it looks after a syntax error: everything renders, nothing
+    works, and no Python test can see it.
+
+    That is not hypothetical. A listener wired to `canvas` three hundred lines above where `canvas`
+    is declared was one line from shipping in this repository, and `node --check` was green on it.
+    """
+    check = (STATIC / ".." / ".." / ".." / "scripts" / "check-the-script.sh").resolve()
+    runner = check.parent / "the-script-runs.js"
+
+    assert runner.exists(), "nothing asks whether the console's script reaches its own last line"
+    assert runner.name in check.read_text(), "the run check is not wired into the gate"
+
+    said = runner.read_text(encoding="utf-8")
+    assert "getElementById" in said and "make()" in said, (
+        "an element the stub answers `null` for tests this program's handling of a missing "
+        "element rather than the order it does things in"
+    )
+    assert "setTimeout" in said, (
+        "a pending timer keeps node alive after the only question here has been answered"
+    )
