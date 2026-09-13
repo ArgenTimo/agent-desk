@@ -86,6 +86,16 @@ moves. A mark that meant something narrower than it said would be CLAUDE.md's fi
 the surface it is most read from, so the mark says "arrived" and the gap is in the pool as its own
 thought.
 
+**The gap, closed for the writer that works while nobody looks.** A card a run moved on — a step the
+run reached, a step going from going to done, or writing what it made — now carries the time that happened, and the
+mark says "changed" for it, apart from "arrived". Every other writer of a card (a check, "why is
+this here", a field) is a press made with the window in front of somebody, so it cannot happen
+while they were away, and stamping it would have been a change to every writer for a mark nobody
+could see. The time lives in the page and is not stored: the mark is about one window's absence,
+and a stored column with no reader would be a second clock to keep honest. Coming back reads the
+runs once more before marking, because a background tab's timers are throttled to a minute or
+worse and the last reading can be older than the change somebody came back for.
+
 ---
 
 ## What was deliberately not asked for
