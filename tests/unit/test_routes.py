@@ -207,6 +207,8 @@ async def test_work_is_queued_started_and_dropped_by_the_buttons_that_say_so(
     status, panel = await _post(f"/tasks/{task.id}/start", {"key": key})
     assert status == 200
     assert len(started) == 1
+    # Told where it is, not told that it is in the sentence it was given.
+    assert "This is in check the ports" not in started[0]["instruction"]
     after = next(one for one in await desk.tasks() if one.id == task.id)
     assert after.agent_id == "agent1"
 

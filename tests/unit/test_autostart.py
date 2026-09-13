@@ -158,11 +158,38 @@ async def test_it_starts_what_was_queued_and_says_which_agent_has_it(
     task = await autostart.tick(desk, live=set())
 
     assert task is not None
-    assert started == [dispatch.build_task("run the tests again", project="run the tests again")]
+    assert started == [dispatch.build_task("run the tests again", project=tmp_path.name)]
     (stored,) = await desk.tasks()
     assert stored.agent_id == "agent1"
     assert stored.started_at is not None
     assert stored.failed_at is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cwd", "project"),
+    [
+        ("/home/a/agent-desk", "agent-desk"),
+        # Queued from a session that was itself an agent in a worktree: the checkout, not the slug.
+        ("/home/a/agent-desk/.claude/worktrees/beri-v-rabotu", "agent-desk"),
+    ],
+)
+async def test_an_agent_is_told_the_project_it_is_in_and_not_the_line_that_was_typed(
+    desk: Store, cwd: str, project: str
+) -> None:
+    """The bug: "бери в работу" queued and started told the agent "This is in бери в работу."."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=cwd,
+        title="бери в работу",
+        instruction="бери в работу",
+        source_kind="typed",
+    )
+
+    assert autostart.project_of(task) == project
+    assert f"This is in {project}." in dispatch.build_task(
+        task.instruction, project=autostart.project_of(task)
+    )
 
 
 @pytest.mark.unit
