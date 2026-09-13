@@ -2139,14 +2139,17 @@ benchFind?.addEventListener('keydown', (event) => {
 // a second clock to keep honest (docs/stories/01, story 5).
 let lookedAwayAt = 0;
 
-// What a step says on its card, as one string to compare. A step that is not on any run says
-// nothing, which is not the same as saying something different.
+// What a step says on its card, as one string to compare. A card that is not a step of any run
+// says '' — which is a reading, unlike `undefined`, which is a card this page has not read yet.
 function stepSays(step) {
   return step ? `${step.state}\n${step.made || ''}` : '';
 }
 
+// A run writes a step's row only when it reaches that step (`set_run_step`), so the later cards of
+// a run left going go from saying nothing to saying "done" while nobody looks — the common case,
+// and a change. Not reading one at all yet is not, and neither is a card stopping being a step.
 function changedBetween(before, now) {
-  return Boolean(before) && Boolean(now) && before !== now;
+  return before !== undefined && Boolean(now) && before !== now;
 }
 
 // Arrived wins: a card that came and then ran was never seen in its first state, so "changed"

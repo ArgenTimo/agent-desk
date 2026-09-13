@@ -67,7 +67,15 @@ def test_the_first_reading_is_not_a_change() -> None:
     step = json.dumps({"state": "done", "made": ""})
 
     assert _run(f"changedBetween(undefined, stepSays({step}))") is False
-    assert _run(f"changedBetween('', stepSays({step}))") is False
+
+
+def test_a_card_a_run_reached_while_away_is_a_change() -> None:
+    """A run has no row for a step until the engine gets to it (`set_run_step`), so every card
+    after the first one goes from not being a step to being one. Read as "the first reading", that
+    was most of a run left going — the exact thing the mark exists for."""
+    step = json.dumps({"state": "done", "made": "## the answer"})
+
+    assert _run(f"changedBetween(stepSays(undefined), stepSays({step}))") is True
 
 
 def test_a_card_that_stopped_being_a_step_is_not_marked() -> None:
