@@ -212,6 +212,21 @@ def _plainly(status: str) -> str:
     return PLAINLY.get(status, status)
 
 
+def _megabytes(size: int | None) -> str:
+    """What a process is holding, the way a person says it: 560 MB, 1.4 GB.
+
+    Rounded to whole megabytes below a gigabyte, because nothing here is decided at a finer
+    resolution and a number that changes every tick is one nobody reads. Powers of 1024, because
+    that is what the kernel counted in.
+    """
+    if not size:
+        return ""
+    mb = size / 1024 / 1024
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.0f} MB"
+
+
 def _tokens(count: int | None) -> str:
     """A context size the way a person says it: 767k, 12k, 900."""
     if not count:
@@ -267,6 +282,7 @@ env.globals["stamped"] = _stamped
 env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens
+env.filters["megabytes"] = _megabytes
 env.filters["plainly"] = _plainly
 env.filters["prose"] = _prose
 env.filters["ago"] = _ago
@@ -293,6 +309,10 @@ class BoardRow:
     # without the shape being rebuilt to answer the question.
     project_key: str = ""
     project_name: str = ""
+    # What the machine says this session is holding, or `None` where it would not say. A reading of
+    # the file beside the one the liveness check opens, and never a judgement about the number
+    # (agent_desk/observe/registry.py).
+    holding: int | None = None
     # Whether this console started it, merely found it, or a person is sitting in it. A fact for
     # the first, a reading of the registry for the other two, and never a guess about which piece
     # of work an agent it did not start belongs to (CLAUDE.md, rule five).
@@ -494,6 +514,7 @@ def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str
                 tail=tail,
                 hint=hint,
                 whose="" if ours is None else whose(session, ours),
+                holding=registry.resident_bytes(session.pid),
             )
         )
     # Triage first; within a group, most recent movement first, and the name to keep the order

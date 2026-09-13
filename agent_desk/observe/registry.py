@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -53,6 +54,46 @@ def is_alive(pid: int, proc_start: str, *, proc_root: Path = PROC) -> bool:
     if not (proc_root / str(pid)).exists():
         return False
     return _starttime(pid, proc_root) == proc_start
+
+
+# Field 2 of /proc/<pid>/statm is the resident set, in pages. The page size is asked of the system
+# rather than assumed to be 4096: it is a kernel build option, and a number that is wrong by a
+# factor of four on somebody's machine is worse than no number.
+_RESIDENT_INDEX = 1
+_PAGE_BYTES = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
+
+
+def resident_bytes(pid: int, *, proc_root: Path = PROC) -> int | None:
+    """What this process is holding, or `None` when the machine will not say.
+
+    The file beside the one the liveness check already opens for every session on every pass, and
+    reading it for thirty of them costs about a millisecond — against the transcript tail that is
+    read per session anyway.
+
+    A reading and not an inference: it is what the kernel says that process holds, not something
+    derived from silence. What it is *worth* is the reader's — whether half a gigabyte is too much
+    depends on the machine, the work and the hour, and a console with an opinion about that would
+    be putting a verdict where CLAUDE.md's fifth rule allows a reading.
+
+    **Per process, and deliberately never summed here.** A resident set counts every shared page in
+    full, so adding thirty of them counts the pages they share thirty times: measured on the
+    author's machine the sum was 8.43 GiB where the proportional figure was 5.63. The honest total
+    is in `smaps_rollup` and costs two hundred and fifty times as much to read, on a surface that
+    renders every two seconds — so there is no total, and the number that supports a decision is
+    the one on the card.
+    """
+    try:
+        said = (proc_root / str(pid) / "statm").read_text().split()
+    except OSError:
+        return None
+    if len(said) <= _RESIDENT_INDEX:
+        return None
+    try:
+        return int(said[_RESIDENT_INDEX]) * _PAGE_BYTES
+    except ValueError:
+        # A file that is there and is not what this expects. The same answer as one that is not
+        # there at all, because both mean the machine did not say.
+        return None
 
 
 def _is_newer(observed: str, recorded: str) -> bool:

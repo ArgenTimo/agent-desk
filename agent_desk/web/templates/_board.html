@@ -131,6 +131,16 @@
               {% else %}
               <span class="pill state {{ row.session.status }}" title="the registry says: {{ row.session.status }}">{{ row.session.status | plainly }}</span>
               {% endif %}
+              {# The same question asked of the machine instead of the model. It arrived by
+                 happening: this machine ran out of memory twice with thirty sessions holding eight
+                 gigabytes between them and a board that said nothing about any of it.
+
+                 A measurement and never a verdict — whether half a gigabyte is too much depends on
+                 the machine, the work and the hour, and a console that coloured it would be putting
+                 a judgement where rule five allows a reading. #}
+              {% if row.holding %}
+              <span class="pill quiet" title="what the machine says this session is holding — a reading, not a judgement">{{ row.holding | megabytes }}</span>
+              {% endif %}
               {% if row.tail and row.tail.context_tokens %}
               <span class="pill quiet" title="what this session is carrying right now">{{ row.tail.context_tokens | tokens }}</span>
               {% endif %}

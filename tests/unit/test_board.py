@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import re
 import time
 from collections.abc import AsyncIterator
@@ -24,6 +25,7 @@ from agent_desk.web import routes, sse
 from jinja2 import UndefinedError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+TEMPLATES = Path(routes.TEMPLATES)
 MINUTE = 60_000
 
 pytestmark = pytest.mark.skipif(
@@ -921,4 +923,92 @@ async def test_a_template_is_formatted_off_the_event_loop(wired: Store) -> None:
     assert held, "the loop never got a turn at all"
     assert max(held) < 0.05, (
         f"the loop was held for {max(held) * 1000:.0f}ms while a template was formatted"
+    )
+
+
+# --- what a session is costing the machine (docs/stories/09) ---------------------------------------
+@pytest.mark.unit
+def test_a_card_says_what_its_session_is_holding(home: Home) -> None:
+    """This arrived by happening: the machine ran out of memory twice during this work and killed a
+    test run and the console itself. Thirty sessions were holding eight gigabytes between them and
+    the board, which was open the whole time, said nothing about any of it.
+
+    A reading of the file beside the one the liveness check already opens, not an inference.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    rows, _ = routes.board()
+
+    assert rows[0].holding, "the board carries no reading of what the session holds"
+    assert rows[0].holding > 1024 * 1024, "a live python process holding under a megabyte"
+    assert re.search(r">(\d+ MB|[\d.]+ GB)<", routes.render_board()), (
+        "the number is read and never shown"
+    )
+
+
+@pytest.mark.unit
+def test_a_process_the_machine_will_not_speak_about_gets_no_number_invented(
+    home: Home, tmp_path: pathlib.Path
+) -> None:
+    """A system where that file is not what this program expects gets no pill, rather than a wrong
+    number — the same rule as everywhere else on this board."""
+    from agent_desk.observe import registry as reader
+
+    assert reader.resident_bytes(999_999) is None
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+    empty = tmp_path / str(os.getpid())
+    empty.mkdir()
+    (empty / "statm").write_text("not what this expects\n")
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+
+@pytest.mark.unit
+def test_the_page_size_is_asked_of_the_system_and_not_assumed() -> None:
+    """It is a kernel build option. A number wrong by a factor of four on somebody's machine is
+    worse than no number."""
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text()
+
+    body = source[source.index("def resident_bytes(") :]
+    body = body[: body.index("\n\n\n")]
+    assert "4096" not in body, "the page size is written into the arithmetic"
+    assert "_PAGE_BYTES" in body
+    assert "sysconf" in source
+
+
+@pytest.mark.unit
+def test_what_a_session_holds_is_said_the_way_a_person_says_it() -> None:
+    assert routes._megabytes(None) == ""
+    assert routes._megabytes(0) == ""
+    assert routes._megabytes(560 * 1024 * 1024) == "560 MB"
+    assert routes._megabytes(1536 * 1024 * 1024) == "1.5 GB"
+    # Whole megabytes below a gigabyte: nothing here is decided at a finer resolution, and a number
+    # that changes on every tick is one nobody reads.
+    assert routes._megabytes(int(111.4 * 1024 * 1024)) == "111 MB"
+
+
+@pytest.mark.unit
+def test_nothing_on_the_board_adds_those_numbers_up() -> None:
+    """A resident set counts every shared page in full, so adding thirty of them counts the pages
+    they share thirty times. Measured on the author's machine: the sum was 8.43 GiB where the
+    proportional figure was 5.63 — an overstatement of a third.
+
+    The honest total is in `smaps_rollup` and costs two hundred and fifty times as much to read, on
+    a surface that renders every two seconds — which is the cost `docs/stories/05` was about
+    removing. So there is no total, and this is what says so.
+    """
+    board = (TEMPLATES / "_board.html").read_text(encoding="utf-8")
+
+    assert "holding" in board
+    assert "sum(" not in board and "| sum" not in board, (
+        "the board totals what must not be totalled"
+    )
+    # And the expensive honest reading has not crept onto a surface that renders every two seconds.
+    # It is named in the docstring on purpose — that is where the decision is written down — so
+    # this asserts it is not *opened*, which is the thing that would cost 274ms a tick.
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"smaps_rollup"' not in source and "'smaps_rollup'" not in source, (
+        "the proportional reading is being opened, at two hundred and fifty times the cost"
     )
