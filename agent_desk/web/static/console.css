@@ -3328,3 +3328,24 @@ button.go:hover, button.yes:hover {
 .chip.choose { font-size: var(--t-xs); }
 .chip.choose.on { border-color: var(--focus); color: var(--focus); }
 .card.project.chosen-project { box-shadow: inset 3px 0 0 0 var(--focus); }
+
+/* --- a thing drawn from the project (docs/stories/12) ------------------------------------------ */
+/* The kind word small and first, the detail as a list that can be read without opening anything,
+   and where it was read last and quiet. No colour: a drawn thing is not in a state. */
+.card-detail.sketch { display: grid; gap: 4px; }
+.sketch-kind {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--fg-dim);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.sketch-lines {
+  margin: 0;
+  padding: 0 0 0 14px;
+  font-size: var(--t-sm);
+  display: grid;
+  gap: 1px;
+}
+.sketch-lines li { overflow-wrap: anywhere; }
+.sketch-from { margin: 0; font-family: var(--mono, ui-monospace, monospace); overflow-wrap: anywhere; }

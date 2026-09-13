@@ -42,6 +42,7 @@ from agent_desk.answer import session
 from agent_desk.ideas import appraise, inbox, kin
 from agent_desk.observe import reading
 from agent_desk.observe.model import Session
+from agent_desk.observe.shape import where_it_works
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import (
     BenchCard,
@@ -511,6 +512,7 @@ async def on_the_bench(
     chosen = await store.card_roles()
     ideas = {f"idea:{one.id}": one for one in await store.ideas()}
     steps = {one.name: one.label for one in await store.step_cards()}
+    sketches = await store.sketch_cards(names)
     cards: list[looking.OnBench] = []
     seen: set[str] = set()
     for target in dropped:
@@ -559,6 +561,21 @@ async def on_the_bench(
                     kind="idea",
                     label=idea.summary,
                     said=idea.text,
+                    role=chosen.get(name, ""),
+                )
+            )
+            continue
+        drawn = sketches.get(name)
+        if drawn is not None:
+            # A thing a drawing found in the project: its kind and its detail are what it *says*, so
+            # a question asked with the map in front of it can answer about what each thing holds
+            # rather than about a list of labels.
+            cards.append(
+                looking.OnBench(
+                    name=name,
+                    kind="sketch",
+                    label=drawn.label,
+                    said=f"{drawn.kind}: " + "; ".join(drawn.lines.splitlines()),
                     role=chosen.get(name, ""),
                 )
             )
@@ -893,6 +910,10 @@ async def _context_lines(
             idea = await store.idea(ident)
             lines.append(f"idea · {idea.summary}" if idea else "idea · no longer in the inbox")
             continue
+        if kind == "sketch":
+            one = await store.sketch_card(ident)
+            lines.append(f"sketch · {one.label}" if one else "sketch · no longer drawn")
+            continue
         found, label = _rows_named(rows, kind, ident)
         if not found:
             lines.append(f"{kind} · no longer on the board")
@@ -1052,7 +1073,7 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         if kind == "drawing":
-            await _draw_it(store, block, surface=surface, project=project)
+            await _draw_it(store, block, surface=surface, project=project, rows=rows)
             return
         if kind == "showing":
             await _show_them(store, block, rows, on_bench)
@@ -1375,32 +1396,156 @@ async def read_tickets_now(store: Store, key: str) -> tuple[list[str], str]:
     )
 
 
+async def checkout_for(
+    store: Store, rows: Sequence[BoardRow], project: str = ""
+) -> tuple[Path | None, str]:
+    """The checkout on this machine a request about a project can read, and what to call it.
+
+    «Текущий проект» is the project a message is addressed to (`project_of`): the one chosen or
+    named, else the one the rows are about, else this console's own. A drawing of it needs a
+    directory, and this is the one place that turns the first into the second.
+
+    In the order a person would look: a checkout of it with a session in it now, which is the copy
+    somebody is working in; the checkout it was last seen in (073), for a project whose sessions have
+    all ended; and for the desk, its own code. A project that is only an address — added by its URL,
+    never cloned here — has no directory, and `None` is the honest answer: the caller says so rather
+    than drawing a project it cannot read.
+
+    A declared project answers for every repository in it, so its key is widened to theirs first —
+    otherwise choosing one would find no session in any of them.
+    """
+    key = project_of(rows, project)
+    if key == desk_key():
+        here = own_checkout()
+        return (here if here.is_dir() else None), "agent-desk"
+    keys = {key}
+    for group in await store.groups():
+        if group.id == key:
+            keys |= set(group.repo_keys)
+    for row in rows:
+        if row.project_key in keys:
+            home, _ = where_it_works(row.session.cwd)
+            if Path(home).is_dir():
+                return Path(home), row.project_name or row.session.project
+    for seen in await store.seen_projects():
+        if seen.repo_key in keys and seen.cwd and Path(seen.cwd).is_dir():
+            return Path(seen.cwd), seen.name
+    return None, key.split(":", 1)[-1]
+
+
+async def cards_from_map(store: Store, drawn: telling.Map) -> list[str]:
+    """Turn a read map into sketch cards and the named lines between them.
+
+    One card per thing, with its kind, its detail and where it was read; every one an `object`,
+    because a thing a project has is a thing that exists; every line `named`, because its words are
+    the relation (agent_desk/ties.py). Nothing here knows what a table or a feature is, which is the
+    point of it.
+    """
+    made: dict[int, str] = {}
+    for one in drawn.cards:
+        card = await store.add_sketch_card(
+            kind=one.kind, label=one.label, lines="\n".join(one.lines), read_from=one.read_from
+        )
+        made[one.number] = f"sketch:{card.id}"
+        await store.set_card_role(made[one.number], "object")
+    for line in drawn.lines:
+        await store.tie_cards(
+            from_name=made[line.from_number],
+            to_name=made[line.to_number],
+            kind="named",
+            says=line.says,
+        )
+    return list(made.values())
+
+
+async def _map_it(
+    store: Store, block: Block, where: Path, called: str, *, surface: Sequence[str]
+) -> str | None:
+    """Draw what a project has, from the project — or hand back a reply that is a process.
+
+    Run read-only over the checkout (`answer/session.py` allows `Read`, `Grep` and `Glob` and denies
+    the rest), with the checkout named in the prompt. One call: the prompt offers the process form as
+    the alternative, so a reply that is not a map is returned for the process reader rather than
+    asked for a second time. `None` means the block is settled — a map was drawn, the project could
+    not answer, or the run failed.
+    """
+    try:
+        reply = "".join(
+            [
+                chunk
+                async for chunk in session.stream_answer(
+                    telling.map_prompt(block.input, str(where), surface), add_dirs=[where]
+                )
+            ]
+        )
+    except (session.AnswerFailed, OSError) as exc:
+        await store.fail_block(block.id, str(exc))
+        return None
+    drawn = telling.read_map(reply)
+    if drawn.empty:
+        needed = telling.read_cannot(reply)
+        if needed and not telling.read_shape(reply)[0]:
+            await store.finish_block(
+                block.id,
+                f"I read {called} and could not draw that from it: {needed}. Nothing was put on "
+                "the workbench.",
+            )
+            return None
+        return reply
+    names = await cards_from_map(store, drawn)
+    await store.finish_block(
+        block.id, telling.as_drawn_json(telling.as_mapped(drawn, called), names)
+    )
+    return None
+
+
 async def _draw_it(
-    store: Store, block: Block, *, surface: Sequence[str] = (), project: str = ""
+    store: Store,
+    block: Block,
+    *,
+    surface: Sequence[str] = (),
+    project: str = "",
+    rows: Sequence[BoardRow] = (),
 ) -> None:
-    """A process described in the input field, drawn as cards on the workbench.
+    """Something described in the input field, drawn as cards on the workbench.
 
-    "Нарисуй процесс релиза: сначала тесты, если красные — чиним."
+    "Нарисуй процесс релиза: сначала тесты, если красные — чиним." And, since the author asked for it
+    in so many words: «нарисуй мне схему базы данных текущего проекта», «создай мне матрицу фич и что
+    они закрывают» — «не делай фичи именно под эти 2 примера, а реализуй гораздо гибче».
 
-    Every part of this already existed — `telling.shape_prompt` turns a description into steps and
-    lines, and the workbench has put those on the bench since 038 — behind a panel somebody had to
-    open first. This is the same act asked for in the field, which is where the rest of the console
-    is asked for things.
+    Two ways a drawing can come out, from one model call. **A map of what a project has**, when
+    there is a project to read: the run is given read-only access to its checkout and told where it
+    is, and what comes back is things of any kind with their detail and relations of any name
+    (`telling.map_prompt`). **A process**, when what was described is steps in an order, or when there
+    is no checkout to read: the five roles and the process lines, as before.
+
+    Nothing here knows what a database or a feature matrix is. What makes a drawing a schema is what
+    somebody asked for and what the project turned out to contain.
 
     The cheapest of the new branches: one model call, cards at the end of it, undone in one press.
     That is why it may be decided on the balance of it where `do` may not.
     """
     await store.set_block_kind(block.id, "drawing")
-    try:
-        reply = "".join(
-            [
-                chunk
-                async for chunk in session.stream_answer(telling.shape_prompt(block.input, surface))
-            ]
-        )
-    except (session.AnswerFailed, OSError) as exc:
-        await store.fail_block(block.id, str(exc))
-        return
+    where, called = await checkout_for(store, rows, project)
+    if where is not None:
+        reply = await _map_it(store, block, where, called, surface=surface)
+        if reply is None:
+            return
+    else:
+        # No checkout of it here, so nothing to read: the words and the bench are all there is, and
+        # the process vocabulary — with its own refusal for anything it cannot see — is what is left.
+        try:
+            reply = "".join(
+                [
+                    chunk
+                    async for chunk in session.stream_answer(
+                        telling.shape_prompt(block.input, surface)
+                    )
+                ]
+            )
+        except (session.AnswerFailed, OSError) as exc:
+            await store.fail_block(block.id, str(exc))
+            return
     # "Рисовать по тому, что модель ВИДИТ… а не по тому, что она помнит про типичные БД." Read
     # before the shape, because a reply that says both is a reply that drew from memory anyway.
     if (needed := telling.read_cannot(reply)) and not telling.read_shape(reply)[0]:

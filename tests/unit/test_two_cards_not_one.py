@@ -86,7 +86,14 @@ def test_what_an_answer_wrote_hangs_off_the_answer() -> None:
     asked about — which is the opposite claim."""
     syncing = _body("syncBlocks")
     assert "`answer:${id}`\n      : `block:${id}`" in syncing
-    assert syncing.count("{ under: from") == 2, "both the drawn cards and the ideas"
+    # The ideas an answer wrote, each under it.
+    assert "{ under: from, came: 'written down by an answer' }" in syncing
+    # And a drawing, under it once: the first card it drew hangs off the answer and the rest are laid
+    # out by their own lines (docs/stories/12) — sixty `wrote` lines from one answer hid the
+    # relations a map exists to show.
+    assert "if (drawn.length === 1) how.under = from;" in syncing, (
+        "a drawing is no longer joined to the answer that drew it"
+    )
 
 
 def test_a_card_can_be_hung_under_anything_that_has_a_name() -> None:

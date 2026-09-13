@@ -6294,15 +6294,22 @@ function syncBlocks() {
     const from = surface.querySelector(`.pin[data-name="answer:${CSS.escape(id)}"]`)
       ? `answer:${id}`
       : `block:${id}`;
+    const drawn = [];
     for (const line of article.querySelectorAll('.drawn-cards li[data-kind]')) {
       const name = `${line.dataset.kind}:${line.dataset.id}`;
-      if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
-        pin(
-          { kind: line.dataset.kind, id: line.dataset.id, label: '' },
-          { under: from, quiet: true, came: 'drawn from a description' }
-        );
-      }
+      if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) continue;
+      drawn.push(name);
+      // Joined to the answer once, by the first thing it drew. Every drawn card used to get its
+      // own `wrote` line from the answer, and a map of sixty things is a fan of sixty lines that
+      // hides the relations the drawing exists to show.
+      const how = { quiet: true, came: 'drawn from a description' };
+      if (drawn.length === 1) how.under = from;
+      pin({ kind: line.dataset.kind, id: line.dataset.id, label: '' }, how);
     }
+    // And laid out by how they relate, not stacked where they landed. The same arrangement `tidy up`
+    // makes of an enquiry — following the lines, server-side, against the heights the cards have
+    // actually drawn themselves at — asked for once, when the drawing arrives.
+    if (drawn.length > 1) layOutDrawn(drawn);
 
     for (const line of article.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
@@ -6473,6 +6480,54 @@ function nowCollected(name) {
 }
 
 // Where a new card goes when it belongs under others: below the lowest of them, roughly centred.
+// A drawing that has just arrived, laid out by its own lines.
+//
+// Only the cards it drew move, and only the ones nobody has touched: a card somebody dragged in
+// the second it appeared stays where they put it. Asked after the bodies have had a moment to
+// arrive, because the height a card will draw itself at is the input the layout is computed from,
+// and a layout against a guessed height overlaps the moment a card has three lines instead of one.
+function layOutDrawn(names) {
+  setTimeout(async () => {
+    const pins = names
+      .map((name) => surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]:not([data-moved])`))
+      .filter(Boolean);
+    if (pins.length < 2) return;
+    const cards = pins.map((pin) => ({
+      name: cardName(pin),
+      width: pin.offsetWidth || CARD_WIDTH,
+      height: pin.offsetHeight || 120,
+    }));
+    const inside = new Set(names);
+    const lines = everyTie().filter((one) => inside.has(one.from) && inside.has(one.to));
+    let spots = {};
+    try {
+      const answer = await fetch('/workbench/arrange', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cards, lines }),
+      });
+      spots = (await answer.json()).spots || {};
+    } catch {
+      return;
+    }
+    // Beside everything already on the bench rather than on top of it.
+    const right = Math.max(
+      0,
+      ...[...(surface?.querySelectorAll('.pin') || [])]
+        .filter((pin) => !inside.has(cardName(pin)))
+        .map((pin) => (placed.get(cardName(pin))?.x || 0) + (pin.offsetWidth || CARD_WIDTH))
+    );
+    for (const pin of pins) {
+      const at = spots[cardName(pin)];
+      if (!at) continue;
+      placed.delete(cardName(pin));
+      place(pin, { x: right + GAP * 3 + at.x, y: at.y }, { avoid: false });
+    }
+    drawTies();
+    drawRings();
+  }, 600);
+}
+
 function spotUnder(names) {
   const spots = names.map((name) => placed.get(name)).filter(Boolean);
   if (!spots.length) return null;

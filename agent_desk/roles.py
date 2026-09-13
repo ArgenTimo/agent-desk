@@ -211,6 +211,9 @@ NATURALLY = {
     # A column of somebody's board. A place things stand in, which is a thing that exists.
     "column": "object",
     "note": "object",
+    # A thing a drawing found in a project (078): a table, a feature, a service — something that
+    # exists, whatever its kind word says.
+    "sketch": "object",
     "block": "event",
     "group": "result",
 }

@@ -23,7 +23,7 @@ package makes: the observed repository cannot tell that it happened.
 from __future__ import annotations
 
 import configparser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
@@ -103,3 +103,30 @@ def repository_of(cwd: str) -> Repository:
         return Repository(key=f"origin:{_readable(origin)}", name=_readable(origin), origin=origin)
     # A repository with no remote is still one repository — every worktree of it resolves here.
     return Repository(key=f"git:{git_dir}", name=git_dir.parent.name or path.name)
+
+
+# Where `claude --bg --worktree <name>` puts the work: inside the checkout it was started from.
+WORKTREES_INSIDE = ".claude/worktrees"
+
+
+def where_it_works(cwd: str) -> tuple[str, str]:
+    """The instance a session belongs to, and the worktree inside it when there is one.
+
+    An instance is a copy of the project on this machine. A background agent started with
+    `--worktree` runs in `<checkout>/.claude/worktrees/<name>` — a directory of its own, and not a
+    copy of the project anybody made: it is scratch space inside a checkout, and its work lands in
+    that checkout. Grouping by working directory made each of them an instance beside the checkout
+    it works on; on the author's board that was twenty-three "instances" for one checkout.
+
+    Read from the path and nothing else, because the path is the fact. A worktree somebody made
+    with `git worktree add ../elsewhere` is outside the checkout and is a copy of its own, so it
+    stays an instance — which is what it is.
+    """
+    parts = PurePosixPath(cwd).parts
+    inside = PurePosixPath(WORKTREES_INSIDE).parts
+    for index in range(len(parts) - len(inside)):
+        if parts[index + 1 : index + 1 + len(inside)] == inside:
+            rest = parts[index + 1 + len(inside) :]
+            if rest:
+                return str(PurePosixPath(*parts[: index + 1])), rest[0]
+    return cwd, ""

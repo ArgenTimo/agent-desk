@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from agent_desk import process, roles, ties
 
@@ -454,3 +455,197 @@ def carried_shape(context: str) -> str:
     """How many of each, in one line, for the summary somebody reads before opening it."""
     counted = [(name, len(lines)) for name, lines in carried_by_kind(context) if name]
     return " · ".join(f"{name} {many}" for name, many in counted)
+
+
+# --- a map of what a project is --------------------------------------------------------------------
+# «Нарисуй мне схему базы данных текущего проекта», «создай мне матрицу фич и что они закрывают» —
+# «не делай фичи именно под эти 2 примера, а реализуй гораздо гибче». So nothing below names a
+# database or a feature: a map is cards of any kind and lines of any relation, and what makes it a
+# schema or a matrix is what somebody asked for and what the project turned out to contain.
+
+# How many things one drawing may put on a bench, and how much one of them may say. Past the first
+# a bench is not something somebody reads; past the second a card is a file. Both are said when they
+# bite (`Map.left_out`), because a drawing that quietly stopped at sixty looks exactly like a
+# project that has sixty things in it.
+MOST_MAP_CARDS = 60
+MOST_CARD_LINES = 16
+CARD_LINE_CHARS = 160
+
+# `card 3 | table | orders`, and under it the detail, one `- ` line each.
+_MAP_CARD = re.compile(
+    r"\Acard\s+(\d+)\s*\|\s*([^|]{1,40}?)\s*\|\s*([^|]{1,120}?)\s*(?:\|\s*(.{1,200}))?\Z", re.I
+)
+_MAP_DETAIL = re.compile(r"\A[-*•]\s+(.+)\Z")
+# `3 -> 7 : belongs to`. The words are the relation, which is what `named` means (agent_desk/ties.py).
+_MAP_LINE = re.compile(r"\A(\d+)\s*->\s*(\d+)\s*:\s*(.{1,120})\Z")
+
+
+@dataclass(frozen=True)
+class MapCard:
+    """One thing a project has, as a drawing described it."""
+
+    number: int
+    kind: str
+    label: str
+    lines: tuple[str, ...] = ()
+    read_from: str = ""
+
+
+@dataclass(frozen=True)
+class MapLine:
+    """A relation between two of them, by their numbers, with its own name."""
+
+    from_number: int
+    to_number: int
+    says: str
+
+
+@dataclass(frozen=True)
+class Map:
+    cards: tuple[MapCard, ...] = ()
+    lines: tuple[MapLine, ...] = ()
+    # Things the reply described past the bound, so the block can say how many it did not draw.
+    left_out: int = 0
+
+    @property
+    def empty(self) -> bool:
+        return not self.cards
+
+
+def map_prompt(text: str, where: str, seen: Sequence[str] = ()) -> str:
+    """Ask for a map of what a project is, drawn from the project itself.
+
+    `where` is the checkout the run has been given to read. It is named because a model handed a
+    directory and not told it is the project will happily describe the directory it is running in.
+
+    One call, both vocabularies. A process described in words is still a process — "нарисуй процесс
+    релиза" asked with a project chosen must come back as steps that can be run — so the process form
+    is offered here as the alternative rather than asked for in a second call, and the reply is read
+    as a map first and as a process when it is not one.
+
+    Two instructions carry the weight. **Read, then draw** — the refusal `cannot:` stays, for a
+    project whose files do not answer what was asked, because a plausible schema of something that
+    does not exist is the one output worse than none. **Say where you read it** — a card that names
+    the file it came from is a claim somebody can check, and one that does not is a guess with a box
+    round it.
+    """
+    lines = [
+        f"The project is the repository at {where}. You may read it; you may not change anything.",
+        "",
+        "Draw what is asked for below, from what that repository actually contains. Read the files",
+        "that answer it first. Never draw from memory of what projects like this usually have.",
+        "",
+        "Answer with lines and nothing else — no prose, no preamble, no explanation.",
+        "",
+        "First the things, each on a line of its own, numbered by their order in your answer:",
+        "  card <number> | <kind> | <name> | <where you read it>",
+        "where <kind> is one or two lowercase words saying what sort of thing it is, in the words",
+        "the project would use, and <where you read it> is a path in the repository.",
+        "Under each card, its detail — one line each, as many as it needs and no more:",
+        "  - <one fact about it>",
+        "",
+        "Then the relations between them, one per line:",
+        "  <from number> -> <to number> : <what the relation is, in a few words>",
+        "",
+        "Draw everything the request covers, and nothing it does not. Relate things only where the",
+        "repository says they are related.",
+        "",
+        "If what was asked for is a *process* — steps that happen in an order — answer in this form",
+        "instead, and not the one above:",
+        "  <role> | <short name> | <what it does>",
+        "where <role> is one of: object, action, decision, event, result; and then",
+        "  <from number> -> <to number> : <then|if|when|makes|with> : <words on the line>",
+        "",
+        "If the repository does not contain what would answer this, answer with one line and nothing",
+        "else:",
+        "  cannot: <what you looked for and did not find>",
+    ]
+    if seen:
+        lines += ["", "## What is on the workbench", *seen]
+    lines += ["", "## What was asked", text.strip()]
+    return "\n".join(lines)
+
+
+def read_map(reply: str) -> Map:
+    """The things and relations a reply describes, and nothing it merely mentions.
+
+    Strict for the same reason `read_shape` is: a line that does not parse is skipped rather than
+    guessed at. A detail line belongs to the card above it and is dropped if there is none; a
+    relation whose ends were not both drawn is dropped, because a line to nothing is harder to
+    correct than no line.
+    """
+    cards: list[MapCard] = []
+    details: dict[int, list[str]] = {}
+    lines: list[MapLine] = []
+    beyond = 0
+    last: int | None = None
+    for raw in reply.splitlines():
+        said = raw.strip()
+        if not said:
+            continue
+        card = _MAP_CARD.match(said)
+        if card is not None:
+            number = int(card.group(1))
+            if len(cards) >= MOST_MAP_CARDS:
+                beyond += 1
+                last = None
+                continue
+            if any(one.number == number for one in cards):
+                last = None
+                continue
+            cards.append(
+                MapCard(
+                    number=number,
+                    kind=card.group(2).strip().lower()[:40],
+                    label=card.group(3).strip()[:120],
+                    read_from=(card.group(4) or "").strip()[:200],
+                )
+            )
+            details[number] = []
+            last = number
+            continue
+        detail = _MAP_DETAIL.match(said)
+        if detail is not None:
+            if last is not None and len(details[last]) < MOST_CARD_LINES:
+                details[last].append(detail.group(1).strip()[:CARD_LINE_CHARS])
+            continue
+        line = _MAP_LINE.match(said)
+        if line is not None:
+            lines.append(MapLine(int(line.group(1)), int(line.group(2)), line.group(3).strip()))
+            last = None
+    drawn = {one.number for one in cards}
+    return Map(
+        cards=tuple(
+            MapCard(one.number, one.kind, one.label, tuple(details[one.number]), one.read_from)
+            for one in cards
+        ),
+        lines=tuple(
+            one
+            for one in lines
+            if one.from_number in drawn
+            and one.to_number in drawn
+            and one.from_number != one.to_number
+        ),
+        left_out=beyond,
+    )
+
+
+def as_mapped(drawn: Map, called: str) -> str:
+    """A map a message produced, as the words its block shows.
+
+    What was drawn and from where, how many relations it found, and — when the bound bit — how many
+    things it left out. A drawing that quietly stopped at sixty looks exactly like a project that has
+    sixty things in it, which is why the number is said rather than assumed.
+    """
+    kinds = sorted({one.kind for one in drawn.cards})
+    said = [
+        f"Drew {len(drawn.cards)} thing{'' if len(drawn.cards) == 1 else 's'} from {called}"
+        + (f" — {', '.join(kinds[:6])}{'…' if len(kinds) > 6 else ''}" if kinds else "")
+        + f", with {len(drawn.lines)} relation{'' if len(drawn.lines) == 1 else 's'} between them."
+    ]
+    if drawn.left_out:
+        said.append(
+            f"The reply described {drawn.left_out} more than one drawing carries; ask for a part "
+            "of it to see those."
+        )
+    return "\n\n".join(said)

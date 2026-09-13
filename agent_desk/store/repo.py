@@ -690,6 +690,23 @@ class StepCard(BaseModel):
         return f"step:{self.id}"
 
 
+class SketchCard(BaseModel):
+    """A picture of something a project has, drawn from reading the project (078)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    kind: str
+    label: str
+    lines: str = ""
+    read_from: str = ""
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"sketch:{self.id}"
+
+
 class BenchCard(BaseModel):
     """One card on the workbench, where somebody put it (040-bench.sql).
 
@@ -3680,6 +3697,57 @@ class Store:
                 text("SELECT id, label, made_at FROM step_card ORDER BY made_at DESC LIMIT 400")
             )
             return [StepCard(**row._mapping) for row in rows]
+
+    async def add_sketch_card(
+        self, *, kind: str, label: str, lines: str = "", read_from: str = ""
+    ) -> SketchCard:
+        """One thing a drawing found in a project. Bounded here as well as where it was read, because
+        a store method is called by more than one reader and the second one may not have read it."""
+        card = SketchCard(
+            id=_new_id(),
+            kind=(kind.strip() or "thing")[:40],
+            label=(label.strip() or "something")[:120],
+            lines=lines[:4000],
+            read_from=read_from[:200],
+            made_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO sketch_card (id, kind, label, lines, read_from, made_at) "
+                    "VALUES (:id, :kind, :label, :lines, :read_from, :made_at)"
+                ),
+                card.model_dump(),
+            )
+        return card
+
+    async def sketch_card(self, card_id: str) -> SketchCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id = :id"
+                ),
+                {"id": card_id},
+            )
+            row = rows.first()
+            return None if row is None else SketchCard(**row._mapping)
+
+    async def sketch_cards(self, names: Sequence[str]) -> dict[str, SketchCard]:
+        """The ones named, by card name. A digest asks for the cards on one bench, not every drawing
+        ever made."""
+        ids = [name.split(":", 1)[1] for name in names if name.startswith("sketch:")]
+        if not ids:
+            return {}
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            )
+            return {f"sketch:{row._mapping['id']}": SketchCard(**row._mapping) for row in rows}
 
     # --- the workbench ------------------------------------------------------------------------
     async def keep_bench(

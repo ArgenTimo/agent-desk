@@ -23,7 +23,7 @@ import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -89,7 +89,7 @@ from agent_desk.observe.model import (
     triage_rank,
     whose,
 )
-from agent_desk.observe.shape import repository_of
+from agent_desk.observe.shape import repository_of, where_it_works
 from agent_desk.store import repo
 from agent_desk.store.repo import (
     DRAFT_KINDS,
@@ -388,34 +388,6 @@ class Project:
     @property
     def flagged(self) -> int:
         return sum(instance.flagged for instance in self.instances)
-
-
-# Where `claude --bg --worktree <name>` puts the work: inside the checkout it was started from.
-WORKTREES_INSIDE = ".claude/worktrees"
-
-
-def where_it_works(cwd: str) -> tuple[str, str]:
-    """The instance a session belongs to, and the worktree inside it when there is one.
-
-    An instance is a copy of the project on this machine. A background agent started with
-    `--worktree` runs in `<checkout>/.claude/worktrees/<name>` — a directory of its own, and not a
-    copy of the project anybody made: it is scratch space inside a checkout, and its work lands in
-    that checkout. Grouping by working directory made each of them an instance beside the checkout
-    it works on; on the author's board that was twenty-three "instances" for one checkout.
-
-    Read from the path and nothing else, because the path is the fact. A worktree somebody made
-    with `git worktree add ../elsewhere` is outside the checkout and is a copy of its own, so it
-    stays an instance — which is what it is.
-    """
-    path = PurePosixPath(cwd)
-    parts = path.parts
-    inside = PurePosixPath(WORKTREES_INSIDE).parts
-    for index in range(len(parts) - len(inside)):
-        if parts[index + 1 : index + 1 + len(inside)] == inside:
-            rest = parts[index + 1 + len(inside) :]
-            if rest:
-                return str(PurePosixPath(*parts[: index + 1])), rest[0]
-    return cwd, ""
 
 
 def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) -> list[Project]:
@@ -1698,6 +1670,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 project=await _project_name(repo_key),
             ),
             status_code=200 if link else 404,
+        )
+    if kind == "sketch":
+        # A thing a drawing found in a project (078). What it is, its detail and where it was read,
+        # on the card itself — a block whose facts are one press away is a label.
+        drawn = await store.sketch_card(id)
+        return HTMLResponse(
+            env.get_template("_card_sketch.html").render(card=drawn),
+            status_code=200 if drawn else 404,
         )
     if kind == "step":
         # A card that is only a card. What it *is* lives in its role and that role's fields, both

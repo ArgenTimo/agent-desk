@@ -125,5 +125,5 @@ def test_the_bench_reaches_the_drawing() -> None:
     (docs/stories/11), because "the schema of the current project" needs to know which project."""
     source = BLOCKS.read_text(encoding="utf-8")
 
-    assert "await _draw_it(store, block, surface=surface, project=project)" in source
+    assert "await _draw_it(store, block, surface=surface, project=project, rows=rows)" in source
     assert "telling.shape_prompt(block.input, surface)" in source

@@ -1,0 +1,25 @@
+{# A picture of something the project has, drawn from reading the project
+   (078-a-thing-drawn-from-the-project.sql).
+
+   The kind word first, because it is what tells a table from a feature before a word of the rest is
+   read. Then the detail, all of it, on the card itself — «большое количество корректно связанных
+   информативных блоков» is a bench that is read, and a block whose facts are one press away is a
+   label. And where it was read, because a claim about a project that says where it came from is one
+   somebody can check (CLAUDE.md, rule five). #}
+{% if not card %}
+<p class="empty small">that drawing is not here any more</p>
+{% else %}
+<div class="card-detail sketch" data-detail="plain" data-label="{{ card.label }}">
+  <p class="sketch-kind">{{ card.kind }}</p>
+  {% if card.lines %}
+  <ul class="sketch-lines">
+    {% for line in card.lines.splitlines() %}
+    <li>{{ line }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if card.read_from %}
+  <p class="sketch-from small dim" title="where this was read in the project">{{ card.read_from }}</p>
+  {% endif %}
+</div>
+{% endif %}
