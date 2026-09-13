@@ -120,9 +120,10 @@
          which is the failure `Take everything off` already had, and the reason nobody pressed it
          twice. #}
       {# A bench left up while an agent worked is thirty-seven cards to re-read. Every card already
-         records when it arrived (`cameAt`, migration 045) and nothing read that as *recently*. #}
+         records when it arrived (`cameAt`, migration 045) and when it last changed (`changedAt`,
+         078), and nothing read either as *recently*. #}
       <button type="button" id="bench-new" class="chip" hidden
-              title="the cards that arrived while this window was in the background"></button>
+              title="the cards that arrived or changed while this window was in the background"></button>
       {# A card completely underneath another is indistinguishable from a card that was never
          added, and what somebody does about that is put down a second copy. Cards are dragged by
          hand, restored from a saved bench and laid out again, and any of those can leave one
