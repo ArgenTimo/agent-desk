@@ -244,6 +244,34 @@ async def test_a_card_that_never_changed_says_zero_rather_than_when_it_arrived(d
 
 
 @pytest.mark.unit
+async def test_an_undo_to_a_bench_saved_before_078_puts_it_back(desk: Store) -> None:
+    """The undo history is JSON written at the time, so every step recorded before 078 has no
+    `changed_at` in it — and the first undo after upgrading reads exactly one of those. A step from
+    before 042 and 045 is missing `by_hand`, `came` and `came_at` the same way."""
+    import json
+
+    from sqlalchemy import text
+
+    await desk.keep_bench([_card("idea:one", came_at=1_000)], thread_id="a")
+    await desk.keep_bench([_card("idea:one", came_at=1_000, x=900)], thread_id="a", moved=True)
+    async with desk.engine.begin() as conn:
+        for at, surface in (await conn.execute(text("SELECT at, surface FROM bench_was"))).all():
+            was = json.loads(surface)
+            for card in was["cards"]:
+                for key in ("by_hand", "came", "came_at", "changed_at"):
+                    del card[key]
+            await conn.execute(
+                text("UPDATE bench_was SET surface = :s WHERE at = :at"),
+                {"s": json.dumps(was), "at": at},
+            )
+
+    assert await desk.undo_bench("a")
+
+    (back,) = await desk.bench_cards("a")
+    assert (back.x, back.by_hand, back.came, back.came_at, back.changed_at) == (10, False, "", 0, 0)
+
+
+@pytest.mark.unit
 async def test_the_page_s_save_carries_when_a_card_changed() -> None:
     """The route builds the row field by field, so a field the page sends and the route forgets is
     dropped silently on every save."""

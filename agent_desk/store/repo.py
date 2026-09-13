@@ -3934,7 +3934,19 @@ class Store:
                         ":card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, "
                         ":came, :came_at, :changed_at)"
                     ),
-                    [{**card, "thread_id": thread_id} for card in was["cards"]],
+                    # A step is JSON written at the time, so one recorded before 042, 045 or 078
+                    # lacks the columns those added; they get the defaults the migrations gave.
+                    [
+                        {
+                            "by_hand": 0,
+                            "came": "",
+                            "came_at": 0,
+                            "changed_at": 0,
+                            **card,
+                            "thread_id": thread_id,
+                        }
+                        for card in was["cards"]
+                    ],
                 )
             for tie in await conn.execute(text("SELECT id, from_name, to_name FROM card_tie")):
                 if tie._mapping["from_name"] in here and tie._mapping["to_name"] in here:
