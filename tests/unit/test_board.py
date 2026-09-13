@@ -1012,3 +1012,132 @@ def test_nothing_on_the_board_adds_those_numbers_up() -> None:
     assert '"smaps_rollup"' not in source and "'smaps_rollup'" not in source, (
         "the proportional reading is being opened, at two hundred and fifty times the cost"
     )
+
+
+# --- a project as it actually is (docs/stories/10) ---------------------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cwd", "home", "worktree"),
+    [
+        ("/home/a/proj", "/home/a/proj", ""),
+        ("/home/a/proj/.claude/worktrees/beri-v-rabotu", "/home/a/proj", "beri-v-rabotu"),
+        # Somewhere deeper inside a worktree is still that worktree's work.
+        ("/home/a/proj/.claude/worktrees/w/src/pkg", "/home/a/proj", "w"),
+        # A worktree somebody made beside the checkout is a copy of its own.
+        ("/home/a/proj-shift", "/home/a/proj-shift", ""),
+        # The directory that holds worktrees is not itself one.
+        ("/home/a/proj/.claude/worktrees", "/home/a/proj/.claude/worktrees", ""),
+    ],
+)
+def test_where_a_session_works_is_read_from_its_path(cwd: str, home: str, worktree: str) -> None:
+    assert routes.where_it_works(cwd) == (home, worktree)
+
+
+@pytest.mark.unit
+def test_a_background_session_is_shown_under_the_checkout_its_worktree_belongs_to(
+    home: Home,
+) -> None:
+    """`claude --bg --worktree <name>` runs inside the checkout it was started from, and grouping by
+    working directory made every one an instance beside that checkout. Twenty-three of them, for one
+    checkout, on the author's board."""
+    person, agent = _live_pids(2)
+    home.session(person, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(
+        agent,
+        "bbbbbbbb-0000-4000-8000-000000000002",
+        cwd="/home/dev/alpha/.claude/worktrees/fix-the-parser",
+        kind="bg",
+    )
+
+    projects = routes.shape(routes.board()[0], [])
+    instances = [one for project in projects for one in project.instances]
+
+    assert [one.path for one in instances] == ["/home/dev/alpha"]
+    assert len(instances[0].rows) == 2
+    worktrees = {row.session.session_id[:8]: row.worktree for row in instances[0].rows}
+    assert worktrees == {"aaaaaaaa": "", "bbbbbbbb": "fix-the-parser"}
+    assert "⎇ fix-the-parser" in routes.render_board()
+
+
+@pytest.mark.unit
+def test_another_checkout_of_the_same_repository_is_still_an_instance_of_its_own(
+    home: Home,
+) -> None:
+    """A copy made beside the checkout is a copy of the project on this machine, which is what an
+    instance is. Only the CLI's scratch space inside a checkout is folded into it."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha-review")
+
+    paths = sorted(
+        one.path for project in routes.shape(routes.board()[0], []) for one in project.instances
+    )
+
+    assert paths == ["/home/dev/alpha", "/home/dev/alpha-review"]
+
+
+@pytest.mark.unit
+def test_a_session_card_says_which_kind_it_is_in_its_head(home: Home) -> None:
+    """One can be written to from here and the other cannot (docs/adr/0009). The only difference
+    used to be a slightly different blue dot."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/a", kind="bg")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/b", kind="interactive")
+
+    html = routes.render_board()
+
+    heads = re.findall(r'<summary class="card-head">(.*?)</summary>', html, re.S)
+    kinds = [re.search(r'session-kind (bg|terminal)"', head) for head in heads]
+    assert sorted(found.group(1) for found in kinds if found) == ["bg", "terminal"], (
+        "a session card does not say in its head which kind of session it is"
+    )
+
+
+@pytest.mark.unit
+def test_the_agents_a_session_started_are_children_of_it(home: Home) -> None:
+    """The transcript records each `Agent` call and whether it came back. They were a row of tags at
+    the bottom of the card, indistinguishable from the pills beside them."""
+    session_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    home.session(os.getpid(), session_id, cwd="/home/dev/alpha")
+    home.transcript(
+        session_id,
+        {
+            "type": "assistant",
+            "isSidechain": False,
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Agent",
+                        "input": {"subagent_type": "Explore", "description": "map the modules"},
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_2",
+                        "name": "Agent",
+                        "input": {"subagent_type": "reviewer", "description": "review the diff"},
+                    },
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "isSidechain": False,
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}],
+            },
+        },
+    )
+
+    html = routes.render_board()
+
+    children = html[html.index('<ul class="children agents"') :]
+    children = children[: children.index("</ul>")]
+    names = re.findall(r'<span class="node-name">(.*?)</span>', children)
+    assert names == ["review the diff", "map the modules"], (
+        "the agents are not children of the session, or the running one is not first"
+    )
+    assert 'class="node card agent working"' in children

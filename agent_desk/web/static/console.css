@@ -3284,3 +3284,47 @@ button.go:hover, button.yes:hover {
   color: var(--fg-dim);
   font-size: var(--t-xs);
 }
+
+/* --- a session's kind, and the agents it started (docs/stories/10) ------------------------------- */
+/* Told apart by a word and a shape, not by colour: colour on this page means status, and whether a
+   session can hear you is not a status it is in. A background session's pill is solid-edged and a
+   terminal's is dashed — the dashed one is the one you cannot write to. */
+.pill.session-kind { font-size: var(--t-xs); border: 1px solid var(--line-strong); background: none; }
+.pill.session-kind.bg { border-style: solid; color: var(--fg); }
+.pill.session-kind.terminal { border-style: dashed; color: var(--fg-soft); }
+.card.session.bg { border-left-style: solid; }
+.card.session:not(.bg) { border-left-style: dashed; }
+.pill.worktree { font-size: var(--t-xs); }
+
+/* The agents a session started, as children of it. Indented and ruled on the left like every other
+   level of the tree, so an agent reads as belonging to the session above it and not beside it. */
+.children.agents {
+  list-style: none;
+  margin: 6px 0 0 8px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--line);
+  display: grid;
+  gap: 3px;
+}
+.children.agents > .card.agent {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: var(--t-sm);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.children.agents .agent-kind { font-size: var(--t-xs); color: var(--fg-dim); }
+.children.agents .node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- the chosen project (docs/stories/11) ----------------------------------------------------- */
+/* A mark on the edge and a pressed button, never a colour on the card: colour on this page means
+   status, and being the project somebody is working on is not a status the project is in. */
+.project-slot { position: relative; }
+/* Beside the card's head rather than inside its `<summary>`, positioned onto it. */
+.choose-project { position: absolute; top: 5px; right: 30px; z-index: 1; display: inline-flex; margin: 0; }
+.chip.choose { font-size: var(--t-xs); }
+.chip.choose.on { border-color: var(--focus); color: var(--focus); }
+.card.project.chosen-project { box-shadow: inset 3px 0 0 0 var(--focus); }

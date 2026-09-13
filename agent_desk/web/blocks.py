@@ -275,7 +275,9 @@ def _capture_context(rows: Sequence[BoardRow]) -> tuple[str, str | None, dict[st
     )
 
 
-async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Block:
+async def capture_idea(
+    store: Store, text: str, rows: Sequence[BoardRow], project: str = ""
+) -> Block:
     """`/idea`: recorded in one step, with a card and no second question (docs/05-ideas.md).
 
     The block is `answered` the moment it exists, because it is. The idea is written before any
@@ -295,7 +297,7 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
         source_ref=source_ref,
         context=context,
         block_id=block.id,
-        project_key=project_of(rows),
+        project_key=project_of(rows, project),
     )
     await store.finish_block(block.id, "")
     # An idea block asks nothing further, so its subject is not a candidate for a later question
@@ -726,7 +728,7 @@ async def submit(
     """
     text = typed.strip()
     if text.startswith(IDEA_PREFIX):
-        return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows)
+        return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows, project)
     forced_new = text.startswith(NEW_PREFIX)
     if forced_new:
         text = text[len(NEW_PREFIX) :].strip()
@@ -814,6 +816,10 @@ async def submit(
             on_bench=on_bench,
             # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
             pointed_at=len(targets),
+            # Who it was addressed to: the project named or chosen, or "" for the desk. Carried to
+            # the branches that file something under a project — an idea, a drawing of one — so
+            # that a project with nothing running in it is still the one they are about.
+            project=project,
         ),
     )
     return block
@@ -1001,6 +1007,7 @@ async def _work(
     surface: Sequence[str] = (),
     on_bench: Sequence[str] = (),
     pointed_at: int = 0,
+    project: str = "",
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
 
@@ -1036,7 +1043,7 @@ async def _work(
             )
             return
         if kind == "idea":
-            await record_idea(store, block, rows)
+            await record_idea(store, block, rows, project=project)
             return
         if kind == "master":
             await _master_request(store, block, rows)
@@ -1045,7 +1052,7 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         if kind == "drawing":
-            await _draw_it(store, block, surface=surface)
+            await _draw_it(store, block, surface=surface, project=project)
             return
         if kind == "showing":
             await _show_them(store, block, rows, on_bench)
@@ -1368,7 +1375,9 @@ async def read_tickets_now(store: Store, key: str) -> tuple[list[str], str]:
     )
 
 
-async def _draw_it(store: Store, block: Block, *, surface: Sequence[str] = ()) -> None:
+async def _draw_it(
+    store: Store, block: Block, *, surface: Sequence[str] = (), project: str = ""
+) -> None:
     """A process described in the input field, drawn as cards on the workbench.
 
     "Нарисуй процесс релиза: сначала тесты, если красные — чиним."
@@ -1499,13 +1508,21 @@ async def _write_what_was_asked(store: Store, block: Block, asked: handling.Hand
             await store.name_step_card(card_id, called.label)
 
 
-def project_of(rows: Sequence[BoardRow]) -> str:
+def project_of(rows: Sequence[BoardRow], project: str = "") -> str:
     """Which project a thought or a request is about, when nothing says otherwise.
 
-    The cards that were on the workbench, if there were any; otherwise this console's own project.
-    A thought typed with nothing in front of it is a thought about the thing in front of you, and
-    the thing in front of you is the desk (docs/05-ideas.md).
+    The project it was addressed to, first — the one somebody chose, or named. «Если проект выбран,
+    то по умолчанию запросы адресованы именно ему, если не выбран и нет другого контекста на
+    верстаке — agent-desk.» Then the cards that were on the workbench; then this console's own
+    project. A thought typed with nothing chosen and nothing in front of it is a thought about the
+    thing in front of you, and the thing in front of you is the desk (docs/05-ideas.md).
+
+    The chosen project comes before the rows because a project added by its address has no rows at
+    all — no checkout here, no session — and a thought about it was being filed under whichever
+    session happened to be first on the board.
     """
+    if project:
+        return project
     for row in rows:
         if row.project_key:
             return row.project_key
@@ -1518,7 +1535,7 @@ def desk_key() -> str:
 
 
 async def record_idea(
-    store: Store, block: Block, rows: Sequence[BoardRow], *, say: str = ""
+    store: Store, block: Block, rows: Sequence[BoardRow], *, say: str = "", project: str = ""
 ) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
@@ -1541,7 +1558,7 @@ async def record_idea(
         source_ref=source_ref,
         context=context,
         block_id=block.id,
-        project_key=project_of(rows),
+        project_key=project_of(rows, project),
     )
     await store.finish_block(block.id, say)
     await _write_ideas(store, block, idea, rows)

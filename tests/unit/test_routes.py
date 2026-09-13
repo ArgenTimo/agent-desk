@@ -22,6 +22,7 @@ from agent_desk.config import Settings
 from agent_desk.observe import registry, transcript
 from agent_desk.store.repo import Store
 from agent_desk.web import autostart, routes, sse
+from agent_desk.web import blocks as block_runs
 
 from tests.unit.test_board import Home, _entry
 
@@ -904,10 +905,13 @@ async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
 ) -> None:
     """Sixty ideas are not read from the end, they are searched. The choice lives in the store
     because a server-sent event replaces this column every couple of seconds."""
+    # Both in one project, and that project chosen: the column is a chosen project's thoughts
+    # (docs/stories/11), so ordering is a question asked of one project's list.
     first = await desk.create_idea(text_="the older one", summary="older", source_kind="typed")
-    await desk.set_idea_project(first.id, "b:project")
+    await desk.set_idea_project(first.id, "a:project")
     second = await desk.create_idea(text_="the newer one", summary="newer", source_kind="typed")
     await desk.set_idea_project(second.id, "a:project")
+    await desk.set_setting(routes.FOCUS_KEY, "a:project")
 
     # The order of the *cards*, not of the words: every card carries a select naming every other
     # idea, so an index of the summary text says nothing about which card came first.
@@ -923,8 +927,11 @@ async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
     # And it is still that way on the next push, which is what a query parameter could not do.
     assert order(await routes.render_ideas()) == [first.id, second.id]
 
+    # By project is still offered and still kept. Inside one chosen project every card has the
+    # same one, so there is no order to assert — only that the choice is taken and survives.
     status, column = await _post("/ideas/sort", {"how": "project"})
-    assert order(column) == [second.id, first.id]  # a:project before b:project
+    assert status == 200
+    assert await desk.setting(routes.IDEA_SORT_KEY) == "project"
 
     # A sort nobody offers changes nothing rather than raising.
     await _post("/ideas/sort", {"how": "by vibes"})
@@ -1282,71 +1289,158 @@ async def test_the_workbench_draws_what_is_on_it(home: Home, desk: Store) -> Non
 
 
 @pytest.mark.unit
-async def test_choosing_a_project_narrows_the_right_hand_column(home: Home, desk: Store) -> None:
-    """ "Выбор проекта слева фильтрует блокеры и идеи; без выбора — всё." A board with six
-    projects has a column about all six, and when you are working on one that is mostly noise."""
-    key = await _the_project(home)
-    mine = await desk.create_idea(
-        text_="about this one", summary="about this one", source_kind="typed"
-    )
-    await desk.set_idea_project(mine.id, key)
-    theirs = await desk.create_idea(
-        text_="about another", summary="about another", source_kind="typed"
-    )
-    await desk.set_idea_project(theirs.id, "origin:someone/else")
-    # One with no project at all: it must survive the narrowing.
-    await desk.create_idea(text_="about nothing", summary="about nothing", source_kind="typed")
+async def test_the_idea_column_is_the_chosen_projects_or_the_desks(home: Home, desk: Store) -> None:
+    """«Идеи отображаются только для конкретных проектов… если не выбран и нет другого контекста на
+    верстаке — agent-desk.» (docs/stories/11)
 
-    # Without a choice: everything.
+    It used to show every project's with nothing chosen and to keep project-less ideas under a
+    choice. With nothing chosen the column is the desk's: a thought typed with nothing chosen and
+    nothing on the bench is filed under the desk, and one written before ideas had a project has
+    always in practice been about the desk too.
+    """
+    key = await _the_project(home)
+
+    async def idea(summary: str, project: str) -> None:
+        made = await desk.create_idea(text_=summary, summary=summary, source_kind="typed")
+        if project:
+            await desk.set_idea_project(made.id, project)
+
+    await idea("about this one", key)
+    await idea("about another", "origin:someone/else")
+    await idea("about the desk", block_runs.desk_key())
+    await idea("from before projects", "")
+
     column = await routes.render_ideas()
-    assert "about this one" in column and "about another" in column and "about nothing" in column
+    assert "about the desk" in column and "from before projects" in column
+    assert "about this one" not in column and "about another" not in column
+    assert "a message goes to <strong>agent-desk</strong>" in column
 
     status, column = await _post("/projects/focus", {"key": key})
 
     assert status == 200
     assert "about this one" in column
     assert "about another" not in column
-    # A thought with no project is about whatever is in front of you, so it survives the
-    # narrowing — hiding it behind a filter it was never part of would lose it.
-    assert "about nothing" in column
-    assert "showing" in column and "show everything" in column
-
-    # And it survives a push, which is what a query parameter could not do.
+    assert "about the desk" not in column and "from before projects" not in column
+    # It survives a push, which is what a query parameter could not do.
     assert "about another" not in await routes.render_ideas()
-
-    status, column = await _post("/projects/focus", {"key": ""})
-    assert "about another" in column
 
 
 @pytest.mark.unit
-async def test_the_blockers_narrow_with_the_ideas_and_the_loose_ones_stay(
+async def test_pressing_the_chosen_project_again_chooses_none(home: Home, desk: Store) -> None:
+    key = await _the_project(home)
+
+    await _post("/projects/focus", {"key": key})
+    assert await desk.setting(routes.FOCUS_KEY) == key
+
+    await _post("/projects/focus", {"key": key})
+    assert await desk.setting(routes.FOCUS_KEY) == ""
+
+
+@pytest.mark.unit
+async def test_a_declared_project_shows_the_ideas_of_every_repository_in_it(
+    home: Home, desk: Store
+) -> None:
+    """A group's id is not any idea's key, so narrowing by the id alone would show a declared
+    project as having no thoughts at all."""
+    group = await desk.create_group("the product")
+    await desk.add_to_group(group.id, "origin:acme/api")
+    await desk.add_to_group(group.id, "origin:acme/app")
+    for summary, repo in (("in the api", "origin:acme/api"), ("in the app", "origin:acme/app")):
+        made = await desk.create_idea(text_=summary, summary=summary, source_kind="typed")
+        await desk.set_idea_project(made.id, repo)
+
+    await desk.set_setting(routes.FOCUS_KEY, group.id)
+    column = await routes.render_ideas()
+
+    assert "in the api" in column and "in the app" in column
+
+
+@pytest.mark.unit
+async def test_the_blockers_are_everybodys_whichever_project_is_chosen(
     home: Home, desk: Store, tmp_path: pathlib.Path
 ) -> None:
-    """One decision moves both columns; a failed question belongs to no repository at all."""
+    """«Блокеры отображаются общие для всех проектов.» Choosing a project narrowed them, and a failure
+    in one project went quiet the moment somebody looked at another."""
     key = await _the_project(home)
-    mine = await desk.queue_task(
-        repo_key=key,
-        cwd=str(tmp_path),
-        title="this project",
-        instruction="x",
-        source_kind="instruction",
-    )
-    await desk.task_failed(mine.id, "it fell over")
-    theirs = await desk.queue_task(
-        repo_key="origin:someone/else",
-        cwd=str(tmp_path),
-        title="another project",
-        instruction="x",
-        source_kind="instruction",
-    )
-    await desk.task_failed(theirs.id, "it fell over too")
+    for repo, title in ((key, "this project"), ("origin:someone/else", "another project")):
+        task = await desk.queue_task(
+            repo_key=repo,
+            cwd=str(tmp_path),
+            title=title,
+            instruction="x",
+            source_kind="instruction",
+        )
+        await desk.task_failed(task.id, "it fell over")
 
     await _post("/projects/focus", {"key": key})
     column = await routes.render_blockers()
 
     assert "this project" in column
-    assert "another project" not in column
-    assert "for this project only" in column
+    assert "another project" in column
+    assert "for this project only" not in column
+
+
+@pytest.mark.unit
+async def test_a_message_with_nothing_on_the_bench_goes_to_the_chosen_project(
+    home: Home, desk: Store
+) -> None:
+    """«Если проект выбран, то по умолчанию запросы адресованы именно ему.» Chosen, not on the board:
+    a project added by its address has no checkout and no session, and a thought about it was filed
+    under whichever session happened to be first."""
+    _a_session(home)
+    far = "origin:someone/far-away"
+    await desk.set_setting(routes.FOCUS_KEY, far)
+
+    # Capturing starts a background pass that takes the thought apart, and that needs the task
+    # group the running console holds for the life of the process.
+    async with asyncio.TaskGroup() as group:
+        block_runs.runs.attach(group)
+        try:
+            await _post("/blocks", {"text": "/idea the export needs a retry"})
+        finally:
+            block_runs.runs.attach(None)
+
+    (made,) = [one for one in await desk.ideas() if "retry" in one.text]
+    assert made.project_key == far
+
+
+@pytest.mark.unit
+async def test_with_nothing_chosen_and_nothing_on_the_bench_a_thought_is_the_desks(
+    home: Home, desk: Store
+) -> None:
+    # Capturing starts a background pass that takes the thought apart, and that needs the task
+    # group the running console holds for the life of the process.
+    async with asyncio.TaskGroup() as group:
+        block_runs.runs.attach(group)
+        try:
+            await _post("/blocks", {"text": "/idea the console could remember my column width"})
+        finally:
+            block_runs.runs.attach(None)
+
+    (made,) = [one for one in await desk.ideas() if "column width" in one.text]
+    assert made.project_key == block_runs.desk_key()
+
+
+@pytest.mark.unit
+def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary() -> None:
+    """«У проектов должна быть кнопка выбрать… но он не помещается на верстак.» It was three levels
+    down, in the `⋯` menu. A control inside a disclosure's `<summary>` is swallowed by the
+    disclosure — which is what happened to the `⋯` before it moved out — and a click on the card
+    head is what puts a card on the workbench."""
+    board = (pathlib.Path(routes.TEMPLATES) / "_board.html").read_text(encoding="utf-8")
+
+    slot = board[board.index('<div class="project-slot">') :]
+    slot = slot[: slot.index('<details class="node card project')]
+    assert 'class="choose-project"' in slot, "the choose button is not beside the project card"
+    assert 'action="/projects/focus"' in slot
+    assert "aria-pressed" in slot, "the chosen state is only a colour"
+
+    summary = board[board.index('<summary class="card-head">') :]
+    summary = summary[: summary.index("</summary>")]
+    assert "choose-project" not in summary
+    assert "Show only this one" not in board, (
+        "the old menu entry still says it narrows the blockers"
+    )
 
 
 @pytest.mark.unit
@@ -1473,14 +1567,19 @@ async def test_a_card_says_which_project_it_is_about(
     )
     await desk.task_failed(task.id, "it fell over")
 
+    # The idea is the chosen project's, so it is in that project's column (docs/stories/11); the
+    # blockers are everybody's whichever is chosen.
+    await desk.set_setting(routes.FOCUS_KEY, key)
     assert f'data-about="{key}"' in await routes.render_ideas()
     assert f'data-about="{key}"' in await routes.render_blockers()
 
-    # An idea about nothing in particular claims nothing.
+    # An idea about nothing in particular claims nothing — and it is the desk's, so it is in the
+    # column with nothing chosen.
     loose = await desk.create_idea(text_="about nothing", summary="loose", source_kind="typed")
+    await desk.set_setting(routes.FOCUS_KEY, "")
     column = await routes.render_ideas()
     assert f'data-id="{loose.id}"' in column
-    assert column.count("data-about") == 1
+    assert "data-about" not in column
 
 
 @pytest.mark.unit
