@@ -718,6 +718,9 @@ class BenchCard(BaseModel):
     # inventing one.
     came: str = ""
     came_at: int = 0
+    # When its content last changed after it arrived — a step's state, a check read back, a new
+    # name — as the page saw it happen (078). Zero is "not since it arrived", not "unknown".
+    changed_at: int = 0
 
 
 class Template(BaseModel):
@@ -3729,9 +3732,9 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
-                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
-                        ":came_at)"
+                        "ord, by_hand, thread_id, came, came_at, changed_at) VALUES (:name, :kind, "
+                        ":card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, "
+                        ":came, :came_at, :changed_at)"
                     ),
                     rows,
                 )
@@ -3786,7 +3789,7 @@ class Store:
             for row in await conn.execute(
                 text(
                     "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
-                    "came, came_at "
+                    "came, came_at, changed_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},
@@ -3927,9 +3930,9 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
-                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
-                        ":came_at)"
+                        "ord, by_hand, thread_id, came, came_at, changed_at) VALUES (:name, :kind, "
+                        ":card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, "
+                        ":came, :came_at, :changed_at)"
                     ),
                     [{**card, "thread_id": thread_id} for card in was["cards"]],
                 )
@@ -3967,7 +3970,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
-                    "came, came_at "
+                    "came, came_at, changed_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},
