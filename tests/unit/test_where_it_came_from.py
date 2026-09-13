@@ -212,6 +212,139 @@ def test_the_line_is_not_shown_on_a_folded_card() -> None:
     assert '.pin[data-view="hint"] .pin-came { display: none; }' in css
 
 
+# --- and when it last changed (078, 01M25VH7AXXJ1AT09AHE77J2W4) ------------------------------------
+def _function(console: str, head: str) -> str:
+    body = console[console.index(head) :]
+    return body[: body.index("\n}\n")]
+
+
+@pytest.mark.unit
+async def test_a_card_remembers_when_it_last_changed_and_it_survives_an_undo(desk: Store) -> None:
+    """Story 5 asked for what arrived *or changed*. `came_at` never moves, so without a second time
+    "changed" had nothing to be read from."""
+    await desk.keep_bench([_card("idea:one", came_at=1_000, changed_at=5_000)], thread_id="a")
+    await desk.keep_bench(
+        [_card("idea:one", came_at=1_000, changed_at=5_000, x=900)], thread_id="a", moved=True
+    )
+
+    await desk.undo_bench("a")
+
+    (back,) = await desk.bench_cards("a")
+    assert (back.came_at, back.changed_at, back.x) == (1_000, 5_000, 10)
+
+
+@pytest.mark.unit
+async def test_a_card_that_never_changed_says_zero_rather_than_when_it_arrived(desk: Store) -> None:
+    """Copying the arrival in would mark every restored card as changed the first time anybody
+    looked away — a mark on most of the bench, which says nothing."""
+    await desk.keep_bench([_card("idea:one", came_at=1_000)], thread_id="a")
+
+    (back,) = await desk.bench_cards("a")
+    assert back.changed_at == 0
+
+
+@pytest.mark.unit
+async def test_an_undo_to_a_bench_saved_before_078_puts_it_back(desk: Store) -> None:
+    """The undo history is JSON written at the time, so every step recorded before 078 has no
+    `changed_at` in it — and the first undo after upgrading reads exactly one of those. A step from
+    before 042 and 045 is missing `by_hand`, `came` and `came_at` the same way."""
+    import json
+
+    from sqlalchemy import text
+
+    await desk.keep_bench([_card("idea:one", came_at=1_000)], thread_id="a")
+    await desk.keep_bench([_card("idea:one", came_at=1_000, x=900)], thread_id="a", moved=True)
+    async with desk.engine.begin() as conn:
+        for at, surface in (await conn.execute(text("SELECT at, surface FROM bench_was"))).all():
+            was = json.loads(surface)
+            for card in was["cards"]:
+                for key in ("by_hand", "came", "came_at", "changed_at"):
+                    del card[key]
+            await conn.execute(
+                text("UPDATE bench_was SET surface = :s WHERE at = :at"),
+                {"s": json.dumps(was), "at": at},
+            )
+
+    assert await desk.undo_bench("a")
+
+    (back,) = await desk.bench_cards("a")
+    assert (back.x, back.by_hand, back.came, back.came_at, back.changed_at) == (10, False, "", 0, 0)
+
+
+@pytest.mark.unit
+async def test_the_page_s_save_carries_when_a_card_changed() -> None:
+    """The route builds the row field by field, so a field the page sends and the route forgets is
+    dropped silently on every save."""
+    from unittest.mock import AsyncMock, patch
+
+    from agent_desk.web import routes
+
+    class _Asked:
+        async def json(self) -> dict[str, object]:
+            return {
+                "thread": "a",
+                "cards": [
+                    {
+                        "name": "idea:one",
+                        "kind": "idea",
+                        "id": "one",
+                        "at": {"x": 1, "y": 2},
+                        "came_at": 1_000,
+                        "changed_at": 5_000,
+                    }
+                ],
+            }
+
+    kept = AsyncMock()
+    with patch.object(routes.store, "keep_bench", kept):
+        await routes.keep_bench(_Asked())  # type: ignore[arg-type]
+
+    (cards,) = kept.call_args.args
+    assert cards[0].changed_at == 5_000
+
+
+@pytest.mark.unit
+def test_the_page_writes_it_down_and_reads_it_back() -> None:
+    console = _code()
+
+    assert "changed_at: Number(pin.dataset.changedAt) || 0" in _function(
+        console, "function benchState("
+    )
+    assert "changedAt: one.changed_at" in _function(console, "function layOut(")
+
+
+@pytest.mark.unit
+def test_a_card_is_marked_changed_only_where_its_content_is_replaced() -> None:
+    """One writer, called from the three places a card that was already here is rewritten. Drawing,
+    moving, folding and restoring are not the card changing, and a stamp there would put the mark on
+    everything."""
+    console = _code()
+
+    assert console.count("changed(") - console.count("function changed(") == 3
+    assert console.count("dataset.changedAt = ") == 2, "a second writer besides `pin` and `changed`"
+    assert "changed(holder)" in _function(console, "async function runTheCheck(")
+    for untouched in ("function setView(", "function layOut(", "function nameItProperly("):
+        assert "changed(" not in _function(console, untouched), untouched
+
+
+@pytest.mark.unit
+def test_a_step_is_a_change_only_when_it_moves_from_a_state_already_drawn() -> None:
+    """The first paint after a load finds every step with no previous state. Counting that as a
+    change would stamp every step card on every reload."""
+    console = _code()
+
+    assert "if (stepWas !== undefined && stepWas !== pin.dataset.step) changed(pin);" in console
+
+
+@pytest.mark.unit
+def test_the_chip_says_arrived_and_changed_apart_and_counts_a_card_once() -> None:
+    marking = _function(_code(), "function markWhatArrivedSince(")
+
+    assert "const isChanged = !isNew &&" in marking
+    assert "`${fresh} arrived`" in marking and "`${moved} changed`" in marking
+    assert "'changed-since'" in _function(_code(), "function forgetWhatArrived(")
+
+
 @pytest.mark.unit
 def test_how_long_ago_is_worked_out_when_somebody_looks() -> None:
     """Written when the card is made and read when the card is opened. A tab left open for an hour

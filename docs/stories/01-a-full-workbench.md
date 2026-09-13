@@ -86,6 +86,14 @@ moves. A mark that meant something narrower than it said would be CLAUDE.md's fi
 the surface it is most read from, so the mark says "arrived" and the gap is in the pool as its own
 thought.
 
+**The gap, closed afterwards.** A card now also records when it last changed (`changedAt`,
+migration 078), stamped by the page at the three moments it rewrites a card that was already there:
+a run step's state moving, a check read back with its verdict, a card renamed from the input field.
+The chip says the two apart — "2 arrived, 3 changed while you were away" — and a card that arrived
+is not counted as changed as well. What is still not marked is a change the page never saw: a card's
+body is read once when it is drawn, so an idea whose state moved on the server shows as it was until
+it is drawn again, and says nothing rather than something it cannot know.
+
 ---
 
 ## What was deliberately not asked for
