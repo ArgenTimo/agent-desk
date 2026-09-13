@@ -118,7 +118,7 @@ _NAMED = re.compile(r"\A(\d+)\s*->\s*(\d+)\s*:\s*(.+)\Z")
 _CANNOT = re.compile(r"\Acannot\s*:\s*(.+)\Z", re.I)
 
 
-def shape_prompt(text: str, seen: Sequence[str] = ()) -> str:
+def shape_prompt(text: str, seen: Sequence[str] = (), *, where: str = "") -> str:
     """Ask for a drawing, in a form that can be read rather than interpreted.
 
     Two vocabularies, and the model picks the one that fits what was asked. Five process words
@@ -134,6 +134,12 @@ def shape_prompt(text: str, seen: Sequence[str] = ()) -> str:
     and that one is worse, because it is not a wrong summary of something true but a picture of
     something that does not exist. So `cannot:` is offered as an answer, and what can be seen is
     listed under it: everything else is off limits.
+
+    `where` is the checkout of the project the request is addressed to, or "" when it has none on
+    this machine (docs/stories/12 §1). A request for "the schema of the current project" made with
+    only the words in the field has one honest answer, `cannot:`, which is the refusal working and
+    the feature doing nothing. The run is handed that directory to read, and told so here — a
+    directory it can read and was not told about is a directory it does not look in.
     """
     lines = [
         "Draw what is described below, using only what it actually says and what you are shown.",
@@ -156,8 +162,9 @@ def shape_prompt(text: str, seen: Sequence[str] = ()) -> str:
         "  <from number> -> <to number> : <what the relation is called>",
         "such as `foreign key`, `deploys to`, `owned by`. Use the name the thing itself uses.",
         "",
-        "Do not invent cards the description does not mention. If it describes three things,",
-        "answer with three cards. A card nobody asked for is worse than a short answer.",
+        "Do not invent cards that neither the description nor what you are shown mentions. If",
+        "it describes three things, answer with three cards. A card nobody asked for is worse",
+        "than a short answer.",
         "",
         "Never draw from memory. If you are asked for something you have not been shown — a",
         "schema, a set of services, a file you cannot see — answer with one line:",
@@ -167,6 +174,13 @@ def shape_prompt(text: str, seen: Sequence[str] = ()) -> str:
         "## The description",
         text,
     ]
+    if where:
+        lines += [
+            "",
+            "## The project",
+            f"It is checked out at {where}. Read it with Read, Grep and Glob, and draw what its",
+            "files say. A thing no file there describes is a thing you have not been shown.",
+        ]
     if seen:
         lines += ["", "## What you can see", *seen]
     return "\n".join(lines)

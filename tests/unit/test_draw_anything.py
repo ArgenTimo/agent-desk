@@ -125,5 +125,7 @@ def test_the_bench_reaches_the_drawing() -> None:
     (docs/stories/11), because "the schema of the current project" needs to know which project."""
     source = BLOCKS.read_text(encoding="utf-8")
 
-    assert "await _draw_it(store, block, surface=surface, project=project)" in source
-    assert "telling.shape_prompt(block.input, surface)" in source
+    # Rows as well since docs/stories/12 §1: which project a drawing is about is `project_of`'s
+    # answer, and that answer reads the rows the message was aimed at.
+    assert "store, block, rows if pointed_at else (), surface=surface, project=project" in source
+    assert "telling.shape_prompt(block.input, surface, where=" in source

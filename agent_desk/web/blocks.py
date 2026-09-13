@@ -1052,7 +1052,12 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         if kind == "drawing":
-            await _draw_it(store, block, surface=surface, project=project)
+            # Rows only when cards pointed at them. Unpointed, `aim` hands over the whole board, and
+            # its first session's project is not "the current project" — it is a guess at one
+            # (docs/stories/12 §1). Chosen, then the bench, then the desk.
+            await _draw_it(
+                store, block, rows if pointed_at else (), surface=surface, project=project
+            )
             return
         if kind == "showing":
             await _show_them(store, block, rows, on_bench)
@@ -1375,8 +1380,36 @@ async def read_tickets_now(store: Store, key: str) -> tuple[list[str], str]:
     )
 
 
+async def checkout_for(
+    store: Store, rows: Sequence[BoardRow], project: str = ""
+) -> tuple[str, Path | None]:
+    """The project a request is about, and where it is checked out on this machine, if anywhere.
+
+    Which project is `project_of`'s answer and nobody else's — a drawing and a thought typed in the
+    same field must not disagree about what "the current project" is. Where it is: this console's
+    own checkout for the desk; a session running in it; the directory it was last seen in. A
+    project added by its address and never cloned has none, and `None` says so rather than
+    pointing a read at a directory that is not there (docs/stories/12 §1).
+    """
+    key = project_of(rows, project)
+    if key.startswith("desk:"):
+        return key, own_checkout()
+    for row in rows:
+        if row.project_key == key and Path(row.session.cwd).is_dir():
+            return key, Path(row.session.cwd)
+    for seen in await store.seen_projects():
+        if seen.repo_key == key and seen.cwd and Path(seen.cwd).is_dir():
+            return key, Path(seen.cwd)
+    return key, None
+
+
 async def _draw_it(
-    store: Store, block: Block, *, surface: Sequence[str] = (), project: str = ""
+    store: Store,
+    block: Block,
+    rows: Sequence[BoardRow] = (),
+    *,
+    surface: Sequence[str] = (),
+    project: str = "",
 ) -> None:
     """A process described in the input field, drawn as cards on the workbench.
 
@@ -1389,13 +1422,20 @@ async def _draw_it(
 
     The cheapest of the new branches: one model call, cards at the end of it, undone in one press.
     That is why it may be decided on the balance of it where `do` may not.
+
+    The run reads the addressed project's checkout (docs/stories/12 §1) through the same read-only
+    engine every answer uses — `--add-dir`, three reading tools, nothing that writes. A project
+    with no checkout here is still drawn from the words: a release process needs no files. What it
+    cannot be is drawn from memory, so a refusal from a project that is not here says that is why.
     """
     await store.set_block_kind(block.id, "drawing")
+    key, where = await checkout_for(store, rows, project)
+    asked = telling.shape_prompt(block.input, surface, where=str(where) if where else "")
     try:
         reply = "".join(
             [
                 chunk
-                async for chunk in session.stream_answer(telling.shape_prompt(block.input, surface))
+                async for chunk in session.stream_answer(asked, add_dirs=[where] if where else [])
             ]
         )
     except (session.AnswerFailed, OSError) as exc:
@@ -1404,6 +1444,13 @@ async def _draw_it(
     # "Рисовать по тому, что модель ВИДИТ… а не по тому, что она помнит про типичные БД." Read
     # before the shape, because a reply that says both is a reply that drew from memory anyway.
     if (needed := telling.read_cannot(reply)) and not telling.read_shape(reply)[0]:
+        if where is None:
+            await store.finish_block(
+                block.id,
+                f"{key.split(':', 1)[-1]} is not checked out on this machine, so there is nothing "
+                f"of it here to read, and I only draw what I can read. What it needed: {needed}.",
+            )
+            return
         await store.finish_block(
             block.id,
             f"I can only draw what is in front of me, and that is not: {needed}. Put it on the "
