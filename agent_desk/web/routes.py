@@ -5535,7 +5535,7 @@ async def _start_it(task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=autostart.project_of(task),
             **await autostart.about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,
