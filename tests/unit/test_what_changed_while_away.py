@@ -111,6 +111,17 @@ def test_coming_back_reads_the_runs_before_marking() -> None:
     assert handler.index("await readRuns()") < handler.index("markWhatArrivedSince(since)")
 
 
+def test_going_away_again_during_the_read_keeps_the_earlier_absence() -> None:
+    """The read is a round trip. A window hidden again before it answers is still the same absence,
+    and marking against the later moment would drop what changed in between."""
+    code = CONSOLE.read_text(encoding="utf-8")
+    handler = code[code.index("document.addEventListener('visibilitychange'") :]
+    handler = handler[: handler.index("\n});\n")]
+    after_read = handler[handler.index("await readRuns()") :]
+
+    assert "lookedAwayAt = since" in after_read[: after_read.index("markWhatArrivedSince(since)")]
+
+
 def test_the_mark_says_which_of_the_two_it_is() -> None:
     code = CONSOLE.read_text(encoding="utf-8")
     marking = _function(code, "markWhatArrivedSince")

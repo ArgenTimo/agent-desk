@@ -2206,6 +2206,11 @@ document.addEventListener('visibilitychange', async () => {
   // A background tab's timers are throttled to a minute or worse, so the last read of the runs can
   // be older than the change somebody came back for. Read them once more before saying anything.
   await readRuns();
+  // Gone again before the read came back: it is still the same absence, and it started earlier.
+  if (document.hidden) {
+    lookedAwayAt = since;
+    return;
+  }
   markWhatArrivedSince(since);
 });
 
