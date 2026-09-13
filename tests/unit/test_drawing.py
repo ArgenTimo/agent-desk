@@ -43,8 +43,11 @@ def test_the_classifier_is_told_what_a_drawing_request_looks_like() -> None:
     said = classify.kind_prompt("нарисуй процесс релиза")
 
     assert "draw" in said
-    assert "describing a *process*" in said
-    assert "Not a question about a process" in said
+    # A process, and since docs/stories/12 §3 a map of what exists as well: described as
+    # process-only, a request for a schema was as likely to be answered in prose.
+    assert "a *process*" in said
+    assert "a *map* of what exists" in said
+    assert "Not a question about it to be" in said
 
 
 @pytest.mark.unit
