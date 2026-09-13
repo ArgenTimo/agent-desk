@@ -2131,30 +2131,60 @@ benchFind?.addEventListener('keydown', (event) => {
 // morning" would be on most of the bench most of the time, which is a mark that says nothing —
 // and the moment somebody actually wants it is the moment they come back to the tab.
 //
-// What this does **not** claim is that a card *changed*: nothing here records a per-card time of
-// last change, and a mark that quietly meant something narrower than it said would be CLAUDE.md's
-// fifth rule broken on the surface it is most read from.
+// A card that *changed* is told apart from one that arrived, and only for the writer that works
+// while nobody is looking: a run, moving a step on and writing what it made (`changedAt`, stamped
+// in `showRuns`). Every other thing that rewrites a card — a check, "why is this here", a field —
+// is a press somebody made with the window in front of them, so it cannot happen while they were
+// away. The time is not stored: the mark is about this window, and a column nobody reads would be
+// a second clock to keep honest (docs/stories/01, story 5).
 let lookedAwayAt = 0;
 
+// What a step says on its card, as one string to compare. A step that is not on any run says
+// nothing, which is not the same as saying something different.
+function stepSays(step) {
+  return step ? `${step.state}\n${step.made || ''}` : '';
+}
+
+function changedBetween(before, now) {
+  return Boolean(before) && Boolean(now) && before !== now;
+}
+
+// Arrived wins: a card that came and then ran was never seen in its first state, so "changed"
+// would describe a difference nobody could have noticed.
+function whatHappenedSince(cameAt, changedAt, since) {
+  if (cameAt > since) return 'arrived';
+  if (changedAt > since) return 'changed';
+  return '';
+}
+
 function markWhatArrivedSince(since) {
-  let fresh = 0;
+  let arrived = 0;
+  let changed = 0;
   for (const pin of onBench()) {
-    const came = Number(pin.dataset.cameAt || 0);
-    const isNew = came > since;
-    pin.classList.toggle('arrived-since', isNew);
-    if (isNew) fresh += 1;
+    const what = whatHappenedSince(
+      Number(pin.dataset.cameAt || 0),
+      Number(pin.dataset.changedAt || 0),
+      since
+    );
+    pin.classList.toggle('arrived-since', what === 'arrived');
+    pin.classList.toggle('changed-since', what === 'changed');
+    if (what === 'arrived') arrived += 1;
+    if (what === 'changed') changed += 1;
   }
+  const said = [];
+  if (arrived) said.push(`${arrived} arrived`);
+  if (changed) said.push(`${changed} changed`);
   const chip = document.getElementById('bench-new');
   if (chip) {
-    chip.hidden = fresh === 0;
-    chip.textContent = fresh ? `${fresh} arrived while you were away` : '';
+    chip.hidden = said.length === 0;
+    chip.textContent = said.length ? `${said.join(' · ')} while you were away` : '';
   }
-  return fresh;
+  return arrived + changed;
 }
 
 function forgetWhatArrived() {
-  for (const pin of surface?.querySelectorAll('.pin.arrived-since') || []) {
-    pin.classList.remove('arrived-since');
+  for (const pin of surface?.querySelectorAll('.pin.arrived-since, .pin.changed-since') || []) {
+    pin.classList.remove('arrived-since', 'changed-since');
   }
   const chip = document.getElementById('bench-new');
   if (chip) {
@@ -2163,7 +2193,7 @@ function forgetWhatArrived() {
   }
 }
 
-document.addEventListener('visibilitychange', () => {
+document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     // The moment the window went away, remembered rather than worked out later: a tab restored
     // from the background has no other way to say how long it was gone.
@@ -2171,8 +2201,12 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (!lookedAwayAt) return;
-  markWhatArrivedSince(lookedAwayAt);
+  const since = lookedAwayAt;
   lookedAwayAt = 0;
+  // A background tab's timers are throttled to a minute or worse, so the last read of the runs can
+  // be older than the change somebody came back for. Read them once more before saying anything.
+  await readRuns();
+  markWhatArrivedSince(since);
 });
 
 // Looking is what clears it. The mark is there to be read once, and a bench that kept it until
@@ -4278,6 +4312,12 @@ function showRuns() {
   for (const pin of surface?.querySelectorAll('.pin') || []) {
     const step = states.get(cardName(pin));
     pin.dataset.step = step ? step.state : '';
+    // When what the card says last moved, for "what changed while I was away". The first reading
+    // is not a change — it is how the card was when this page met it — and neither is the same
+    // answer read again twenty seconds later.
+    const says = stepSays(step);
+    if (changedBetween(pin.dataset.stepSays, says)) pin.dataset.changedAt = String(Date.now());
+    pin.dataset.stepSays = says;
     pin.classList.toggle('at-now', Boolean(going && going.at === cardName(pin)));
     let mark = pin.querySelector('.pin-step');
     if (!step) {
