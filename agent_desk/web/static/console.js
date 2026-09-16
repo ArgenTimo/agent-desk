@@ -338,6 +338,13 @@ stream.addEventListener('board', (event) => {
   if (event.data === lastBoard || document.body.classList.contains('dragging-card')) return;
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
+  // The board carries htmx of its own now — the choose button on a project card is a form that
+  // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
+  // processed. Without this the button worked exactly once, on the page as it was served, and the
+  // first board refresh turned it back into a plain form that navigated the whole console away to
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
+  if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
   // checkout whose last session ended has none any more.
@@ -1985,7 +1992,11 @@ document.addEventListener('drop', (event) => {
     body: new URLSearchParams({ repo_key: from }),
   })
     .then((response) => (response.ok ? response.text() : null))
-    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
+    .then((html) => {
+      if (!html) return;
+      document.getElementById('board').innerHTML = html;
+      if (window.htmx) htmx.process(document.getElementById('board'));
+    });
 });
 
 /* --- the third view of a card ------------------------------------------------------------------- */

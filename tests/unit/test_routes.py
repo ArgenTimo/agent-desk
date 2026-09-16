@@ -1443,6 +1443,27 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
     )
 
 
+def test_a_board_swapped_in_is_handed_to_htmx() -> None:
+    """The choose button worked once, on the page as it was served, and stopped at the first board
+    refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
+    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Every
+    other swap in that file already processes what it wrote; the board never carried htmx before
+    the choose button, and now it does."""
+    console = (
+        (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+
+    swaps = [n for n, line in enumerate(console) if "getElementById('board').innerHTML =" in line]
+    assert swaps, "nothing swaps the board any more — this test is pinning the wrong thing"
+    for n in swaps:
+        after = "\n".join(console[n : n + 8])
+        assert "htmx.process(document.getElementById('board'))" in after, (
+            f"the board swapped in at console.js:{n + 1} is never handed to htmx"
+        )
+
+
 @pytest.mark.unit
 async def test_the_right_hand_column_switches_between_the_pool_and_the_board(
     home: Home, desk: Store, tmp_path: pathlib.Path
