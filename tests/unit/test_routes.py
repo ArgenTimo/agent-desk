@@ -1443,24 +1443,38 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
     )
 
 
-def test_a_board_swapped_in_is_handed_to_htmx() -> None:
+@pytest.mark.unit
+def test_a_column_swapped_in_is_handed_to_htmx() -> None:
     """The choose button worked once, on the page as it was served, and stopped at the first board
     refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
-    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Every
-    other swap in that file already processes what it wrote; the board never carried htmx before
-    the choose button, and now it does."""
+    form fell back to a plain POST and navigated the whole console to `/projects/focus`. The idea
+    list carries the same kind of form in its focus banner, and a drag that re-parents an idea
+    swapped it in the same way."""
     console = (
         (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
         .read_text(encoding="utf-8")
         .splitlines()
     )
 
-    swaps = [n for n, line in enumerate(console) if "getElementById('board').innerHTML =" in line]
-    assert swaps, "nothing swaps the board any more — this test is pinning the wrong thing"
+    for column in ("board", "idea-list"):
+        swap = f"getElementById('{column}').innerHTML ="
+        swaps = [n for n, line in enumerate(console) if swap in line]
+        assert swaps, f"nothing swaps #{column} any more — this test is pinning the wrong thing"
+        for n in swaps:
+            after = "\n".join(console[n : n + 8])
+            assert f"htmx.process(document.getElementById('{column}'))" in after, (
+                f"#{column} swapped in at console.js:{n + 1} is never handed to htmx"
+            )
+
+    # A card body carries the same kind of form — renaming a step, answering a question.
+    swaps = [
+        n for n, line in enumerate(console) if "querySelector('.pin-body').innerHTML =" in line
+    ]
+    assert swaps, "nothing swaps a card body any more — this test is pinning the wrong thing"
     for n in swaps:
         after = "\n".join(console[n : n + 8])
-        assert "htmx.process(document.getElementById('board'))" in after, (
-            f"the board swapped in at console.js:{n + 1} is never handed to htmx"
+        assert "htmx.process(holder.querySelector('.pin-body'))" in after, (
+            f"a card body swapped in at console.js:{n + 1} is never handed to htmx"
         )
 
 

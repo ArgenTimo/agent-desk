@@ -342,8 +342,7 @@ stream.addEventListener('board', (event) => {
   // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
   // processed. Without this the button worked exactly once, on the page as it was served, and the
   // first board refresh turned it back into a plain form that navigated the whole console away to
-  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
-  // had nothing to process.
+  // `/projects/focus`.
   if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
@@ -1077,6 +1076,7 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
+      if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
       showCheck(holder);
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
       // has to act on, and folding it away would hide the sentence saying what to do.
@@ -1602,6 +1602,8 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    // A card's own forms — renaming a step, answering a question — are htmx forms like the board's.
+    if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
@@ -1976,6 +1978,7 @@ document.addEventListener('drop', (event) => {
       .then((html) => {
         if (!html) return;
         document.getElementById('idea-list').innerHTML = html;
+        if (window.htmx) htmx.process(document.getElementById('idea-list'));
         filterIdeas();
       });
     return;
