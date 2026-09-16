@@ -4863,16 +4863,14 @@ async def from_the_bench(rows: list[BoardRow], thread_id: str) -> list[str]:
     if not on_it:
         return []
     carried = await block_runs.carried_from_the_bench(store, rows, [card.name for card in on_it])
-    said = block_runs.as_one_string(carried)
-    named = "\n".join(
-        f"- {card.name}" + (f" — {card.label}" if card.label != card.name else "") for card in on_it
+    section = block_runs.the_bench(
+        [
+            f"- {card.name}" + (f" — {card.label}" if card.label != card.name else "")
+            for card in on_it
+        ],
+        block_runs.as_one_string(carried),
     )
-    return [
-        "The workbench this was started from. Read what you need by name; the rest is here so you "
-        "know it exists.",
-        named,
-        *([said] if said else []),
-    ]
+    return [section] if section else []
 
 
 @router.post("/blocks/{block_id}/implement", response_class=HTMLResponse)

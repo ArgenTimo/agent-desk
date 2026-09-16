@@ -716,6 +716,32 @@ def as_one_string(carried: Carried) -> str:
     ).strip("\n")
 
 
+def the_bench(named: Sequence[str], said: str) -> str:
+    """The workbench an agent is handed when it is started from a message.
+
+    One writer of this sentence for the two callers that hand it over — the button in
+    `routes.from_the_bench` and the dispatch a message makes by itself — because two places
+    writing one heading are two places that drift apart (`session.workbench_section`).
+
+    Names first, because that is the half which is not a summary (`routes.from_the_bench`), and
+    the digest after it for what an agent cannot open by name.
+
+    Either half can be empty. A bench of folder cards says only where they are; and a paragraph
+    somebody typed on the workbench beside no cards at all is still what they sent the message
+    with.
+    """
+    lines: list[str] = []
+    if named:
+        lines += [
+            "The workbench this was started from. Read what you need by name; the rest is here "
+            "so you know it exists.",
+            "\n".join(named),
+        ]
+    if said.strip():
+        lines += [said.strip("\n")]
+    return "\n\n".join(lines)
+
+
 async def submit(
     store: Store,
     typed: str,
@@ -1067,10 +1093,12 @@ async def _work(
             await record_idea(store, block, rows, project=project)
             return
         if kind == "master":
-            await _master_request(store, block, rows)
+            await _master_request(store, block, rows, bench=_the_bench(on_bench, surface, written))
             return
         if kind == "instruction":
-            await _prepare_directive(store, block, rows)
+            await _prepare_directive(
+                store, block, rows, bench=_the_bench(on_bench, surface, written)
+            )
             return
         if kind == "drawing":
             await _draw_it(store, block, surface=surface, project=project, rows=rows)
@@ -1766,6 +1794,29 @@ def _session_lines(rows: Sequence[BoardRow]) -> list[str]:
     ]
 
 
+def _the_bench(
+    on_bench: Sequence[str], surface: Sequence[str], written: Sequence[str]
+) -> list[str]:
+    """The workbench a message was sent with, for an agent started from it.
+
+    Read at submission, like the question's own copy: a bench read later is a different bench
+    (`submit`). Without it "бери в работу" over a set of cards reached the agent as three
+    words — the message said what to do and the cards said what to do it to, and only the first
+    half travelled.
+
+    What travels is the bench itself and not the console's note about what the block carried. That
+    note is written for somebody reading the block afterwards, in the console's words for its own
+    reading: a card it deliberately leaves out of the digest is "no longer on the board" there,
+    which is true of the board and reads like a fault to an agent the card was dropped in front
+    of (`_context_lines`).
+    """
+    said = as_one_string(
+        Carried(surface=list(surface), written=list(written), on_bench=list(on_bench))
+    )
+    section = the_bench([f"- {name}" for name in on_bench], said)
+    return [section] if section else []
+
+
 async def _take_it_on(
     store: Store,
     block: Block,
@@ -1775,6 +1826,7 @@ async def _take_it_on(
     row: BoardRow | None = None,
     message: str = "",
     directive_id: str = "",
+    bench: Sequence[str] = (),
 ) -> bool:
     """Say what should happen, and it happens (docs/adr/0006).
 
@@ -1799,6 +1851,7 @@ async def _take_it_on(
         cwd=row.session.cwd,
         project=row.project_name or row.session.project,
         branch=(row.tail.git_branch if row.tail else "") or "",
+        extra=bench,
         directive_id=directive_id,
     )
 
@@ -1836,6 +1889,9 @@ async def _start_work(
         parts += [f"- {idea.text}" for idea in ideas]
     if extra:
         parts += ["\n".join(extra)]
+    # Everything the message carried is in the stored instruction rather than beside it: a task
+    # that waits for the seat is started later from this text alone (`autostart.py`), and what was
+    # left in the block next to it does not travel that far.
     instruction = "\n\n".join(parts)
     task = await store.queue_task(
         repo_key=repo_key,
@@ -1956,7 +2012,9 @@ async def _secrets_for(store: Store, repo_keys: Sequence[str]) -> dict[str, str]
     return found
 
 
-async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+async def _master_request(
+    store: Store, block: Block, rows: Sequence[BoardRow], *, bench: Sequence[str] = ()
+) -> None:
     """A request about this console: "tidy up the ideas", "put a button here".
 
     Where the console is running from its own checkout, an agent is started there and does it —
@@ -1975,13 +2033,17 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
         # facts — every thought and which project it belongs to — and with the tokens the projects
         # named, because "collect the blockers from Jira" cannot be done without one.
         given = await _secrets_for(store, [])
+        # The ideas somebody dropped in are what the request is about, here as much as in
+        # `_prepare_directive`: "take these on" addressed at the desk still names them.
+        pinned = [idea for idea in await _pinned_ideas(store, block) if idea.state != "done"]
         if await _start_work(
             store,
             block,
+            pinned,
             repo_key=desk_key(),
             cwd=str(here),
             project=here.name,
-            extra=await briefing(store),
+            extra=[*bench, *await briefing(store)],
             env=given,
             given=sorted(given),
         ):
@@ -1996,7 +2058,9 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
     )
 
 
-async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
+async def _prepare_directive(
+    store: Store, block: Block, rows: Sequence[BoardRow], *, bench: Sequence[str] = ()
+) -> None:
     """An instruction: taken on where somebody pointed at the work, written out where they did not.
 
     "Tell Biba to test it again" with nothing dropped in produces a message and a button, because
@@ -2010,7 +2074,7 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
     pinned = [idea for idea in await _pinned_ideas(store, block) if idea.state != "done"]
     if pinned:
         await store.link_block_ideas(block.id, [idea.id for idea in pinned])
-        if await _take_it_on(store, block, rows, pinned):
+        if await _take_it_on(store, block, rows, pinned, bench=bench):
             return
 
     await _note_related_ideas(store, block)
@@ -2052,6 +2116,7 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
         row=row,
         message=message.strip(),
         directive_id=directive.id if directive is not None else "",
+        bench=bench,
     ):
         return
 
