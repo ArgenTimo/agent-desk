@@ -630,11 +630,12 @@ def read_map(reply: str) -> Map:
     )
 
 
-def as_mapped(drawn: Map, called: str) -> str:
+def as_mapped(drawn: Map, called: str, spent: float = 0.0) -> str:
     """A map a message produced, as the words its block shows.
 
-    What was drawn and from where, how many relations it found, and — when the bound bit — how many
-    things it left out. A drawing that quietly stopped at sixty looks exactly like a project that has
+    What was drawn and from where, how many relations it found, what reading the project for it
+    cost, and — when the bound bit — how many things it left out. Zero cost is "not measured"
+    (058) and is not said. A drawing that quietly stopped at sixty looks exactly like a project that has
     sixty things in it, which is why the number is said rather than assumed.
     """
     kinds = sorted({one.kind for one in drawn.cards})
@@ -642,6 +643,7 @@ def as_mapped(drawn: Map, called: str) -> str:
         f"Drew {len(drawn.cards)} thing{'' if len(drawn.cards) == 1 else 's'} from {called}"
         + (f" — {', '.join(kinds[:6])}{'…' if len(kinds) > 6 else ''}" if kinds else "")
         + f", with {len(drawn.lines)} relation{'' if len(drawn.lines) == 1 else 's'} between them."
+        + (f" Reading it cost ${spent:.2f}." if spent > 0 else "")
     ]
     if drawn.left_out:
         said.append(

@@ -1469,18 +1469,28 @@ async def _map_it(
     asked for a second time. `None` means the block is settled — a map was drawn, the project could
     not answer, or the run failed.
     """
+    spent: list[float] = []
     try:
         reply = "".join(
             [
                 chunk
                 async for chunk in session.stream_answer(
-                    telling.map_prompt(block.input, str(where), surface), add_dirs=[where]
+                    telling.map_prompt(block.input, str(where), surface),
+                    add_dirs=[where],
+                    # What it is reading, while it reads. A map of this console's own repository
+                    # took three minutes on the real engine and every one of them showed only a
+                    # caret. Scrubbed for the reason `_run` scrubs it: a path a model wrote, on an
+                    # output path that never passes through the store (docs/07-security.md).
+                    on_step=lambda step: DOING.__setitem__(block.id, scrub(step)),
+                    on_cost=spent.append,
                 )
             ]
         )
     except (session.AnswerFailed, OSError) as exc:
         await store.fail_block(block.id, str(exc))
         return None
+    finally:
+        DOING.pop(block.id, None)
     drawn = telling.read_map(reply)
     if drawn.empty:
         needed = telling.read_cannot(reply)
@@ -1494,7 +1504,7 @@ async def _map_it(
         return reply
     names = await cards_from_map(store, drawn)
     await store.finish_block(
-        block.id, telling.as_drawn_json(telling.as_mapped(drawn, called), names)
+        block.id, telling.as_drawn_json(telling.as_mapped(drawn, called, sum(spent)), names)
     )
     return None
 
