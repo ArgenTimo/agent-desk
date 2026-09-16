@@ -1466,9 +1466,13 @@ def test_a_column_swapped_in_is_handed_to_htmx() -> None:
                 f"#{column} swapped in at console.js:{n + 1} is never handed to htmx"
             )
 
-    # A card body carries the same kind of form — renaming a step, answering a question.
+    # A card body carries the same kind of form — renaming a step, answering a question. A body
+    # written from a string literal in the file ("could not read this one") has nothing to process.
+    swap = "querySelector('.pin-body').innerHTML ="
     swaps = [
-        n for n, line in enumerate(console) if "querySelector('.pin-body').innerHTML =" in line
+        n
+        for n, line in enumerate(console)
+        if swap in line and not line.split(swap, 1)[1].strip().startswith(("'", '"', "`"))
     ]
     assert swaps, "nothing swaps a card body any more — this test is pinning the wrong thing"
     for n in swaps:
