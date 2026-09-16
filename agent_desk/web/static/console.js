@@ -342,7 +342,8 @@ stream.addEventListener('board', (event) => {
   // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
   // processed. Without this the button worked exactly once, on the page as it was served, and the
   // first board refresh turned it back into a plain form that navigated the whole console away to
-  // `/projects/focus`.
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
   if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a

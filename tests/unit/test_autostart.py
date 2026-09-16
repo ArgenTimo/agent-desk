@@ -158,7 +158,8 @@ async def test_it_starts_what_was_queued_and_says_which_agent_has_it(
     task = await autostart.tick(desk, live=set())
 
     assert task is not None
-    assert started == [dispatch.build_task("run the tests again", project="run the tests again")]
+    # Told where it is by the checkout's name, not by the line somebody typed.
+    assert started == [dispatch.build_task("run the tests again", project=tmp_path.name)]
     (stored,) = await desk.tasks()
     assert stored.agent_id == "agent1"
     assert stored.started_at is not None

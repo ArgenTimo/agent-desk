@@ -1834,6 +1834,13 @@ async def _start_work(
     if ideas:
         parts += ["The ideas this is about, as they were written down:"]
         parts += [f"- {idea.text}" for idea in ideas]
+    # What else was on the workbench when they said it — a session, a drawing, a note they wrote
+    # there. Read from the store rather than off `block`, which was built before `submit` wrote the
+    # context. Without it "бери в работу" over anything but an idea reached the agent as those three
+    # words and nothing about what to take on.
+    stored = await store.block(block.id)
+    if stored is not None and stored.context:
+        parts += ["What was on the workbench when they said it:\n" + stored.context]
     if extra:
         parts += ["\n".join(extra)]
     instruction = "\n\n".join(parts)

@@ -1443,39 +1443,40 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
     )
 
 
-@pytest.mark.unit
-def test_a_column_swapped_in_is_handed_to_htmx() -> None:
+def test_a_swap_is_handed_to_htmx() -> None:
     """The choose button worked once, on the page as it was served, and stopped at the first board
     refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
     form fell back to a plain POST and navigated the whole console to `/projects/focus`. The idea
-    list carries the same kind of form in its focus banner, and a drag that re-parents an idea
-    swapped it in the same way."""
+    list carries the same kind of form in its focus banner, and a card body carries its own —
+    renaming a step, answering a question."""
     console = (
         (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
         .read_text(encoding="utf-8")
         .splitlines()
     )
 
-    for column in ("board", "idea-list"):
-        swap = f"getElementById('{column}').innerHTML ="
-        swaps = [n for n, line in enumerate(console) if swap in line]
-        assert swaps, f"nothing swaps #{column} any more — this test is pinning the wrong thing"
+    def literal(line: str, swap: str) -> bool:
+        # A body written from a string in the file ("could not read this one") has nothing to process.
+        return line.split(swap, 1)[1].strip().startswith(("'", '"', "`"))
+
+    for swap, process in (
+        ("getElementById('board').innerHTML =", "htmx.process(document.getElementById('board'))"),
+        (
+            "getElementById('idea-list').innerHTML =",
+            "htmx.process(document.getElementById('idea-list'))",
+        ),
+        (
+            "querySelector('.pin-body').innerHTML =",
+            "htmx.process(holder.querySelector('.pin-body'))",
+        ),
+    ):
+        swaps = [n for n, line in enumerate(console) if swap in line and not literal(line, swap)]
+        assert swaps, f"nothing does `{swap}` any more — this test is pinning the wrong thing"
         for n in swaps:
             after = "\n".join(console[n : n + 8])
-            assert f"htmx.process(document.getElementById('{column}'))" in after, (
-                f"#{column} swapped in at console.js:{n + 1} is never handed to htmx"
+            assert process in after, (
+                f"console.js:{n + 1} swaps markup in and never hands it to htmx"
             )
-
-    # A card body carries the same kind of form — renaming a step, answering a question.
-    swaps = [
-        n for n, line in enumerate(console) if "querySelector('.pin-body').innerHTML =" in line
-    ]
-    assert swaps, "nothing swaps a card body any more — this test is pinning the wrong thing"
-    for n in swaps:
-        after = "\n".join(console[n : n + 8])
-        assert "htmx.process(holder.querySelector('.pin-body'))" in after, (
-            f"a card body swapped in at console.js:{n + 1} is never handed to htmx"
-        )
 
 
 @pytest.mark.unit

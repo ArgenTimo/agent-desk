@@ -1122,6 +1122,39 @@ async def test_an_idea_dropped_in_with_take_it_on_starts_an_agent(
 
 
 @pytest.mark.unit
+async def test_take_it_on_over_the_desk_carries_what_was_on_the_workbench(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Бери в работу" over something that is not an idea used to reach the agent as those three
+    words and nothing else: the ideas travelled, the rest of the workbench did not. An agent that
+    starts cold cannot find out what it was pointed at."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+    monkeypatch.setattr(
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name, env=None: (
+            told.append(instruction),
+            dispatch.Started(True, agent_id="agent8"),
+        )[1],
+    )
+    monkeypatch.setenv("KIND", "desk")
+    monkeypatch.setattr(blocks, "own_checkout", lambda: kinds.parent)
+    (kinds.parent / ".git").mkdir(exist_ok=True)
+
+    block = await blocks.submit(desk, "бери в работу", [], notes_="the export button does nothing")
+    assert await _settled(desk, block.id) == "answered"
+
+    assert len(told) == 1
+    assert "бери в работу" in told[0]
+    assert "the export button does nothing" in told[0]
+    # And the queue holds the same, so a task that waited for its seat is told it too.
+    (task,) = await desk.tasks()
+    assert "the export button does nothing" in task.instruction
+
+
+@pytest.mark.unit
 async def test_a_question_never_starts_anything(
     desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -138,7 +138,9 @@ async def _start(store: Store, task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            # The checkout's name, as `_explore` says it. The title is the line somebody typed, and
+            # an agent told "This is in бери в работу" has been told nothing about where it is.
+            project=Path(task.cwd).name,
             **await about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,
