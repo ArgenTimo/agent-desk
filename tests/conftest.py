@@ -1,18 +1,19 @@
-"""What every test runs under."""
+"""What the whole suite runs under, before anything imports `agent_desk.config`.
+
+The CLI this program starts is resolved from PATH, and on the machine this suite usually runs on it
+is there. So a test that reached `dispatch.start` without faking it started a real `claude --bg`
+agent — in a worktree of whichever checkout ran the gate — and a test that reached the answer
+engine spent a real `claude -p` call. The Stop hook runs the gate at every turn end, which made
+that one agent, named after the test's input, every few minutes: fifty-four of them told only
+"бери в работу" in one day, each with nothing in front of it to act on (docs/adr/0006 — an agent
+is started by a click, never by a background loop).
+
+A name that resolves to nothing turns every such path into the one it already handles: the CLI is
+not installed here. A test that wants a CLI builds its own `Settings(claude_bin=...)`.
+"""
 
 from __future__ import annotations
 
-import pytest
-from agent_desk import dispatch
-from agent_desk.config import Settings
+import os
 
-
-@pytest.fixture(autouse=True)
-def no_real_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A test never starts a real agent, whether or not it remembered to fake one.
-
-    `take_it_as(..., "master")` in a test that patched nothing ran `claude --bg "бери в работу"` in
-    this checkout, and each agent started that way ran `make gate` and started the next. A test that
-    wants `dispatch.start` to run patches `dispatch.settings` itself, which overrides this.
-    """
-    monkeypatch.setattr(dispatch, "settings", Settings(claude_bin="not-installed-anywhere"))
+os.environ["AGENT_DESK_CLAUDE_BIN"] = "claude-is-never-run-by-this-suite"
