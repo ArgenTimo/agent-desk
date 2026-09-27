@@ -1077,6 +1077,7 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
+      if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
       showCheck(holder);
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
       // has to act on, and folding it away would hide the sentence saying what to do.
@@ -1602,6 +1603,10 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    // A card body is server markup written with innerHTML, which htmx cannot see until it is
+    // handed to it — the idea card's project picker was dead on every card until this line
+    // (docs/stories/14).
+    if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
@@ -1976,6 +1981,7 @@ document.addEventListener('drop', (event) => {
       .then((html) => {
         if (!html) return;
         document.getElementById('idea-list').innerHTML = html;
+        if (window.htmx) htmx.process(document.getElementById('idea-list'));
         filterIdeas();
       });
     return;
@@ -2013,7 +2019,10 @@ document.addEventListener(
     body.dataset.read = 'yes';
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
-      if (response.ok) body.innerHTML = await response.text();
+      if (response.ok) {
+        body.innerHTML = await response.text();
+        if (window.htmx) htmx.process(body);
+      }
     } catch {
       body.textContent = 'could not read it';
     }

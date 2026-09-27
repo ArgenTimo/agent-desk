@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import re
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
@@ -1443,24 +1444,37 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
     )
 
 
-def test_a_board_swapped_in_is_handed_to_htmx() -> None:
+@pytest.mark.unit
+def test_server_markup_written_into_the_page_is_handed_to_htmx() -> None:
     """The choose button worked once, on the page as it was served, and stopped at the first board
     refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
-    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Every
-    other swap in that file already processes what it wrote; the board never carried htmx before
-    the choose button, and now it does."""
+    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Counting
+    the live page afterwards found 26 more dead controls — the project picker on every idea card on
+    the workbench — so this pins the class rather than the board (docs/stories/14).
+
+    Server markup is what came from a response or a stream: `event.data`, a `.text()`, or the
+    `html` a fetch resolved to. The one exemption is the poster that runs only when htmx is absent
+    and writes into its own `into` target."""
     console = (
         (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
         .read_text(encoding="utf-8")
         .splitlines()
     )
 
-    swaps = [n for n, line in enumerate(console) if "getElementById('board').innerHTML =" in line]
-    assert swaps, "nothing swaps the board any more — this test is pinning the wrong thing"
-    for n in swaps:
+    writes = []
+    for n, line in enumerate(console):
+        if ".innerHTML =" not in line or "into.innerHTML" in line:
+            continue
+        statement = " ".join(console[n : n + 3])
+        statement = statement[: statement.find(";") + 1]
+        if re.search(r"event\.data|\.text\(\)|innerHTML = html;", statement):
+            writes.append(n)
+
+    assert len(writes) >= 10, "fewer server swaps than there were — this pins the wrong thing"
+    for n in writes:
         after = "\n".join(console[n : n + 8])
-        assert "htmx.process(document.getElementById('board'))" in after, (
-            f"the board swapped in at console.js:{n + 1} is never handed to htmx"
+        assert "htmx.process(" in after, (
+            f"console.js:{n + 1} writes server markup into the page and never hands it to htmx"
         )
 
 
