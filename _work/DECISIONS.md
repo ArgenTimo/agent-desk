@@ -61,3 +61,16 @@ so the refusal lives there, and `engine.begin` refuses a run. Buttons hidden: "G
 "Start it now", "Have an agent do it instead", "take it on", the autostart switch, and the card's
 "run from here". The kicking buttons are left, since S1 deletes kicking. The suite runs with
 `AGENT_DESK_HANDS=on` (conftest) so the frozen paths keep their tests. Undo: `AGENT_DESK_HANDS=on`.
+
+## D11 · Restart=always, not on-failure (A2)
+The acceptance is "survives pkill"; uvicorn exits 0 on SIGTERM, which on-failure treats as a reason
+to stay down. `systemctl --user stop agent-desk` still stops it. A second console refused by the
+A3 lock also exits 0; with RestartSec=2 systemd's start limit (5 in 10 s) ends such a loop.
+Undo: edit the unit in `scripts/prod.sh`, then `prod.sh update <tag>`.
+
+## D12 · The working console is installed and running
+`~/opt/agent-desk-prod` at tag `desk-20260927`, `~/.config/systemd/user/agent-desk.service`
+(enabled, linger is on). Hands and appraise off. Stop/remove:
+`systemctl --user disable --now agent-desk && rm ~/.config/systemd/user/agent-desk.service && rm -rf ~/opt/agent-desk-prod`.
+From here the live database changes because its owner runs; the isolated-gate check compares
+schema_version, the `.lock` holder and the jobs count instead of mtimes.

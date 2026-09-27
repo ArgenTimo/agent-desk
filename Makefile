@@ -26,7 +26,7 @@ SHARE_PORT ?= 8788
 POETRY = unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT; poetry
 URL  := http://127.0.0.1:$(PORT)
 
-.PHONY: help install gate verify test coverage lint typecheck run share overlay check-links clean
+.PHONY: help install gate verify test coverage lint typecheck run share overlay check-links clean prod-install prod-update
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -105,6 +105,16 @@ run: ## The console: a dev one on .desk-data/ and its own port; PROD=1 for the w
 	$(DESK_ENV) $(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
 	  --reload-exclude '.claude/worktrees/*' --reload-exclude '*/.claude/worktrees/*' \
 	  --timeout-graceful-shutdown 2 --no-access-log
+
+# The working console is not this checkout: it is a copy of a tag under ~/opt, run by
+# systemd --user without --reload (A2, scripts/prod.sh). Updating it is a decision with a name.
+prod-install: ## Install the working console from a tag: make prod-install TAG=desk-YYYYMMDD
+	@test -n "$(TAG)" || { echo "TAG= is required"; exit 2; }
+	scripts/prod.sh install $(TAG)
+
+prod-update: ## Move the working console to another tag: make prod-update TAG=desk-YYYYMMDD
+	@test -n "$(TAG)" || { echo "TAG= is required"; exit 2; }
+	scripts/prod.sh update $(TAG)
 
 # The one target that changes the security model of this tool. Everything else binds to
 # loopback, where "anything that can reach the port can already read ~/.claude/" holds; this one

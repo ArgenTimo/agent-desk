@@ -58,3 +58,9 @@ git -C ~/PycharmProjects/agent-desk stash drop      # = ~/agent-desk-salvage/sta
 Optionally on origin: archive-tag then delete `worktree-eta-ideya-…` and `worktree-mozhesh-…`
 (`git tag archive/<name> origin/<name> && git push origin archive/<name> && git push origin --delete <name>`),
 and delete merged `experiment/insurance-site`, `ideas-from-the-pool`, `worktree-looking-for-something-…`.
+
+## H4 · The working console is now a service (FYI)
+`http://127.0.0.1:8787` is served by `systemctl --user … agent-desk` from `~/opt/agent-desk-prod`
+(tag `desk-20260927`). Don't `make run PROD=1` beside it — the A3 lock refuses a second console.
+Update: `git tag desk-YYYYMMDD origin/main && git push origin desk-YYYYMMDD && make prod-update TAG=desk-YYYYMMDD`.
+Hands or appraise on: `systemctl --user edit agent-desk` → `[Service]` `Environment=AGENT_DESK_HANDS=on`.
