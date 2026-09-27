@@ -1,30 +1,24 @@
 {
-  "state": "working",
+  "state": "blocked",
   "detail": "what it was doing",
-  "tempo": "idle",
+  "tempo": "blocked",
   "inFlight": {
     "tasks": 0,
-    "queued": 1,
+    "queued": 0,
     "kinds": [],
     "drainableMonitors": 0
   },
-  "fan": [
-    {
-      "id": "scrubbed",
-      "kind": "scrubbed",
-      "label": "an option",
-      "startedAt": 1789555423126,
-      "doneAt": 1789556320574,
-      "failed": true
-    }
-  ],
-  "tokens": 4977,
-  "output": null,
+  "tokens": 4352,
+  "needs": "what the job is waiting for, in its own words",
+  "output": {
+    "result": "scrubbed"
+  },
   "children": null,
-  "linkScanOffset": 411922,
+  "linkScanOffset": 399715,
   "linkScanPath": "/home/someone/.claude/projects/-home-someone-a-project/a-transcript.jsonl",
   "template": "bg",
   "respawnFlags": [],
+  "providerEnv": {},
   "intent": "what somebody asked for",
   "name": "a short name the cli made up",
   "nameSource": "auto",
@@ -33,9 +27,9 @@
   "daemonShort": "22222222",
   "cliVersion": "2.1.273",
   "cwd": "/home/someone/a-project",
-  "providerEnv": {},
-  "backend": "daemon",
   "createdAt": "2026-09-20T10:00:00.000Z",
   "updatedAt": "2026-09-20T10:05:00.000Z",
-  "firstTerminalAt": "2026-09-20T10:05:00.000Z"
+  "firstTerminalAt": null,
+  "backend": "daemon",
+  "suggestedReply": "a reply the job suggests"
 }

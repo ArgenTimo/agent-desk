@@ -77,7 +77,7 @@ from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, inbox, kin, meeting, waking
-from agent_desk.observe import attach, folder, reading, registry, transcript
+from agent_desk.observe import attach, folder, jobs, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -668,11 +668,15 @@ def render_board(
     show nothing rather than a confident `$0.00`, which is a different claim entirely.
     """
     rows, notices = board(ours)
+    background = jobs.read_jobs()
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
         rows=rows,
         projects=projects,
-        notices=notices,
+        notices=notices + background.notices,
+        # Background jobs blocked on a human — the CLI wrote `blocked`, so this is a fact (B1).
+        waiting_jobs=background.waiting,
+        waiting_questions=background.questions,
         # What each project is linked to, for the menu on its card. Read with the board rather
         # than fetched when the menu opens: it is four links, and a click that waits for a round
         # trip is a click that feels broken.
@@ -1257,6 +1261,7 @@ async def render_page(message: str = "") -> str:
     """
     groups = await store.groups()
     rows, notices = await asyncio.to_thread(board, await board_ours())
+    background = await asyncio.to_thread(jobs.read_jobs)
     projects = shape(rows, groups, await store.seen_projects())
     # Written from the read that happened anyway, never on a schedule of its own (073). A project
     # this console has seen stays on the board after its last session ends, because everything
@@ -1273,7 +1278,9 @@ async def render_page(message: str = "") -> str:
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,
-            notices=notices,
+            notices=notices + background.notices,
+            waiting_jobs=background.waiting,
+            waiting_questions=background.questions,
             links=await board_links(),
             work=await board_work(),
             kicks=await board_kicks(),

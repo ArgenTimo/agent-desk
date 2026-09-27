@@ -219,7 +219,10 @@ async def settle(store: Store, live: set[str]) -> list[str]:
             continue
 
         if ended is not None and ended.failed:
-            detail = ended.detail or "its agent exited without saying why"
+            if ended.state == "stopped":
+                detail = "its agent was stopped before it finished"
+            else:
+                detail = ended.detail or "its agent exited without saying why"
             await store.task_failed(task.id, detail)
             failures = await store.note_failure(task.repo_key)
             log.warning("autostart.died", repo=task.repo_key, agent=task.agent_id, detail=detail)
