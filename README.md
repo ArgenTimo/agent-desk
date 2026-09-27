@@ -59,7 +59,8 @@ the implementation, not a description of running code.
 ```bash
 make install          # dependencies, dev group included
 make gate             # ruff · mypy · pytest -m unit
-make run              # the console on http://127.0.0.1:8787
+make run              # a dev console: own .desk-data/, port from the checkout path
+make run PROD=1       # the working console on http://127.0.0.1:8787, ~/.local/share/agent-desk
 make share SHARE_HOST=192.168.1.10   # the console, plus the shared ideas list on the network
 make overlay          # the same page in its own always-on-top window
 ```
