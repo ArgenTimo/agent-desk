@@ -122,14 +122,21 @@ async def serve(reader: asyncio.StreamReader, write: Any, store: Store) -> None:
             write(json.dumps(back))
 
 
+async def open_store() -> Store:
+    """The console's file, opened as a guest: migrated if it must be, but its running blocks are
+    the console's to account for, not this process's (R1, _research/04_dogfooding_gaps.md)."""
+    store = Store(settings.db_path)
+    await store.open(recover=False)
+    return store
+
+
 async def run() -> None:  # pragma: no cover - the process entry point
     """Open the store beside the console's and talk on stdin.
 
     The same file the console has open. That is what WAL is for, and it is why this can be a second
     process rather than a route: an agent's tool call does not wait on a browser being open.
     """
-    store = Store(settings.db_path)
-    await store.open()
+    store = await open_store()
     reader = asyncio.StreamReader()
     await asyncio.get_running_loop().connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), sys.stdin

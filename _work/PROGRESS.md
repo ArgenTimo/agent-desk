@@ -16,8 +16,8 @@ Isolated test run until A1 was merged (and still used for every gate here):
 | 2 | A1 hermetic suite | done | #14 (73e2d4c) | isolated `make gate`: 2708 passed, 0 fake-claude calls, live DB mtime/size and jobs count unchanged; mutation (drop DATA_DIR redirect) fails the new test | |
 | 3 | Job cleanup (07 §7) | human | `_work/proposed/rm-test-jobs.sh` | snapshot `~/agent-desk-salvage/agents-2026-09-27.json` + `jobs-2026-09-27/`; 203 blocked = 199 test ("бери в работу") + 1 explore + 3 other | `claude rm` fails: background service not running (supervisor dead since 09-16) → HUMAN_TODO H2 |
 | 4 | U1 PR/branch/worktree cleanup | done (branch deletion → human H3) | merged #20 (with the fuller ../agent-desk-shift patch), #18, #13, #16 (migration renumbered 079); closed #15 #8 #21 #3 #17 #12 #11 #5 | open PRs 18→5 (#19 #10 #9 #7 #6, all frozen agent-launch/engine work); worktrees 32→3; `uniq -d` over migration numbers empty; each merge after an isolated green gate | local branch/stash deletion refused by auto-mode classifier → H3 |
-| 5 | A4 safe migrations | in progress | `a4-safe-migrations` | 9 tests in test_migrate.py (mutations: name check off → 2 fail; checks outside txn → 1 fails); live DB backed up, restore verified, reconciled (D8); a copy of it opens with this code, nothing pending, no warning | |
-| 6 | A3 flock + recover=False | todo | | | |
+| 5 | A4 safe migrations | done | #22 (ed9b93f) | 9 tests in test_migrate.py (mutations: name check off → 2 fail; checks outside txn → 1 fails); isolated gate 2741 passed; live DB backed up (`~/agent-desk-salvage/agent-desk.db.before-a4`), restore verified, reconciled (D8); a copy opens with main, nothing pending | |
+| 6 | A3 flock + recover=False | done | `a3-one-process` | tests/unit/test_one_process.py 5 tests (mutations: MCP recover=True → fails; lifespan without lock → fails); live smoke: two `python -m agent_desk` on one temp data_dir — second exits with `AlreadyRunning … pid N …`, first still serves 200 | uvicorn exits 0 on a refused startup |
 | 7 | A5 dev isolated by default | todo | | | |
 | 8 | A2 prod instance | todo | | | |
 | 9 | A6 AGENT_DESK_HANDS | todo | | | |

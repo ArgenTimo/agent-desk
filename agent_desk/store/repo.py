@@ -1105,13 +1105,18 @@ class Store:
             marks.append(f"{stat.st_size}:{stat.st_mtime_ns}")
         return "|".join(marks)
 
-    async def open(self) -> None:
+    async def open(self, *, recover: bool = True) -> None:
+        """`recover` is for the console alone: only the process that runs blocks can say which of
+        them were interrupted. Anything else that opens this file beside it — the MCP server, a
+        script — passes False, or it marks the console's running blocks failed (R1 in
+        _research/04_dogfooding_gaps.md)."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
         event.listen(self._engine.sync_engine, "connect", _prepare_connection)
         event.listen(self._engine.sync_engine, "begin", _begin_explicitly)
         await self._migrate()
-        await self._recover_interrupted()
+        if recover:
+            await self._recover_interrupted()
 
     async def close(self) -> None:
         if self._engine is not None:
