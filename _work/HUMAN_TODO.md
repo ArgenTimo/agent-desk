@@ -64,3 +64,18 @@ and delete merged `experiment/insurance-site`, `ideas-from-the-pool`, `worktree-
 (tag `desk-20260927`). Don't `make run PROD=1` beside it — the A3 lock refuses a second console.
 Update: `git tag desk-YYYYMMDD origin/main && git push origin desk-YYYYMMDD && make prod-update TAG=desk-YYYYMMDD`.
 Hands or appraise on: `systemctl --user edit agent-desk` → `[Service]` `Environment=AGENT_DESK_HANDS=on`.
+
+## H5 · Re-record `tests/fixtures/stream_json.jsonl` at the current CLI (B2)
+It is the stdout of a real `claude -p`, which this work may not run. It stays labelled 2.1.259.
+```
+claude -p "say hi" --output-format stream-json --verbose > /tmp/stream.jsonl
+```
+then scrub text and ids as `tests/fixtures/README.md` says, replace the fixture, and set its row in
+the README table to the version in its `system` line (`test_fixtures.py` checks the two agree).
+
+## H6 · Decide what the registry's new `waitingFor` means (found in B2)
+At 2.1.283 one live `~/.claude/sessions/<pid>.json` carried a `waitingFor` string. If the CLI now
+writes "waiting for a human" into the registry, that is the fact rule five says the board cannot
+have today — but `docs/03-session-observation.md` requires a human to confirm a meaning before the
+reader acts on it. Look at a few values (`jq .waitingFor ~/.claude/sessions/*.json`) and, if it is
+that fact, say so in docs/03; reading it is then a small observe/ change with a recorded fixture.

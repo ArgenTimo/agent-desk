@@ -527,7 +527,9 @@ def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str
     # Triage first; within a group, most recent movement first, and the name to keep the order
     # stable between two ticks that are otherwise identical.
     rows.sort(key=lambda r: (triage_rank(r.session, r.hint), -r.session.updated_at, r.session.name))
-    return rows, read.notices
+    # A transcript that no longer looks recorded is said once, however many sessions show it.
+    drifted = dict.fromkeys(row.tail.drift for row in rows if row.tail and row.tail.drift)
+    return rows, read.notices + [notice for notice in drifted if notice]
 
 
 async def board_work() -> dict[str, dict[str, int]]:

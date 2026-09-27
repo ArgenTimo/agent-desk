@@ -21,11 +21,14 @@ from pydantic import BaseModel, ConfigDict, Field
 # The CLI version tests/fixtures/ was recorded from. A live session reporting anything else is not
 # an error and never a block — it is the advisory banner of docs/adr/0004, and the fixture README
 # is the procedure.
-RECORDED_CLI_VERSION = "2.1.259"
+RECORDED_CLI_VERSION = "2.1.283"
 
 # docs/03-session-observation.md: written by the session itself, and the only trustworthy
 # statement about what it is doing.
 KNOWN_STATUSES = ("idle", "busy", "shell")
+
+# Below this many lines a share of unknown ones says nothing (TranscriptTail.drift).
+DRIFT_MIN_LINES = 10
 
 
 def now_ms() -> int:
@@ -200,6 +203,28 @@ class TranscriptTail(BaseModel):
     # the number a person means by "how big has this got" — not a bill, and not a total of
     # everything ever spent, which the window this is read from could not see anyway.
     context_tokens: int | None = None
+    # The shape check of docs/adr/0004, for the file with no version to compare: how many lines
+    # the window held, how many were of a type this program has never seen, and which keys it reads
+    # were absent from the lines that should carry them ("assistant.timestamp").
+    read_lines: int = 0
+    unknown_lines: int = 0
+    missing: list[str] = []
+
+    @property
+    def drift(self) -> str | None:
+        """A sentence for the board when the transcript no longer looks like what was recorded."""
+        if self.missing:
+            return (
+                f"transcript lines are missing {', '.join(self.missing)} — the CLI's transcript "
+                "format may have changed; re-record tests/fixtures/transcript.jsonl"
+            )
+        if self.read_lines >= DRIFT_MIN_LINES and self.unknown_lines * 2 > self.read_lines:
+            share = round(100 * self.unknown_lines / self.read_lines)
+            return (
+                f"{share}% of a transcript's lines are of types this program has not seen — the "
+                "CLI's transcript format may have changed (agent_desk/observe/transcript.py)"
+            )
+        return None
 
     @property
     def last_entry(self) -> TailEntry | None:

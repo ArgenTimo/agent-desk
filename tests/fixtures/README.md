@@ -9,8 +9,8 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 
 | File | Recorded from | CLI `version` |
 |---|---|---|
-| `registry_entry.json` | `~/.claude/sessions/<pid>.json` | `2.1.259` |
-| `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` | `2.1.258` |
+| `registry_entry.json` | `~/.claude/sessions/<pid>.json` (key set re-checked; `bridgeSessionId` is gone) | `2.1.283` |
+| `transcript.jsonl` | `~/.claude/projects/<slug>/<sessionId>.jsonl` (keys per line type re-aligned to 25 live transcripts) | `2.1.283` |
 | `registry_entry_headless.json` | `~/.claude/sessions/<pid>.json` of a `claude -p` run | `2.1.259` |
 | `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `2.1.259` |
 | `job_state_failed.json` | `~/.claude/jobs/<short>/state.json` of a `--bg` job that died | `2.1.261` |

@@ -191,6 +191,17 @@ def test_a_cli_newer_than_the_recording_raises_the_banner(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+def test_the_cli_the_fixtures_were_recorded_from_raises_no_banner(tmp_path: Path) -> None:
+    """B2: the banner was lit for weeks because the recording was three CLI versions old."""
+    entry = _entry()
+    read = registry.read_registry(
+        pattern=_sessions_dir(tmp_path, entry),
+        proc_root=_proc(tmp_path, entry["pid"], entry["procStart"]),
+    )
+    assert read.notices == []
+
+
+@pytest.mark.unit
 def test_a_session_older_than_the_recording_does_not_raise_it(tmp_path: Path) -> None:
     """A banner that is always lit is a banner nobody reads.
 
