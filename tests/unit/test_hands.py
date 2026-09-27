@@ -1,6 +1,6 @@
 """A console with hands off starts no agent, runs no loop that would, and offers no button for it.
 
-A6 in _research/06_backlog.md. The suite runs with AGENT_DESK_HANDS=on (tests/conftest.py) so the
+A6 in _research/06_backlog.md (and S2: the idea pool is read in the background only when asked). The suite runs with AGENT_DESK_HANDS=on (tests/conftest.py) so the
 agent-starting paths keep their tests; here each is switched off and asserted refused.
 """
 
@@ -28,6 +28,13 @@ def test_a_console_nobody_configured_has_no_hands(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("AGENT_DESK_HANDS", raising=False)
 
     assert Settings().hands is False
+
+
+def test_nor_reads_the_idea_pool_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2: a sweep is model calls charged to the day's ceiling, made while nobody asked."""
+    monkeypatch.delenv("AGENT_DESK_APPRAISE", raising=False)
+
+    assert Settings().appraise is False
 
 
 def test_start_refuses_before_anything_is_run(
@@ -61,8 +68,16 @@ async def test_the_workbench_engine_starts_no_run(
     assert "AGENT_DESK_HANDS" in why
 
 
+@pytest.mark.parametrize(
+    ("appraise", "expected"),
+    [
+        # S2: reading the idea pool costs model calls, so it runs only when asked for.
+        (False, ["agent_desk.web.later.run"]),
+        (True, ["agent_desk.web.kicking.appraising", "agent_desk.web.later.run"]),
+    ],
+)
 async def test_the_loops_that_start_work_are_not_run(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, appraise: bool, expected: list[str]
 ) -> None:
     ran: list[str] = []
 
@@ -81,13 +96,13 @@ async def test_the_loops_that_start_work_are_not_run(
         (later, "run"),
     ):
         monkeypatch.setattr(module, name, recorder(f"{module.__name__}.{name}"))
-    monkeypatch.setattr(app_module, "settings", _off())
+    monkeypatch.setattr(app_module, "settings", Settings(hands=False, appraise=appraise))
     monkeypatch.setattr(routes, "store", Store(tmp_path / "agent-desk.db"))
 
     async with app_module.app.router.lifespan_context(app_module.app):
         await asyncio.sleep(0)
 
-    assert sorted(ran) == ["agent_desk.web.kicking.appraising", "agent_desk.web.later.run"]
+    assert sorted(ran) == expected
 
 
 @pytest.mark.parametrize("hands", [True, False])

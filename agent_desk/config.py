@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # drawn. `AGENT_DESK_HANDS=on` brings all of it back as it was.
     hands: bool = False
 
+    # --- Reading the idea pool in the background (S2 in _research/06_backlog.md). -------------
+    # Off by default: every sweep is model calls nobody asked for at that moment, charged to the
+    # day's ceiling above. `AGENT_DESK_APPRAISE=on` runs it again while the console is up.
+    appraise: bool = False
+
     @property
     def registry_glob(self) -> str:
         """`*.json`, never `*`. See the module docstring."""

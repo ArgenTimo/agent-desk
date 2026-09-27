@@ -69,9 +69,10 @@ async def _console() -> AsyncIterator[None]:
                 # And the one that walks a drawing somebody pressed run on (037-runs.sql). It
                 # only ever queues; the loop above is what actually starts anything.
                 loops.append(group.create_task(engine.run(routes.store)))
-            # And the pass that reads the idea pool, so a list of sixty is a list
-            # somebody can scan (agent_desk/ideas/appraise.py).
-            loops.append(group.create_task(kicking.appraising(routes.store)))
+            if settings.appraise:
+                # And the pass that reads the idea pool, so a list of sixty is a list
+                # somebody can scan (agent_desk/ideas/appraise.py). Off unless asked for (S2).
+                loops.append(group.create_task(kicking.appraising(routes.store)))
             # And the one that brings back what somebody put off until a moment that has now
             # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
             # would be a daemon, and this program does not have one.

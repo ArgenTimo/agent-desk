@@ -70,7 +70,8 @@ file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
 **It starts no agents unless told to.** With `AGENT_DESK_HANDS` unset (or `off`) the console does
 not dispatch, run the autostart, kicking or workbench-engine loops, or draw the buttons for them —
-it watches and keeps ideas. `AGENT_DESK_HANDS=on` brings those back.
+it watches and keeps ideas. `AGENT_DESK_HANDS=on` brings those back. Reading the idea pool in the
+background costs model calls, so it too runs only with `AGENT_DESK_APPRAISE=on`.
 
 ## Using it with your projects
 
