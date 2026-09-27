@@ -113,6 +113,18 @@ class _Tail:
         return f" — {scrub(last.strip())[:200]}" if last.strip() else ""
 
 
+# The longest single line of the engine's output this reads. `asyncio`'s default is 64 KiB, and a
+# stream-json event is one line: when a run reads a file with the `Read` tool, the event carrying
+# what it read is as long as the file. Found by drawing this console's own repository with the real
+# engine — `store/repo.py` is several hundred kilobytes — and the read raised `ValueError` out of
+# the middle of the loop: not `AnswerFailed`, so nothing above caught it, and the block would have
+# stayed `running` for ever. Every answer that reads a big file was one file away from the same.
+#
+# Sixteen megabytes is far above anything a tool result is allowed to be, and still a bound: a
+# line longer than this is skipped (see the loop), not buffered without end.
+_LONGEST_LINE = 16 * 1024 * 1024
+
+
 def _kill_run(process: asyncio.subprocess.Process) -> None:
     """Kill the run, not merely the process that started it.
 
@@ -339,6 +351,7 @@ async def _run(
             stderr=asyncio.subprocess.PIPE,
             # Its own process group, so the whole run can be ended in one call — see _kill_run.
             start_new_session=True,
+            limit=_LONGEST_LINE,
         )
     except FileNotFoundError as exc:
         raise AnswerFailed(
@@ -380,7 +393,17 @@ async def _run(
             # away an answer that had arrived. Caught here rather than left to `OSError` above,
             # because that path marks the block failed and loses what was said.
             with contextlib.suppress(ConnectionResetError):
-                async for raw in stdout:
+                while True:
+                    try:
+                        raw = await stdout.readline()
+                    except ValueError:
+                        # A line longer than `_LONGEST_LINE`. `readline` has already dropped it and
+                        # the next one reads normally, so it is skipped the way a line that will not
+                        # parse is: what matters is the text and the result, and a tool's output
+                        # that is too big to hold is not either of those.
+                        continue
+                    if not raw:
+                        break
                     line = raw.decode(errors="replace").strip()
                     if not line:
                         continue

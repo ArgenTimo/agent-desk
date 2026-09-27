@@ -219,6 +219,38 @@ async def test_a_map_is_drawn_from_the_project_it_is_about(
     assert all(roles.role_of("sketch", chosen.get(n, "")).name == "object" for n in names)
 
 
+async def test_a_map_says_what_it_is_reading_while_it_reads_and_what_that_cost(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A map of this console's own repository took three minutes and $1.24 on the real engine, and
+    every one of those minutes said nothing but a caret; the finished block never said the price."""
+    checkout = tmp_path / "shop"
+    checkout.mkdir()
+    await desk.note_project("origin:acme/shop", "acme/shop", str(checkout))
+    seen_while_running: list[str] = []
+    block = await _block(desk, "draw the database")
+
+    async def reading(prompt: str, **how: Any) -> AsyncIterator[str]:
+        how["on_step"]("reading db/schema.sql")
+        seen_while_running.append(blocks.DOING.get(block.id, ""))
+        how["on_cost"](1.24)
+        yield SCHEMA
+
+    monkeypatch.setattr(blocks.session, "stream_answer", reading)
+
+    await blocks._draw_it(desk, block, project="origin:acme/shop")
+
+    assert seen_while_running == ["reading db/schema.sql"]
+    assert block.id not in blocks.DOING, "a finished drawing still says it is reading"
+    said, _ = telling.read_drawn((await desk.block(block.id)).answer or "")
+    assert "Reading it cost $1.24." in said
+
+
+def test_a_map_whose_cost_was_not_measured_does_not_say_it_was_free() -> None:
+    drawn = telling.read_map(SCHEMA)
+    assert "cost" not in telling.as_mapped(drawn, "acme/shop")
+
+
 async def test_a_project_with_no_checkout_here_draws_a_process_or_nothing_it_cannot_see(
     desk: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
