@@ -38,7 +38,7 @@ async def test_opening_applies_every_migration_exactly_once(store: Store) -> Non
     Asserting against the files rather than against a number means a new migration does not have
     to edit this test, while a migration that was skipped or applied twice still fails it.
     """
-    from agent_desk.store.repo import _migrations
+    from agent_desk.store.migrate import migrations as _migrations
 
     on_disk = [
         version
@@ -325,10 +325,10 @@ async def test_a_crash_between_a_migration_and_its_version_row_leaves_nothing_be
     `schema_version` row left the tables in place and the version unrecorded — and every start
     after that died with "table thread already exists". The only recovery was deleting the file.
     """
-    from agent_desk.store import repo
+    from agent_desk.store import migrate
 
     path = tmp_path / "agent-desk.db"
-    real = repo._now_ms
+    real = migrate._now_ms
     calls = {"n": 0}
 
     def explode() -> int:
@@ -337,13 +337,13 @@ async def test_a_crash_between_a_migration_and_its_version_row_leaves_nothing_be
             raise RuntimeError("killed between the tables and the version")
         return real()
 
-    monkeypatch.setattr(repo, "_now_ms", explode)
+    monkeypatch.setattr(migrate, "_now_ms", explode)
     store = Store(path)
     with pytest.raises(RuntimeError):
         await store.open()
     await store.close()
 
-    monkeypatch.setattr(repo, "_now_ms", real)
+    monkeypatch.setattr(migrate, "_now_ms", real)
     reopened = Store(path)
     await reopened.open()  # this is the assertion: it opens at all
     async with reopened.engine.connect() as conn:
@@ -355,7 +355,7 @@ async def test_a_crash_between_a_migration_and_its_version_row_leaves_nothing_be
 @pytest.mark.unit
 def test_a_semicolon_inside_a_comment_or_a_string_is_not_the_end_of_a_statement() -> None:
     """Both halves of this were bugs: the first shipped, the second was one migration away."""
-    from agent_desk.store.repo import _statements
+    from agent_desk.store.migrate import statements as _statements
 
     script = """
     -- a note with a semicolon; like this one
@@ -380,7 +380,7 @@ def test_a_migration_numbered_one_is_refused_rather_than_silently_winning(
     tmp_path: pathlib.Path,
 ) -> None:
     """`001-anything.sql` sorts before `schema.sql`, and would take its version number with it."""
-    from agent_desk.store.repo import _migrations
+    from agent_desk.store.migrate import migrations as _migrations
 
     (tmp_path / "schema.sql").write_text("CREATE TABLE a (id TEXT);")
     (tmp_path / "001-early.sql").write_text("CREATE TABLE b (id TEXT);")
@@ -441,7 +441,7 @@ async def test_every_column_the_documents_call_redacted_is_redacted(store: Store
 @pytest.mark.unit
 def test_the_splitter_knows_every_way_sqlite_quotes_a_name() -> None:
     """A `;` inside any of the four quotings is not the end of a statement."""
-    from agent_desk.store.repo import _statements
+    from agent_desk.store.migrate import statements as _statements
 
     parsed = _statements(
         """

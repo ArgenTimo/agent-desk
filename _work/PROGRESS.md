@@ -13,10 +13,10 @@ Isolated test run until A1 was merged (and still used for every gate here):
 |---|---|---|---|---|---|
 | 0 | Backup | done | local branch `backup/2026-09-27-before-autonomy` (ce3f286) | `git log -1` on it; bundles in `~/agent-desk-salvage/` | not pushed: repo is public, see DECISIONS D1 |
 | 1 | U0 salvage | done | — | `~/agent-desk-salvage/README.md` lists 4 dirty worktrees, stash, 9e3de5d test; DB copied via sqlite backup API from a `mode=ro` connection, `integrity_check` ok, schema_version max 79 | |
-| 2 | A1 hermetic suite | in progress | `suite-starts-no-agent` / #14 | | |
-| 3 | Job cleanup (07 §7) | todo | | | |
-| 4 | U1 PR/branch/worktree cleanup | todo | | | |
-| 5 | A4 safe migrations | todo | | | |
+| 2 | A1 hermetic suite | done, **awaiting merge** | `suite-starts-no-agent` / #14 (ready) | isolated `make gate`: 2708 passed, 0 fake-claude calls, live DB mtime/size and jobs count unchanged; mutation (drop DATA_DIR redirect) fails the new test | merge blocked by `deny: Bash(gh pr merge*)` in .claude/settings.json — owner is removing it |
+| 3 | Job cleanup (07 §7) | human | `_work/proposed/rm-test-jobs.sh` | snapshot `~/agent-desk-salvage/agents-2026-09-27.json` + `jobs-2026-09-27/`; 203 blocked = 199 test ("бери в работу") + 1 explore + 3 other | `claude rm` fails: background service not running (supervisor dead since 09-16) → HUMAN_TODO H2 |
+| 4 | U1 PR/branch/worktree cleanup | in progress | — | closed #15 #8 #21 #3 #17 #12 #11 with comments (18→11 open); worktrees in ~/PycharmProjects/agent-desk 32→3 (2 left are inside ~/.claude/jobs, see H2) | left: merge #20, #18, #13, #16 (as 079), #5?; branch deletion |
+| 5 | A4 safe migrations | in progress | local `safe-migrations` (stacked on #14) | `tests/unit/test_migrate.py` 8 tests + store tests green | `scripts/reconcile-schema-version.py` needs #16 merged as 079 first; live-DB schema differs from main only by bench_card.changed_at (= #16's SQL); 66 left no trace |
 | 6 | A3 flock + recover=False | todo | | | |
 | 7 | A5 dev isolated by default | todo | | | |
 | 8 | A2 prod instance | todo | | | |
