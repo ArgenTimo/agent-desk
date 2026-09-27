@@ -28,6 +28,7 @@ from sqlalchemy import bindparam, event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from ulid import ULID
 
+from agent_desk.store.migrate import migrate
 from agent_desk.store.redact import scrub, scrub_optional
 
 # The fifth is a request about *this console* — "tidy up the ideas", "put a button here" — as
@@ -1005,71 +1006,6 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _statements(script: str) -> list[str]:
-    """One SQL statement per element, split on the semicolons that actually end one.
-
-    The sqlite driver takes one statement per call, so a schema file is split here — and the split
-    has to know where it is. A `;` inside a comment already cut a `CREATE TABLE` in half once
-    ("sha256 of a token; not stored", which failed as `incomplete input`), and a `;` inside a
-    string literal would do the same to the first migration that seeds a row or writes a
-    `CHECK (x IN ('a;b'))`. So this walks the script once, tracking quotes and both kinds of
-    comment, rather than deleting comments and hoping.
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    index = 0
-    while index < len(script):
-        character = script[index]
-        pair = script[index : index + 2]
-
-        if quote is not None:
-            current.append(character)
-            if character == quote:
-                quote = None
-            index += 1
-        elif character in "'\"`[":
-            # SQLite accepts four quotings, and a `;` inside any of them is not the end of a
-            # statement: '…', "…", `…` and [ … ].
-            quote = "]" if character == "[" else character
-            current.append(character)
-            index += 1
-        elif pair == "--":
-            end = script.find("\n", index)
-            index = len(script) if end == -1 else end
-        elif pair == "/*":
-            end = script.find("*/", index + 2)
-            index = len(script) if end == -1 else end + 2
-        elif character == ";":
-            statements.append("".join(current))
-            current = []
-            index += 1
-        else:
-            current.append(character)
-            index += 1
-
-    statements.append("".join(current))
-    return [statement.strip() for statement in statements if statement.strip()]
-
-
-def _migrations(directory: Path) -> list[tuple[int, Path]]:
-    """`schema.sql` is version 1; every later change is `NNN-<name>.sql` applied in order.
-
-    Forward-only, and never edited in place: a file that has been applied on a machine is history
-    (docs/adr/0003).
-    """
-    found = [(1, directory / "schema.sql")]
-    for path in sorted(directory.glob("[0-9][0-9][0-9]-*.sql")):
-        version = int(path.name[:3])
-        if version <= 1:
-            # `001-anything.sql` would sort before `schema.sql`, apply, record version 1, and the
-            # baseline would then be skipped for ever. The glob invites exactly that filename, so
-            # it is refused loudly rather than resolved quietly.
-            raise ValueError(f"{path.name}: version 1 is schema.sql; number migrations from 002")
-        found.append((version, path))
-    return sorted(found)
-
-
 def _prepare_connection(dbapi_connection: Any, _record: Any) -> None:
     """Two settings per connection, and the second one is why migrations are safe.
 
@@ -1184,32 +1120,8 @@ class Store:
 
     # --- schema ---------------------------------------------------------------------------
     async def _migrate(self) -> None:
-        """Apply what has not been applied, each file in one transaction with its own version row.
-
-        The transaction is the point. A file that fails halfway, or a process killed between its
-        statements and its `schema_version` row, must leave the database exactly as it found it —
-        otherwise the next start finds tables it is about to create and never opens again.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "CREATE TABLE IF NOT EXISTS schema_version ("
-                    "version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)"
-                )
-            )
-            rows = await conn.execute(text("SELECT version FROM schema_version"))
-            applied = {row[0] for row in rows}
-
-        for version, path in _migrations(Path(__file__).parent):
-            if version in applied:
-                continue
-            async with self.engine.begin() as conn:
-                for statement in _statements(path.read_text()):
-                    await conn.execute(text(statement))
-                await conn.execute(
-                    text("INSERT INTO schema_version (version, applied_at) VALUES (:v, :t)"),
-                    {"v": version, "t": _now_ms()},
-                )
+        """See `store/migrate.py`: backup first, refuse a history this code did not write."""
+        await migrate(self.engine, self.path)
 
     async def _recover_interrupted(self) -> None:
         """A block that did not finish comes back `failed`, never `answered`, and says which way.

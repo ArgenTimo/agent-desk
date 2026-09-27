@@ -13,10 +13,10 @@ Isolated test run until A1 was merged (and still used for every gate here):
 |---|---|---|---|---|---|
 | 0 | Backup | done | local branch `backup/2026-09-27-before-autonomy` (ce3f286) | `git log -1` on it; bundles in `~/agent-desk-salvage/` | not pushed: repo is public, see DECISIONS D1 |
 | 1 | U0 salvage | done | — | `~/agent-desk-salvage/README.md` lists 4 dirty worktrees, stash, 9e3de5d test; DB copied via sqlite backup API from a `mode=ro` connection, `integrity_check` ok, schema_version max 79 | |
-| 2 | A1 hermetic suite | in progress | `suite-starts-no-agent` / #14 | | |
-| 3 | Job cleanup (07 §7) | todo | | | |
-| 4 | U1 PR/branch/worktree cleanup | todo | | | |
-| 5 | A4 safe migrations | todo | | | |
+| 2 | A1 hermetic suite | done | #14 (73e2d4c) | isolated `make gate`: 2708 passed, 0 fake-claude calls, live DB mtime/size and jobs count unchanged; mutation (drop DATA_DIR redirect) fails the new test | |
+| 3 | Job cleanup (07 §7) | human | `_work/proposed/rm-test-jobs.sh` | snapshot `~/agent-desk-salvage/agents-2026-09-27.json` + `jobs-2026-09-27/`; 203 blocked = 199 test ("бери в работу") + 1 explore + 3 other | `claude rm` fails: background service not running (supervisor dead since 09-16) → HUMAN_TODO H2 |
+| 4 | U1 PR/branch/worktree cleanup | done (branch deletion → human H3) | merged #20 (with the fuller ../agent-desk-shift patch), #18, #13, #16 (migration renumbered 079); closed #15 #8 #21 #3 #17 #12 #11 #5 | open PRs 18→5 (#19 #10 #9 #7 #6, all frozen agent-launch/engine work); worktrees 32→3; `uniq -d` over migration numbers empty; each merge after an isolated green gate | local branch/stash deletion refused by auto-mode classifier → H3 |
+| 5 | A4 safe migrations | in progress | `a4-safe-migrations` | 9 tests in test_migrate.py (mutations: name check off → 2 fail; checks outside txn → 1 fails); live DB backed up, restore verified, reconciled (D8); a copy of it opens with this code, nothing pending, no warning | |
 | 6 | A3 flock + recover=False | todo | | | |
 | 7 | A5 dev isolated by default | todo | | | |
 | 8 | A2 prod instance | todo | | | |

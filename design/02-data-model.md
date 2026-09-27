@@ -224,6 +224,13 @@ rule 2 broken in the name of a roadmap.
 Plain SQL files applied in order at startup, recorded in a `schema_version` table. Forward-only. No
 Alembic ([`../docs/adr/0003`](../docs/adr/0003-sqlite-and-one-process.md)).
 
+`schema_version` records each file's name as well as its number, and `agent_desk/store/migrate.py`
+refuses to open a database whose recorded history this code does not have — a version with no file
+here, or one applied under another file's name. Two branches that both numbered a file 078 are
+otherwise invisible to git and to a number-only runner. Before applying anything to an existing
+database the runner copies it to `agent-desk.db.bak-v<N>` beside it, N being the version it was at:
+rolling code back is a tag, and rolling the database back is that file.
+
 Thirty-nine of them at the time of writing. Each is a small file whose comment is longer than its
 SQL, and that ratio is on purpose: the statement says what changed and the comment says why it is
 that shape and what it refuses to do — which is the part that is expensive to reconstruct and the
