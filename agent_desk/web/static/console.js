@@ -342,7 +342,8 @@ stream.addEventListener('board', (event) => {
   // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
   // processed. Without this the button worked exactly once, on the page as it was served, and the
   // first board refresh turned it back into a plain form that navigated the whole console away to
-  // `/projects/focus`.
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
   if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
@@ -1602,7 +1603,9 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
-    // A card's own forms — renaming a step, answering a question — are htmx forms like the board's.
+    // A card body is server markup written with innerHTML, which htmx cannot see until it is
+    // handed to it — the idea card's project picker was dead on every card until this line
+    // (docs/stories/14).
     if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
@@ -2016,7 +2019,10 @@ document.addEventListener(
     body.dataset.read = 'yes';
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
-      if (response.ok) body.innerHTML = await response.text();
+      if (response.ok) {
+        body.innerHTML = await response.text();
+        if (window.htmx) htmx.process(body);
+      }
     } catch {
       body.textContent = 'could not read it';
     }

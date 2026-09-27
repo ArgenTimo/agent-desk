@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import re
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
@@ -1444,41 +1445,36 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
 
 
 @pytest.mark.unit
-def test_a_column_swapped_in_is_handed_to_htmx() -> None:
+def test_server_markup_written_into_the_page_is_handed_to_htmx() -> None:
     """The choose button worked once, on the page as it was served, and stopped at the first board
     refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
-    form fell back to a plain POST and navigated the whole console to `/projects/focus`. The idea
-    list carries the same kind of form in its focus banner, and a drag that re-parents an idea
-    swapped it in the same way."""
+    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Counting
+    the live page afterwards found 26 more dead controls — the project picker on every idea card on
+    the workbench — so this pins the class rather than the board (docs/stories/14).
+
+    Server markup is what came from a response or a stream: `event.data`, a `.text()`, or the
+    `html` a fetch resolved to. The one exemption is the poster that runs only when htmx is absent
+    and writes into its own `into` target."""
     console = (
         (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
         .read_text(encoding="utf-8")
         .splitlines()
     )
 
-    for column in ("board", "idea-list"):
-        swap = f"getElementById('{column}').innerHTML ="
-        swaps = [n for n, line in enumerate(console) if swap in line]
-        assert swaps, f"nothing swaps #{column} any more — this test is pinning the wrong thing"
-        for n in swaps:
-            after = "\n".join(console[n : n + 8])
-            assert f"htmx.process(document.getElementById('{column}'))" in after, (
-                f"#{column} swapped in at console.js:{n + 1} is never handed to htmx"
-            )
+    writes = []
+    for n, line in enumerate(console):
+        if ".innerHTML =" not in line or "into.innerHTML" in line:
+            continue
+        statement = " ".join(console[n : n + 3])
+        statement = statement[: statement.find(";") + 1]
+        if re.search(r"event\.data|\.text\(\)|innerHTML = html;", statement):
+            writes.append(n)
 
-    # A card body carries the same kind of form — renaming a step, answering a question. A body
-    # written from a string literal in the file ("could not read this one") has nothing to process.
-    swap = "querySelector('.pin-body').innerHTML ="
-    swaps = [
-        n
-        for n, line in enumerate(console)
-        if swap in line and not line.split(swap, 1)[1].strip().startswith(("'", '"', "`"))
-    ]
-    assert swaps, "nothing swaps a card body any more — this test is pinning the wrong thing"
-    for n in swaps:
+    assert len(writes) >= 10, "fewer server swaps than there were — this pins the wrong thing"
+    for n in writes:
         after = "\n".join(console[n : n + 8])
-        assert "htmx.process(holder.querySelector('.pin-body'))" in after, (
-            f"a card body swapped in at console.js:{n + 1} is never handed to htmx"
+        assert "htmx.process(" in after, (
+            f"console.js:{n + 1} writes server markup into the page and never hands it to htmx"
         )
 
 
