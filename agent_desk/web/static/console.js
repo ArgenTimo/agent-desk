@@ -338,6 +338,13 @@ stream.addEventListener('board', (event) => {
   if (event.data === lastBoard || document.body.classList.contains('dragging-card')) return;
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
+  // The board carries htmx of its own now — the choose button on a project card is a form that
+  // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
+  // processed. Without this the button worked exactly once, on the page as it was served, and the
+  // first board refresh turned it back into a plain form that navigated the whole console away to
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
+  if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
   // checkout whose last session ended has none any more.
@@ -1070,6 +1077,7 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
+      if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
       changed(holder);
       showCheck(holder);
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
@@ -1551,7 +1559,7 @@ async function pin(card, how) {
   // rather than having one invented for it.
   holder.dataset.came = how?.came || '';
   holder.dataset.cameAt = String(how?.cameAt || Date.now());
-  // When its content last changed after it arrived (078). Nothing is invented for a new card: zero
+  // When its content last changed after it arrived (079). Nothing is invented for a new card: zero
   // is "not since it arrived", and only `changed()` moves it.
   holder.dataset.changedAt = String(how?.changedAt || 0);
   holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
@@ -1599,6 +1607,10 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    // A card body is server markup written with innerHTML, which htmx cannot see until it is
+    // handed to it — the idea card's project picker was dead on every card until this line
+    // (docs/stories/14).
+    if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
@@ -1973,6 +1985,7 @@ document.addEventListener('drop', (event) => {
       .then((html) => {
         if (!html) return;
         document.getElementById('idea-list').innerHTML = html;
+        if (window.htmx) htmx.process(document.getElementById('idea-list'));
         filterIdeas();
       });
     return;
@@ -1989,7 +2002,11 @@ document.addEventListener('drop', (event) => {
     body: new URLSearchParams({ repo_key: from }),
   })
     .then((response) => (response.ok ? response.text() : null))
-    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
+    .then((html) => {
+      if (!html) return;
+      document.getElementById('board').innerHTML = html;
+      if (window.htmx) htmx.process(document.getElementById('board'));
+    });
 });
 
 /* --- the third view of a card ------------------------------------------------------------------- */
@@ -2006,7 +2023,10 @@ document.addEventListener(
     body.dataset.read = 'yes';
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
-      if (response.ok) body.innerHTML = await response.text();
+      if (response.ok) {
+        body.innerHTML = await response.text();
+        if (window.htmx) htmx.process(body);
+      }
     } catch {
       body.textContent = 'could not read it';
     }
@@ -2135,7 +2155,7 @@ benchFind?.addEventListener('keydown', (event) => {
 // morning" would be on most of the bench most of the time, which is a mark that says nothing —
 // and the moment somebody actually wants it is the moment they come back to the tab.
 //
-// And which *changed*, said apart from which arrived (078). For a long time this could only say
+// And which *changed*, said apart from which arrived (079). For a long time this could only say
 // "arrived", because nothing recorded a per-card time of last change and a mark that quietly meant
 // something narrower than it said would be CLAUDE.md's fifth rule broken on the surface it is most
 // read from. `changed()` is that record: stamped where the page rewrites a card, never inferred.
@@ -4299,7 +4319,7 @@ function showRuns() {
     const step = states.get(cardName(pin));
     const stepWas = pin.dataset.step;
     pin.dataset.step = step ? step.state : '';
-    // A step going from going to done is the card changing (078). Only a move from a state this
+    // A step going from going to done is the card changing (079). Only a move from a state this
     // page had already drawn: the first pass after a load finds every step "new" and none changed.
     if (stepWas !== undefined && stepWas !== pin.dataset.step) changed(pin);
     pin.classList.toggle('at-now', Boolean(going && going.at === cardName(pin)));
@@ -6318,15 +6338,22 @@ function syncBlocks() {
     const from = surface.querySelector(`.pin[data-name="answer:${CSS.escape(id)}"]`)
       ? `answer:${id}`
       : `block:${id}`;
+    const drawn = [];
     for (const line of article.querySelectorAll('.drawn-cards li[data-kind]')) {
       const name = `${line.dataset.kind}:${line.dataset.id}`;
-      if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
-        pin(
-          { kind: line.dataset.kind, id: line.dataset.id, label: '' },
-          { under: from, quiet: true, came: 'drawn from a description' }
-        );
-      }
+      if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) continue;
+      drawn.push(name);
+      // Joined to the answer once, by the first thing it drew. Every drawn card used to get its
+      // own `wrote` line from the answer, and a map of sixty things is a fan of sixty lines that
+      // hides the relations the drawing exists to show.
+      const how = { quiet: true, came: 'drawn from a description' };
+      if (drawn.length === 1) how.under = from;
+      pin({ kind: line.dataset.kind, id: line.dataset.id, label: '' }, how);
     }
+    // And laid out by how they relate, not stacked where they landed. The same arrangement `tidy up`
+    // makes of an enquiry — following the lines, server-side, against the heights the cards have
+    // actually drawn themselves at — asked for once, when the drawing arrives.
+    if (drawn.length > 1) layOutDrawn(drawn);
 
     for (const line of article.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
@@ -6498,6 +6525,54 @@ function nowCollected(name) {
 }
 
 // Where a new card goes when it belongs under others: below the lowest of them, roughly centred.
+// A drawing that has just arrived, laid out by its own lines.
+//
+// Only the cards it drew move, and only the ones nobody has touched: a card somebody dragged in
+// the second it appeared stays where they put it. Asked after the bodies have had a moment to
+// arrive, because the height a card will draw itself at is the input the layout is computed from,
+// and a layout against a guessed height overlaps the moment a card has three lines instead of one.
+function layOutDrawn(names) {
+  setTimeout(async () => {
+    const pins = names
+      .map((name) => surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]:not([data-moved])`))
+      .filter(Boolean);
+    if (pins.length < 2) return;
+    const cards = pins.map((pin) => ({
+      name: cardName(pin),
+      width: pin.offsetWidth || CARD_WIDTH,
+      height: pin.offsetHeight || 120,
+    }));
+    const inside = new Set(names);
+    const lines = everyTie().filter((one) => inside.has(one.from) && inside.has(one.to));
+    let spots = {};
+    try {
+      const answer = await fetch('/workbench/arrange', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cards, lines }),
+      });
+      spots = (await answer.json()).spots || {};
+    } catch {
+      return;
+    }
+    // Beside everything already on the bench rather than on top of it.
+    const right = Math.max(
+      0,
+      ...[...(surface?.querySelectorAll('.pin') || [])]
+        .filter((pin) => !inside.has(cardName(pin)))
+        .map((pin) => (placed.get(cardName(pin))?.x || 0) + (pin.offsetWidth || CARD_WIDTH))
+    );
+    for (const pin of pins) {
+      const at = spots[cardName(pin)];
+      if (!at) continue;
+      placed.delete(cardName(pin));
+      place(pin, { x: right + GAP * 3 + at.x, y: at.y }, { avoid: false });
+    }
+    drawTies();
+    drawRings();
+  }, 600);
+}
+
 function spotUnder(names) {
   const spots = names.map((name) => placed.get(name)).filter(Boolean);
   if (!spots.length) return null;

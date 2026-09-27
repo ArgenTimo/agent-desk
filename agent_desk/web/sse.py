@@ -90,6 +90,8 @@ async def board_events() -> AsyncIterator[str]:
                     # the first render knew and this one does not is a fact that survives for two
                     # seconds and then disappears.
                     await routes.board_ours(),
+                    # The chosen project, so its card keeps saying so across a push.
+                    await routes.store.setting(routes.FOCUS_KEY),
                 ),
             ),
             # Built only when the store has been written to since the last time they were.

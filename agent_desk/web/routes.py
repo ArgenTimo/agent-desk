@@ -89,7 +89,7 @@ from agent_desk.observe.model import (
     triage_rank,
     whose,
 )
-from agent_desk.observe.shape import repository_of
+from agent_desk.observe.shape import repository_of, where_it_works
 from agent_desk.store import repo
 from agent_desk.store.repo import (
     DRAFT_KINDS,
@@ -313,6 +313,10 @@ class BoardRow:
     # the file beside the one the liveness check opens, and never a judgement about the number
     # (agent_desk/observe/registry.py).
     holding: int | None = None
+    # The worktree this session runs in, when it runs in one the CLI made inside a checkout —
+    # `<checkout>/.claude/worktrees/<name>`. Kept on the row because the row is shown under the
+    # checkout now, and "which of the checkout's worktrees" is the one thing that move would lose.
+    worktree: str = ""
     # Whether this console started it, merely found it, or a person is sitting in it. A fact for
     # the first, a reading of the registry for the other two, and never a guess about which piece
     # of work an agent it did not start belongs to (CLAUDE.md, rule five).
@@ -398,7 +402,8 @@ def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) 
     """
     by_directory: dict[str, list[BoardRow]] = {}
     for row in rows:
-        by_directory.setdefault(row.session.cwd, []).append(row)
+        home, worktree = where_it_works(row.session.cwd)
+        by_directory.setdefault(home, []).append(replace(row, worktree=worktree))
 
     instances = [
         Instance(path=path, name=Path(path).name or path, rows=rows_here)
@@ -652,6 +657,7 @@ def render_board(
     plans_html: str = "",
     spent: Spent | None = None,
     ours: Collection[str] | None = None,
+    focus: str = "",
 ) -> str:
     """The fragment the page holds and every server-sent event replaces.
 
@@ -684,6 +690,8 @@ def render_board(
         # A reading of the text, in one place rather than in the template.
         signed=signed,
         flagged=sum(1 for row in rows if row.hint.waiting),
+        # Which project is chosen, so its card can say so and its button can undo it.
+        focus=focus,
         # What today has cost (043-spending.sql).
         spent=spent,
     )
@@ -941,10 +949,27 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
     return roots
 
 
+async def _keys_of(project: str) -> set[str]:
+    """Every repository key a chosen project answers to.
+
+    A project is one repository unless somebody declared several to be one, and then it is a group
+    whose id is not any idea's key — so narrowing by the id alone would show a declared project as
+    having no ideas at all.
+    """
+    group = next((one for one in await store.groups() if one.id == project), None)
+    return set(group.repo_keys) | {project} if group else {project}
+
+
 async def render_blockers() -> str:
-    """The top of the right column: what has stopped (agent_desk/web/blockers.py)."""
-    only = await store.setting(FOCUS_KEY)
-    return await _rendered("_blockers.html", found=await blockers.blockers(store, only), only=only)
+    """The top of the right column: what has stopped (agent_desk/web/blockers.py).
+
+    Every project's, whichever one is chosen. «Блокеры отображаются общие для всех проектов —
+    собираются из jira или из сессий.» A blocker is a thing that has stopped and wants a person,
+    and choosing a project to work on is not a decision to stop hearing about the others — that is
+    what narrowed this before, and it meant a failure in one project went quiet the moment somebody
+    looked at another.
+    """
+    return await _rendered("_blockers.html", found=await blockers.blockers(store, ""))
 
 
 UNDO_SAYS = {"drop": "discarded", "done": "marked built", "keep": "kept"}
@@ -984,11 +1009,15 @@ async def render_ideas() -> str:
     def shown(idea: Idea) -> bool:
         return idea.state == "dropped" if aside else idea.state not in ("dropped", "done")
 
-    ideas = [idea for idea in await store.ideas() if shown(idea)]
-    if only:
-        # A thought with no project is about whatever is in front of you, so it survives the
-        # narrowing — the same rule the blockers follow, for the same reason.
-        ideas = [idea for idea in ideas if (idea.project_key or "") in ("", only)]
+    # «Идеи отображаются только для конкретных проектов.» The chosen project's, or — when nothing is
+    # chosen — this console's own, because a thought typed with nothing chosen and nothing on the
+    # bench is addressed to the desk (`blocks.project_of`) and that is where it is kept. An idea
+    # written before ideas carried a project belongs to nobody in particular, which in practice has
+    # always meant the desk.
+    belongs = await _keys_of(only) if only else {block_runs.desk_key(), ""}
+    ideas = [
+        idea for idea in await store.ideas() if shown(idea) and (idea.project_key or "") in belongs
+    ]
     known = {idea.id for idea in ideas}
     children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
     roots: list[Idea] = []
@@ -1014,6 +1043,9 @@ async def render_ideas() -> str:
         # Which project the column is narrowed to, so it can say so rather than looking empty.
         only=only,
         only_named=await _project_name(only),
+        # Who a message typed now is for. Said in the column that the choice swaps, so the sentence
+        # changes in the same press as the ideas under it rather than a push later.
+        addressed=await _project_name(only) if only else "agent-desk",
         # What depends on what (024-idea-links.sql). Read with the column: it is a handful of
         # rows, and a card that fetched its own links would be a card that flickers.
         links=await store.idea_links(),
@@ -1247,6 +1279,7 @@ async def render_page(message: str = "") -> str:
             plans=await board_plans(rows, await board_kicks()),
             flagged=sum(1 for row in rows if row.hint.waiting),
             spent=await board_spent(),
+            focus=await store.setting(FOCUS_KEY),
         ),
         projects=projects,
         message=message,
@@ -1637,6 +1670,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 project=await _project_name(repo_key),
             ),
             status_code=200 if link else 404,
+        )
+    if kind == "sketch":
+        # A thing a drawing found in a project (078). What it is, its detail and where it was read,
+        # on the card itself — a block whose facts are one press away is a label.
+        drawn = await store.sketch_card(id)
+        return HTMLResponse(
+            env.get_template("_card_sketch.html").render(card=drawn),
+            status_code=200 if drawn else 404,
         )
     if kind == "step":
         # A card that is only a card. What it *is* lives in its role and that role's fields, both
@@ -2339,7 +2380,10 @@ async def ask(request: Request) -> Response:
             store,
             typed,
             stamped,
-            project=form.get("project", "").strip(),
+            # «Если проект выбран, то по умолчанию запросы адресованы именно ему.» The chosen
+            # project is the default and nothing more: cards on the bench still say what a message
+            # is about first (`aim`), and a project named in the form still wins.
+            project=form.get("project", "").strip() or await store.setting(FOCUS_KEY),
             session=form.get("session", "").strip(),
             # The cards sitting in the output field when Send was pressed, in the order they were
             # dropped. Empty is the ordinary case and means the whole board (docs/06-console.md).
@@ -4557,18 +4601,24 @@ async def attach_project(request: Request) -> Response:
 
 @router.post("/projects/focus", response_class=HTMLResponse)
 async def focus_project(request: Request) -> Response:
-    """Narrow the blockers and the ideas to one project, or open them up again.
+    """Choose the project being worked on, or choose none.
 
-    "Выбор проекта слева фильтрует блокеры и идеи; без выбора — всё." A board with six projects on
-    it has a right-hand column about all six, and when you are working on one of them that column
-    is mostly noise.
+    «У проектов должна быть кнопка выбрать. При выборе проекта мы видим его идеи, но он не
+    помещается на верстак. Если проект выбран, то по умолчанию запросы адресованы именно ему, если
+    не выбран и нет другого контекста на верстаке — agent-desk.»
 
-    Anything belonging to no project survives the narrowing: a thought typed with nothing on the
-    workbench is about whatever is in front of you, and a failed question belongs to no repository
-    at all. Hiding those behind a filter they were never part of would lose them.
+    What a choice changes, and what it does not: the idea column shows that project's thoughts, and
+    a message with nothing on the bench is addressed to it. The blockers stay everybody's — a
+    project somebody is not looking at can still stop — and the workbench is not touched, because
+    choosing what to work on is not the same act as putting something in front of you.
+
+    Pressing the chosen one again chooses none, which is the desk.
     """
     form = await _form(request)
-    await store.set_setting(FOCUS_KEY, form.get("key", "").strip())
+    chosen = form.get("key", "").strip()
+    if chosen and chosen == await store.setting(FOCUS_KEY):
+        chosen = ""
+    await store.set_setting(FOCUS_KEY, chosen)
     if _wants_fragment(request):
         # Both columns move together, because they are one decision.
         return HTMLResponse(await render_column())
@@ -5161,6 +5211,19 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
             started=False, detail="that session is not on the board any more"
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+    # A go-ahead was meant for the session that proposed the work, and it is the one thing a new
+    # agent cannot be handed: "бери в работу" sent from here started a dozen agents on 2026-09-10,
+    # each left to guess what "it" was. The same rule the workbench keeps
+    # (docs/04-threads-and-blocks.md), at the other door that reaches dispatch. A directive is the
+    # exception, because the workbench already applied that rule before it wrote one.
+    if not directive_id and block_runs.names_nothing(text_):
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail=f"«{text_}» names no work, and a new agent knows nothing of what that session "
+            "proposed — it would only have a guess at what to take on. Say what should be done, "
+            "or wait until the session is idle and send it the go-ahead.",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
     result = await asyncio.to_thread(
         dispatch.start,
@@ -5486,7 +5549,7 @@ async def _start_it(task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=autostart.project_of(task),
             **await autostart.about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,

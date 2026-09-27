@@ -52,7 +52,22 @@
 
 {% for project in projects %}
 <div class="project-slot">
-<details class="node card project{% if project.flagged %} flagged{% endif %}" open
+    {# «У проектов должна быть кнопка выбрать.» On the card rather than in its menu, because it is
+       the thing somebody does with a project most often — and beside the card's `<summary>` rather
+       than inside it, because a control inside a disclosure's summary is swallowed by the
+       disclosure, which is exactly what happened to the `⋯` before it moved out. A form, so it works with no script; and
+       `hx-swap="none"` with the column refreshed by its own trigger, because choosing a project must
+       not put it on the workbench — a click on the card head would. The pressed state is
+       `aria-pressed`, so it is a fact for a screen reader and not only a colour. #}
+    <form class="choose-project" method="post" action="/projects/focus"
+          hx-post="/projects/focus" hx-target="#idea-list" hx-swap="innerHTML">
+      <input type="hidden" name="key" value="{{ project.key }}">
+      <button type="submit" class="chip choose{% if focus == project.key %} on{% endif %}"
+              aria-pressed="{{ 'true' if focus == project.key else 'false' }}"
+              title="{{ 'chosen — its ideas are shown and a message is for it; press to choose none' if focus == project.key else 'work on this project: show its ideas and address messages to it' }}">
+        {{ "✓ chosen" if focus == project.key else "choose" }}</button>
+    </form>
+<details class="node card project{% if project.flagged %} flagged{% endif %}{% if focus == project.key %} chosen-project{% endif %}" open
          data-drop="project" data-project="{{ project.key }}"
          data-kind="project" data-id="{{ project.key }}" data-label="{{ project.name }}"
          draggable="true">
@@ -105,6 +120,20 @@
           <summary class="card-head">
             <span class="dot {{ row.session.status }}" aria-hidden="true"></span>
             <span class="card-name">{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</span>
+            {# Which kind of session this is, in the head, before anything else is read. One of them
+               can be written to from here and the other cannot (docs/adr/0009), and the only
+               difference used to be a slightly different blue dot — which is colour, and colour on
+               this page means status. #}
+            {% if row.session.kind in ("bg", "background") %}
+            <span class="pill session-kind bg" title="a background session — this console can continue it and answer it">background</span>
+            {% else %}
+            <span class="pill session-kind terminal" title="a session in a terminal — this console can read it and cannot write to it">terminal</span>
+            {% endif %}
+            {% if row.worktree %}
+            {# Shown under the checkout it works in now, so which of the checkout's worktrees is the
+               one thing the move would otherwise lose. #}
+            <span class="pill quiet worktree" title="working in .claude/worktrees/{{ row.worktree }} inside this checkout">⎇ {{ row.worktree }}</span>
+            {% endif %}
             <span class="age">{{ row.session.updated_at | ago }}</span>
           </summary>
 
@@ -274,17 +303,28 @@
             {% endif %}
 
             {% if row.tail and row.tail.agents %}
-            <div class="chips">
-              {% for agent in row.tail.agents[:5] %}
-              <span class="node chip agent{% if agent.running %} working{% endif %}"
-                    data-kind="agent" data-id="{{ row.session.session_id }}"
-                    data-label="{{ agent.kind }}: {{ agent.description }}" draggable="true"
-                    title="{{ agent.kind }}{{ ' · still running' if agent.running else '' }}">
+            {# The agents this session started, as children of it rather than a row of tags. The
+               transcript records each `Agent` call and whether its result came back; a call whose
+               result has not arrived is still running as far as this window can see, which is the
+               same limit everything else on this board has (docs/03-session-observation.md).
+               Running ones first: they are the ones that are still doing something. #}
+            {% set running = row.tail.agents | selectattr("running") | list %}
+            {% set back = row.tail.agents | rejectattr("running") | list %}
+            <ul class="children agents" aria-label="agents this session started">
+              {% for agent in (running + back)[:8] %}
+              <li class="node card agent{% if agent.running %} working{% endif %}"
+                  data-kind="agent" data-id="{{ row.session.session_id }}"
+                  data-label="{{ agent.kind }}: {{ agent.description }}" draggable="true"
+                  title="{{ agent.kind }}{{ ' · still running' if agent.running else ' · came back' }}">
                 <span class="dot {{ 'busy' if agent.running else 'done' }}" aria-hidden="true"></span>
+                <span class="agent-kind">{{ agent.kind }}</span>
                 <span class="node-name">{{ agent.description or agent.kind }}</span>
-              </span>
+              </li>
               {% endfor %}
-            </div>
+              {% if (running + back) | length > 8 %}
+              <li class="small quiet">and {{ (running + back) | length - 8 }} more</li>
+              {% endif %}
+            </ul>
             {% endif %}
           </div>
         </details>
@@ -306,16 +346,6 @@
       <span class="menu-what">New instance…</span>
       <span class="menu-why">a copy of the checkout with an agent working in it</span>
     </a>
-    {# Narrow the right-hand column to this one. A board with six projects on it has a column
-       about all six, and when you are working on one of them that column is mostly noise. #}
-    <form method="post" action="/projects/focus"
-          hx-post="/projects/focus" hx-target="#idea-list">
-      <input type="hidden" name="key" value="{{ project.key }}">
-      <button type="submit" class="menu-item">
-        <span class="menu-what">Show only this one</span>
-        <span class="menu-why">narrow the blockers and the ideas to {{ project.name }}</span>
-      </button>
-    </form>
     <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
       <span class="menu-what">Project settings</span>
       <span class="menu-why">services, environment, the queue</span>

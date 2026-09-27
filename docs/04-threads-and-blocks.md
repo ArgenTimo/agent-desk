@@ -44,7 +44,10 @@ nothing, because the text is in the block verbatim and recording it is one click
 from the board it was given, and then an agent starts on it in a worktree of its own
 ([adr/0006](adr/0006-the-desk-may-start-work.md)). A reply that names no project prepares the
 message and asks which one it meant: picking a repository to start work in would be a guess with a
-worktree at the end of it.
+worktree at the end of it. The same holds one step on, for *what*: a go-ahead and nothing else —
+"бери в работу", "take it on" — sent with an empty workbench names no work, so it starts nothing
+and asks what to take on. The same words with a card, an idea or a written note in front of them
+point at that, and are carried out like any other instruction.
 
 **And a request is not done until it is done.** Where something this program started is already
 running in that project, the work is written into the queue and the block says **waiting** — it

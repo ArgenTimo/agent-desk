@@ -212,7 +212,7 @@ def test_the_line_is_not_shown_on_a_folded_card() -> None:
     assert '.pin[data-view="hint"] .pin-came { display: none; }' in css
 
 
-# --- and when it last changed (078, 01M25VH7AXXJ1AT09AHE77J2W4) ------------------------------------
+# --- and when it last changed (079, 01M25VH7AXXJ1AT09AHE77J2W4) ------------------------------------
 def _function(console: str, head: str) -> str:
     body = console[console.index(head) :]
     return body[: body.index("\n}\n")]
@@ -244,8 +244,8 @@ async def test_a_card_that_never_changed_says_zero_rather_than_when_it_arrived(d
 
 
 @pytest.mark.unit
-async def test_an_undo_to_a_bench_saved_before_078_puts_it_back(desk: Store) -> None:
-    """The undo history is JSON written at the time, so every step recorded before 078 has no
+async def test_an_undo_to_a_bench_saved_before_079_puts_it_back(desk: Store) -> None:
+    """The undo history is JSON written at the time, so every step recorded before 079 has no
     `changed_at` in it — and the first undo after upgrading reads exactly one of those. A step from
     before 042 and 045 is missing `by_hand`, `came` and `came_at` the same way."""
     import json
