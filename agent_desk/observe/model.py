@@ -61,6 +61,25 @@ class Session(BaseModel):
         return Path(self.cwd).name or self.cwd
 
 
+class JobQuestion(BaseModel):
+    """One question a background job put to a human (`block.questions[]`, recorded at 2.1.267)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    question: str = ""
+
+
+class JobBlock(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    questions: list[JobQuestion] = []
+
+
+# Every `state` a job file has been seen to carry (tests/fixtures/job_state_*.json). One outside
+# this set is shown as a notice rather than guessed at (docs/adr/0004).
+JOB_STATES = frozenset({"working", "running", "blocked", "stopped", "done", "failed"})
+
+
 class JobEnd(BaseModel):
     """How one `claude --bg` job ended, from `~/.claude/jobs/<short>/state.json`.
 
@@ -80,10 +99,30 @@ class JobEnd(BaseModel):
     detail: str = ""
     tokens: int | None = None
     worktree_branch: str = Field(default="", alias="worktreeBranch")
+    # What a `blocked` job is waiting for, in its own words, and the questions it asked. The CLI
+    # writes these; they are facts about the job, not an inference from its silence.
+    needs: str | None = None
+    block: JobBlock | None = None
+    name: str = ""
+    cwd: str = ""
 
     @property
     def failed(self) -> bool:
-        return self.state == "failed"
+        """Over without having finished its work: it died, or somebody stopped it. A stopped job
+        is not a finished one, and settling it as done would close its task and its idea."""
+        return self.state in ("failed", "stopped")
+
+    @property
+    def waiting(self) -> bool:
+        """Blocked on a human — the CLI's own word for it, so the board may say it as a fact."""
+        return self.state == "blocked"
+
+    @property
+    def questions(self) -> int:
+        """How many things it is waiting to be told: its questions, or the one thing it `needs`."""
+        if self.block is not None and self.block.questions:
+            return len(self.block.questions)
+        return 1 if self.needs else 0
 
     @property
     def terminal(self) -> bool:
@@ -92,11 +131,12 @@ class JobEnd(BaseModel):
         Recorded rather than reasoned about: a `--bg` job reads `working` both while it holds a
         turn *and* while it sits at the prompt afterwards, and its process outlives either — so
         "the session is gone from the registry" never becomes true for an agent that succeeds.
-        `done` and `failed` are the two values the CLI writes when it is over, and both carry a
-        `firstTerminalAt`. Anything else is treated as still going, which is the safe direction:
-        a state this program has not seen must not end somebody's task.
+        `done`, `failed` and `stopped` are the values the CLI writes when it is over, and each
+        carries a `firstTerminalAt`. Anything else — `blocked` included, which can be answered and
+        carry on — is treated as still going, which is the safe direction: a state this program
+        has not seen must not end somebody's task.
         """
-        return self.state in ("done", "failed")
+        return self.state in ("done", "failed", "stopped")
 
 
 class RegistryRead(BaseModel):

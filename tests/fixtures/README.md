@@ -15,6 +15,10 @@ format has moved. A recorded one fails, with a name attached, on the day the CLI
 | `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `2.1.259` |
 | `job_state_failed.json` | `~/.claude/jobs/<short>/state.json` of a `--bg` job that died | `2.1.261` |
 | `job_state_done.json` | `~/.claude/jobs/<short>/state.json` of a `--bg` job that worked | `2.1.261` |
+| `job_state_blocked.json` | a `--bg` job waiting on a human (`needs`, `suggestedReply`) | `2.1.273` |
+| `job_state_stopped.json` | a `--bg` job ended by `claude stop`, with `block.questions` | `2.1.267` |
+| `job_state_running.json` | a `--bg` job mid-turn | `2.1.273` |
+| `job_state_working.json` | a `--bg` job at its prompt (re-recorded) | `2.1.273` |
 
 ## What was scrubbed, and what was not
 

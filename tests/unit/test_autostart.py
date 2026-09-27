@@ -588,6 +588,33 @@ async def test_an_agent_that_died_before_it_ran_does_not_mark_its_ideas_built(
 
 
 @pytest.mark.unit
+async def test_an_agent_somebody_stopped_is_not_counted_as_work_done(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`claude stop` writes `stopped`: over, but its work was not finished (B1). Settling it as
+    done would mark its idea built — the same mistake as the six that died before they ran."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "stopped1")
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: JobEnd(state="stopped"))
+
+    assert await autostart.settle(desk, set()) == []
+
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+    stopped = next(one for one in await desk.tasks() if one.id == task.id)
+    assert stopped.failed_at is not None and stopped.finished_at is None
+    assert stopped.detail == "its agent was stopped before it finished"
+
+
+@pytest.mark.unit
 async def test_two_agents_that_die_in_a_row_disarm_the_project(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,30 +1,24 @@
 {
-  "state": "working",
+  "state": "running",
   "detail": "what it was doing",
   "tempo": "idle",
-  "inFlight": {
-    "tasks": 0,
-    "queued": 1,
-    "kinds": [],
-    "drainableMonitors": 0
-  },
   "fan": [
     {
       "id": "scrubbed",
       "kind": "scrubbed",
       "label": "an option",
-      "startedAt": 1789555423126,
-      "doneAt": 1789556320574,
-      "failed": true
+      "startedAt": 1789555407212,
+      "doneAt": 1789555797739
     }
   ],
-  "tokens": 4977,
+  "tokens": 9459,
   "output": null,
   "children": null,
-  "linkScanOffset": 411922,
+  "linkScanOffset": 614121,
   "linkScanPath": "/home/someone/.claude/projects/-home-someone-a-project/a-transcript.jsonl",
   "template": "bg",
   "respawnFlags": [],
+  "providerEnv": {},
   "intent": "what somebody asked for",
   "name": "a short name the cli made up",
   "nameSource": "auto",
@@ -33,9 +27,8 @@
   "daemonShort": "22222222",
   "cliVersion": "2.1.273",
   "cwd": "/home/someone/a-project",
-  "providerEnv": {},
-  "backend": "daemon",
   "createdAt": "2026-09-20T10:00:00.000Z",
   "updatedAt": "2026-09-20T10:05:00.000Z",
-  "firstTerminalAt": "2026-09-20T10:05:00.000Z"
+  "firstTerminalAt": null,
+  "backend": "daemon"
 }

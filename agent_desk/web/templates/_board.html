@@ -12,6 +12,23 @@
 {% endfor %}
 {% endif %}
 
+{# Background jobs the CLI itself marked `blocked` (B1). Not "may want you": the job file says it
+   is waiting on a human and what for, so this is said as a fact. Answering stays in a terminal —
+   `claude attach` — because writing into a session is not something this board does. #}
+{% if waiting_jobs %}
+<details class="waiting-jobs">
+  <summary class="notice small"><strong>{{ waiting_jobs | length }} background job{{ "" if waiting_jobs | length == 1 else "s" }} waiting on you</strong>
+    · {{ waiting_questions }} question{{ "" if waiting_questions == 1 else "s" }}</summary>
+  <ul class="small">
+    {% for one in waiting_jobs %}
+    <li><code>claude attach {{ one.short_id }}</code>
+      <span class="dim">{{ one.job.name or one.short_id }}{% if one.job.cwd %} · {{ one.job.cwd.rstrip("/").split("/")[-1] }}{% endif %}</span>
+      {% if one.job.needs %}<br><span>{{ one.job.needs | truncate(200) }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
 <div class="tree-head">
   <span class="tree-count">{{ rows | length }} session{{ "" if rows | length == 1 else "s" }}</span>
   {# Of those, the ones this console started. A board of thirty-six that says nothing about which

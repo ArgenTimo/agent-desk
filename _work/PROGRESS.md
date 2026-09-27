@@ -22,7 +22,7 @@ Isolated test run until A1 was merged (and still used for every gate here):
 | 8 | A2 prod instance | done | `a2-prod-instance`; tags desk-20260927-rc1 → desk-20260927 | installed at ~/opt/agent-desk-prod, unit agent-desk.service enabled; http 200; `kill <MainPID>` → back under a new pid in <7 s; `touch` in the dev checkout → same pid; test_prod_unit.py (no --reload, Restart=always); `prod-update` exercised rc1 → final tag | Restart=always instead of on-failure (D11) |
 | 9 | A6 AGENT_DESK_HANDS | done | #25 | tests/unit/test_hands.py (8; mutations: no check in dispatch.start → fails, loops ungated → fails); suite runs with HANDS=on in conftest so the agent paths keep their tests | kicking buttons left drawn: kicking is deleted in S1 |
 | 10 | S2 appraise switch | done | #26 | test_hands: default off; lifespan with appraise off runs only `later`, with on runs appraising too | |
-| 11 | B1 jobs blocked/stopped | todo | | | |
+| 11 | B1 jobs blocked/stopped | done | `b1-jobs-blocked` | fixtures blocked/stopped/running (+working re-recorded) from ~/.claude/jobs, structure only; test_jobs + test_autostart (stopped ≠ done; mutation fails 2); real ~/.claude/jobs: 203 waiting, 202 questions, 0 unknown states; isolated gate 2772 passed | `blocked` has `needs`, not `block.questions` — questions counted from `block.questions` when present, else 1 per `needs` |
 | 12 | B2 fixtures on current CLI | todo | | | |
 | 13 | B7 `claude agents --json` | todo | | | |
 | 14 | B4 go to session | todo | | | |
