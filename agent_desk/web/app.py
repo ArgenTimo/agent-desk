@@ -22,7 +22,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from agent_desk import lock
 from agent_desk.answer import session
+from agent_desk.config import settings
 from agent_desk.web import autostart, blocks, engine, kicking, later, routes, sse
 from agent_desk.web.origin import guard
 
@@ -38,6 +40,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     waiting for it — a console that will not close while three questions are in the air is the
     same failure as one that will not close while a browser is watching the board.
     """
+    # Before the store: a second console on this data directory refuses here, before it can
+    # recover (and so fail) the first one's running blocks (agent_desk/lock.py).
+    with lock.hold(settings.data_dir):
+        async with _console():
+            yield
+
+
+@asynccontextmanager
+async def _console() -> AsyncIterator[None]:
     await routes.store.open()
     # What the asking costs, counted against the day's ceiling (043-spending.sql). Attached the
     # same way the run group is and for the same reason: every model call in this program goes
