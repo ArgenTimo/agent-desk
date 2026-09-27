@@ -55,6 +55,7 @@ import structlog
 
 from agent_desk import allowed, checking, dispatch, engines, land, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
+from agent_desk.config import settings
 from agent_desk.ideas import waking
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Run, RunStep, Store
@@ -113,6 +114,8 @@ async def begin(
     `given` is what somebody typed to start it, which the steps can then read (057). A pipeline is
     a shape run more than once with different inputs, so the input belongs to the run.
     """
+    if not settings.hands:
+        return None, "the workbench engine is off here (AGENT_DESK_HANDS is off)"
     cards = await bench_of(store, names)
     why = process.ready_to_run(cards, await lines_of(store, names))
     if why:

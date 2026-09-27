@@ -68,6 +68,10 @@ make overlay          # the same page in its own always-on-top window
 Nothing here needs a server, a database daemon, a container or a network. One process, one SQLite
 file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
+**It starts no agents unless told to.** With `AGENT_DESK_HANDS` unset (or `off`) the console does
+not dispatch, run the autostart, kicking or workbench-engine loops, or draw the buttons for them —
+it watches and keeps ideas. `AGENT_DESK_HANDS=on` brings those back.
+
 ## Using it with your projects
 
 **There is nothing to connect.** This is the part that is easy to miss, so it is worth stating

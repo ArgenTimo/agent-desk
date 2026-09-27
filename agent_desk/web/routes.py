@@ -279,6 +279,8 @@ def _stamped(name: str) -> str:
 
 
 env.globals["stamped"] = _stamped
+# Whether this console starts agents (config.py, `hands`): a button it would refuse is not drawn.
+env.globals["hands"] = settings.hands
 env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens

@@ -18,9 +18,9 @@ Isolated test run until A1 was merged (and still used for every gate here):
 | 4 | U1 PR/branch/worktree cleanup | done (branch deletion → human H3) | merged #20 (with the fuller ../agent-desk-shift patch), #18, #13, #16 (migration renumbered 079); closed #15 #8 #21 #3 #17 #12 #11 #5 | open PRs 18→5 (#19 #10 #9 #7 #6, all frozen agent-launch/engine work); worktrees 32→3; `uniq -d` over migration numbers empty; each merge after an isolated green gate | local branch/stash deletion refused by auto-mode classifier → H3 |
 | 5 | A4 safe migrations | done | #22 (ed9b93f) | 9 tests in test_migrate.py (mutations: name check off → 2 fail; checks outside txn → 1 fails); isolated gate 2741 passed; live DB backed up (`~/agent-desk-salvage/agent-desk.db.before-a4`), restore verified, reconciled (D8); a copy opens with main, nothing pending | |
 | 6 | A3 flock + recover=False | done | #23 | tests/unit/test_one_process.py 5 tests (mutations: MCP recover=True → fails; lifespan without lock → fails); live smoke: two `python -m agent_desk` on one temp data_dir — second exits with `AlreadyRunning … pid N …`, first still serves 200 | uvicorn exits 0 on a refused startup |
-| 7 | A5 dev isolated by default | done | `a5-dev-isolated` | tests/unit/test_make_run.py (3, read from `make -n`); live: `make run` served 200 on :9055 with data in ./.desk-data, live DB mtime unchanged | also fixed: `make share` never passed its AGENT_DESK_SHARE_* vars (a VAR= prefix went to `unset`) |
-| 8 | A2 prod instance | todo | | | |
-| 9 | A6 AGENT_DESK_HANDS | todo | | | |
+| 7 | A5 dev isolated by default | done | #24 | tests/unit/test_make_run.py (3, read from `make -n`); live: `make run` served 200 on :9055 with data in ./.desk-data, live DB mtime unchanged | also fixed: `make share` never passed its AGENT_DESK_SHARE_* vars (a VAR= prefix went to `unset`) |
+| 8 | A2 prod instance | todo — moved after A6/S2 (D9) | | | |
+| 9 | A6 AGENT_DESK_HANDS | done | `a6-hands-off` | tests/unit/test_hands.py (8; mutations: no check in dispatch.start → fails, loops ungated → fails); suite runs with HANDS=on in conftest so the agent paths keep their tests | kicking buttons left drawn: kicking is deleted in S1 |
 | 10 | S2 appraise switch | todo | | | |
 | 11 | B1 jobs blocked/stopped | todo | | | |
 | 12 | B2 fixtures on current CLI | todo | | | |

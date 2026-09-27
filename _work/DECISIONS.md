@@ -49,3 +49,15 @@ named 78 `078-a-thing-drawn-from-the-project.sql` and 79 `079-when-a-card-last-c
 with the sqlite backup API; a restored copy matched the live one table for table.
 Undo (console stopped):
 `cp ~/agent-desk-salvage/agent-desk.db.before-a4 ~/.local/share/agent-desk/agent-desk.db && rm -f ~/.local/share/agent-desk/agent-desk.db-{wal,shm}`
+
+## D9 · A6 and S2 before A2
+A2 installs a systemd unit that starts the console at once from a tag. Before A6 that console
+would run the autostart/kicking/engine loops, and before S2 the appraise loop spends model calls on
+the idea pool in the background. So A6 and S2 land first and A2 installs a tag that has both.
+
+## D10 · Hands off: one refusal in `dispatch.start`, plus hidden buttons
+Every path that starts an agent ends in `dispatch.start` (routes, blocks, autostart, the engine),
+so the refusal lives there, and `engine.begin` refuses a run. Buttons hidden: "Get it started",
+"Start it now", "Have an agent do it instead", "take it on", the autostart switch, and the card's
+"run from here". The kicking buttons are left, since S1 deletes kicking. The suite runs with
+`AGENT_DESK_HANDS=on` (conftest) so the frozen paths keep their tests. Undo: `AGENT_DESK_HANDS=on`.

@@ -57,33 +57,30 @@ async def _console() -> AsyncIterator[None]:
     try:
         async with asyncio.TaskGroup() as group:
             blocks.runs.attach(group)
-            # The loop that starts queued work lives here rather than in a daemon: it runs while
-            # the console does and stops when it stops, which is the simplest kill switch there is
-            # (docs/adr/0007). On a console where nothing is armed it wakes, finds no armed
-            # project, and sleeps again.
-            watching = group.create_task(autostart.run(routes.store))
-            # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
-            # Same lifetime, same kill switch: it runs while the console does.
-            nudging = group.create_task(kicking.run(routes.store))
+            loops: list[asyncio.Task[None]] = []
+            if settings.hands:
+                # The loop that starts queued work lives here rather than in a daemon: it runs
+                # while the console does and stops when it stops, which is the simplest kill
+                # switch there is (docs/adr/0007). On a console where nothing is armed it wakes,
+                # finds no armed project, and sleeps again.
+                loops.append(group.create_task(autostart.run(routes.store)))
+                # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
+                loops.append(group.create_task(kicking.run(routes.store)))
+                # And the one that walks a drawing somebody pressed run on (037-runs.sql). It
+                # only ever queues; the loop above is what actually starts anything.
+                loops.append(group.create_task(engine.run(routes.store)))
             # And the pass that reads the idea pool, so a list of sixty is a list
             # somebody can scan (agent_desk/ideas/appraise.py).
-            reading = group.create_task(kicking.appraising(routes.store))
+            loops.append(group.create_task(kicking.appraising(routes.store)))
             # And the one that brings back what somebody put off until a moment that has now
             # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
             # would be a daemon, and this program does not have one.
-            recalling = group.create_task(later.run(routes.store))
-            # And the one that walks a drawing somebody pressed run on (037-runs.sql). It only
-            # ever queues; the loop above is what actually starts anything, under the rules that
-            # were already there.
-            walking = group.create_task(engine.run(routes.store))
+            loops.append(group.create_task(later.run(routes.store)))
             try:
                 yield
             finally:
-                watching.cancel()
-                nudging.cancel()
-                reading.cancel()
-                recalling.cancel()
-                walking.cancel()
+                for loop in loops:
+                    loop.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

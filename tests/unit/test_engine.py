@@ -411,7 +411,8 @@ def test_the_engine_is_held_open_and_cancelled_with_the_others() -> None:
     )
 
     assert "engine.run(routes.store)" in app
-    assert "walking.cancel()" in app
+    assert "loops.append(group.create_task(engine.run(routes.store)))" in app
+    assert "loop.cancel()" in app
 
 
 @pytest.mark.unit
