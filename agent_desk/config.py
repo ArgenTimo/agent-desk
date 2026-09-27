@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     # hard. Zero switches it off for anybody who would rather find out at the end of the month.
     daily_usd: float = 25.0
 
+    # --- Hands: whether this console starts agents at all (A6 in _research/06_backlog.md). -----
+    # Off by default. What the tool is for is looking — the board and the inbox — and the parts that
+    # start agents (dispatch, autostart, the workbench engine, kicking) are frozen rather than
+    # grown: locally `claude --bg` already does it, and for tickets it belongs to ai-worker. Off,
+    # `dispatch.start` refuses, the loops that start work are not run, and the buttons are not
+    # drawn. `AGENT_DESK_HANDS=on` brings all of it back as it was.
+    hands: bool = False
+
     @property
     def registry_glob(self) -> str:
         """`*.json`, never `*`. See the module docstring."""

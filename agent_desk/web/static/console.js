@@ -796,7 +796,8 @@ function isAStep(holder) {
 
 function showRunFrom(holder) {
   const button = holder.querySelector('.pin-run');
-  if (button) button.hidden = !isAStep(holder);
+  // A console that does not start agents does not offer to (AGENT_DESK_HANDS, config.py).
+  if (button) button.hidden = !isAStep(holder) || document.body.dataset.hands !== 'on';
 }
 
 async function runFromHere(holder) {

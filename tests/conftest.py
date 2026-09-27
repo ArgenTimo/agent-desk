@@ -39,6 +39,9 @@ _ELSEWHERE = Path(tempfile.mkdtemp(prefix="agent-desk-suite-"))
 os.environ["AGENT_DESK_CLAUDE_HOME"] = str(_ELSEWHERE / "claude")
 os.environ["AGENT_DESK_DATA_DIR"] = str(_ELSEWHERE / "data")
 os.environ["AGENT_DESK_CLAUDE_BIN"] = str(_ELSEWHERE / "claude-is-never-run-by-this-suite")
+# The suite exercises the agent-starting paths, which a console runs only with hands on (A6). It
+# is safe to say so here because the CLI above does not exist; `test_hands.py` asserts the default.
+os.environ["AGENT_DESK_HANDS"] = "on"
 
 
 def pytest_sessionfinish() -> None:

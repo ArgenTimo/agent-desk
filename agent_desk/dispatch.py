@@ -42,6 +42,9 @@ NEVER: tuple[str, ...] = (
 START_TIMEOUT_SECONDS = 60.0
 
 
+HANDS_OFF = "this console does not start agents (AGENT_DESK_HANDS is off) — `claude --bg` does"
+
+
 @dataclass(frozen=True)
 class Started:
     """What came back. `agent_id` is the short id `claude attach|logs|stop` take."""
@@ -431,6 +434,8 @@ def start(
     """
     if not instruction.strip():
         return Started(False, detail="there is nothing written to send")
+    if not settings.hands:
+        return Started(False, detail=HANDS_OFF)
     directory = Path(cwd)
     if not directory.is_dir():
         return Started(False, detail=f"{cwd} is not a directory on this machine any more")
