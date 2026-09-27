@@ -214,16 +214,16 @@
 </details>
 {% endmacro %}
 
-{% if only %}
-{# The column is narrowed. It says so rather than looking empty, and the way back out is here
-   rather than somewhere else on the page. #}
+{# Whose ideas these are, and who a message typed now is for — one sentence, because it is one
+   decision. «При выборе проекта мы видим его идеи… если не выбран и нет другого контекста на
+   верстаке — agent-desk.» Cards on the workbench still say what a message is about first, which is
+   why this is "by default". #}
 <form class="focus-banner" method="post" action="/projects/focus"
       hx-post="/projects/focus" hx-target="#idea-list">
   <input type="hidden" name="key" value="">
-  <span>showing <strong>{{ only_named }}</strong> only</span>
-  <button type="submit">show everything</button>
+  <span>ideas of <strong>{{ addressed }}</strong> · a message goes to <strong>{{ addressed }}</strong> unless the workbench says otherwise</span>
+  {% if only %}<button type="submit" title="choose no project — the desk itself">choose none</button>{% endif %}
 </form>
-{% endif %}
 {# The way back from a press. Discard takes an idea out of the column, and before this the only
    way back was to go and find it in the inbox — a different page and a different frame of mind,
    which in practice means nobody does it and the press quietly becomes permanent. It shows where

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import re
 import time
 from collections.abc import AsyncIterator
@@ -24,6 +25,7 @@ from agent_desk.web import routes, sse
 from jinja2 import UndefinedError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+TEMPLATES = Path(routes.TEMPLATES)
 MINUTE = 60_000
 
 pytestmark = pytest.mark.skipif(
@@ -922,3 +924,220 @@ async def test_a_template_is_formatted_off_the_event_loop(wired: Store) -> None:
     assert max(held) < 0.05, (
         f"the loop was held for {max(held) * 1000:.0f}ms while a template was formatted"
     )
+
+
+# --- what a session is costing the machine (docs/stories/09) ---------------------------------------
+@pytest.mark.unit
+def test_a_card_says_what_its_session_is_holding(home: Home) -> None:
+    """This arrived by happening: the machine ran out of memory twice during this work and killed a
+    test run and the console itself. Thirty sessions were holding eight gigabytes between them and
+    the board, which was open the whole time, said nothing about any of it.
+
+    A reading of the file beside the one the liveness check already opens, not an inference.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    rows, _ = routes.board()
+
+    assert rows[0].holding, "the board carries no reading of what the session holds"
+    assert rows[0].holding > 1024 * 1024, "a live python process holding under a megabyte"
+    assert re.search(r">(\d+ MB|[\d.]+ GB)<", routes.render_board()), (
+        "the number is read and never shown"
+    )
+
+
+@pytest.mark.unit
+def test_a_process_the_machine_will_not_speak_about_gets_no_number_invented(
+    home: Home, tmp_path: pathlib.Path
+) -> None:
+    """A system where that file is not what this program expects gets no pill, rather than a wrong
+    number — the same rule as everywhere else on this board."""
+    from agent_desk.observe import registry as reader
+
+    assert reader.resident_bytes(999_999) is None
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+    empty = tmp_path / str(os.getpid())
+    empty.mkdir()
+    (empty / "statm").write_text("not what this expects\n")
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+
+@pytest.mark.unit
+def test_the_page_size_is_asked_of_the_system_and_not_assumed() -> None:
+    """It is a kernel build option. A number wrong by a factor of four on somebody's machine is
+    worse than no number."""
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text()
+
+    body = source[source.index("def resident_bytes(") :]
+    body = body[: body.index("\n\n\n")]
+    assert "4096" not in body, "the page size is written into the arithmetic"
+    assert "_PAGE_BYTES" in body
+    assert "sysconf" in source
+
+
+@pytest.mark.unit
+def test_what_a_session_holds_is_said_the_way_a_person_says_it() -> None:
+    assert routes._megabytes(None) == ""
+    assert routes._megabytes(0) == ""
+    assert routes._megabytes(560 * 1024 * 1024) == "560 MB"
+    assert routes._megabytes(1536 * 1024 * 1024) == "1.5 GB"
+    # Whole megabytes below a gigabyte: nothing here is decided at a finer resolution, and a number
+    # that changes on every tick is one nobody reads.
+    assert routes._megabytes(int(111.4 * 1024 * 1024)) == "111 MB"
+
+
+@pytest.mark.unit
+def test_nothing_on_the_board_adds_those_numbers_up() -> None:
+    """A resident set counts every shared page in full, so adding thirty of them counts the pages
+    they share thirty times. Measured on the author's machine: the sum was 8.43 GiB where the
+    proportional figure was 5.63 — an overstatement of a third.
+
+    The honest total is in `smaps_rollup` and costs two hundred and fifty times as much to read, on
+    a surface that renders every two seconds — which is the cost `docs/stories/05` was about
+    removing. So there is no total, and this is what says so.
+    """
+    board = (TEMPLATES / "_board.html").read_text(encoding="utf-8")
+
+    assert "holding" in board
+    assert "sum(" not in board and "| sum" not in board, (
+        "the board totals what must not be totalled"
+    )
+    # And the expensive honest reading has not crept onto a surface that renders every two seconds.
+    # It is named in the docstring on purpose — that is where the decision is written down — so
+    # this asserts it is not *opened*, which is the thing that would cost 274ms a tick.
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"smaps_rollup"' not in source and "'smaps_rollup'" not in source, (
+        "the proportional reading is being opened, at two hundred and fifty times the cost"
+    )
+
+
+# --- a project as it actually is (docs/stories/10) ---------------------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cwd", "home", "worktree"),
+    [
+        ("/home/a/proj", "/home/a/proj", ""),
+        ("/home/a/proj/.claude/worktrees/beri-v-rabotu", "/home/a/proj", "beri-v-rabotu"),
+        # Somewhere deeper inside a worktree is still that worktree's work.
+        ("/home/a/proj/.claude/worktrees/w/src/pkg", "/home/a/proj", "w"),
+        # A worktree somebody made beside the checkout is a copy of its own.
+        ("/home/a/proj-shift", "/home/a/proj-shift", ""),
+        # The directory that holds worktrees is not itself one.
+        ("/home/a/proj/.claude/worktrees", "/home/a/proj/.claude/worktrees", ""),
+    ],
+)
+def test_where_a_session_works_is_read_from_its_path(cwd: str, home: str, worktree: str) -> None:
+    assert routes.where_it_works(cwd) == (home, worktree)
+
+
+@pytest.mark.unit
+def test_a_background_session_is_shown_under_the_checkout_its_worktree_belongs_to(
+    home: Home,
+) -> None:
+    """`claude --bg --worktree <name>` runs inside the checkout it was started from, and grouping by
+    working directory made every one an instance beside that checkout. Twenty-three of them, for one
+    checkout, on the author's board."""
+    person, agent = _live_pids(2)
+    home.session(person, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(
+        agent,
+        "bbbbbbbb-0000-4000-8000-000000000002",
+        cwd="/home/dev/alpha/.claude/worktrees/fix-the-parser",
+        kind="bg",
+    )
+
+    projects = routes.shape(routes.board()[0], [])
+    instances = [one for project in projects for one in project.instances]
+
+    assert [one.path for one in instances] == ["/home/dev/alpha"]
+    assert len(instances[0].rows) == 2
+    worktrees = {row.session.session_id[:8]: row.worktree for row in instances[0].rows}
+    assert worktrees == {"aaaaaaaa": "", "bbbbbbbb": "fix-the-parser"}
+    assert "⎇ fix-the-parser" in routes.render_board()
+
+
+@pytest.mark.unit
+def test_another_checkout_of_the_same_repository_is_still_an_instance_of_its_own(
+    home: Home,
+) -> None:
+    """A copy made beside the checkout is a copy of the project on this machine, which is what an
+    instance is. Only the CLI's scratch space inside a checkout is folded into it."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha-review")
+
+    paths = sorted(
+        one.path for project in routes.shape(routes.board()[0], []) for one in project.instances
+    )
+
+    assert paths == ["/home/dev/alpha", "/home/dev/alpha-review"]
+
+
+@pytest.mark.unit
+def test_a_session_card_says_which_kind_it_is_in_its_head(home: Home) -> None:
+    """One can be written to from here and the other cannot (docs/adr/0009). The only difference
+    used to be a slightly different blue dot."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/a", kind="bg")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/b", kind="interactive")
+
+    html = routes.render_board()
+
+    heads = re.findall(r'<summary class="card-head">(.*?)</summary>', html, re.S)
+    kinds = [re.search(r'session-kind (bg|terminal)"', head) for head in heads]
+    assert sorted(found.group(1) for found in kinds if found) == ["bg", "terminal"], (
+        "a session card does not say in its head which kind of session it is"
+    )
+
+
+@pytest.mark.unit
+def test_the_agents_a_session_started_are_children_of_it(home: Home) -> None:
+    """The transcript records each `Agent` call and whether it came back. They were a row of tags at
+    the bottom of the card, indistinguishable from the pills beside them."""
+    session_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    home.session(os.getpid(), session_id, cwd="/home/dev/alpha")
+    home.transcript(
+        session_id,
+        {
+            "type": "assistant",
+            "isSidechain": False,
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Agent",
+                        "input": {"subagent_type": "Explore", "description": "map the modules"},
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_2",
+                        "name": "Agent",
+                        "input": {"subagent_type": "reviewer", "description": "review the diff"},
+                    },
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "isSidechain": False,
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}],
+            },
+        },
+    )
+
+    html = routes.render_board()
+
+    children = html[html.index('<ul class="children agents"') :]
+    children = children[: children.index("</ul>")]
+    names = re.findall(r'<span class="node-name">(.*?)</span>', children)
+    assert names == ["review the diff", "map the modules"], (
+        "the agents are not children of the session, or the running one is not first"
+    )
+    assert 'class="node card agent working"' in children
