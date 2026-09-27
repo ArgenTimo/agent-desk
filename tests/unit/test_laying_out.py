@@ -48,16 +48,21 @@ def test_the_page_is_handed_the_order_rather_than_keeping_a_copy() -> None:
 
 
 @pytest.mark.unit
-async def test_what_is_served_is_what_the_diagram_uses() -> None:
+async def test_what_is_served_is_what_the_diagram_uses(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The workbench diagram and "lay it out again" put a card in the same column, because they
     are given the same list. Two orders would mean a card moved when you tidied up."""
+    from agent_desk.store.repo import Store
     from agent_desk.web import routes
 
-    await routes.store.open()
+    store = Store(tmp_path / "agent-desk.db")
+    monkeypatch.setattr(routes, "store", store)
+    await store.open()
     try:
         page = await routes.render_page()
     finally:
-        await routes.store.close()
+        await store.close()
 
     said = page[page.index('id="bench-columns"') :]
     served = json.loads(said[said.index(">") + 1 : said.index("</script>")])
