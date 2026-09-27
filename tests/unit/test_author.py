@@ -28,6 +28,9 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
     store = Store(tmp_path / "agent-desk.db")
     await store.open()
     monkeypatch.setattr(routes, "store", store)
+    # Every idea in this file belongs to KEY, and the idea column is the chosen project's
+    # (docs/stories/11) — so these tests look at KEY's column, which is the column they are about.
+    await store.set_setting(routes.FOCUS_KEY, KEY)
     yield store
     await store.close()
 

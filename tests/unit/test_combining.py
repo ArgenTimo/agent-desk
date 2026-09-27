@@ -437,7 +437,9 @@ async def test_a_typed_message_is_still_read(desk: Store, monkeypatch: pytest.Mo
         read.append(said)
         return "idea"
 
-    async def recorded(store: Store, block: object, rows: object) -> None:
+    async def recorded(
+        store: Store, block: object, rows: object, *, say: str = "", project: str = ""
+    ) -> None:
         return None
 
     monkeypatch.setattr(blocks.classifier, "kind", reads)

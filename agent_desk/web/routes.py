@@ -20,10 +20,11 @@ import hashlib
 import io
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs
 
 import structlog
@@ -86,8 +87,9 @@ from agent_desk.observe.model import (
     now_ms,
     since,
     triage_rank,
+    whose,
 )
-from agent_desk.observe.shape import repository_of
+from agent_desk.observe.shape import repository_of, where_it_works
 from agent_desk.store import repo
 from agent_desk.store.repo import (
     DRAFT_KINDS,
@@ -210,6 +212,21 @@ def _plainly(status: str) -> str:
     return PLAINLY.get(status, status)
 
 
+def _megabytes(size: int | None) -> str:
+    """What a process is holding, the way a person says it: 560 MB, 1.4 GB.
+
+    Rounded to whole megabytes below a gigabyte, because nothing here is decided at a finer
+    resolution and a number that changes every tick is one nobody reads. Powers of 1024, because
+    that is what the kernel counted in.
+    """
+    if not size:
+        return ""
+    mb = size / 1024 / 1024
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.0f} MB"
+
+
 def _tokens(count: int | None) -> str:
     """A context size the way a person says it: 767k, 12k, 900."""
     if not count:
@@ -265,6 +282,7 @@ env.globals["stamped"] = _stamped
 env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens
+env.filters["megabytes"] = _megabytes
 env.filters["plainly"] = _plainly
 env.filters["prose"] = _prose
 env.filters["ago"] = _ago
@@ -276,6 +294,8 @@ env.filters["at"] = _at
 env.filters["stopped"] = telling.stopped
 # What this console decided a message was, in words rather than as a class on the article.
 env.filters["taken_as"] = telling.taken_as
+env.filters["by_kind"] = telling.carried_by_kind
+env.filters["shape_of"] = telling.carried_shape
 
 
 @dataclass(frozen=True)
@@ -289,6 +309,28 @@ class BoardRow:
     # without the shape being rebuilt to answer the question.
     project_key: str = ""
     project_name: str = ""
+    # What the machine says this session is holding, or `None` where it would not say. A reading of
+    # the file beside the one the liveness check opens, and never a judgement about the number
+    # (agent_desk/observe/registry.py).
+    holding: int | None = None
+    # The worktree this session runs in, when it runs in one the CLI made inside a checkout —
+    # `<checkout>/.claude/worktrees/<name>`. Kept on the row because the row is shown under the
+    # checkout now, and "which of the checkout's worktrees" is the one thing that move would lose.
+    worktree: str = ""
+    # Whether this console started it, merely found it, or a person is sitting in it. A fact for
+    # the first, a reading of the registry for the other two, and never a guess about which piece
+    # of work an agent it did not start belongs to (CLAUDE.md, rule five).
+    #
+    # Empty means the question was not asked. Most callers of `board` want the rows in order to
+    # find the sessions a question is about and have no use for this; a default of `"agent"` would
+    # have every one of them quietly asserting something nobody looked up, which is the same rule
+    # broken to make a field tidier.
+    whose: str = ""
+
+
+# More sessions in one directory than anybody reads one by one. Six because a checkout with a
+# person and a handful of agents in it is still a list; twenty-three is a wall.
+MANY_IN_ONE_PLACE = 6
 
 
 @dataclass(frozen=True)
@@ -306,6 +348,27 @@ class Instance:
     @property
     def flagged(self) -> int:
         return sum(1 for row in self.rows if row.hint.waiting)
+
+    @property
+    def mine(self) -> int:
+        """Sessions somebody is sitting in. A person's own terminal is not a thing to answer."""
+        return sum(1 for row in self.rows if row.whose == "person")
+
+    @property
+    def ours(self) -> int:
+        """Agents this console started and is therefore answerable for."""
+        return sum(1 for row in self.rows if row.whose == "ours")
+
+    @property
+    def crowded(self) -> bool:
+        """Whether this directory holds more sessions than anybody scans.
+
+        One worktree on a real console held twenty-three, and the whole board — thirty-six rows —
+        was mostly that one directory rendered out flat. Folded rather than hidden: the head says
+        how many are inside, and one press opens it. A board that quietly showed twelve of
+        thirty-six would be wrong in a way nobody can see.
+        """
+        return len(self.rows) > MANY_IN_ONE_PLACE
 
 
 @dataclass(frozen=True)
@@ -339,7 +402,8 @@ def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) 
     """
     by_directory: dict[str, list[BoardRow]] = {}
     for row in rows:
-        by_directory.setdefault(row.session.cwd, []).append(row)
+        home, worktree = where_it_works(row.session.cwd)
+        by_directory.setdefault(home, []).append(replace(row, worktree=worktree))
 
     instances = [
         Instance(path=path, name=Path(path).name or path, rows=rows_here)
@@ -435,15 +499,29 @@ def shape(rows: list[BoardRow], groups: list[Group], seen: Sequence[Seen] = ()) 
     return projects
 
 
-def board() -> tuple[list[BoardRow], list[str]]:
-    """Read the registry, then the tail of each live session. Blocking; call it in a thread."""
+def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str]]:
+    """Read the registry, then the tail of each live session. Blocking; call it in a thread.
+
+    `ours` is the short ids this console recorded against tasks it dispatched, handed in for the
+    same reason `spent` is handed to `render_board`: this runs in a thread and the store is not
+    here. `None` means the question was not asked and every row says so, rather than a default
+    that would have thirty callers asserting something none of them looked up.
+    """
     read = registry.read_registry()
     now = now_ms()
     rows: list[BoardRow] = []
     for session in read.sessions:
         tail = transcript.read_tail(session.session_id)
         hint = attention_hint(session, tail, now=now, after_seconds=settings.idle_hint_seconds)
-        rows.append(BoardRow(session=session, tail=tail, hint=hint))
+        rows.append(
+            BoardRow(
+                session=session,
+                tail=tail,
+                hint=hint,
+                whose="" if ours is None else whose(session, ours),
+                holding=registry.resident_bytes(session.pid),
+            )
+        )
     # Triage first; within a group, most recent movement first, and the name to keep the order
     # stable between two ticks that are otherwise identical.
     rows.sort(key=lambda r: (triage_rank(r.session, r.hint), -r.session.updated_at, r.session.name))
@@ -511,6 +589,16 @@ async def board_plans(rows: list[BoardRow], kicks: dict[str, Kicking]) -> str:
     )
 
 
+async def board_ours() -> set[str]:
+    """The short ids this console started, out of its own queue.
+
+    A fact, and the only one available: a session in the registry says it is `bg`, which is how
+    this console starts one and also how anything else does. What separates the four it is
+    responsible for from the thirty-one it is not is that it wrote the id down when it started them.
+    """
+    return {task.agent_id for task in await store.tasks(limit=500) if task.agent_id}
+
+
 async def board_canaries() -> dict[str, str]:
     """The signature each session this console started was told to keep (023-canary.sql)."""
     return await store.canaries()
@@ -568,6 +656,8 @@ def render_board(
     canaries: dict[str, str] | None = None,
     plans_html: str = "",
     spent: Spent | None = None,
+    ours: Collection[str] | None = None,
+    focus: str = "",
 ) -> str:
     """The fragment the page holds and every server-sent event replaces.
 
@@ -575,7 +665,7 @@ def render_board(
     the counter is simply not rendered, which is deliberate: a caller that forgot to read it should
     show nothing rather than a confident `$0.00`, which is a different claim entirely.
     """
-    rows, notices = board()
+    rows, notices = board(ours)
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
         rows=rows,
@@ -600,6 +690,8 @@ def render_board(
         # A reading of the text, in one place rather than in the template.
         signed=signed,
         flagged=sum(1 for row in rows if row.hint.waiting),
+        # Which project is chosen, so its card can say so and its button can undo it.
+        focus=focus,
         # What today has cost (043-spending.sql).
         spent=spent,
     )
@@ -683,6 +775,20 @@ def render_tail(session_id: str) -> str:
     return env.get_template("_tail.html").render(tail=tail)
 
 
+async def _rendered(name: str, **fields: Any) -> str:
+    """One template, formatted off the event loop.
+
+    Jinja's work is CPU on this process's one thread, and the conversation is ninety milliseconds
+    of it. Held on the loop, that is ninety milliseconds in which nothing else this console does
+    can run — every other request, every other stream, every run reporting a step — which CLAUDE.md
+    names as one of the two async mistakes that hurt most here.
+
+    Only the formatting moves. The store reads that produce `fields` are awaited by the caller in
+    the ordinary way, because they already yield.
+    """
+    return await asyncio.to_thread(env.get_template(name).render, **fields)
+
+
 async def render_blocks() -> str:
     """Every recent block, for the workbench to place the open chat's on the surface.
 
@@ -719,7 +825,8 @@ async def render_blocks() -> str:
         for block_id, idea_ids in (await store.ideas_of_blocks()).items()
     }
     directives = {d.block_id: d for d in await store.directives()}
-    return env.get_template("_blocks.html").render(
+    return await _rendered(
+        "_blocks.html",
         blocks=rows,
         drafted=await store.drafted("ticket"),
         filings={filing.idea_id: filing for filing in await store.filings()},
@@ -842,12 +949,27 @@ def _sorted_roots(roots: list[Idea], how: str) -> list[Idea]:
     return roots
 
 
+async def _keys_of(project: str) -> set[str]:
+    """Every repository key a chosen project answers to.
+
+    A project is one repository unless somebody declared several to be one, and then it is a group
+    whose id is not any idea's key — so narrowing by the id alone would show a declared project as
+    having no ideas at all.
+    """
+    group = next((one for one in await store.groups() if one.id == project), None)
+    return set(group.repo_keys) | {project} if group else {project}
+
+
 async def render_blockers() -> str:
-    """The top of the right column: what has stopped (agent_desk/web/blockers.py)."""
-    only = await store.setting(FOCUS_KEY)
-    return env.get_template("_blockers.html").render(
-        found=await blockers.blockers(store, only), only=only
-    )
+    """The top of the right column: what has stopped (agent_desk/web/blockers.py).
+
+    Every project's, whichever one is chosen. «Блокеры отображаются общие для всех проектов —
+    собираются из jira или из сессий.» A blocker is a thing that has stopped and wants a person,
+    and choosing a project to work on is not a decision to stop hearing about the others — that is
+    what narrowed this before, and it meant a failure in one project went quiet the moment somebody
+    looked at another.
+    """
+    return await _rendered("_blockers.html", found=await blockers.blockers(store, ""))
 
 
 UNDO_SAYS = {"drop": "discarded", "done": "marked built", "keep": "kept"}
@@ -887,11 +1009,15 @@ async def render_ideas() -> str:
     def shown(idea: Idea) -> bool:
         return idea.state == "dropped" if aside else idea.state not in ("dropped", "done")
 
-    ideas = [idea for idea in await store.ideas() if shown(idea)]
-    if only:
-        # A thought with no project is about whatever is in front of you, so it survives the
-        # narrowing — the same rule the blockers follow, for the same reason.
-        ideas = [idea for idea in ideas if (idea.project_key or "") in ("", only)]
+    # «Идеи отображаются только для конкретных проектов.» The chosen project's, or — when nothing is
+    # chosen — this console's own, because a thought typed with nothing chosen and nothing on the
+    # bench is addressed to the desk (`blocks.project_of`) and that is where it is kept. An idea
+    # written before ideas carried a project belongs to nobody in particular, which in practice has
+    # always meant the desk.
+    belongs = await _keys_of(only) if only else {block_runs.desk_key(), ""}
+    ideas = [
+        idea for idea in await store.ideas() if shown(idea) and (idea.project_key or "") in belongs
+    ]
     known = {idea.id for idea in ideas}
     children: dict[str, list[Idea]] = {idea.id: [] for idea in ideas}
     roots: list[Idea] = []
@@ -902,7 +1028,8 @@ async def render_ideas() -> str:
             children[idea.parent_id].append(idea)
         else:
             roots.append(idea)
-    return env.get_template("_ideas.html").render(
+    return await _rendered(
+        "_ideas.html",
         working=await store.ideas_in_flight(),
         roots=_sorted_roots(list(reversed(roots)), how),
         children=children,
@@ -916,6 +1043,9 @@ async def render_ideas() -> str:
         # Which project the column is narrowed to, so it can say so rather than looking empty.
         only=only,
         only_named=await _project_name(only),
+        # Who a message typed now is for. Said in the column that the choice swaps, so the sentence
+        # changes in the same press as the ideas under it rather than a push later.
+        addressed=await _project_name(only) if only else "agent-desk",
         # What depends on what (024-idea-links.sql). Read with the column: it is a handful of
         # rows, and a card that fetched its own links would be a card that flickers.
         links=await store.idea_links(),
@@ -935,7 +1065,51 @@ async def render_ideas() -> str:
         # than worked out in the template: which of the three words to show is a fact about what
         # happened, not about how it is drawn.
         undo=await _undone(),
+        # The second of the two numbers docs/09-roadmap.md says this project is judged by, and the
+        # honest half of the first. In this column rather than on a page of its own, for the reason
+        # the spend counter is on the board rather than behind a link: a number behind a link is a
+        # number nobody is shown.
+        worked=await _did_this_work(),
     )
+
+
+# How far back the two measures look. A week because that is the unit somebody actually asks in —
+# "has this been worth it lately" — and because an all-time total stops moving, and a number that
+# stops moving is one nobody looks at twice.
+MEASURED_OVER_MS = 7 * 24 * 60 * 60 * 1000
+
+
+@dataclass(frozen=True)
+class DidThisWork:
+    """What docs/09-roadmap.md said it would judge this by, over a week.
+
+    `captured` and `built` are the second measure, and they are facts about rows.
+
+    `terminals` is the honest half of the first. The roadmap asks for terminal opens per day and
+    that is not knowable from here — a terminal somebody opens themselves is invisible to this
+    program, and an estimate of it would be a guessed status wearing a number. What this counts is
+    the times the board sent them to one, which is a different thing and says so (077).
+    """
+
+    captured: int
+    built: int
+    terminals: int
+
+    @property
+    def draining(self) -> bool:
+        """Whether thoughts are going in without coming out.
+
+        The one state worth a sentence. "Capture with no promotion means the inbox is a drain, not
+        a notebook" — and a counter that says something reassuring all day teaches people to stop
+        reading it, which is this console's own argument about its spend counter.
+        """
+        return self.captured >= 5 and self.built * 2 < self.captured
+
+
+async def _did_this_work() -> DidThisWork:
+    since = now_ms() - MEASURED_OVER_MS
+    captured, built = await store.ideas_since(since)
+    return DidThisWork(captured=captured, built=built, terminals=await store.terminals_since(since))
 
 
 async def render_inbox() -> str:
@@ -1080,7 +1254,7 @@ async def render_page(message: str = "") -> str:
     field offers when you point a question at a project or a session.
     """
     groups = await store.groups()
-    rows, notices = await asyncio.to_thread(board)
+    rows, notices = await asyncio.to_thread(board, await board_ours())
     projects = shape(rows, groups, await store.seen_projects())
     # Written from the read that happened anyway, never on a schedule of its own (073). A project
     # this console has seen stays on the board after its last session ends, because everything
@@ -1105,6 +1279,7 @@ async def render_page(message: str = "") -> str:
             plans=await board_plans(rows, await board_kicks()),
             flagged=sum(1 for row in rows if row.hint.waiting),
             spent=await board_spent(),
+            focus=await store.setting(FOCUS_KEY),
         ),
         projects=projects,
         message=message,
@@ -1495,6 +1670,14 @@ async def card(kind: str, id: str = "") -> HTMLResponse:
                 project=await _project_name(repo_key),
             ),
             status_code=200 if link else 404,
+        )
+    if kind == "sketch":
+        # A thing a drawing found in a project (078). What it is, its detail and where it was read,
+        # on the card itself — a block whose facts are one press away is a label.
+        drawn = await store.sketch_card(id)
+        return HTMLResponse(
+            env.get_template("_card_sketch.html").render(card=drawn),
+            status_code=200 if drawn else 404,
         )
     if kind == "step":
         # A card that is only a card. What it *is* lives in its role and that role's fields, both
@@ -2197,7 +2380,10 @@ async def ask(request: Request) -> Response:
             store,
             typed,
             stamped,
-            project=form.get("project", "").strip(),
+            # «Если проект выбран, то по умолчанию запросы адресованы именно ему.» The chosen
+            # project is the default and nothing more: cards on the bench still say what a message
+            # is about first (`aim`), and a project named in the form still wins.
+            project=form.get("project", "").strip() or await store.setting(FOCUS_KEY),
             session=form.get("session", "").strip(),
             # The cards sitting in the output field when Send was pressed, in the order they were
             # dropped. Empty is the ordinary case and means the whole board (docs/06-console.md).
@@ -3630,6 +3816,13 @@ async def open_a_session(session_id: str) -> JSONResponse:
     text into a context, and this puts a person in front of one.
     """
     done = await asyncio.to_thread(opening.open_it, session_id)
+    if done.ok:
+        # The half of the roadmap's first measure this console can stand behind (077). A terminal
+        # somebody opens themselves is not visible from here and never will be; this one is, and it
+        # is this console handing them back to a terminal because the board did not answer their
+        # question. Recorded only when one actually opened: a press that failed sent nobody
+        # anywhere.
+        await store.went_to_a_terminal(session_id)
     return JSONResponse({"opened": done.ok, "why": done.detail})
 
 
@@ -4407,18 +4600,24 @@ async def attach_project(request: Request) -> Response:
 
 @router.post("/projects/focus", response_class=HTMLResponse)
 async def focus_project(request: Request) -> Response:
-    """Narrow the blockers and the ideas to one project, or open them up again.
+    """Choose the project being worked on, or choose none.
 
-    "Выбор проекта слева фильтрует блокеры и идеи; без выбора — всё." A board with six projects on
-    it has a right-hand column about all six, and when you are working on one of them that column
-    is mostly noise.
+    «У проектов должна быть кнопка выбрать. При выборе проекта мы видим его идеи, но он не
+    помещается на верстак. Если проект выбран, то по умолчанию запросы адресованы именно ему, если
+    не выбран и нет другого контекста на верстаке — agent-desk.»
 
-    Anything belonging to no project survives the narrowing: a thought typed with nothing on the
-    workbench is about whatever is in front of you, and a failed question belongs to no repository
-    at all. Hiding those behind a filter they were never part of would lose them.
+    What a choice changes, and what it does not: the idea column shows that project's thoughts, and
+    a message with nothing on the bench is addressed to it. The blockers stay everybody's — a
+    project somebody is not looking at can still stop — and the workbench is not touched, because
+    choosing what to work on is not the same act as putting something in front of you.
+
+    Pressing the chosen one again chooses none, which is the desk.
     """
     form = await _form(request)
-    await store.set_setting(FOCUS_KEY, form.get("key", "").strip())
+    chosen = form.get("key", "").strip()
+    if chosen and chosen == await store.setting(FOCUS_KEY):
+        chosen = ""
+    await store.set_setting(FOCUS_KEY, chosen)
     if _wants_fragment(request):
         # Both columns move together, because they are one decision.
         return HTMLResponse(await render_column())
@@ -5349,7 +5548,7 @@ async def _start_it(task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=autostart.project_of(task),
             **await autostart.about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,

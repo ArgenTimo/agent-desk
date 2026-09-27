@@ -128,11 +128,17 @@ async def test_a_failed_block_says_why_and_stays(store: Store) -> None:
 
 
 @pytest.mark.unit
-async def test_a_block_that_was_running_when_the_process_died_comes_back_failed(
+async def test_a_block_that_did_not_finish_comes_back_failed_and_says_which_way(
     tmp_path: pathlib.Path,
 ) -> None:
     """Never `answered`: an empty answer that looks complete is the worst of both
-    (design/02-data-model.md, "Crash behaviour")."""
+    (design/02-data-model.md, "Crash behaviour").
+
+    Both unfinished states, and the two reasons kept apart because they are different facts.
+    `interrupted` means an answer was being written and part of it may be true; `never started`
+    means the question was never asked, so re-asking costs what asking it the first time would
+    have. `telling.stopped` says each in words and a settled block carries the press that acts.
+    """
     path = tmp_path / "agent-desk.db"
     store = Store(path)
     await store.open()
@@ -153,8 +159,17 @@ async def test_a_block_that_was_running_when_the_process_died_comes_back_failed(
     assert after.state == "failed"
     assert after.error == "interrupted"
     assert after.answer is None
-    # A queued block never started; nothing about it is lost by leaving it queued.
-    assert (await reopened.block(queued.id)).state == "queued"  # type: ignore[union-attr]
+    # And the one that never started, said as the other thing that it is. This used to be left
+    # queued, on the reasoning that nothing is lost by running it now — which was true and
+    # described something no code does. One in the author's own store sat that way for forty-five
+    # hours: on the page, in a state that reads as *about to happen*, with somebody waiting.
+    never = await reopened.block(queued.id)
+    assert never is not None
+    assert never.state == "failed"
+    assert never.error == "never started", (
+        "the two are the same word, so the page cannot say which of them happened"
+    )
+    assert never.answer is None
     await reopened.close()
 
 
@@ -542,3 +557,40 @@ async def test_a_write_lands_while_something_is_reading(store: Store) -> None:
         )
 
     assert len(await store.blocks_in_thread(thread)) == 1
+
+
+@pytest.mark.unit
+async def test_the_store_can_say_whether_anything_has_been_written(tmp_path: pathlib.Path) -> None:
+    """For the one caller that needs to know whether it is worth *building* an answer at all.
+
+    `PRAGMA data_version` is SQLite's own answer to this and it is documented not to change for
+    commits made on the same connection — and this program writes and reads through one pooled
+    engine, so it would miss exactly the writes that matter. This is the filesystem instead, and
+    the write-ahead log is in it because in WAL mode a commit lands there while the database itself
+    goes untouched.
+    """
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    try:
+        quiet = store.written_at()
+
+        assert store.written_at() == quiet, "asking twice reported a write nobody made"
+
+        await store.create_idea(
+            text_="a thought", summary="a thought", source_kind="typed", author="human"
+        )
+
+        assert store.written_at() != quiet, "a write to the store went unnoticed"
+    finally:
+        await store.close()
+
+
+@pytest.mark.unit
+def test_a_database_that_is_not_there_yet_is_an_answer_and_not_a_crash(
+    tmp_path: pathlib.Path,
+) -> None:
+    """It is asked on a path that may have no file and no write-ahead log beside it — on the way
+    up, and on any machine where this has never run."""
+    store = Store(tmp_path / "nothing" / "agent-desk.db")
+
+    assert store.written_at() == "-|-"

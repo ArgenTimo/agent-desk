@@ -22,6 +22,7 @@ from agent_desk import dispatch, land
 from agent_desk import tidying as tidying_
 from agent_desk.observe import jobs, registry
 from agent_desk.observe.model import JobEnd, lost_the_canary, now_ms
+from agent_desk.observe.shape import where_it_works
 from agent_desk.store.repo import Autostart, BenchCard, Pull, Store, Task
 from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
@@ -132,13 +133,24 @@ async def about(store: Store, repo_key: str) -> dict[str, object]:
     }
 
 
+def project_of(task: Task) -> str:
+    """The project a task is in, as the agent is told it: the checkout's directory name.
+
+    Not the title. The title is the line somebody typed, and passing it as the project told a
+    dispatched agent "This is in бери в работу." A task queued from a session that was itself in a
+    worktree has that worktree as its cwd, so the checkout is read through it — otherwise the agent
+    is told it is in `beri-v-rabotu` (docs/03-session-observation.md).
+    """
+    return Path(where_it_works(task.cwd)[0]).name
+
+
 async def _start(store: Store, task: Task) -> None:
     """Start one claimed task, and record either half of what happens."""
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=project_of(task),
             **await about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,

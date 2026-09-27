@@ -101,6 +101,36 @@
               title="walk the whole drawing without running it — nothing starts and nothing is paid for">as if</button>
       <button type="button" class="chip go" data-run
               title="run this drawing, one step at a time">run it</button>
+      {# A bench of thirty-seven is a bench you hunt on. Everything else in this row acts on the
+         surface as a whole — lay it out again, fit it, take it all off — and not one of them
+         answers the question somebody in front of a full bench is actually asking, which is
+         *where is the card I put down ten minutes ago*. The pool has had a search since it had
+         twenty rows in it; the bench holds more than the pool does and had none.
+
+         Outside `#pins`, which is rewritten whenever the surface changes: a field inside it would
+         lose what somebody had typed, mid-word, on the next redraw — the same reason `#idea-find`
+         sits outside `#idea-list`. #}
+      <label class="bench-find">
+        <input type="search" id="bench-find" placeholder="find a card…" autocomplete="off"
+               aria-label="find a card on the workbench">
+      </label>
+      <span id="bench-found" class="bench-found small dim" aria-live="polite"></span>
+      {# Cards somebody set aside on purpose. Shown whenever there are any, because a bench that is
+         quietly holding back eleven cards and does not say so is a bench that has lost them —
+         which is the failure `Take everything off` already had, and the reason nobody pressed it
+         twice. #}
+      {# A bench left up while an agent worked is thirty-seven cards to re-read. Every card already
+         records when it arrived (`cameAt`, migration 045) and nothing read that as *recently*. #}
+      <button type="button" id="bench-new" class="chip" hidden
+              title="the cards that arrived while this window was in the background"></button>
+      {# A card completely underneath another is indistinguishable from a card that was never
+         added, and what somebody does about that is put down a second copy. Cards are dragged by
+         hand, restored from a saved bench and laid out again, and any of those can leave one
+         exactly on top of another. #}
+      <button type="button" id="bench-under" class="chip" hidden
+              title="move the cards that are completely underneath another one out where they can be seen"></button>
+      <button type="button" id="bench-aside" class="chip" hidden
+              title="bring back the cards that were set aside — they never moved"></button>
       <span class="spacer"></span>
       {# Cards on the workbench that are off the screen. One you cannot see and do not know is
          there is one that goes into the next message by surprise. #}
@@ -248,6 +278,12 @@
       <span class="chosen-count"></span>
       <button type="button" data-many="out" title="switch them all in or out of the next message (I)">in the message</button>
       <button type="button" data-many="fold" title="fold them all, or open them all (F)">fold</button>
+      {# Between "leave everything where it is" and "take them all off" there was nothing, and the
+         thing somebody whose next twenty minutes are about six cards actually wants is in that
+         gap: the other thirty-one out of the way and still there. One press, one press back, and
+         nothing moves. #}
+      <button type="button" data-many="hold"
+              title="set every other card aside — they stay where they are and come back in one press">hold these</button>
       <button type="button" data-many="off" title="take them all off the workbench (Delete)">take off</button>
       <button type="button" data-many="none" title="stop choosing them (Escape)">done</button>
     </div>

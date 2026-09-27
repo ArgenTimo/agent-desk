@@ -42,13 +42,19 @@
   {% if block.context %}
   {# What this one was sent with. A block that cannot say what it carried is a block whose answer
      cannot be explained afterwards (docs/04-threads-and-blocks.md). #}
+  {# Grouped by the word each line begins with, which is the word the console wrote when it wrote
+     the line. Two dozen flat lines answer "what exactly"; the question somebody opening this a
+     week later has is "what was this about", and that one is answered by the shape. #}
   <details class="carried">
-    <summary>carried {{ block.context.splitlines() | length }} thing{{ "" if block.context.splitlines() | length == 1 else "s" }}</summary>
+    <summary>carried {{ block.context.splitlines() | length }} thing{{ "" if block.context.splitlines() | length == 1 else "s" }}{% set shape = block.context | shape_of %}{% if shape %} — {{ shape }}{% endif %}</summary>
+    {% for kind, lines in block.context | by_kind %}
+    {% if kind %}<p class="carried-kind">{{ kind }}</p>{% endif %}
     <ul>
-      {% for line in block.context.splitlines() %}
+      {% for line in lines %}
       <li>{{ line }}</li>
       {% endfor %}
     </ul>
+    {% endfor %}
   </details>
   {% endif %}
 

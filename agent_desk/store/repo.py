@@ -690,6 +690,23 @@ class StepCard(BaseModel):
         return f"step:{self.id}"
 
 
+class SketchCard(BaseModel):
+    """A picture of something a project has, drawn from reading the project (078)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    kind: str
+    label: str
+    lines: str = ""
+    read_from: str = ""
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"sketch:{self.id}"
+
+
 class BenchCard(BaseModel):
     """One card on the workbench, where somebody put it (040-bench.sql).
 
@@ -1114,6 +1131,41 @@ class Store:
             raise RuntimeError("the store is not open")
         return self._engine
 
+    def written_at(self) -> str:
+        """A fingerprint of this database as the filesystem last saw it.
+
+        For the one caller that needs to know whether it is worth *building* an answer at all. The
+        stream that keeps the console live re-rendered the whole conversation every two seconds —
+        862 KiB, 90 ms of it on the event loop — to compare it against a byte-identical string and
+        throw it away.
+
+        **Why not `PRAGMA data_version`.** SQLite's own answer to this question is documented not
+        to change for commits made on the same connection, and this program writes and reads
+        through one pooled engine. It would miss exactly the writes that matter.
+
+        **Why the write-ahead log and not only the file.** In WAL mode a commit lands in `-wal` and
+        the database itself can go untouched for a long time; a fingerprint of the main file alone
+        would report a busy console as quiet.
+
+        **It is allowed to be wrong in one direction only.** A checkpoint moves these bytes without
+        changing anything anybody renders, and that costs one wasted render. Missing a write would
+        cost an answer arriving two ticks late, which is what makes people reload a page that a
+        live stream exists to stop them reloading. Those are not the same kind of wrong, and this
+        is deliberately the cheap, conservative one: it says "something was written", never "this
+        is what changed".
+        """
+        marks: list[str] = []
+        for where in (self.path, self.path.with_name(self.path.name + "-wal")):
+            try:
+                stat = where.stat()
+            except OSError:
+                # A `-wal` that is not there is an answer, and so is a database that has not been
+                # created yet: both are states this can be asked about and neither is an error.
+                marks.append("-")
+                continue
+            marks.append(f"{stat.st_size}:{stat.st_mtime_ns}")
+        return "|".join(marks)
+
     async def open(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
@@ -1157,17 +1209,40 @@ class Store:
                 )
 
     async def _recover_interrupted(self) -> None:
-        """A block that was running when the process died comes back `failed`, never `answered`.
+        """A block that did not finish comes back `failed`, never `answered`, and says which way.
 
         A restart that silently promoted an unfinished block would produce an empty answer that
-        looks complete (design/02-data-model.md, "Crash behaviour"). A `queued` block is left
-        queued: it never started, and nothing about it is lost by running it now.
+        looks complete (design/02-data-model.md, "Crash behaviour").
+
+        **Both unfinished states, not just one.** A block is created `queued` and the same request
+        starts the run that moves it on; a process that dies in that window leaves it queued, and
+        nothing anywhere reads a queued block afterwards. This used to leave it alone, reasoning
+        that "nothing about it is lost by running it now" — which was true and described something
+        no code does. One in the author's own store sat that way for forty-five hours: on the page,
+        in a state that reads as *about to happen*, with somebody waiting for it.
+
+        The two reasons are kept apart because they are different facts and lead to different
+        decisions. `interrupted` means an answer was being written and part of it may be true;
+        `never started` means the question was never asked and re-asking costs exactly what asking
+        it the first time would have. `telling.stopped` says each of them in words, and a settled
+        block already carries the one press that acts on it.
+
+        Startup-only, and that is the whole of the licence this takes. "Nothing is running it" is
+        not something the store can see while the console is up — that would be an inference from
+        silence — but "this process has just started and did not queue that" is a fact.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "UPDATE block SET state = 'failed', error = 'interrupted', finished_at = :t "
                     "WHERE state = 'running'"
+                ),
+                {"t": _now_ms()},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = 'failed', error = 'never started', finished_at = :t "
+                    "WHERE state = 'queued'"
                 ),
                 {"t": _now_ms()},
             )
@@ -3520,6 +3595,52 @@ class Store:
                 {"short_id": short_id, "name": name, "t": _now_ms()},
             )
 
+    async def went_to_a_terminal(self, session_id: str) -> None:
+        """Record that the board sent somebody to a terminal (077).
+
+        The honest half of the roadmap's first measure. A press of `go to it` is this console
+        handing somebody back to a terminal because the board did not answer their question, and
+        driving that to zero is what docs/09-roadmap.md says phase one exists for.
+        """
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO went_to_a_terminal (session_id, at) VALUES (:session_id, :at)"),
+                {"session_id": session_id, "at": _now_ms()},
+            )
+
+    async def terminals_since(self, since_ms: int) -> int:
+        """How many times, in a window. A window because an all-time total stops moving, and a
+        number that stops moving is one nobody looks at twice."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT COUNT(*) FROM went_to_a_terminal WHERE at >= :since"),
+                {"since": since_ms},
+            )
+            return int(rows.scalar_one())
+
+    async def ideas_since(self, since_ms: int) -> tuple[int, int]:
+        """Thoughts written down in a window, and how many of them were built.
+
+        The second of the two numbers docs/09-roadmap.md says this project is judged by, and it has
+        been derivable since the first migration without ever being shown. Counted in SQL rather
+        than by reading every idea into memory: the pool is four hundred and seventy-nine rows on
+        the author's machine and this is asked on a surface that renders every couple of seconds.
+
+        `done` and not `promoted`: the roadmap's word for the far end is "promoted", and the state
+        that actually means a thought became something is `done` — `promoted` is one step on the way
+        and a count that used it would report an idea that was built as though it had stalled.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT COUNT(*), COALESCE(SUM(state = 'done'), 0) FROM idea "
+                    "WHERE created_at >= :since"
+                ),
+                {"since": since_ms},
+            )
+            captured, built = rows.one()
+            return int(captured), int(built)
+
     async def canaries(self) -> dict[str, str]:
         """Every session this console told to sign its replies, by short id."""
         async with self.engine.connect() as conn:
@@ -3576,6 +3697,57 @@ class Store:
                 text("SELECT id, label, made_at FROM step_card ORDER BY made_at DESC LIMIT 400")
             )
             return [StepCard(**row._mapping) for row in rows]
+
+    async def add_sketch_card(
+        self, *, kind: str, label: str, lines: str = "", read_from: str = ""
+    ) -> SketchCard:
+        """One thing a drawing found in a project. Bounded here as well as where it was read, because
+        a store method is called by more than one reader and the second one may not have read it."""
+        card = SketchCard(
+            id=_new_id(),
+            kind=(kind.strip() or "thing")[:40],
+            label=(label.strip() or "something")[:120],
+            lines=lines[:4000],
+            read_from=read_from[:200],
+            made_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO sketch_card (id, kind, label, lines, read_from, made_at) "
+                    "VALUES (:id, :kind, :label, :lines, :read_from, :made_at)"
+                ),
+                card.model_dump(),
+            )
+        return card
+
+    async def sketch_card(self, card_id: str) -> SketchCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id = :id"
+                ),
+                {"id": card_id},
+            )
+            row = rows.first()
+            return None if row is None else SketchCard(**row._mapping)
+
+    async def sketch_cards(self, names: Sequence[str]) -> dict[str, SketchCard]:
+        """The ones named, by card name. A digest asks for the cards on one bench, not every drawing
+        ever made."""
+        ids = [name.split(":", 1)[1] for name in names if name.startswith("sketch:")]
+        if not ids:
+            return {}
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            )
+            return {f"sketch:{row._mapping['id']}": SketchCard(**row._mapping) for row in rows}
 
     # --- the workbench ------------------------------------------------------------------------
     async def keep_bench(

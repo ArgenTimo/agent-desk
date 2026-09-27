@@ -38,11 +38,17 @@ def test_choosing_some_cards_sends_only_those() -> None:
     """ "Сейчас чтобы отправить запрос про три карточки, надо потушить двадцать семь." The
     mechanism: when anything is chosen, it is what travels."""
     code = _code()
+    # Where the set is decided, rather than where it is spelled out as targets: one reading answers
+    # both "what will be sent" and "how many", and a rule asserted against the speller would go
+    # unchecked the moment a second caller appeared.
+    carried = code[code.index("function cardsBeingCarried(") :]
+    carried = carried[: carried.index("\n}\n")]
     targets = code[code.index("function pinnedTargets(") :]
     targets = targets[: targets.index("\n}\n")]
 
-    assert "chosenCards()" in targets
-    assert "chosen.length" in targets, "a choice no longer decides what is carried"
+    assert "chosenCards()" in carried
+    assert "chosen.length" in carried, "a choice no longer decides what is carried"
+    assert "cardsBeingCarried()" in targets
 
 
 @pytest.mark.unit
