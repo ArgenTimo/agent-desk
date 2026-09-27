@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-from agent_desk.observe.model import RECORDED_CLI_VERSION
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -96,7 +95,12 @@ def test_the_recorded_stream_is_the_shape_the_answer_engine_reads() -> None:
     assert "result" in types
     assert "rate_limit_event" in types
     system = next(line for line in lines if line["type"] == "system")
-    assert system["claude_code_version"] == RECORDED_CLI_VERSION
+    # Recorded from a real `claude -p`, which only a human may run here; it stays at the version
+    # the README's table says it was recorded at rather than being relabelled (B2).
+    assert (
+        f"| `stream_json.jsonl` | stdout of `claude --print --output-format stream-json` | `{system['claude_code_version']}` |"
+        in (FIXTURES / "README.md").read_text()
+    )
     result = next(line for line in lines if line["type"] == "result")
     assert result["is_error"] is False
 
