@@ -1,0 +1,21 @@
+-- When a card on the workbench last changed, beside when it arrived (01M25VH7AXXJ1AT09AHE77J2W4).
+--
+-- docs/stories/01, story 5: "I want to see which cards arrived or changed since I last looked." What
+-- shipped marks only what *arrived*, and said so, because `came_at` (045) is when a card was made and
+-- never moves. A run step going from going to done, a check read back with its verdict, a card
+-- renamed from the input field — none of those left a time behind, so "changed" had nothing to be
+-- read from and the mark would have been a guess wearing a fact's clothes (CLAUDE.md, rule five).
+--
+-- ## Written by the page, where the change is seen
+--
+-- The same argument `came` was stored under: the place that replaces a card's content is the only
+-- place that knows it did. So this is stamped by the page at the moment it rewrites a card, and
+-- written down with the rest of the surface.
+--
+-- ## Zero is "has not changed since it arrived"
+--
+-- Not "unknown" and not `came_at` copied in: a card that has never been touched since it arrived has
+-- no time of change, and a default that pretended otherwise would mark every restored card as changed
+-- the first time anybody looked away.
+
+ALTER TABLE bench_card ADD COLUMN changed_at INTEGER NOT NULL DEFAULT 0;
