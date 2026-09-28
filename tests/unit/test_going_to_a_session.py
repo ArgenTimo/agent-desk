@@ -26,7 +26,11 @@ def test_the_command_is_a_list_and_a_shell_never_sees_it() -> None:
     said = opening.argv("0f8cf805-a691-4599-9565-4211709833c0")
 
     assert said is not None
-    assert said[-3:] == ["claude", "attach", "0f8cf805-a691-4599-9565-4211709833c0"]
+    # The CLI by whatever name settings resolve it to, not the literal `claude`: the suite points
+    # `claude_bin` at a name that does not exist so that a test which forgets to fake the engine
+    # cannot start one (tests/conftest.py). What is being claimed here is the shape of the list.
+    engine = opening.settings.claude_bin
+    assert said[-3:] == [engine, "attach", "0f8cf805-a691-4599-9565-4211709833c0"]
     assert all(isinstance(one, str) for one in said)
 
 

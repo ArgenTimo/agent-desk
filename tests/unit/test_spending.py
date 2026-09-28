@@ -310,7 +310,9 @@ async def test_a_board_rendered_without_the_number_shows_no_number(desk: Store) 
     the other says "nothing was spent"."""
     from agent_desk.web import routes
 
-    assert "today" not in routes.render_board()
+    # The counter's own markup, not a word inside it: "today" is a word anything on the board may
+    # use, and the claim being made here is that one `<span>` is absent.
+    assert 'class="tree-count spend' not in routes.render_board()
 
 
 # --- and it cannot take an answer down with it ---------------------------------------------------
