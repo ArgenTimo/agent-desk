@@ -3830,14 +3830,31 @@ async def open_a_session(session_id: str) -> JSONResponse:
     text into a context, and this puts a person in front of one.
     """
     done = await asyncio.to_thread(opening.open_it, session_id)
+    press = 0
     if done.ok:
         # The half of the roadmap's first measure this console can stand behind (077). A terminal
         # somebody opens themselves is not visible from here and never will be; this one is, and it
         # is this console handing them back to a terminal because the board did not answer their
         # question. Recorded only when one actually opened: a press that failed sent nobody
         # anywhere.
-        await store.went_to_a_terminal(session_id)
-    return JSONResponse({"opened": done.ok, "why": done.detail})
+        press = await store.went_to_a_terminal(session_id)
+    # `press` and `reasons` are for the one optional click after it: why somebody went (080).
+    return JSONResponse(
+        {"opened": done.ok, "why": done.detail, "press": press, "reasons": opening.REASONS}
+    )
+
+
+@router.post("/terminals/{press}/why", response_class=JSONResponse)
+async def why_it_went(press: int, request: Request) -> JSONResponse:
+    """The reason somebody gave for going to a terminal — one of `opening.REASONS`, or nothing.
+
+    Asked, never inferred (080): the board offers the four words after the terminal has opened,
+    and a press nobody labels stays unlabelled.
+    """
+    reason = str((await _form(request)).get("reason", ""))
+    if reason not in opening.REASONS:
+        return JSONResponse({"kept": False, "why": "not one of the four"}, status_code=400)
+    return JSONResponse({"kept": await store.why_it_went(press, reason)})
 
 
 @router.get("/workbench/again", response_class=JSONResponse)

@@ -26,6 +26,7 @@ exact line to paste. That is the honest half, and it stays.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -44,6 +45,25 @@ TERMINALS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("alacritty", ("-e",)),
     ("foot", ()),
     ("xterm", ("-e",)),
+)
+
+# Why somebody went, when they say (080). Closed, so the answers can be counted.
+REASONS: dict[str, str] = {
+    "answer": "to answer it",
+    "approve": "to approve a tool",
+    "read": "to read what it did",
+    "other": "something else",
+}
+
+# What a window needs to appear on somebody's screen. The console may be a systemd --user service
+# started at boot, before the graphical session existed, and then its own environment has none of
+# these (A2); the user manager is told them when the session starts, so they are asked for there.
+_DISPLAY = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR",
 )
 
 # How long to wait for the terminal to come up. It returns immediately or it is not going to: this
@@ -73,7 +93,26 @@ def argv(session_id: str) -> list[str] | None:
     if found is None or not session_id.strip():
         return None
     name, flag = found
-    return [name, *flag, settings.claude_bin, "attach", session_id.strip()]
+    # The short id: the form `claude agents` prints and `claude attach <id>` documents.
+    return [name, *flag, settings.claude_bin, "attach", session_id.strip().split("-")[0]]
+
+
+def _session_display() -> dict[str, str]:
+    """The graphical session's variables, from the user manager, for what this process lacks."""
+    if any(os.environ.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY")):
+        return {}
+    try:
+        done = subprocess.run(  # noqa: S603 — a fixed argv
+            ["systemctl", "--user", "show-environment"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pairs = (line.partition("=") for line in done.stdout.splitlines())
+    return {name: value for name, _, value in pairs if name in _DISPLAY and value}
 
 
 def open_it(session_id: str) -> Opened:
@@ -96,6 +135,7 @@ def open_it(session_id: str) -> Opened:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env={**os.environ, **_session_display()},
         )
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         # `ValueError` because `session_id` is a path parameter and nothing between the URL and
