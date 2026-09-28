@@ -518,8 +518,9 @@ class Tool(BaseModel):
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
-    Two switches, because they are two decisions (docs/adr/0008): `armed` starts work somebody
-    queued, and `exploring` goes looking for something to fix when there is nothing queued.
+    One switch: `armed` starts work somebody queued. `exploring_at`, `per_day` and `tidying_at`
+    are columns of two switches that are gone (docs/adr/0013) — read so the row still loads, and
+    used by nothing.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -531,56 +532,14 @@ class Autostart(BaseModel):
     disarmed_why: str | None = None
     exploring_at: int | None = None
     per_day: int = 3
-    # Where this project is on disk, recorded by the panel that pressed the switch: an exploration
-    # is the first task in a project and has none to inherit a directory from.
+    # Where this project is on disk, recorded when it was attached: the queue needs a directory
+    # before any session has appeared there.
     cwd: str | None = None
-    # The third thing a project may be allowed to do on its own (076): close a session whose canary
-    # is lost, once it is idle and its checkout is clean. Off, like the other two, and for a
-    # sharper reason — closing a session is the one irreversible act in this console.
     tidying_at: int | None = None
 
     @property
     def armed(self) -> bool:
         return self.armed_at is not None
-
-    @property
-    def tidying(self) -> bool:
-        return self.tidying_at is not None
-
-    @property
-    def exploring(self) -> bool:
-        return self.exploring_at is not None
-
-
-class Kicking(BaseModel):
-    """One session that is not allowed to idle, and what it has spent not idling (docs/adr/0009).
-
-    Keyed by the short id, because that is the name the CLI's own `stop` and `logs` take and the
-    prefix of the id `--resume` takes. Per session rather than per project: this is a permission
-    about one conversation.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    short_id: str
-    session_id: str = ""
-    cwd: str = ""
-    armed_at: int | None = None
-    kicks: int = 0
-    kicked_at: int | None = None
-    # When the account was out of budget, this is when to look again. A limit is a wait, not a
-    # failure, and this field is the difference between the two.
-    resume_at: int | None = None
-    failures: int = 0
-    disarmed_why: str | None = None
-    per_hour: int = 4
-
-    @property
-    def armed(self) -> bool:
-        return self.armed_at is not None
-
-    def waiting(self, now_ms: int) -> bool:
-        return self.resume_at is not None and self.resume_at > now_ms
 
 
 class Term(BaseModel):
@@ -1616,22 +1575,6 @@ class Store:
                 {"agent_id": agent_id, "id": task_id},
             )
 
-    async def task_landed(self, task_id: str, detail: str, *, landed: bool) -> None:
-        """What happened when its branch was offered to the project (docs/adr/0008).
-
-        Both halves: the sentence for whoever reads the card, and the boolean for whatever has to
-        decide something from it. A condition that had to read the sentence would be depending on
-        the shape of prose (032-task-landed.sql).
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE task SET detail = :detail, landed = :landed WHERE id = :id"),
-                {"detail": detail[:500], "landed": int(landed), "id": task_id},
-            )
-        await self.note_in_the_shift(
-            "gate", ("green: " if landed else "red: ") + (detail or "it said nothing")
-        )
-
     async def task_failed(self, task_id: str, detail: str) -> None:
         """It stays failed and says why. Retry is a click (docs/adr/0007)."""
         async with self.engine.begin() as conn:
@@ -1679,116 +1622,10 @@ class Store:
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
                     "exploring_at, per_day, cwd, tidying_at FROM autostart "
-                    "WHERE armed_at IS NOT NULL OR exploring_at IS NOT NULL"
+                    "WHERE armed_at IS NOT NULL"
                 )
             )
             return [Autostart(**row._mapping) for row in rows]
-
-    # --- a session that is not allowed to idle (docs/adr/0009) --------------------------------
-    async def kicking(self, short_id: str) -> Kicking:
-        """Absent is off, which is what every session is until somebody presses the button."""
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE short_id = :short_id"
-                ),
-                {"short_id": short_id},
-            )
-            row = rows.first()
-            return Kicking(short_id=short_id) if row is None else Kicking(**row._mapping)
-
-    async def kicked_sessions(self) -> list[Kicking]:
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE armed_at IS NOT NULL"
-                )
-            )
-            return [Kicking(**row._mapping) for row in rows]
-
-    async def switched_off_sessions(self) -> list[Kicking]:
-        """Sessions that stopped being kept going, and said why (docs/adr/0009).
-
-        The same shape as `switched_off_projects`, and for the same reason: turning itself off is
-        what takes a row out of `kicked_sessions`, and that is the moment it is worth showing.
-        """
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE disarmed_why IS NOT NULL"
-                )
-            )
-            return [Kicking(**row._mapping) for row in rows]
-
-    async def kick_session(
-        self, short_id: str, *, on: bool, session_id: str = "", cwd: str = "", per_hour: int = 4
-    ) -> None:
-        """Switch kicking on or off for one session.
-
-        The full id and the directory are recorded when the button is pressed, by the card that
-        already knows them: the loop must be able to continue a session whose registry entry has
-        gone, and a registry entry goes the moment the session is stopped — which is the first
-        thing a kick does.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO kicking (short_id, session_id, cwd, armed_at, per_hour) "
-                    "VALUES (:short_id, :session_id, :cwd, :armed_at, :per_hour) "
-                    "ON CONFLICT (short_id) DO UPDATE SET armed_at = :armed_at, "
-                    "session_id = CASE WHEN :session_id = '' THEN kicking.session_id "
-                    "ELSE :session_id END, "
-                    "cwd = CASE WHEN :cwd = '' THEN kicking.cwd ELSE :cwd END, "
-                    "per_hour = :per_hour, failures = 0, disarmed_why = NULL, resume_at = NULL"
-                ),
-                {
-                    "short_id": short_id,
-                    "session_id": session_id,
-                    "cwd": cwd,
-                    "armed_at": _now_ms() if on else None,
-                    "per_hour": per_hour,
-                },
-            )
-
-    async def note_kick(self, short_id: str) -> None:
-        """One more turn kept alive. The count is what says whether this was worth switching on."""
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "UPDATE kicking SET kicks = kicks + 1, kicked_at = :t, failures = 0, "
-                    "resume_at = NULL WHERE short_id = :short_id"
-                ),
-                {"t": _now_ms(), "short_id": short_id},
-            )
-
-    async def kick_waits_until(self, short_id: str, when_ms: int) -> None:
-        """The account is out of budget. Not a failure: the switch stays on and this is when."""
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE kicking SET resume_at = :t WHERE short_id = :short_id"),
-                {"t": when_ms, "short_id": short_id},
-            )
-
-    async def note_kick_failure(self, short_id: str) -> int:
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE kicking SET failures = failures + 1 WHERE short_id = :short_id"),
-                {"short_id": short_id},
-            )
-        return (await self.kicking(short_id)).failures
-
-    async def stop_kicking(self, short_id: str, *, why: str) -> None:
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "UPDATE kicking SET armed_at = NULL, disarmed_why = :why "
-                    "WHERE short_id = :short_id"
-                ),
-                {"why": why[:300], "short_id": short_id},
-            )
 
     async def switched_off_projects(self) -> list[Autostart]:
         """Projects that turned themselves off, and said why (docs/adr/0007).
@@ -1806,77 +1643,17 @@ class Store:
             )
             return [Autostart(**row._mapping) for row in rows]
 
-    async def explore(self, repo_key: str, *, per_day: int, on: bool, cwd: str = "") -> None:
-        """Switch exploring on or off for one project (docs/adr/0008).
-
-        Separate from arming on purpose: "start what I queued" and "find something to do" are
-        different permissions, and a project can have the first without the second.
-        """
+    async def remember_checkout(self, repo_key: str, cwd: str) -> None:
+        """Where a project is on disk, so its queue has a directory before any session does."""
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
-                    "disarmed_why, exploring_at, per_day, cwd) VALUES (:repo_key, NULL, 2, 0, "
-                    "NULL, :t, :per_day, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
-                    "exploring_at = :t, per_day = :per_day, cwd = COALESCE(:cwd, autostart.cwd)"
+                    "disarmed_why, cwd) VALUES (:repo_key, NULL, 2, 0, NULL, :cwd) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET cwd = :cwd"
                 ),
-                {
-                    "repo_key": repo_key,
-                    "t": _now_ms() if on else None,
-                    "per_day": max(1, min(per_day, 12)),
-                    "cwd": cwd or None,
-                },
+                {"repo_key": repo_key, "cwd": cwd},
             )
-
-    async def tidying_projects(self) -> list[Autostart]:
-        """Projects switched on to close a session whose canary is lost (076).
-
-        Its own reader, and not a filter over `armed_projects`: a project switched on only for this
-        is not armed for anything else, and returning it from there put it through the whole of the
-        loop — the queue, the tracker, the exploration. The switches are three permissions and the
-        readers have to be three as well.
-        """
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day, cwd, tidying_at FROM autostart "
-                    "WHERE tidying_at IS NOT NULL"
-                )
-            )
-            return [Autostart(**row._mapping) for row in rows]
-
-    async def tidy_sessions(self, repo_key: str, *, on: bool, cwd: str = "") -> None:
-        """Switch tidying on or off for one project (076).
-
-        Its own switch, beside arming and exploring, because it is its own permission: "close a
-        session that has stopped signing" is a different thing to allow from "start what I queued",
-        and the difference matters more here than anywhere else — this is the one irreversible act
-        in the console.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
-                    "disarmed_why, tidying_at, cwd) VALUES (:repo_key, NULL, 2, 0, "
-                    "NULL, :t, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
-                    "tidying_at = :t, cwd = COALESCE(:cwd, autostart.cwd)"
-                ),
-                {"repo_key": repo_key, "t": _now_ms() if on else None, "cwd": cwd or None},
-            )
-
-    async def explored_since(self, repo_key: str, since_ms: int) -> int:
-        """How much of the day's budget this project has spent looking for work of its own."""
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT COUNT(*) AS n FROM task WHERE repo_key = :repo_key "
-                    "AND source_kind = 'found' AND started_at IS NOT NULL AND started_at >= :since"
-                ),
-                {"repo_key": repo_key, "since": since_ms},
-            )
-            row = rows.first()
-            return int(row._mapping["n"]) if row else 0
 
     async def arm(self, repo_key: str, *, per_hour: int) -> None:
         """Switch it on for one project. Arming clears whatever disarmed it last time."""

@@ -25,7 +25,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from agent_desk import lock
 from agent_desk.answer import session
 from agent_desk.config import settings
-from agent_desk.web import autostart, blocks, engine, kicking, later, pulls, routes, sse
+from agent_desk.ideas import appraise
+from agent_desk.web import autostart, blocks, engine, later, pulls, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -64,15 +65,13 @@ async def _console() -> AsyncIterator[None]:
                 # switch there is (docs/adr/0007). On a console where nothing is armed it wakes,
                 # finds no armed project, and sleeps again.
                 loops.append(group.create_task(autostart.run(routes.store)))
-                # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
-                loops.append(group.create_task(kicking.run(routes.store)))
                 # And the one that walks a drawing somebody pressed run on (037-runs.sql). It
                 # only ever queues; the loop above is what actually starts anything.
                 loops.append(group.create_task(engine.run(routes.store)))
             if settings.appraise:
                 # And the pass that reads the idea pool, so a list of sixty is a list
                 # somebody can scan (agent_desk/ideas/appraise.py). Off unless asked for (S2).
-                loops.append(group.create_task(kicking.appraising(routes.store)))
+                loops.append(group.create_task(appraise.run(routes.store)))
             if pulls.repos():
                 # And the open pull requests of the repositories somebody named (B3). Read-only,
                 # so it runs whether or not this console has hands.

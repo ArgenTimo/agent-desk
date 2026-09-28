@@ -86,6 +86,6 @@ mislead, and the one worth having is on the card.
 
 **A threshold, a colour, or a warning.** See story 3.
 
-**Doing anything about it.** Closing a session throws away what it has not committed and is the one
-irreversible thing in this console ([`docs/adr/0012`](../adr/0012-the-one-irreversible-thing.md)).
+**Doing anything about it.** Closing a session throws away what it has not committed, and this
+console does not do it ([`docs/adr/0013`](../adr/0013-back-to-observing.md)).
 This story is a number on a card.

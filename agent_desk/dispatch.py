@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_desk.config import settings
+from agent_desk.observe.model import Session
 from agent_desk.store.repo import McpServer
 
 # Flags that would hand a dispatched agent the machine. This program does not pass them, from any
@@ -138,19 +139,6 @@ def resume_argv(session_id: str, instruction: str) -> list[str]:
         session_id,
         instruction,
     ]
-
-
-# What the CLI says when the account has nothing left to spend. Matched loosely and on purpose:
-# this is the one shape here that was not recorded from a real occurrence, so it is a hint that
-# turns a failure into a wait, never a parser anything depends on (docs/adr/0004). When none of
-# these appear the failure is an ordinary failure and is counted as one.
-LIMIT_SAID = ("rate limit", "rate-limit", "usage limit", "resets at", "try again at", "quota")
-
-
-def looks_like_a_limit(said: str) -> bool:
-    """Is this failure the account being out of budget rather than something being broken?"""
-    lowered = said.lower()
-    return any(phrase in lowered for phrase in LIMIT_SAID)
 
 
 def build_task(
@@ -292,40 +280,6 @@ def introduce(who: str, *, project: str, doing: str = "", env_names: Sequence[st
         "front of you rather than starting anything new.",
     ]
     return "\n".join(lines)
-
-
-def go_looking(project: str) -> str:
-    """What an agent is told when it was sent to find its own work (docs/adr/0008).
-
-    Every clause of this is a fence. One thing, because an agent asked to improve a project
-    without a bound improves it until its context runs out. Something already there, because
-    fixing is maintenance and inventing is design — and design is the human's. A test, because a
-    fix nobody can check is a claim. And stop, because the next thing it finds is the next run's.
-    """
-    return "\n".join(
-        [
-            f"Nothing is queued for {project}, so you were sent to find one thing worth fixing.",
-            "",
-            "Find exactly one, of these kinds and no others:",
-            "- something that is broken, or wrong at an edge nobody covered",
-            "- a behaviour the documentation or a docstring claims and the code no longer does",
-            "- a test that is missing where a mistake would be silent",
-            "- a dependency with a known advisory, or an obvious vulnerability in this code",
-            "- code nothing reaches any more",
-            "",
-            "Then: make the smallest change that fixes it, prove it with a test that fails without",
-            "the change, and run whatever this repository uses as its gate. Stop there — the next",
-            "thing you find is the next run's, and a branch with one clear fix in it is worth more",
-            "than one with five.",
-            "",
-            "What you must not do: add a feature, change an interface anybody depends on, rewrite",
-            "something that works, or start a redesign. You were not asked to improve the product;",
-            "you were asked to fix what is already there. If you find nothing worth a change, say",
-            "so and stop — that is a good outcome and it costs nobody anything.",
-            "",
-            "Write in the commit message what you found and how you know it was real.",
-        ]
-    )
 
 
 # Cyrillic to latin, because the person using this console writes in Russian and the CLI does not
@@ -471,6 +425,24 @@ def start(
         said = (done.stderr or done.stdout).strip().splitlines()
         return Started(False, detail=said[-1][:300] if said else f"exit {done.returncode}")
     return Started(True, agent_id=agent_id)
+
+
+# The kinds of session this console can address. `bg` is what `claude --bg` writes; an interactive
+# terminal is left alone and the card says why (docs/adr/0009).
+ANSWERABLE_KINDS = ("bg", "background")
+
+
+def answerable(session: Session) -> str:
+    """Why this session cannot be answered from its card, or an empty string.
+
+    A sentence rather than a boolean, because the card shows it: a disabled button with no reason
+    next to it is the thing that makes somebody click it twice and then file a bug.
+    """
+    if session.kind not in ANSWERABLE_KINDS:
+        return "only a background session can be continued from here"
+    if session.status != "idle":
+        return f"it is {session.status}, and a session that is working is never interrupted"
+    return ""
 
 
 def kick(session_id: str, instruction: str, *, cwd: str, agent_id: str = "") -> Started:

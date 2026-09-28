@@ -167,9 +167,7 @@ a session that does not exist yet has no context to displace. It can be stopped 
 cannot be steered from here.
 
 [adr/0007](adr/0007-a-loop-that-decides-when-not-what.md) allows a loop to decide **when** to start
-something a human already queued, and [adr/0008](adr/0008-an-agent-that-finds-its-own-work.md) lets
-a project that was switched on for it find its own work when the queue is empty — one defect at a
-time, marked as found by an agent wherever it appears, never merged. It never invents a task, never reads a
+something a human already queued. It never invents a task, never reads a
 tracker for work, and never queues anything itself. It is off in every project until somebody arms
 that one, starts one agent at a time, spends a small hourly budget, runs only while this console
 is open, and switches itself off after two starts in a row fail. What it will not do is the half
@@ -193,27 +191,16 @@ happened. **Today the last step always reports a refusal**, because the installe
 client for its cross-session socket; the panel then offers the text back to be pasted by hand
 ([09-roadmap.md](09-roadmap.md), Phase 3).
 
-## The switch on a session card
+## Answering a background session from its card
 
-A session card carries one control, and it is the only place in this console where a click buys a
-*standing* permission rather than a single act: **don't let it idle**. While it is on and the
-console is running, that session is continued whenever it goes quiet — its own unfinished work
-first, and the fenced "find one thing worth fixing" instruction when there is none.
+An idle background session has a field on its card, and what is typed there is sent to that
+session when somebody presses send — one message, by a click, which is the case
+[`adr/0002`](adr/0002-read-first-never-interrupt.md) was written for. `stop` followed by
+`--bg --resume` is the CLI's own door into a background session; a session running in somebody's
+terminal has no door this program is allowed to open, so its card says that in a sentence instead.
 
-It appears only on a background session. `stop` followed by `--bg --resume` is the CLI's own door
-into one of those, and a session running in somebody's terminal has no door this program is
-allowed to open — the one that exists is authenticated by a key CLAUDE.md forbids reading. So the
-card says that in a sentence instead of showing a button that would not work
-([`adr/0009`](adr/0009-a-session-that-is-not-allowed-to-idle.md)).
-
-Three things it will show you afterwards, in the place the button was:
-
-- **how many turns it has kept alive**, on the button's own tooltip — the number that says whether
-  switching it on was worth it;
-- **🍽 on a break until 14:20** when the account ran out of budget. The switch stays on: a limit is
-  a wait, not a failure, and a console that switched itself off at lunchtime would need somebody
-  to notice and switch it back;
-- **why it stopped**, when two attempts in a row failed and it turned itself off.
+There used to be a switch beside it that continued a session whenever it went idle. It is gone
+([`adr/0013`](adr/0013-back-to-observing.md)).
 
 A session that is *working* is never continued, ever. That is the half of
 [`adr/0002`](adr/0002-read-first-never-interrupt.md) this console still keeps whole.

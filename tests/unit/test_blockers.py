@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import AsyncIterator
-from types import SimpleNamespace
 
 import pytest
 from agent_desk.ideas import inbox
 from agent_desk.store.repo import Store
 from agent_desk.web import blockers
+
+from tests.unit.landed import as_landed
 
 KEY = "origin:acme/api"
 
@@ -72,7 +73,7 @@ async def test_a_branch_a_gate_refused_is_work_nobody_has_read(
     await desk.take_next_task(KEY)
     await desk.task_started(task.id, "agent1")
     await desk.finish_task(task.id)
-    await desk.task_landed(task.id, "not merged: `make verify` failed: 1 test", landed=False)
+    await as_landed(desk, task.id, "not merged: `make verify` failed: 1 test", landed=False)
 
     found = await blockers.blockers(desk)
 
@@ -84,17 +85,13 @@ async def test_a_branch_a_gate_refused_is_work_nobody_has_read(
 async def test_a_switch_that_turned_itself_off_says_so_here(
     desk: Store, tmp_path: pathlib.Path
 ) -> None:
-    """Both of them: a project that stopped starting work (docs/adr/0007) and a session that
-    stopped being kept going (docs/adr/0009)."""
+    """A project that stopped starting work (docs/adr/0007)."""
     await desk.arm(KEY, per_hour=2)
     await desk.disarm(KEY, why="two starts in a row failed: no such directory")
-    await desk.kick_session("abc12345", on=True, session_id="abc12345-x", cwd=str(tmp_path))
-    await desk.stop_kicking("abc12345", why="two in a row failed: it would not resume")
 
     found = {one.kind: one for one in await blockers.blockers(desk)}
 
     assert "no such directory" in found["project"].why
-    assert "would not resume" in found["session"].why
     # The project card is draggable into the middle, because there is one to drag.
     assert found["project"].card == f"project:{KEY}"
 
@@ -293,25 +290,6 @@ async def test_a_project_that_switched_itself_off_holds_up_its_whole_queue(
 
 
 @pytest.mark.unit
-async def test_a_switched_off_session_belongs_to_the_project_it_is_checked_out_in(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """It used to belong to nothing, which meant it showed under every project's filter and was
-    counted under none of them — the "не правильно мапятся на проекты" of the report."""
-    blockers._projects.clear()
-    monkeypatch.setattr(blockers, "repository_of", lambda cwd: SimpleNamespace(key=KEY, name="api"))
-    await desk.kick_session("abc123", on=True, session_id="abc123-full", cwd=str(tmp_path))
-    await desk.stop_kicking("abc123", why="two in a row failed")
-
-    found = [one for one in await blockers.blockers(desk) if one.kind == "session"]
-
-    assert len(found) == 1
-    assert found[0].repo_key == KEY, "a switched-off session is still somebody's project's problem"
-    assert found[0].about_a_project
-    assert await blockers.blockers(desk, only=KEY), "it is filtered out of its own project"
-
-
-@pytest.mark.unit
 async def test_a_blocker_about_no_project_says_so_rather_than_reading_as_yours(desk: Store) -> None:
     """A failed question belongs to no project. It survives a project filter — hiding it behind
     one it was never part of would lose it — and the card says which of the two it is."""
@@ -448,8 +426,6 @@ async def test_the_open_card_renders_for_every_kind_of_blocker(
 
     await desk.arm(KEY, per_hour=2)
     await desk.disarm(KEY, why="two starts in a row failed")
-    await desk.kick_session("abc12345", on=True, session_id="abc-x", cwd=str(tmp_path))
-    await desk.stop_kicking("abc12345", why="two in a row failed")
     stuck = await desk.queue_task(
         repo_key=KEY, cwd=str(tmp_path), title="a job", instruction="x", source_kind="instruction"
     )
@@ -465,7 +441,7 @@ async def test_the_open_card_renders_for_every_kind_of_blocker(
         assert "What is waiting on it" in html
         assert "Which project it belongs to" in html
 
-    assert kinds == {"project", "session", "task"}
+    assert kinds == {"project", "task"}
 
 
 @pytest.mark.unit
@@ -507,41 +483,3 @@ async def test_a_pull_request_is_its_own_kind_rather_than_a_ticket_with_a_hash(
 
     assert found.kind == "pull"
     assert found.holding_up == (), "nothing here records what a pull request is holding up"
-
-
-@pytest.mark.unit
-async def test_a_session_in_a_directory_that_is_not_a_checkout_still_gets_a_project(
-    desk: Store, tmp_path: pathlib.Path
-) -> None:
-    """A folder somebody works in without git is its own project, which is what
-    `repository_of` says and what this must not second-guess."""
-    blockers._projects.clear()
-    await desk.kick_session("abc999", on=True, session_id="abc999-x", cwd=str(tmp_path))
-    await desk.stop_kicking("abc999", why="two in a row failed")
-
-    (found,) = await blockers.blockers(desk)
-
-    assert found.repo_key == f"dir:{tmp_path}"
-    # And it is remembered, because this runs on every render of the column.
-    assert blockers._projects[str(tmp_path)] == f"dir:{tmp_path}"
-
-
-@pytest.mark.unit
-async def test_a_session_whose_directory_has_gone_belongs_to_nothing(
-    desk: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The blocker is still real — the session did stop being kept going. It simply cannot be
-    filed under a project, and an empty key is how that is said."""
-    blockers._projects.clear()
-
-    def gone(cwd: str) -> object:
-        raise OSError("no such directory")
-
-    monkeypatch.setattr(blockers, "repository_of", gone)
-    await desk.kick_session("abc998", on=True, session_id="abc998-x", cwd="/gone")
-    await desk.stop_kicking("abc998", why="two in a row failed")
-
-    (found,) = await blockers.blockers(desk)
-
-    assert found.repo_key == ""
-    assert not found.about_a_project

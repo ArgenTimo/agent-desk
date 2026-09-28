@@ -1,6 +1,6 @@
 # ADR 0008 — an agent that finds its own work, inside a fence
 
-**Status:** accepted · 2026-09-05
+**Status:** superseded by [0013](0013-back-to-observing.md) · 2026-09-27
 
 ## Context
 

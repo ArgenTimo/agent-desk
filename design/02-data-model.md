@@ -22,8 +22,9 @@ somebody sent it out the one door (adr/0005). `idea.author` (039) says whether a
 or this console proposed it — which is about whose head holds the context, not about credit.
 
 **Work this console started** — `task`, `autostart`, `kicking`, `canary`.
-The queue (adr/0007), the per-project arming switch and its budget, the per-session one
-(adr/0009), and the name a session signs its turns with.
+The queue (adr/0007), the per-project arming switch and its budget, and the name a session signs
+its turns with. `kicking` held the per-session switch of adr/0009; nothing reads or writes it since
+adr/0013, and it stays so that no migration has to drop data.
 
 **The workbench as a constructor** (adr/0011) — `card_role`, `card_field`, `card_tie`,
 `card_leave`, `card_made`, `card_said`, `step_card`, `template`, `template_step`, `template_line`.

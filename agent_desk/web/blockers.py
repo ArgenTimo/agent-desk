@@ -9,7 +9,6 @@ session:
 - a task it started that failed, and nobody has retried;
 - a branch an agent finished that its project's own gate would not take (docs/adr/0008);
 - a project that switched itself off after two failures (docs/adr/0007);
-- a session that switched itself off after two (docs/adr/0009);
 - a question this console asked a model that came back an error;
 - a ticket or a pull request that somebody else's board says is waiting (docs/adr/0010).
 
@@ -24,8 +23,7 @@ The question card is the exception that proves the rule rather than a hole in it
 inferred there. An agent said in writing that it is waiting, and said what for. That is the same
 kind of fact as a task this console started and watched fail.
 
-Red means stopped, and everything in this module is stopped. A rate limit is not: it is a wait, it
-comes back on its own, and it renders as a break rather than a blocker.
+Red means stopped, and everything in this module is stopped.
 
 ## What each one holds up, and why it is a list rather than a number
 
@@ -42,7 +40,7 @@ So each kind now names what it holds up, and only where the link is **causal and
 | `task` (failed)        | the ideas that task was going to build                       |
 | `branch` (not merged)  | the same, still unbuilt because the work never landed        |
 | `ticket` / pull request| the idea this console filed as it, where it filed one        |
-| `session`, `answer`    | nothing this console can see, and the card says so           |
+| `answer`               | nothing this console can see, and the card says so           |
 
 Everything in that table is a link something wrote down: `task.source_ref` names the ideas a task
 was started for, `filing` records where an idea went, and a disarmed project is the reason its own
@@ -52,11 +50,9 @@ would be a picture of a guess in a column whose whole purpose is the opposite.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field, replace
 
 from agent_desk import telling
-from agent_desk.observe.shape import repository_of
 from agent_desk.store.repo import Idea, Store, Task
 
 # How many are shown. A column of forty is a column nobody reads, and the newest are the ones
@@ -158,7 +154,6 @@ PLAINLY = {
     "task": "a job that failed",
     "branch": "finished work that would not merge",
     "project": "a project that switched itself off",
-    "session": "a session that stopped being kept going",
     "answer": "a question that came back an error",
     "asked": "a question waiting on you",
     "ticket": "a ticket waiting on a person",
@@ -172,7 +167,6 @@ ROUGHLY = {
     "ticket": "usually a few hours — it is waiting on a person",
     "pull": "as long as a review takes — it is waiting on a person",
     "project": "minutes — press the switch again once whatever broke is fixed",
-    "session": "minutes — press the switch again",
     "branch": "as long as the gate takes, once the branch is fixed",
     "task": "as long as the task takes, once whatever stopped it is fixed",
     "answer": "moments — ask it again",
@@ -243,12 +237,6 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     why=task.detail or "the gate would not take it",
                     when=task.finished_at,
                     holding_up=tuple(_ideas_of(task, ideas)),
-                    # The branch is committed and sitting in a worktree. Offering the gate again
-                    # is the whole of what somebody does about it once they have pushed a fix, and
-                    # it was two pages away.
-                    action=f"/tasks/{task.id}/land",
-                    action_says="run the gate on it again",
-                    action_fields=(("key", task.repo_key),),
                 )
             )
 
@@ -273,31 +261,6 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
                     ),
                 )
             )
-
-    # A switched-off session belongs to the project it is checked out in. It used to belong to
-    # nothing, which meant it showed under every project's filter and under none of their counts —
-    # the "не правильно мапятся на проекты" of the report, and the one case here where the answer
-    # was already on the row.
-    for kicked in await store.switched_off_sessions():
-        if not kicked.disarmed_why:
-            continue
-        where = await _project_of(kicked.cwd) if kicked.cwd else ""
-        found.append(
-            Blocker(
-                kind="session",
-                ref=kicked.short_id,
-                repo_key=where,
-                what=kicked.short_id,
-                why=f"it stopped being kept going: {kicked.disarmed_why}",
-                when=kicked.kicked_at or 0,
-                card=f"session:{kicked.session_id}" if kicked.session_id else "",
-                # Only where the full id is on the row: the route addresses a session by it, and
-                # a button that cannot say which session it means is a button that does nothing.
-                action=(f"/sessions/{kicked.session_id}/kicking" if kicked.session_id else ""),
-                action_says="start keeping it going again",
-                action_fields=(("kicking", "yes"),),
-            )
-        )
 
     for block in await store.blocks(limit=60):
         if block.state == "failed" and block.finished_at:
@@ -384,23 +347,6 @@ async def blockers(store: Store, only: str = "") -> list[Blocker]:
     # with four ideas behind it is a different size of problem from one with none.
     found.sort(key=lambda one: (one.when, one.holds), reverse=True)
     return found[:MOST_SHOWN]
-
-
-# Resolving a checkout to a project reads git, so it is done off the loop and remembered for the
-# life of the process: a session's directory does not change project, and this runs on every
-# render of the column.
-_projects: dict[str, str] = {}
-
-
-async def _project_of(cwd: str) -> str:
-    if cwd not in _projects:
-        try:
-            _projects[cwd] = (await asyncio.to_thread(repository_of, cwd)).key
-        except OSError:
-            # A directory that has gone is a session whose project cannot be named. The blocker is
-            # still real; it simply belongs to nothing, and that is what an empty key means.
-            _projects[cwd] = ""
-    return _projects[cwd]
 
 
 async def one(store: Store, blocker_id: str) -> Blocker | None:

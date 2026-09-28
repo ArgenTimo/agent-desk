@@ -1,6 +1,6 @@
 # ADR 0012 — the one irreversible thing this console can do
 
-**Status:** accepted · 2026-09-09
+**Status:** superseded by [0013](0013-back-to-observing.md) · 2026-09-27
 
 ## Context
 

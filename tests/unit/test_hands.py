@@ -13,9 +13,10 @@ from types import SimpleNamespace
 import pytest
 from agent_desk import dispatch
 from agent_desk.config import Settings
+from agent_desk.ideas import appraise as appraise_module
 from agent_desk.store.repo import Store
 from agent_desk.web import app as app_module
-from agent_desk.web import autostart, engine, kicking, later, routes
+from agent_desk.web import autostart, engine, later, routes
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +74,7 @@ async def test_the_workbench_engine_starts_no_run(
     [
         # S2: reading the idea pool costs model calls, so it runs only when asked for.
         (False, ["agent_desk.web.later.run"]),
-        (True, ["agent_desk.web.kicking.appraising", "agent_desk.web.later.run"]),
+        (True, ["agent_desk.ideas.appraise.run", "agent_desk.web.later.run"]),
     ],
 )
 async def test_the_loops_that_start_work_are_not_run(
@@ -90,9 +91,8 @@ async def test_the_loops_that_start_work_are_not_run(
 
     for module, name in (
         (autostart, "run"),
-        (kicking, "run"),
         (engine, "run"),
-        (kicking, "appraising"),
+        (appraise_module, "run"),
         (later, "run"),
     ):
         monkeypatch.setattr(module, name, recorder(f"{module.__name__}.{name}"))
