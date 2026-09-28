@@ -35,10 +35,59 @@ Isolated test run until A1 was merged (and still used for every gate here):
 | 21 | D6 aiworker_workspace_roots | done | #38 | observe/elsewhere.py; applied in registry, agents.listed, jobs.read_jobs and transcript._find (by slug, can only over-hide); test_elsewhere (6; registry filter off → fails) | default `/srv/ai-worker/projects,/home/aiw` |
 | 22 | lanes module | done | #39 | web/lanes.py: LANES of functions → (template fields, notices); both renders in routes.py use `**beside.fields`; test_lanes (a lane appended in lanes.py reaches render_board and render_page; routes.py names no lane source); board/jobs/pulls tests unchanged and green | named lanes.py, not board.py, so it is not confused with routes.board(); board()/BoardRow stay in routes (11 tests patch routes.board) |
 | 23 | profile for ai-worker | done | #40 | migrations_glob → `agent_desk/store/[0-9][0-9][0-9]-*.sql` (matches 78 files), code_host.repository ArgenTimo/agent-desk, ci.platform github + pipeline_file .github/workflows/gate.yml (proposed, H9), tracker kind stays null; YAML parses | ci.platform says github before the workflow exists — noted in the file |
-| 24 | ADR draft external executors | done | `adr-external-executors` | docs/adr/0014 (proposed): read the executor's published API only; statuses verbatim + seen_at, unreachable is shown as unreachable; no control buttons; token by variable name; workspace roots hidden (task 21); one loop in the TaskGroup; indexed in docs/README.md; check-links ok | no code |
-| 25 | human: CI, CODEOWNERS, protection | todo | | | |
+| 24 | ADR draft external executors | done | #41 | docs/adr/0014 (proposed): read the executor's published API only; statuses verbatim + seen_at, unreachable is shown as unreachable; no control buttons; token by variable name; workspace roots hidden (task 21); one loop in the TaskGroup; indexed in docs/README.md; check-links ok | no code |
+| 25 | human: CI, CODEOWNERS, protection | human (H9–H11) | `human-proposals` | _work/proposed/.github/workflows/gate.yml (YAML parses; fake claude, temp dirs, fails on any call), _work/proposed/CODEOWNERS (guard files of 07 §4), exact `gh api` for branch protection | guarded paths: not written into the repo by this work |
 
 ## Baseline numbers (before)
 
 - open PRs: 18; worktrees (PycharmProjects repo): 32; blocked jobs: 203 (research), to re-count in task 3
 - tests: 2704 passed on origin/main 974a306 (research); lines of code: see final report
+
+
+## Final report (2026-09-27)
+
+### Done and how it was verified
+Every merged task passed the isolated gate (fake `claude` first on PATH, temp data dirs,
+before/after check of the live DB and the jobs count) with 0 calls, and its diff was re-read before
+the squash merge. PRs merged by this work: #14, #16, #18, #20, #13, #22–#41 (plus 7+1 closed).
+
+- **Safety first (0, A):** hermetic suite (A1); PR/worktree cleanup (U1); migrations by name with a
+  backup before any change, the live DB reconciled after a restore-checked backup (A4); one console
+  per data dir, guest opens for MCP (A3); dev consoles isolated by default (A5); hands (A6) and
+  idea appraisal (S2) off by default; the working console is a tagged copy under systemd — survives
+  kill, ignores dev edits, and the A4 backup was seen working live on migration 080 (A2).
+- **Board (B):** 203 blocked jobs shown as a fact with `claude attach` buttons (B1); fixtures on the
+  running CLI, transcript drift detection, banner off (B2); `claude agents --json` as the list (B7);
+  go-to-session from a service, reasons for going asked not guessed, counted on /standing (B4);
+  open PRs per repository (B3, needs a token); ideas column linear, not quadratic (B6); MCP inbox
+  for sessions (B5).
+- **Narrowing (C):** explore/land, kicking and session closing deleted, ADR 0013 (S1); git
+  "filings" kept but not read as filings (task 19); README prod/dev and terminal fallback (20).
+- **Readiness (D):** executor workspaces hidden (21); board lanes module (22); profile facts (23);
+  ADR 0014 proposed (24); CI/CODEOWNERS/protection proposed (25).
+
+### Blocked / not done
+- **Job cleanup (3):** `claude rm` needs the Claude background service, which is not running; the
+  plan does not allow starting it → H2 with a ready script for the 200 junk jobs.
+- **Local branch deletion (part of U1):** refused by the auto-mode classifier → H3.
+- **B6's "< 400 KB at 200 ideas":** not met (0.71 MB, linear now); needs lazy per-card forms.
+- **B4 real click:** not pressed on the owner's screen; first thing to try on the board day.
+- **stream_json fixture:** needs a real `claude -p` → H5.
+
+### For the human, in order of importance
+H0 restore the three denies + strict JSON · H2 start the service and remove 200 junk jobs ·
+H9 CI gate · H11 protect main · H10 CODEOWNERS · H7 read-only GitHub token for the PR lane ·
+H8 approve the MCP server (+ ai-worker copy) · H6 decide what `waitingFor` means · H5 re-record
+the stream fixture · H3 delete stale local branches · H4 (FYI: the working console is a service) ·
+H1 (Stop hook: nothing to change in the repo).
+
+### Numbers (before → after)
+| | before (2026-09-27 start) | after |
+|---|---|---|
+| open PRs | 18 | 5 (#19, #10, #9, #7, #6 — frozen agent-launch work) |
+| worktrees (~/PycharmProjects/agent-desk) | 32 | 3 (main + 2 inside ~/.claude/jobs, gone with H2) |
+| `blocked` background jobs | 203 | 203 (H2 removes 200) |
+| unit tests (`make gate`) | 2704 on origin/main | 2714 (≈ +110 new, ≈ −100 with the deleted features) |
+| agent_desk/**/*.py lines | 29 045 (974a306) | 28 630 |
+| tests/**/*.py lines | 41 923 | 41 892 |
+| live DB | schema 79, names unrecorded, 66/78/79 foreign | schema 80, every version named, `.bak-v79` beside it |

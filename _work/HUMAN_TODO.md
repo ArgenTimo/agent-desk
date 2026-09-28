@@ -37,7 +37,10 @@ Steps:
    `claude rm <id>` each, or `claude attach <id>` to finish one.
 No job is `running`/`working` today (all 203 background entries are `blocked`).
 
-## H0 · `.claude/settings.json` is not strict JSON (most important)
+## H0 · `.claude/settings.json`: restore the three denies, and make it strict JSON (most important)
+For this work you removed `Bash(gh pr merge*)`, `Bash(git tag *)` and `Bash(git checkout main*)` from
+`permissions.deny`. They are what stops an agent session under your account from merging and
+tagging on its own — put them back now that the work is done.
 The Stop hook is commented out with `//`. JSON has no comments; Claude Code evidently tolerated it
 (merges went through after your edit), but any other reader (`jq`, the hooks' own parsing, a
 future CLI) fails on it. Delete the `"Stop": [ … ]` entry instead of commenting it, and commit the
@@ -120,3 +123,36 @@ For the ai-worker repository, the same file at its root (this work does not writ
 ```
 Caveat: it must not reach ai-worker's own runtime containers or its `aiw` user — the server opens
 `~/.local/share/agent-desk` of whoever runs it. For interactive sessions on this laptop only.
+
+## H9 · Add the CI gate (task 25) — `.github/workflows/` is a guarded path
+`_work/proposed/.github/workflows/gate.yml`: `make gate` on ubuntu-latest, Python 3.12, with a
+`claude` first on PATH that only logs that it was called, `AGENT_DESK_DATA_DIR` and
+`AGENT_DESK_CLAUDE_HOME` in `$RUNNER_TEMP`, and a last step that fails if anything called it.
+```
+mkdir -p .github/workflows && cp _work/proposed/.github/workflows/gate.yml .github/workflows/
+git switch -c ci-gate && git add .github && git commit -m "ci: the gate, hermetic, on every PR" && git push -u origin ci-gate
+gh pr create --fill && gh pr checks --watch     # the check is named "gate"
+```
+The public repository gets Actions minutes for free. The profile already says `ci.platform: github`.
+
+## H10 · Add CODEOWNERS (task 25)
+`_work/proposed/CODEOWNERS` lists the guard files of `_integration/07` §4 (settings, hooks,
+`.claude/.ai-worker/`, CLAUDE.md, conftest and the no-agent test, fixtures, Makefile, pyproject,
+poetry.lock, `.github/`, migrations and `store/migrate.py`, secrets/redact/origin, the lock,
+`scripts/prod.sh`, `.mcp.json`, and the future ai-worker reader) → `@ArgenTimo`.
+`cp _work/proposed/CODEOWNERS CODEOWNERS` in the same PR as H9, or its own.
+
+## H11 · Protect `main` (task 25) — after H9 has run once, so the check name exists
+```
+gh api -X PUT repos/ArgenTimo/agent-desk/branches/main/protection --input - <<'JSON'
+{"required_status_checks": {"strict": true, "contexts": ["gate"]},
+ "enforce_admins": false,
+ "required_pull_request_reviews": {"required_approving_review_count": 1,
+   "require_code_owner_reviews": true, "dismiss_stale_reviews": true},
+ "restrictions": null, "allow_force_pushes": false, "allow_deletions": false}
+JSON
+```
+With one maintainer, a review of your own PR is impossible; `enforce_admins: false` leaves you
+`gh pr merge --admin`, while a bot or an agent under another account needs your approval. An agent
+running under *your* account is held by the `deny: Bash(gh pr merge*)` in `.claude/settings.json`,
+which you removed for this session — put it back when this work is done (see H0).
