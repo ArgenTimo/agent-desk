@@ -4523,11 +4523,14 @@ async def link_ideas(request: Request) -> Response:
         await store.unlink_ideas(drop)
     else:
         kind = form.get("kind", "needs").strip()
-        await store.link_ideas(
-            from_id=form.get("from_id", "").strip(),
-            to_id=form.get("to_id", "").strip(),
-            kind="touches" if kind == "touches" else "needs",
-        )
+        to_id = form.get("to_id", "").strip()
+        # Typed now rather than picked from a <select> (B6), so it may name nothing.
+        if await store.idea(to_id) is not None:
+            await store.link_ideas(
+                from_id=form.get("from_id", "").strip(),
+                to_id=to_id,
+                kind="touches" if kind == "touches" else "needs",
+            )
     panel = await render_ideas()
     if _wants_fragment(request):
         return HTMLResponse(panel)
