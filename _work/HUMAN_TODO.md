@@ -98,3 +98,25 @@ systemctl --user restart agent-desk
 Expected on the board (2026-09-27): `PR · ArgenTimo/agent-desk: 5 open, oldest 17 days` and
 `PR · bagorbenko/DuckyFlow: 1 open, oldest 20 days` (checked against `gh pr list`). Without the
 token each repository says why it could not be read, which is also a correct board.
+
+## H8 · Approve the agent-desk MCP server, and add it to ai-worker (B5)
+This repository now has `.mcp.json`: the installed copy (`~/opt/agent-desk-prod`, A2) offering
+`keep_idea`, `open_ideas`, `ask`, `answer` — nothing that starts work. Claude Code asks once
+before it trusts a project's MCP server: accept "agent-desk" the next time a session opens here
+(or `claude mcp list` to see it). A session can then write an idea into the inbox without anybody
+opening the console.
+
+For the ai-worker repository, the same file at its root (this work does not write there):
+```json
+{
+  "mcpServers": {
+    "agent-desk": {
+      "command": "${HOME}/opt/agent-desk-prod/.venv/bin/python",
+      "args": ["-m", "agent_desk.mcp"],
+      "env": { "AGENT_DESK_MCP_TOOLS": "keep_idea,open_ideas,ask,answer" }
+    }
+  }
+}
+```
+Caveat: it must not reach ai-worker's own runtime containers or its `aiw` user — the server opens
+`~/.local/share/agent-desk` of whoever runs it. For interactive sessions on this laptop only.

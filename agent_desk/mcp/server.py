@@ -50,6 +50,12 @@ def _refuse(at: Any, code: int, why: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": at, "error": {"code": code, "message": why}}
 
 
+def offered() -> tuple[tools.Tool, ...]:
+    """The tools this server was started to offer (`settings.mcp_tools`), in their usual order."""
+    wanted = {one.strip() for one in settings.mcp_tools.split(",") if one.strip()}
+    return tuple(one for one in tools.TOOLS if not wanted or one.name in wanted)
+
+
 def _tools_said() -> dict[str, Any]:
     return {
         "tools": [
@@ -61,7 +67,7 @@ def _tools_said() -> dict[str, Any]:
                 # the server, so a client can tell the two kinds apart without reading prose.
                 "annotations": {"readOnlyHint": not one.writes, "destructiveHint": False},
             }
-            for one in tools.TOOLS
+            for one in offered()
         ]
     }
 
@@ -90,6 +96,10 @@ async def answer(store: Store, said: dict[str, Any]) -> dict[str, Any] | None:
         return _reply(at, _tools_said())
     if method == "tools/call":
         given = said.get("params") or {}
+        name = str(given.get("name", ""))
+        if all(one.name != name for one in offered()):
+            # Not offered is not there: a tool left out of the list is refused, not merely hidden.
+            return _reply(at, tools._text(f"There is no tool called {name}. Ask for tools/list."))
         return _reply(
             at,
             await tools.call(store, str(given.get("name", "")), given.get("arguments") or {}),
