@@ -3515,7 +3515,7 @@ class Store:
                 {"short_id": short_id, "name": name, "t": _now_ms()},
             )
 
-    async def went_to_a_terminal(self, session_id: str) -> None:
+    async def went_to_a_terminal(self, session_id: str) -> int:
         """Record that the board sent somebody to a terminal (077).
 
         The honest half of the roadmap's first measure. A press of `go to it` is this console
@@ -3523,10 +3523,32 @@ class Store:
         driving that to zero is what docs/09-roadmap.md says phase one exists for.
         """
         async with self.engine.begin() as conn:
-            await conn.execute(
+            done = await conn.execute(
                 text("INSERT INTO went_to_a_terminal (session_id, at) VALUES (:session_id, :at)"),
                 {"session_id": session_id, "at": _now_ms()},
             )
+            return int(done.lastrowid or 0)
+
+    async def why_it_went(self, press: int, reason: str) -> bool:
+        """The reason somebody gave for one press (080). False when there is no such press."""
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("UPDATE went_to_a_terminal SET reason = :reason WHERE id = :id"),
+                {"reason": reason, "id": press},
+            )
+            return bool(done.rowcount)
+
+    async def terminal_reasons_since(self, since_ms: int) -> dict[str, int]:
+        """Presses in a window, by the reason given; '' is the ones nobody labelled."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT reason, COUNT(*) FROM went_to_a_terminal WHERE at >= :since "
+                    "GROUP BY reason"
+                ),
+                {"since": since_ms},
+            )
+            return {str(row[0]): int(row[1]) for row in rows}
 
     async def terminals_since(self, since_ms: int) -> int:
         """How many times, in a window. A window because an all-time total stops moving, and a

@@ -6755,6 +6755,7 @@ document.addEventListener('click', async (event) => {
   if (answer.opened) {
     going.textContent = '✓ opened';
     setTimeout(() => { going.textContent = said; }, 2000);
+    offerWhy(going, answer.press, answer.reasons || {});
     return;
   }
   // No terminal this console knows how to open, or it would not start. The exact line to paste is
@@ -6762,6 +6763,32 @@ document.addEventListener('click', async (event) => {
   say(answer.why || 'it would not open');
   copyTheLine(going, said);
 });
+
+// Why somebody went, if they care to say (080): four words beside the button for a few seconds, one
+// optional press. Asked, never inferred — a press nobody labels stays unlabelled.
+function offerWhy(going, press, reasons) {
+  if (!press || !Object.keys(reasons).length) return;
+  const holder = document.createElement('span');
+  holder.className = 'went-why small';
+  holder.append('why? ');
+  for (const [key, words] of Object.entries(reasons)) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = words;
+    chip.addEventListener('click', async () => {
+      await fetch(`/terminals/${press}/why`, {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ reason: key }),
+      }).catch(() => {});
+      holder.remove();
+    });
+    holder.append(chip);
+  }
+  going.after(holder);
+  setTimeout(() => holder.remove(), 15000);
+}
 
 // What it always did, kept for the fallback and for anything else on the board that hands over a
 // line to paste.

@@ -242,3 +242,18 @@ async def test_it_counts_ideas_in_english(desk: Store, many: int, expected: str)
         await desk.create_idea(text_=f"idea {at}", summary=f"idea {at}", source_kind="typed")
 
     assert expected in await standing.where_it_stopped(desk)
+
+
+async def test_where_it_stopped_says_how_often_the_board_sent_somebody_to_a_terminal(
+    desk: Store,
+) -> None:
+    """B4: the counter with its reasons, as people gave them; unlabelled presses are "not said"."""
+    idea = await desk.create_idea(text_="one", summary="one", source_kind="typed")
+    await desk.record_filing(idea_id=idea.id, tracker="git", issue_key="1", url="http://x/")
+    first = await desk.went_to_a_terminal("s1")
+    await desk.went_to_a_terminal("s1")
+    await desk.why_it_went(first, "answer")
+
+    said = await standing.where_it_stopped(desk)
+
+    assert "sent somebody to a terminal 2 times in it: 1 to answer it, 1 not said." in said
