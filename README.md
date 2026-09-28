@@ -73,6 +73,53 @@ not dispatch, run the autostart or workbench-engine loops, or draw the buttons f
 it watches and keeps ideas. `AGENT_DESK_HANDS=on` brings those back. Reading the idea pool in the
 background costs model calls, so it too runs only with `AGENT_DESK_APPRAISE=on`.
 
+## The working console, and the ones you develop in
+
+The console you look at all day is not the checkout you edit. It is a copy of a tag, run by
+`systemd --user` without `--reload`, so a saved file or a branch's migration never reaches it:
+
+| | code | data | port | started by |
+|---|---|---|---|---|
+| **working** | `~/opt/agent-desk-prod` at a tag `desk-YYYYMMDD[.N]` | `~/.local/share/agent-desk/` | 8787 | `systemctl --user … agent-desk` |
+| **dev** | any checkout or worktree | that checkout's `.desk-data/` | from the checkout's path | `make run` |
+| **tests** | any checkout | a temp dir per run ([`tests/conftest.py`](tests/conftest.py)) | — | `make gate` |
+
+```bash
+make prod-install TAG=desk-20260927        # once: clone, install, enable the unit
+git tag desk-YYYYMMDD origin/main && git push origin desk-YYYYMMDD
+make prod-update TAG=desk-YYYYMMDD         # move the working console to a tag, restart it
+```
+
+Only one console may hold a data directory — a second one refuses to start and names the pid that
+has it. Before a migration is applied the database is copied to `agent-desk.db.bak-v<N>` beside it,
+so rolling back is two steps: `make prod-update TAG=<previous>` and that file.
+
+## When the board is down: the terminal
+
+Everything the board shows is also reachable without it.
+
+```bash
+# Sessions and background jobs
+claude agents --json | jq '.[] | {id, kind, state, status, cwd, name}'
+claude attach <id>            # answer a background job
+claude logs <id>              # what it did
+
+# The working console
+systemctl --user status agent-desk
+journalctl --user -u agent-desk -n 200
+
+# Roll it back: the previous tag, and the copy taken before the migration
+make prod-update TAG=desk-<previous>
+systemctl --user stop agent-desk
+cp ~/.local/share/agent-desk/agent-desk.db.bak-v<N> ~/.local/share/agent-desk/agent-desk.db
+rm -f ~/.local/share/agent-desk/agent-desk.db-{wal,shm}
+systemctl --user start agent-desk
+
+# The inbox without a browser: the MCP server on stdio (it opens the store as a guest)
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"open_ideas","arguments":{}}}' \
+  | ~/opt/agent-desk-prod/.venv/bin/python -m agent_desk.mcp
+```
+
 ## Using it with your projects
 
 **There is nothing to connect.** This is the part that is easy to miss, so it is worth stating
@@ -99,7 +146,7 @@ What is optional, per project, and set from the board rather than from a file:
 | **Words used here** | your names for things, so an agent is told what they mean |
 | **Links** | Jira, GitHub, a dashboard — opened from the card's `⋯` menu |
 | **Environment** | the *names* of variables the work needs; never a value ([`docs/07-security.md`](docs/07-security.md)) |
-| **Start what I queue** | the switch of [`adr/0007`](docs/adr/0007-a-loop-that-decides-when-not-what.md) |
+| **Start what I queue** | the switch of [`adr/0007`](docs/adr/0007-a-loop-that-decides-when-not-what.md) — drawn only with `AGENT_DESK_HANDS=on` |
 
 ### On another machine
 
@@ -117,6 +164,9 @@ immediately; blocks answer on their own time through a headless `claude -p` that
 anywhere; ideas are captured before anything is generated and grow into drafts that stay in this
 program's store; and a classifier proposes a subject that one click undoes
 ([`docs/09-roadmap.md`](docs/09-roadmap.md)).
+
+The suite is 2705 unit tests (`make gate`, about four minutes) with a 94% coverage floor, and it
+starts no agent and opens nothing of the machine it runs on (`tests/conftest.py`).
 
 The distinction is the one that page insists on: **a phase is not done because its tests pass.**
 Phase 1's criterion is a full working day with three or more sessions in which every "what is that
