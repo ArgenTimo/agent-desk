@@ -55,7 +55,6 @@ from agent_desk import (
     finding,
     grading,
     handling,
-    land,
     opening,
     pasted,
     peer,
@@ -77,7 +76,7 @@ from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, inbox, kin, meeting, waking
-from agent_desk.observe import attach, folder, reading, registry, transcript
+from agent_desk.observe import agents, attach, folder, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -98,7 +97,6 @@ from agent_desk.store.repo import (
     Group,
     Idea,
     IdeaState,
-    Kicking,
     LooksLike,
     ProjectLink,
     Seen,
@@ -109,9 +107,8 @@ from agent_desk.store.repo import (
     Thread,
 )
 from agent_desk.tracker import jira
-from agent_desk.web import autostart, blockers, engine, plans
+from agent_desk.web import autostart, blockers, engine, lanes, plans
 from agent_desk.web import blocks as block_runs
-from agent_desk.web import kicking as nudge
 
 router = APIRouter()
 
@@ -279,6 +276,8 @@ def _stamped(name: str) -> str:
 
 
 env.globals["stamped"] = _stamped
+# Whether this console starts agents (config.py, `hands`): a button it would refuse is not drawn.
+env.globals["hands"] = settings.hands
 env.filters["blocker_is"] = _blocker_is
 env.filters["comes_back"] = _comes_back
 env.filters["tokens"] = _tokens
@@ -507,7 +506,9 @@ def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str
     here. `None` means the question was not asked and every row says so, rather than a default
     that would have thirty callers asserting something none of them looked up.
     """
-    read = registry.read_registry()
+    # Which sessions exist is the CLI's published answer; the registry files fill in the rest, and
+    # stand in alone, with a notice, when the command cannot be read (B7, observe/agents.py).
+    read = agents.listed(registry.read_registry(), agents.read_agents())
     now = now_ms()
     rows: list[BoardRow] = []
     for session in read.sessions:
@@ -525,7 +526,9 @@ def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str
     # Triage first; within a group, most recent movement first, and the name to keep the order
     # stable between two ticks that are otherwise identical.
     rows.sort(key=lambda r: (triage_rank(r.session, r.hint), -r.session.updated_at, r.session.name))
-    return rows, read.notices
+    # A transcript that no longer looks recorded is said once, however many sessions show it.
+    drifted = dict.fromkeys(row.tail.drift for row in rows if row.tail and row.tail.drift)
+    return rows, read.notices + [notice for notice in drifted if notice]
 
 
 async def board_work() -> dict[str, dict[str, int]]:
@@ -569,22 +572,18 @@ async def board_work() -> dict[str, dict[str, int]]:
     return counted
 
 
-async def board_rows_and_kicks() -> tuple[list[BoardRow], dict[str, Kicking]]:
-    """What the plans strip needs, read once. A convenience for the stream, which has no board row
-    of its own to hand over."""
-    rows, _ = await asyncio.to_thread(board)
-    return rows, await board_kicks()
+async def board_plans(rows: list[BoardRow] | None = None) -> str:
+    """The subscriptions strip above the projects (agent_desk/web/plans.py).
 
-
-async def board_plans(rows: list[BoardRow], kicks: dict[str, Kicking]) -> str:
-    """The subscriptions strip above the projects (agent_desk/web/plans.py)."""
+    `rows` is the board when the caller has already read it; the stream has none of its own to
+    hand over, so it is read here.
+    """
+    read = rows if rows is not None else (await asyncio.to_thread(board))[0]
     return env.get_template("_plans.html").render(
         plans=plans.plans(
             await store.subscriptions(),
-            rows,
+            read,
             await store.session_subscriptions(),
-            kicks,
-            now_ms(),
         )
     )
 
@@ -602,15 +601,6 @@ async def board_ours() -> set[str]:
 async def board_canaries() -> dict[str, str]:
     """The signature each session this console started was told to keep (023-canary.sql)."""
     return await store.canaries()
-
-
-async def board_kicks() -> dict[str, Kicking]:
-    """Which sessions are switched on to keep going, by short id (docs/adr/0009).
-
-    Read with the board for the same reason the links are: it is a handful of rows, and a button
-    whose state arrives one round trip after the card is a button that looks broken.
-    """
-    return {arming.short_id: arming for arming in await store.kicked_sessions()}
 
 
 @dataclass(frozen=True)
@@ -652,7 +642,6 @@ def render_board(
     groups: list[Group] | None = None,
     links: dict[str, list[ProjectLink]] | None = None,
     work: dict[str, dict[str, int]] | None = None,
-    kicks: dict[str, Kicking] | None = None,
     canaries: dict[str, str] | None = None,
     plans_html: str = "",
     spent: Spent | None = None,
@@ -666,11 +655,14 @@ def render_board(
     show nothing rather than a confident `$0.00`, which is a different claim entirely.
     """
     rows, notices = board(ours)
+    beside = lanes.read_lanes()
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
         rows=rows,
         projects=projects,
-        notices=notices,
+        notices=notices + beside.notices,
+        # Everything shown beside the sessions — waiting jobs, pull requests (web/lanes.py).
+        **beside.fields,
         # What each project is linked to, for the menu on its card. Read with the board rather
         # than fetched when the menu opens: it is four links, and a click that waits for a round
         # trip is a click that feels broken.
@@ -678,9 +670,6 @@ def render_board(
         # What it has going on and what it has got through — from this program's own queue, which
         # is the only work it can honestly count (docs/adr/0007).
         work=work or {},
-        # Which sessions are switched on not to idle, so the button on each card shows its own
-        # state rather than the same state on all of them (docs/adr/0009).
-        kicks=kicks or {},
         # The signature each session this console started was told to keep, so the card can say
         # when one stops (023-canary.sql).
         canaries=canaries or {},
@@ -1255,6 +1244,7 @@ async def render_page(message: str = "") -> str:
     """
     groups = await store.groups()
     rows, notices = await asyncio.to_thread(board, await board_ours())
+    beside = await asyncio.to_thread(lanes.read_lanes)
     projects = shape(rows, groups, await store.seen_projects())
     # Written from the read that happened anyway, never on a schedule of its own (073). A project
     # this console has seen stays on the board after its last session ends, because everything
@@ -1271,12 +1261,12 @@ async def render_page(message: str = "") -> str:
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,
-            notices=notices,
+            notices=notices + beside.notices,
+            **beside.fields,
             links=await board_links(),
             work=await board_work(),
-            kicks=await board_kicks(),
             canaries=await board_canaries(),
-            plans=await board_plans(rows, await board_kicks()),
+            plans=await board_plans(rows),
             flagged=sum(1 for row in rows if row.hint.waiting),
             spent=await board_spent(),
             focus=await store.setting(FOCUS_KEY),
@@ -1815,7 +1805,6 @@ async def render_project(key: str, refused: str = "") -> str:
         arming=await store.autostart(key),
         # The console says exactly what the loop decided, because it asks the same function.
         why_not=await autostart.why_not(store, key),
-        explore_why=await autostart.why_not_explore(store, key),
         # What is simply true here, whatever the task is. It goes verbatim into every agent this
         # console starts in this project (020-project-note.sql).
         note=await store.project_note(key),
@@ -2087,34 +2076,6 @@ async def remove_project_link(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
-@router.post("/tidy-sessions", response_class=HTMLResponse)
-async def switch_tidying(request: Request) -> Response:
-    """Let this project close a session whose canary is lost, or stop letting it (076).
-
-    «Закрытие сессии выбрасывает то, что она не закоммитила. Это единственное необратимое действие
-    во всей консоли, и решение о нём должно приниматься с открытыми глазами, а не заодно с
-    кнопкой.» So it is its own switch, off by default, on the project's own settings, and the panel
-    says what it will do before it is pressed.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    where = next(
-        (
-            one.instances[0].path
-            for one in shape(
-                (await asyncio.to_thread(board))[0],
-                await store.groups(),
-                await store.seen_projects(),
-            )
-            if one.key == key and one.instances
-        ),
-        "",
-    )
-    await store.tidy_sessions(key, on=form.get("tidying", "") == "yes", cwd=where)
-    panel = await render_project(key)
-    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
-
-
 @router.post("/mcp-servers", response_class=HTMLResponse)
 async def add_mcp_server(request: Request) -> Response:
     """Attach an MCP server to a project (074).
@@ -2179,9 +2140,8 @@ async def create_project(request: Request) -> Response:
                     await store.groups(),
                     await board_links(),
                     await board_work(),
-                    await board_kicks(),
                     await board_canaries(),
-                    await board_plans(*await board_rows_and_kicks()),
+                    await board_plans(),
                     await board_spent(),
                 )
             )
@@ -2201,7 +2161,6 @@ async def add_to_project(group_id: str, request: Request) -> Response:
                 await store.groups(),
                 await board_links(),
                 await board_work(),
-                await board_kicks(),
                 spent=await board_spent(),
             )
         )
@@ -2219,7 +2178,6 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
                 await store.groups(),
                 await board_links(),
                 await board_work(),
-                await board_kicks(),
                 spent=await board_spent(),
             )
         )
@@ -2571,6 +2529,7 @@ async def keep_bench(request: Request) -> JSONResponse:
                     by_hand=bool(one.get("by_hand")),
                     came=str(one.get("came", ""))[:120],
                     came_at=int(one.get("came_at", 0)),
+                    changed_at=int(one.get("changed_at", 0)),
                     ord=place,
                 )
             )
@@ -3816,14 +3775,31 @@ async def open_a_session(session_id: str) -> JSONResponse:
     text into a context, and this puts a person in front of one.
     """
     done = await asyncio.to_thread(opening.open_it, session_id)
+    press = 0
     if done.ok:
         # The half of the roadmap's first measure this console can stand behind (077). A terminal
         # somebody opens themselves is not visible from here and never will be; this one is, and it
         # is this console handing them back to a terminal because the board did not answer their
         # question. Recorded only when one actually opened: a press that failed sent nobody
         # anywhere.
-        await store.went_to_a_terminal(session_id)
-    return JSONResponse({"opened": done.ok, "why": done.detail})
+        press = await store.went_to_a_terminal(session_id)
+    # `press` and `reasons` are for the one optional click after it: why somebody went (080).
+    return JSONResponse(
+        {"opened": done.ok, "why": done.detail, "press": press, "reasons": opening.REASONS}
+    )
+
+
+@router.post("/terminals/{press}/why", response_class=JSONResponse)
+async def why_it_went(press: int, request: Request) -> JSONResponse:
+    """The reason somebody gave for going to a terminal — one of `opening.REASONS`, or nothing.
+
+    Asked, never inferred (080): the board offers the four words after the terminal has opened,
+    and a press nobody labels stays unlabelled.
+    """
+    reason = str((await _form(request)).get("reason", ""))
+    if reason not in opening.REASONS:
+        return JSONResponse({"kept": False, "why": "not one of the four"}, status_code=400)
+    return JSONResponse({"kept": await store.why_it_went(press, reason)})
 
 
 @router.get("/workbench/again", response_class=JSONResponse)
@@ -4490,11 +4466,14 @@ async def link_ideas(request: Request) -> Response:
         await store.unlink_ideas(drop)
     else:
         kind = form.get("kind", "needs").strip()
-        await store.link_ideas(
-            from_id=form.get("from_id", "").strip(),
-            to_id=form.get("to_id", "").strip(),
-            kind="touches" if kind == "touches" else "needs",
-        )
+        to_id = form.get("to_id", "").strip()
+        # Typed now rather than picked from a <select> (B6), so it may name nothing.
+        if await store.idea(to_id) is not None:
+            await store.link_ideas(
+                from_id=form.get("from_id", "").strip(),
+                to_id=to_id,
+                kind="touches" if kind == "touches" else "needs",
+            )
     panel = await render_ideas()
     if _wants_fragment(request):
         return HTMLResponse(panel)
@@ -4586,12 +4565,9 @@ async def attach_project(request: Request) -> Response:
     if pointed.url:
         await store.set_link(repo_key=pointed.repo_key, name="repository", url=pointed.url)
     if pointed.path:
-        # Where it is, so the queue and an exploration have a directory to work in without
-        # waiting for a session to appear there first (docs/adr/0008).
-        arming = await store.autostart(pointed.repo_key)
-        await store.explore(
-            pointed.repo_key, per_day=arming.per_day, on=arming.exploring, cwd=pointed.path
-        )
+        # Where it is, so the queue has a directory to work in without waiting for a session to
+        # appear there first.
+        await store.remember_checkout(pointed.repo_key, pointed.path)
     log.info("project attached", project=pointed.name, key=pointed.repo_key)
 
     panel = await render_project(pointed.repo_key)
@@ -4767,15 +4743,6 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
                 await _start_it(claimed)
     elif action == "drop":
         await store.drop_task(task_id)
-    elif action == "land":
-        # Offer the branch to the project again, once somebody has pushed a fix to it. The same
-        # call the settling pass makes, with the same rule behind it: nothing lands that the
-        # project's own gate will not take (docs/adr/0008). A gate that says no again leaves the
-        # branch exactly where it is and says why, which is what it did the first time.
-        task = next((t for t in await store.tasks() if t.id == task_id), None)
-        if task is not None and task.finished_at is not None:
-            offered = await asyncio.to_thread(land.land, task.cwd, autostart.worktree_of(task))
-            await store.task_landed(task.id, offered.detail, landed=offered.landed)
     elif action == "retry":
         task = next((t for t in await store.tasks() if t.id == task_id), None)
         if task is not None and task.failed_at is not None:
@@ -4995,64 +4962,6 @@ async def set_project_note(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
-@router.post("/explore", response_class=HTMLResponse)
-async def set_exploring(request: Request) -> Response:
-    """Let a project find its own work when its queue is empty (docs/adr/0008).
-
-    A second switch rather than a wider one: arming says "start what I put here", this says "and
-    when there is nothing, find something". Two decisions, made separately.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    if key:
-        try:
-            per_day = int(form.get("per_day", "3"))
-        except ValueError:
-            per_day = 3
-        # The checkout goes with the switch: an exploration is the first task in a project and
-        # has none to inherit a directory from (docs/adr/0008).
-        rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups(), await store.seen_projects())
-        named = next((project for project in projects if project.key == key), None)
-        where = named.instances[0].path if named and named.instances else ""
-        await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes", cwd=where)
-    panel = await render_project(key)
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
-
-
-@router.post("/projects/kicking", response_class=HTMLResponse)
-async def set_kicking_here(request: Request) -> Response:
-    """Switch every background session in one project into not being allowed to idle.
-
-    docs/adr/0009 says "all of them" is a click repeated, not a wider switch — so this is exactly
-    that: the same per-session rows the card's own button writes, written for the sessions that
-    are in this project right now. A session started afterwards is a new decision and gets its own
-    click, which is the property that keeps the switch a permission rather than a policy.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    on = form.get("kicking") == "yes"
-    if key:
-        rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups(), await store.seen_projects())
-        named = next((project for project in projects if project.key == key), None)
-        for row in [r for i in (named.instances if named else []) for r in i.rows]:
-            if row.session.kind != "bg":
-                continue
-            await store.kick_session(
-                row.session.session_id.split("-")[0],
-                on=on,
-                session_id=row.session.session_id,
-                cwd=row.session.cwd,
-            )
-    panel = await render_project(key)
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
-
-
 @router.post("/plans", response_class=HTMLResponse)
 async def manage_plans(request: Request) -> Response:
     """Declare a subscription, or forget one (025-subscriptions.sql).
@@ -5085,7 +4994,7 @@ async def render_plans_page() -> str:
         subscriptions=await store.subscriptions(),
         placed=await store.session_subscriptions(),
         rows=rows,
-        plans=await board_plans(rows, await board_kicks()),
+        plans=await board_plans(rows),
     )
 
 
@@ -5136,8 +5045,8 @@ async def say_to_session(session_id: str, request: Request) -> Response:
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
-    refused = nudge.kickable(row.session)
-    if refused and row.session.kind not in nudge.KICKABLE_KINDS:
+    refused = dispatch.answerable(row.session)
+    if refused and row.session.kind not in dispatch.ANSWERABLE_KINDS:
         # A session in a terminal. The refusal names the rule rather than the symptom.
         panel = env.get_template("_dispatch.html").render(started=False, detail=refused)
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
@@ -5158,45 +5067,17 @@ async def say_to_session(session_id: str, request: Request) -> Response:
     return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
 
-@router.post("/sessions/{session_id}/kicking", response_class=HTMLResponse)
-async def set_kicking(session_id: str, request: Request) -> Response:
-    """Switch one session into not being allowed to idle, or back out of it (docs/adr/0009).
-
-    This is the explicit human click docs/adr/0002 requires, and what it buys is a standing
-    permission rather than one message — which is the whole of what 0009 changes about that rule.
-    Nothing here writes into a session that is working: the loop checks the registry every time,
-    and `busy` is never continued.
-
-    The full id and the checkout are recorded now, by the card that has them, because the first
-    thing a kick does is stop the session — and a stopped session has no registry entry to read
-    them back from.
-    """
-    form = await _form(request)
-    on = form.get("kicking") == "yes"
-    rows, _ = await asyncio.to_thread(board)
-    row = next((r for r in rows if r.session.session_id == session_id), None)
-    short = session_id.split("-")[0]
-    if row is not None:
-        await store.kick_session(
-            short, on=on, session_id=row.session.session_id, cwd=row.session.cwd
-        )
-    elif not on:
-        # Switching one off must work even for a session that has since gone: otherwise the row
-        # stays armed forever and the loop keeps saying it is not running any more.
-        await store.kick_session(short, on=False)
-
-    panel = render_card("session", session_id, await store.groups())
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
-
-
 @router.post("/sessions/{session_id}/dispatch", response_class=HTMLResponse)
 async def dispatch_here(session_id: str, request: Request) -> Response:
     """Start an agent on this text, in the project that session is in (docs/adr/0006).
 
     Reached from the refusal panel: nothing can be said to a session that is already running, and
     this is the thing that *can* be done with the same words instead of ending at a wall.
+
+    The agent is briefed the way every other door briefs one: what the message was about, what the
+    project wrote down for anybody working in it, and the servers it lends. The words typed at a
+    refusal are usually short — "бери в работу" — and on their own they reach a cold session as an
+    instruction with no object.
     """
     form = await _form(request)
     text_ = form.get("text", "").strip()
@@ -5208,16 +5089,42 @@ async def dispatch_here(session_id: str, request: Request) -> Response:
             started=False, detail="that session is not on the board any more"
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
+    # A go-ahead was meant for the session that proposed the work, and it is the one thing a new
+    # agent cannot be handed: "бери в работу" sent from here started a dozen agents on 2026-09-10,
+    # each left to guess what "it" was. The same rule the workbench keeps
+    # (docs/04-threads-and-blocks.md), at the other door that reaches dispatch. A directive is the
+    # exception, because the workbench already applied that rule before it wrote one.
+    if not directive_id and block_runs.names_nothing(text_):
+        panel = env.get_template("_dispatch.html").render(
+            started=False,
+            detail=f"«{text_}» names no work, and a new agent knows nothing of what that session "
+            "proposed — it would only have a guess at what to take on. Say what should be done, "
+            "or wait until the session is idle and send it the go-ahead.",
+        )
+        return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
+    directive = await store.directive(directive_id) if directive_id else None
+    block = await store.block(directive.block_id) if directive is not None else None
+    # The one object a refusal always has: the session the words were typed at. Without it "бери в
+    # работу" sent six agents, one after another, to dig through transcripts for what "it" was.
+    # A fact, not a reading of it — where to look, never what that session was doing.
+    said_at = (
+        f"These words were typed at session {row.session.session_id}, working in "
+        f"{row.session.cwd}. It was running, so they could not be sent to it; its transcript is "
+        "where to look for what they refer to."
+    )
     result = await asyncio.to_thread(
         dispatch.start,
         dispatch.build_task(
             text_,
             project=row.session.project,
             branch=(row.tail.git_branch if row.tail else "") or "",
+            notes=[said_at, *([block.context] if block is not None and block.context else [])],
+            **await autostart.about(store, row.project_key),  # type: ignore[arg-type]
         ),
         cwd=row.session.cwd,
         name=text_[:40],
+        servers=await store.mcp_servers(row.project_key),
     )
     if result.started and directive_id:
         await store.mark_directive_dispatched(directive_id, result.agent_id)
@@ -5533,7 +5440,7 @@ async def _start_it(task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=autostart.project_of(task),
             **await autostart.about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,

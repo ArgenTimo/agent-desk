@@ -89,8 +89,9 @@ allows only a reading.
 ## What was deliberately not asked for
 
 **Stopping anything.** Closing a session throws away what it has not committed and is the one
-irreversible thing in this console; [`docs/adr/0012`](../adr/0012-the-one-irreversible-thing.md)
-decided how that happens and it is a switch somebody presses per project. Nothing here goes near it.
+irreversible thing a console could do; [`docs/adr/0012`](../adr/0012-the-one-irreversible-thing.md)
+decided how it would happen and [`docs/adr/0013`](../adr/0013-back-to-observing.md) took it out
+again. Nothing here goes near it.
 
 **Hiding rows.** A board that quietly showed twelve of thirty-six would be a board that is wrong in
 a way nobody can see. Gathering is not hiding: what is gathered says how many it gathered.

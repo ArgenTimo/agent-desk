@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import re
 from collections.abc import AsyncIterator
 from urllib.parse import urlencode
 
@@ -207,6 +208,8 @@ async def test_work_is_queued_started_and_dropped_by_the_buttons_that_say_so(
     status, panel = await _post(f"/tasks/{task.id}/start", {"key": key})
     assert status == 200
     assert len(started) == 1
+    # Told where it is, not told that it is in the sentence it was given.
+    assert "This is in check the ports" not in started[0]["instruction"]
     after = next(one for one in await desk.tasks() if one.id == task.id)
     assert after.agent_id == "agent1"
 
@@ -327,6 +330,62 @@ async def test_dispatching_from_a_session_card_starts_work_in_its_checkout(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("said", ["бери в работу", "Take it on, please."])
+async def test_a_go_ahead_from_a_refusal_starts_no_agent(
+    home: Home, desk: Store, started: list[dict[str, str]], said: str
+) -> None:
+    """docs/04-threads-and-blocks.md: a go-ahead and nothing else names no work, so it starts
+    nothing. The refusal panel is where such a line lands — it was meant for the session that
+    proposed the work — and a new agent started on it only has a guess at what "it" was."""
+    session_id = _a_session(home)
+
+    status, panel = await _post(f"/sessions/{session_id}/dispatch", {"text": said})
+
+    assert status == 200
+    assert "no agent was started" in panel
+    assert "names no work" in panel
+    assert started == []
+
+
+@pytest.mark.unit
+async def test_a_go_ahead_with_the_work_after_it_is_still_carried_out(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    session_id = _a_session(home)
+
+    status, panel = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу парсер реестра"}
+    )
+
+    assert "an agent is on it" in panel
+    (call,) = started
+    assert "парсер реестра" in call["instruction"]
+
+
+@pytest.mark.unit
+async def test_a_go_ahead_that_came_with_a_directive_is_carried_out(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """A directive exists only after the workbench found something the words point at."""
+    session_id = _a_session(home)
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="бери в работу",
+        thread_set_by="human",
+    )
+    directive = await desk.record_directive(
+        block_id=block.id, session_id=session_id, session_name="alpha", text_="бери в работу"
+    )
+
+    await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу", "directive": directive.id}
+    )
+
+    assert len(started) == 1
+
+
+@pytest.mark.unit
 async def test_dispatching_at_a_session_that_has_gone_says_so(
     home: Home, desk: Store, started: list[dict[str, str]]
 ) -> None:
@@ -335,6 +394,72 @@ async def test_dispatching_at_a_session_that_has_gone_says_so(
     assert status == 200
     assert "not on the board any more" in panel
     assert started == []
+
+
+@pytest.mark.unit
+async def test_dispatching_from_a_refusal_briefs_the_agent_like_every_other_door(
+    home: Home, desk: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "бери в работу" at a refusal reached an agent as that bare line and nothing else: no
+    context of the message, no project note, no glossary, no servers (2026-09-10)."""
+    session_id = _a_session(home)
+    rows, _ = routes.board()
+    key = rows[0].project_key
+    await desk.set_project_note(key, "Commit messages name the document the change serves.")
+    await desk.add_term(repo_key=key, term="смена", means="one stretch of work")
+    await desk.add_mcp_server(key, "the board", "stdio", "npx -y a-server")
+    block = await desk.create_block(
+        thread_id=(await desk.create_thread("s")).id,
+        kind="instruction",
+        input="бери в работу",
+        thread_set_by="human",
+    )
+    await desk.set_block_context(block.id, "idea · the check card goes grey once it passes")
+    directive = await desk.record_directive(
+        block_id=block.id, session_id=session_id, session_name="alpha", text_="бери в работу"
+    )
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_start(instruction: str, *, servers: object = (), **rest: object) -> dispatch.Started:
+        calls.append((instruction, [one.name for one in servers]))  # type: ignore[attr-defined]
+        return dispatch.Started(True, agent_id="agent1")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+
+    status, panel = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу", "directive": directive.id}
+    )
+
+    assert status == 200
+    assert "an agent is on it" in panel
+    ((instruction, servers),) = calls
+    assert "the check card goes grey once it passes" in instruction
+    assert "Commit messages name the document the change serves." in instruction
+    assert "**смена** — one stretch of work" in instruction
+    assert servers == ["the board"]
+
+
+@pytest.mark.unit
+async def test_words_typed_at_a_refusal_name_the_session_they_were_typed_at(
+    home: Home, desk: Store, started: list[dict[str, str]]
+) -> None:
+    """Words typed at a refusal with no directive behind them have one object, the session whose
+    refusal they were typed into. Six agents on 2026-09-10 started without it, each one working
+    out from transcripts which session "it" was.
+
+    Not the bare "бери в работу" of that day: that line now starts nothing at all (#13, "names no
+    work"). A go-ahead with the work after it still starts an agent, and is still typed at a
+    session the agent should be told about."""
+    session_id = _a_session(home)
+
+    status, _ = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу парсер реестра"}
+    )
+
+    assert status == 200
+    (call,) = started
+    assert f"typed at session {session_id}" in call["instruction"]
+    assert f"working in {home.root.parent}." in call["instruction"]
 
 
 # --- ideas, from the other side ---------------------------------------------------------------------
@@ -742,34 +867,6 @@ async def test_what_is_stuck_is_counted_apart_from_what_is_running(home: Home, d
 
 
 @pytest.mark.unit
-async def test_the_second_switch_says_what_it_will_do_before_it_is_pressed(
-    home: Home, desk: Store
-) -> None:
-    """docs/adr/0008: what it authorises is a machine deciding what is worth doing, so the page
-    says so in a sentence and the queue marks everything it produces."""
-    key = await _the_project(home)
-
-    status, panel = await _post("/explore", {"key": key, "exploring": "yes", "per_day": "2"})
-    assert status == 200
-    assert "Exploring:" in panel
-    assert "It fixes; it does not design, and it never merges." in panel
-    arming = await desk.autostart(key)
-    assert arming.exploring is True
-    assert arming.per_day == 2
-    # Two switches, two decisions: this one did not arm the queue.
-    assert arming.armed is False
-
-    status, panel = await _post("/explore", {"key": key, "exploring": "no"})
-    assert status == 200
-    assert "It starts only what you put in the queue." in panel
-    assert (await desk.autostart(key)).exploring is False
-
-    # A budget that is not a number falls back rather than failing.
-    status, _ = await _post("/explore", {"key": key, "exploring": "yes", "per_day": "lots"})
-    assert (await desk.autostart(key)).per_day == 3
-
-
-@pytest.mark.unit
 async def test_work_an_agent_found_is_marked_as_its_own_in_the_queue(
     home: Home, desk: Store
 ) -> None:
@@ -788,115 +885,16 @@ async def test_work_an_agent_found_is_marked_as_its_own_in_the_queue(
 
 
 @pytest.mark.unit
-async def test_the_switch_records_where_the_project_is(home: Home, desk: Store) -> None:
-    """An exploration is the first task in a project and has no earlier one to take a directory
-    from, so the panel that knows which project the button belongs to writes it down."""
-    key = await _the_project(home)
-
-    await _post("/explore", {"key": key, "exploring": "yes", "per_day": "2"})
-
-    arming = await desk.autostart(key)
-    assert arming.cwd == str(home.root.parent)
-    assert await autostart.why_not_explore(desk, key, live=set()) == ""
-
-
-@pytest.mark.unit
-async def test_the_switch_that_will_not_let_a_session_idle_says_what_it_does(
-    home: Home, desk: Store
-) -> None:
-    """docs/adr/0009: this is the explicit click docs/adr/0002 requires, and what it buys is a
-    standing permission — so the button says so before it is pressed."""
-    import os
-    import time
-
-    session_id = "bbbbbbbb-0000-4000-8000-000000000002"
-    home.session(
-        os.getpid(),
-        session_id,
-        cwd=str(home.root.parent),
-        kind="bg",
-        status="idle",
-        updatedAt=int(time.time() * 1000),
-    )
-
-    board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
-    )
-    assert "don&#39;t let it idle" in board or "don't let it idle" in board
-
-    status, _ = await _post(f"/sessions/{session_id}/kicking", {"kicking": "yes"})
-    assert status == 200
-    arming = await desk.kicking("bbbbbbbb")
-    assert arming.armed
-    # Recorded when the button is pressed, because a kick stops the session first and a stopped
-    # session has no registry entry to read them back from.
-    assert arming.session_id == session_id
-    assert arming.cwd == str(home.root.parent)
-
-    board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
-    )
-    assert "keeping it going" in board
-
-    status, _ = await _post(f"/sessions/{session_id}/kicking", {"kicking": "no"})
-    assert status == 200
-    assert not (await desk.kicking("bbbbbbbb")).armed
-
-
-@pytest.mark.unit
 async def test_a_terminal_session_is_offered_no_button_and_told_why(
     home: Home, desk: Store
 ) -> None:
     """A button that would lie is worse than a sentence that explains (docs/adr/0009)."""
     _a_session(home)  # the fixture's session is interactive
 
-    board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
-    )
+    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {})
 
     assert "cannot be continued from here" in board
     assert "let it idle" not in board
-
-
-@pytest.mark.unit
-async def test_switching_one_off_works_for_a_session_that_has_since_gone(desk: Store) -> None:
-    """Otherwise the row stays armed forever and the loop keeps saying it is not running."""
-    gone = "cccccccc-0000-4000-8000-000000000003"
-    await desk.kick_session("cccccccc", on=True, session_id=gone, cwd="/somewhere")
-
-    status, _ = await _post(f"/sessions/{gone}/kicking", {"kicking": "no"})
-
-    assert status == 200
-    assert not (await desk.kicking("cccccccc")).armed
-
-
-@pytest.mark.unit
-async def test_a_whole_project_can_be_told_not_to_idle_one_session_at_a_time(
-    home: Home, desk: Store
-) -> None:
-    """docs/adr/0009: "all of them" is a click repeated, not a wider switch — so this writes the
-    same per-session rows the card's own button writes."""
-    import os
-    import time
-
-    now = int(time.time() * 1000)
-    background = "dddddddd-0000-4000-8000-000000000004"
-    # A different pid: the registry is one file per pid, and the fixture's own session takes
-    # os.getpid().
-    home.session(os.getppid(), background, cwd=str(home.root.parent), kind="bg", updatedAt=now)
-    terminal = _a_session(home)
-    key = await _the_project(home)
-
-    status, _ = await _post("/projects/kicking", {"key": key, "kicking": "yes"})
-
-    assert status == 200
-    assert (await desk.kicking("dddddddd")).armed
-    # And the one in a terminal is left out: there is no door into it (docs/adr/0009).
-    assert not (await desk.kicking(terminal.split("-")[0])).armed
-
-    status, _ = await _post("/projects/kicking", {"key": key, "kicking": "no"})
-    assert status == 200
-    assert not (await desk.kicking("dddddddd")).armed
 
 
 @pytest.mark.unit
@@ -936,36 +934,6 @@ async def test_the_ideas_column_can_be_ordered_and_the_choice_survives_a_push(
     # A sort nobody offers changes nothing rather than raising.
     await _post("/ideas/sort", {"how": "by vibes"})
     assert await desk.setting(routes.IDEA_SORT_KEY) == "project"
-
-
-@pytest.mark.unit
-async def test_an_idle_row_says_why_it_is_idle_when_the_console_knows(
-    home: Home, desk: Store
-) -> None:
-    """Not an inference: this console tried to continue the session and the account said there
-    was nothing left to spend, so the time on the card is the one it was given."""
-    import os
-    import time
-
-    now = int(time.time() * 1000)
-    session_id = "eeeeeeee-0000-4000-8000-000000000005"
-    home.session(os.getpid(), session_id, cwd=str(home.root.parent), kind="bg", updatedAt=now)
-    await desk.kick_session("eeeeeeee", on=True, session_id=session_id, cwd="/somewhere")
-
-    # Before: it is just idle, and the board says only what the registry says.
-    board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
-    )
-    assert "having a smoke" in board
-    assert "on a break" not in board
-
-    await desk.kick_waits_until("eeeeeeee", now + 30 * 60 * 1000)
-
-    board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, await routes.board_kicks()
-    )
-    assert "on a break until" in board
-    assert "having a smoke" not in board
 
 
 @pytest.mark.unit
@@ -1040,8 +1008,8 @@ async def test_the_words_somebody_uses_are_told_to_every_agent_started_here(
 async def test_every_path_that_starts_an_agent_carries_the_same_context(
     home: Home, desk: Store
 ) -> None:
-    """One helper, so a word added on a project's page reaches the queue, an exploration and a
-    session being kept going — rather than the one path somebody remembered to wire it into."""
+    """One helper, so a word added on a project's page reaches everything this console starts —
+    rather than the one path somebody remembered to wire it into."""
     key = await _the_project(home)
     await desk.set_project_note(key, "no build step here")
     await desk.add_term(repo_key=key, term="верстак", means="the middle column")
@@ -1121,7 +1089,7 @@ async def test_a_background_session_can_be_answered_from_its_card(
         updatedAt=int(time.time() * 1000),
     )
 
-    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {}, {})
+    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {})
     assert "answer it, or tell it what to do next" in board
 
     status, panel = await _post(f"/sessions/{session_id}/say", {"text": "  use the other one  "})
@@ -1151,7 +1119,7 @@ async def test_a_session_that_is_working_is_offered_no_field(home: Home, desk: S
         updatedAt=int(time.time() * 1000),
     )
 
-    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {}, {})
+    board = await asyncio.to_thread(routes.render_board, await desk.groups(), {}, {})
 
     assert "answer it, or tell it what to do next" not in board
 
@@ -1189,13 +1157,13 @@ async def test_a_session_that_stopped_signing_is_flagged_and_never_closed_for_it
     await desk.keep_canary("0b0b0b0b", "biba")
 
     board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, {}, await routes.board_canaries()
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_canaries()
     )
     assert "lost the thread" not in board
 
     home.transcript(session_id, _entry("assistant", "I have finished the parser."))
     board = await asyncio.to_thread(
-        routes.render_board, await desk.groups(), {}, {}, {}, await routes.board_canaries()
+        routes.render_board, await desk.groups(), {}, {}, await routes.board_canaries()
     )
 
     assert "lost the thread" in board
@@ -1254,7 +1222,7 @@ async def test_the_plans_page_declares_one_and_moves_a_session_onto_it(
     assert await desk.session_subscriptions() == {session_id.split("-")[0]: plan.id}
 
     # The strip on the board shows it, and says which number is which.
-    strip = await routes.board_plans(*await routes.board_rows_and_kicks())
+    strip = await routes.board_plans()
     assert "Claude Max" in strip
     assert "in the air" in strip
 
@@ -1444,6 +1412,40 @@ def test_choosing_a_project_is_a_button_on_its_card_and_not_inside_the_summary()
 
 
 @pytest.mark.unit
+def test_server_markup_written_into_the_page_is_handed_to_htmx() -> None:
+    """The choose button worked once, on the page as it was served, and stopped at the first board
+    refresh: markup written with `innerHTML` is invisible to htmx until it is processed, so the
+    form fell back to a plain POST and navigated the whole console to `/projects/focus`. Counting
+    the live page afterwards found 26 more dead controls — the project picker on every idea card on
+    the workbench — so this pins the class rather than the board (docs/stories/14).
+
+    Server markup is what came from a response or a stream: `event.data`, a `.text()`, or the
+    `html` a fetch resolved to. The one exemption is the poster that runs only when htmx is absent
+    and writes into its own `into` target."""
+    console = (
+        (pathlib.Path(routes.TEMPLATES).parent / "static" / "console.js")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+
+    writes = []
+    for n, line in enumerate(console):
+        if ".innerHTML =" not in line or "into.innerHTML" in line:
+            continue
+        statement = " ".join(console[n : n + 3])
+        statement = statement[: statement.find(";") + 1]
+        if re.search(r"event\.data|\.text\(\)|innerHTML = html;", statement):
+            writes.append(n)
+
+    assert len(writes) >= 10, "fewer server swaps than there were — this pins the wrong thing"
+    for n in writes:
+        after = "\n".join(console[n : n + 8])
+        assert "htmx.process(" in after, (
+            f"console.js:{n + 1} writes server markup into the page and never hands it to htmx"
+        )
+
+
+@pytest.mark.unit
 async def test_the_right_hand_column_switches_between_the_pool_and_the_board(
     home: Home, desk: Store, tmp_path: pathlib.Path
 ) -> None:
@@ -1522,8 +1524,8 @@ async def test_a_project_can_be_added_by_pointing_at_a_folder(
     assert status == 200
     assert "a-project" in panel
     assert [group.name for group in await desk.groups()] == ["a-project"]
-    # The directory is recorded, so the queue and an exploration have somewhere to work before a
-    # session has ever run there.
+    # The directory is recorded, so the queue has somewhere to work before a session has ever run
+    # there.
     arming = await desk.autostart(routes.repository_of(str(where)).key)
     assert arming.cwd == str(where)
 

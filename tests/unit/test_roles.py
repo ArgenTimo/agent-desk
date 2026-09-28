@@ -340,9 +340,11 @@ async def test_what_a_step_may_do_is_replaced_rather_than_merged(desk: Store) ->
 async def test_the_route_drops_a_permission_this_program_does_not_have(desk: Store) -> None:
     from tests.unit.test_input import _post
 
+    # `land` was one until docs/adr/0013, and a permission that has gone is one this program
+    # does not have.
     await _post("/cards/leave", {"name": "idea:one", "leave": "work,fly,land"})
 
-    assert (await desk.card_leaves())["idea:one"] == ["land", "work"]
+    assert (await desk.card_leaves())["idea:one"] == ["work"]
 
 
 @pytest.mark.unit

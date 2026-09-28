@@ -111,12 +111,12 @@ async def test_an_idea_says_how_it_was_written_down_and_what_it_is_part_of(desk:
 async def test_an_idea_that_went_out_says_where(desk: Store) -> None:
     idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
     await desk.record_filing(
-        idea_id=idea.id, tracker="git", issue_key="abc1234", url="https://example/abc1234"
+        idea_id=idea.id, tracker="jira", issue_key="ADSK-12", url="https://example/ADSK-12"
     )
 
     said = json.loads((await routes.why_it_is_here(name=f"idea:{idea.id}")).body)["steps"]
 
-    assert any("git abc1234" in one["said"] for one in said)
+    assert any("jira ADSK-12" in one["said"] for one in said)
 
 
 async def test_an_answer_names_the_two_cards_it_was_made_out_of(desk: Store) -> None:

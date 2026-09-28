@@ -204,10 +204,12 @@
     <div class="directive-buttons">
       {# Nothing started, so the two ways forward: try again, or take the words and send them by
          hand into the session already running there. #}
+      {% if hands %}
       <form method="post" action="/directives/{{ directive.id }}/dispatch"
             hx-post="/directives/{{ directive.id }}/dispatch" hx-target="#message">
         <button type="submit" class="send" title="start an agent in its own worktree on this">Get it started</button>
       </form>
+      {% endif %}
       <form method="post" action="/sessions/{{ directive.session_id }}/message/review"
             hx-post="/sessions/{{ directive.session_id }}/message/review" hx-target="#message">
         <input type="hidden" name="text" value="{{ directive.text }}">
@@ -307,10 +309,12 @@
   <div class="about waiting">
     <span class="pill attention">waiting</span>
     <span class="dim small">queued in {{ task.repo_key }} — it starts when the seat is free</span>
+    {% if hands %}
     <form method="post" action="/tasks/{{ task.id }}/start"
           hx-post="/tasks/{{ task.id }}/start" hx-target="#message">
       <button type="submit" title="start it now, alongside whatever is running">Start it now</button>
     </form>
+    {% endif %}
     <form method="post" action="/tasks/{{ task.id }}/drop"
           hx-post="/tasks/{{ task.id }}/drop" hx-target="#message">
       <button type="submit" class="danger">Drop it</button>

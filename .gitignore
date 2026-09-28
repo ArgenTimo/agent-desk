@@ -16,6 +16,8 @@ build/
 *.db
 *.db-wal
 *.db-shm
+# A dev console's own data directory (`make run` without PROD=1).
+.desk-data/
 
 # Never, under any circumstances.
 .env

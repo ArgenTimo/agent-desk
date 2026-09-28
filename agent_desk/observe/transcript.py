@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_desk.config import settings
+from agent_desk.observe.elsewhere import elsewhere_slug
 from agent_desk.observe.model import AgentCall, TailEntry, TranscriptTail
 
 # A session id reaches this module from a URL path, and it is interpolated into a glob. Anything
@@ -34,6 +35,24 @@ _SESSION_ID = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")
 # a megabyte should already have reached.
 _MAX_ENTRY_CHARS = 2000
 
+# Every line type seen in transcripts at 2.1.283 (B2 in _research/06_backlog.md). Most are not
+# read; they are listed so that a window full of types nobody has seen reads as a format change
+# rather than as a quiet session (TranscriptTail.drift).
+KNOWN_LINE_TYPES = frozenset(
+    {
+        "ai-title", "last-prompt", "user", "assistant", "attachment", "system", "summary",
+        "atis-latch", "mode", "permission-mode", "pr-link", "queue-operation", "relocated",
+        "worktree-state", "file-history-delta", "file-history-snapshot", "cost-state",
+    }
+)  # fmt: skip
+# What this module reads from each type it reads. A line of that type without one is drift.
+READ_KEYS: dict[str, tuple[str, ...]] = {
+    "ai-title": ("aiTitle",),
+    "last-prompt": ("lastPrompt",),
+    "user": ("message", "timestamp"),
+    "assistant": ("message", "timestamp"),
+}
+
 
 def _find(session_id: str, root: Path) -> Path | None:
     """`~/.claude/projects/*/<sessionId>.jsonl`, never a slug derived from `cwd`.
@@ -43,7 +62,10 @@ def _find(session_id: str, root: Path) -> Path | None:
     """
     if not _SESSION_ID.match(session_id):
         return None
-    matches = list(root.glob(f"*/{session_id}.jsonl"))
+    # Another executor's session is not opened at all (observe/elsewhere.py).
+    matches = [
+        one for one in root.glob(f"*/{session_id}.jsonl") if not elsewhere_slug(one.parent.name)
+    ]
     if not matches:
         return None
 
@@ -216,6 +238,9 @@ def read_tail(
     calls: list[tuple[str, str, str]] = []
     returned: set[str] = set()
     context_tokens: int | None = None
+    read_lines = 0
+    unknown_lines = 0
+    missing: set[str] = set()
 
     for raw in window:
         try:
@@ -224,10 +249,16 @@ def read_tail(
             # A line torn by a write in progress, or the tail of one older than the window. Not a
             # format change and not worth a notice: the next read gets it whole.
             continue
-        if not isinstance(line, dict) or line.get("isSidechain"):
+        if not isinstance(line, dict):
+            continue
+        read_lines += 1
+        kind = line.get("type")
+        if kind not in KNOWN_LINE_TYPES:
+            unknown_lines += 1
+        missing.update(f"{kind}.{key}" for key in READ_KEYS.get(str(kind), ()) if key not in line)
+        if line.get("isSidechain"):
             continue
 
-        kind = line.get("type")
         if kind == "ai-title":
             title = line.get("aiTitle") or title
         elif kind == "last-prompt":
@@ -244,10 +275,12 @@ def read_tail(
                 )
             )
 
-    if title is None and last_prompt is None and not entries:
+    if title is None and last_prompt is None and not entries and not unknown_lines:
         # The file exists and the window yielded nothing readable. Returning an empty tail here
         # would render a row of em-dashes that looks like a quiet session; returning None marks it
-        # as unread, which is what it is (docs/02-architecture.md, failure posture).
+        # as unread, which is what it is (docs/02-architecture.md, failure posture). Unless what
+        # it yielded was lines of types nobody has seen: then the tail is returned for its drift,
+        # which the board shows as a notice beside the row.
         return None
 
     return TranscriptTail(
@@ -262,4 +295,7 @@ def read_tail(
             AgentCall(kind=kind, description=description, finished=call_id in returned)
             for call_id, kind, description in reversed(calls)
         ],
+        read_lines=read_lines,
+        unknown_lines=unknown_lines,
+        missing=sorted(missing),
     )

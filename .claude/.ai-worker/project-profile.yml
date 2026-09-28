@@ -29,7 +29,7 @@ supplied:
     status_map: {}
   code_host:
     kind: github
-    repository: null            # no remote yet — set this when one exists
+    repository: ArgenTimo/agent-desk
     default_branch: main
     # Empty on purpose. `worktree-workflow` builds `<branch_prefix><TICKET>`; with no tracker
     # there is no ticket key, so the branch is a bare task slug — `registry-reader`, `idea-card`.
@@ -61,12 +61,16 @@ detected:
     source_roots: [agent_desk]
     test_roots: [tests]
     e2e_roots: []
-    migrations_glob: agent_desk/store/schema.sql
+    # schema.sql is version 1; every later change is NNN-<name>.sql (agent_desk/store/migrate.py).
+    migrations_glob: agent_desk/store/[0-9][0-9][0-9]-*.sql
     docs_roots: [docs, design]
 
   ci:
-    platform: none              # no pipeline yet; `make gate` is the whole gate
-    pipeline_file: null
+    # GitHub Actions. The workflow itself is the owner's to add (.github/workflows/ is a guarded
+    # path): proposed in _work/proposed/.github/workflows/gate.yml. Until it lands, `make gate`
+    # run locally is the whole gate.
+    platform: github
+    pipeline_file: .github/workflows/gate.yml
     test_cmd: "poetry run pytest -m unit -q"
     ci_test_script: "make gate"
     expensive_jobs: []

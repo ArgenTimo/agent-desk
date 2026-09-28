@@ -1269,28 +1269,6 @@ body.dragging-card .ungroup { border-color: var(--focus); color: var(--fg-soft);
 #stream-state.lost { color: var(--flag); }
 body.stale .col-left { opacity: 0.55; }
 
-/* The switch that will not let a session sit idle (docs/adr/0009).
-   Off it reads as one more chip on the card; on it is the colour of a thing that is working,
-   because that is exactly what it is doing — and the card it sits on is the one place somebody
-   looks to find out why a session that was idle a minute ago is not idle now. */
-.card .kick { margin: 0.35rem 0 0; }
-.chip.kicking {
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--fg-dim);
-  border-radius: 999px;
-  padding: 0.12rem 0.5rem;
-  font: inherit;
-  font-size: var(--t-sm);
-  cursor: pointer;
-}
-.chip.kicking:hover { color: var(--ink); border-color: var(--fg-dim); }
-.chip.kicking.on {
-  border-color: var(--busy);
-  color: var(--busy);
-  background: color-mix(in srgb, var(--busy) 12%, transparent);
-}
-
 /* The blockers are a column of their own and a long one scrolls rather than pushing the idea pool
    off the bottom of the window. The same `scrollbar-gutter` as every other scroller here, so the
    cards do not shift sideways when one appears. */
@@ -1326,9 +1304,6 @@ body.stale .col-left { opacity: 0.55; }
 .keys dt { font-family: ui-monospace, monospace; color: var(--fg); white-space: nowrap; }
 .keys dd { margin: 0; color: var(--fg-soft); }
 
-/* A break is a wait, not a failure: amber like every other "look at this eventually", never red.
-   Red is stopped, and a session on a break comes back on its own (docs/adr/0009). */
-.pill.state.break { color: var(--attention); border-color: color-mix(in srgb, var(--attention) 45%, transparent); }
 
 /* What anybody working in a project should know. A field, not a card: it is written once and then
    read by every agent, so it looks like the thing you edit rather than the thing you scan. */
@@ -1458,7 +1433,6 @@ svg.map a:hover .node rect { stroke: var(--focus); }
 .card.plan.close { border-left-color: var(--attention); }
 /* Red for a plan that is actually out, because that is a fact rather than a projection — and
    stopped is exactly what it is until the time on the card. */
-.card.plan.out { border-left-color: var(--flag); }
 .card.plan .bar {
   height: 4px;
   border-radius: 999px;
@@ -1468,7 +1442,6 @@ svg.map a:hover .node rect { stroke: var(--focus); }
 }
 .card.plan .bar > span { display: block; height: 100%; background: var(--busy); }
 .card.plan.close .bar > span { background: var(--attention); }
-.card.plan.out .bar > span { background: var(--flag); }
 
 /* Pasting a meeting into the pool. Folded, because it is a rare thing to do and the column is
    mostly for reading. */
@@ -3260,6 +3233,9 @@ button.go:hover, button.yes:hover {
    colour on the card: colour on this page means status and nothing else (docs/06-console.md), and
    "this is new to you" is not a status the card is in — it is a fact about the reader. */
 .pin.arrived-since { box-shadow: -3px 0 0 0 var(--focus); }
+/* One that was already here and changed meanwhile (079). The same edge, thinner, so the two read as
+   one kind of mark with two answers — and still no colour of its own, for the same reason. */
+.pin.changed-since { box-shadow: -1px 0 0 0 var(--focus); }
 
 /* The word a group of carried lines is filed under. Small and quiet: it is a heading over three
    lines, not a section of the page. */

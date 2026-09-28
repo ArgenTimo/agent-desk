@@ -338,6 +338,13 @@ stream.addEventListener('board', (event) => {
   if (event.data === lastBoard || document.body.classList.contains('dragging-card')) return;
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
+  // The board carries htmx of its own now — the choose button on a project card is a form that
+  // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
+  // processed. Without this the button worked exactly once, on the page as it was served, and the
+  // first board refresh turned it back into a plain form that navigated the whole console away to
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
+  if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
   // checkout whose last session ended has none any more.
@@ -789,7 +796,8 @@ function isAStep(holder) {
 
 function showRunFrom(holder) {
   const button = holder.querySelector('.pin-run');
-  if (button) button.hidden = !isAStep(holder);
+  // A console that does not start agents does not offer to (AGENT_DESK_HANDS, config.py).
+  if (button) button.hidden = !isAStep(holder) || document.body.dataset.hands !== 'on';
 }
 
 async function runFromHere(holder) {
@@ -1070,6 +1078,8 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
+      if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
+      changed(holder);
       showCheck(holder);
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
       // has to act on, and folding it away would hide the sentence saying what to do.
@@ -1550,6 +1560,9 @@ async function pin(card, how) {
   // rather than having one invented for it.
   holder.dataset.came = how?.came || '';
   holder.dataset.cameAt = String(how?.cameAt || Date.now());
+  // When its content last changed after it arrived (079). Nothing is invented for a new card: zero
+  // is "not since it arrived", and only `changed()` moves it.
+  holder.dataset.changedAt = String(how?.changedAt || 0);
   holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
     <button type="button" class="pin-role" title="what this is in the process"></button>
     <span class="pin-kind">${card.kind}</span>
@@ -1595,6 +1608,10 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    // A card body is server markup written with innerHTML, which htmx cannot see until it is
+    // handed to it — the idea card's project picker was dead on every card until this line
+    // (docs/stories/14).
+    if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
@@ -1969,6 +1986,7 @@ document.addEventListener('drop', (event) => {
       .then((html) => {
         if (!html) return;
         document.getElementById('idea-list').innerHTML = html;
+        if (window.htmx) htmx.process(document.getElementById('idea-list'));
         filterIdeas();
       });
     return;
@@ -1985,7 +2003,11 @@ document.addEventListener('drop', (event) => {
     body: new URLSearchParams({ repo_key: from }),
   })
     .then((response) => (response.ok ? response.text() : null))
-    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
+    .then((html) => {
+      if (!html) return;
+      document.getElementById('board').innerHTML = html;
+      if (window.htmx) htmx.process(document.getElementById('board'));
+    });
 });
 
 /* --- the third view of a card ------------------------------------------------------------------- */
@@ -2002,7 +2024,10 @@ document.addEventListener(
     body.dataset.read = 'yes';
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
-      if (response.ok) body.innerHTML = await response.text();
+      if (response.ok) {
+        body.innerHTML = await response.text();
+        if (window.htmx) htmx.process(body);
+      }
     } catch {
       body.textContent = 'could not read it';
     }
@@ -2131,30 +2156,44 @@ benchFind?.addEventListener('keydown', (event) => {
 // morning" would be on most of the bench most of the time, which is a mark that says nothing —
 // and the moment somebody actually wants it is the moment they come back to the tab.
 //
-// What this does **not** claim is that a card *changed*: nothing here records a per-card time of
-// last change, and a mark that quietly meant something narrower than it said would be CLAUDE.md's
-// fifth rule broken on the surface it is most read from.
+// And which *changed*, said apart from which arrived (079). For a long time this could only say
+// "arrived", because nothing recorded a per-card time of last change and a mark that quietly meant
+// something narrower than it said would be CLAUDE.md's fifth rule broken on the surface it is most
+// read from. `changed()` is that record: stamped where the page rewrites a card, never inferred.
 let lookedAwayAt = 0;
+
+// The one writer of `changedAt`. Called where a card's content is replaced after it arrived — a
+// step's state moving, a check read back with its verdict, a new name — and nowhere a card is
+// merely drawn, moved, folded or restored, because none of those is the card changing.
+function changed(pin) {
+  pin.dataset.changedAt = String(Date.now());
+}
 
 function markWhatArrivedSince(since) {
   let fresh = 0;
+  let moved = 0;
   for (const pin of onBench()) {
-    const came = Number(pin.dataset.cameAt || 0);
-    const isNew = came > since;
+    const isNew = Number(pin.dataset.cameAt || 0) > since;
+    // A card that arrived while you were away has changed since you last saw it by definition, and
+    // counting it twice would make the chip's two numbers add up to more cards than there are.
+    const isChanged = !isNew && Number(pin.dataset.changedAt || 0) > since;
     pin.classList.toggle('arrived-since', isNew);
+    pin.classList.toggle('changed-since', isChanged);
     if (isNew) fresh += 1;
+    if (isChanged) moved += 1;
   }
+  const said = [fresh ? `${fresh} arrived` : '', moved ? `${moved} changed` : ''].filter(Boolean);
   const chip = document.getElementById('bench-new');
   if (chip) {
-    chip.hidden = fresh === 0;
-    chip.textContent = fresh ? `${fresh} arrived while you were away` : '';
+    chip.hidden = said.length === 0;
+    chip.textContent = said.length ? `${said.join(', ')} while you were away` : '';
   }
-  return fresh;
+  return fresh + moved;
 }
 
 function forgetWhatArrived() {
-  for (const pin of surface?.querySelectorAll('.pin.arrived-since') || []) {
-    pin.classList.remove('arrived-since');
+  for (const pin of surface?.querySelectorAll('.pin.arrived-since, .pin.changed-since') || []) {
+    pin.classList.remove('arrived-since', 'changed-since');
   }
   const chip = document.getElementById('bench-new');
   if (chip) {
@@ -2355,6 +2394,7 @@ function benchState() {
       by_hand: pin.dataset.moved === 'yes',
       came: pin.dataset.came || '',
       came_at: Number(pin.dataset.cameAt) || 0,
+      changed_at: Number(pin.dataset.changedAt) || 0,
     }))
     .filter((one) => one.at);
 }
@@ -2504,6 +2544,7 @@ function layOut(cards) {
         // about the card, and reloading a page is not a way of making one.
         came: one.came,
         cameAt: one.came_at,
+        changedAt: one.changed_at,
       }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
@@ -4277,7 +4318,11 @@ function showRuns() {
   const dearest = Math.max(0, ...[...states.values()].map((step) => step.usd || 0));
   for (const pin of surface?.querySelectorAll('.pin') || []) {
     const step = states.get(cardName(pin));
+    const stepWas = pin.dataset.step;
     pin.dataset.step = step ? step.state : '';
+    // A step going from going to done is the card changing (079). Only a move from a state this
+    // page had already drawn: the first pass after a load finds every step "new" and none changed.
+    if (stepWas !== undefined && stepWas !== pin.dataset.step) changed(pin);
     pin.classList.toggle('at-now', Boolean(going && going.at === cardName(pin)));
     let mark = pin.querySelector('.pin-step');
     if (!step) {
@@ -6407,10 +6452,11 @@ function applyArrangement(said) {
   // redraws the cards it renamed. Doing it here as well would be a second writer of the same row.
   if ((said.joined || []).length) readLines();
   for (const one of said.named || []) {
-    const label = surface
-      ?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`)
-      ?.querySelector('.pin-label');
-    if (label) label.textContent = one.label;
+    const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    const label = pin?.querySelector('.pin-label');
+    if (!label) continue;
+    label.textContent = one.label;
+    changed(pin);
   }
   for (const one of said.given || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
@@ -6709,6 +6755,7 @@ document.addEventListener('click', async (event) => {
   if (answer.opened) {
     going.textContent = '✓ opened';
     setTimeout(() => { going.textContent = said; }, 2000);
+    offerWhy(going, answer.press, answer.reasons || {});
     return;
   }
   // No terminal this console knows how to open, or it would not start. The exact line to paste is
@@ -6716,6 +6763,32 @@ document.addEventListener('click', async (event) => {
   say(answer.why || 'it would not open');
   copyTheLine(going, said);
 });
+
+// Why somebody went, if they care to say (080): four words beside the button for a few seconds, one
+// optional press. Asked, never inferred — a press nobody labels stays unlabelled.
+function offerWhy(going, press, reasons) {
+  if (!press || !Object.keys(reasons).length) return;
+  const holder = document.createElement('span');
+  holder.className = 'went-why small';
+  holder.append('why? ');
+  for (const [key, words] of Object.entries(reasons)) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = words;
+    chip.addEventListener('click', async () => {
+      await fetch(`/terminals/${press}/why`, {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ reason: key }),
+      }).catch(() => {});
+      holder.remove();
+    });
+    holder.append(chip);
+  }
+  going.after(holder);
+  setTimeout(() => holder.remove(), 15000);
+}
 
 // What it always did, kept for the fallback and for anything else on the board that hands over a
 // line to paste.

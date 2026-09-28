@@ -22,8 +22,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from agent_desk import lock
 from agent_desk.answer import session
-from agent_desk.web import autostart, blocks, engine, kicking, later, routes, sse
+from agent_desk.config import settings
+from agent_desk.ideas import appraise
+from agent_desk.web import autostart, blocks, engine, later, pulls, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -38,6 +41,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     waiting for it — a console that will not close while three questions are in the air is the
     same failure as one that will not close while a browser is watching the board.
     """
+    # Before the store: a second console on this data directory refuses here, before it can
+    # recover (and so fail) the first one's running blocks (agent_desk/lock.py).
+    with lock.hold(settings.data_dir):
+        async with _console():
+            yield
+
+
+@asynccontextmanager
+async def _console() -> AsyncIterator[None]:
     await routes.store.open()
     # What the asking costs, counted against the day's ceiling (043-spending.sql). Attached the
     # same way the run group is and for the same reason: every model call in this program goes
@@ -46,33 +58,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         async with asyncio.TaskGroup() as group:
             blocks.runs.attach(group)
-            # The loop that starts queued work lives here rather than in a daemon: it runs while
-            # the console does and stops when it stops, which is the simplest kill switch there is
-            # (docs/adr/0007). On a console where nothing is armed it wakes, finds no armed
-            # project, and sleeps again.
-            watching = group.create_task(autostart.run(routes.store))
-            # And the loop that will not let a switched-on session sit idle (docs/adr/0009).
-            # Same lifetime, same kill switch: it runs while the console does.
-            nudging = group.create_task(kicking.run(routes.store))
-            # And the pass that reads the idea pool, so a list of sixty is a list
-            # somebody can scan (agent_desk/ideas/appraise.py).
-            reading = group.create_task(kicking.appraising(routes.store))
+            loops: list[asyncio.Task[None]] = []
+            if settings.hands:
+                # The loop that starts queued work lives here rather than in a daemon: it runs
+                # while the console does and stops when it stops, which is the simplest kill
+                # switch there is (docs/adr/0007). On a console where nothing is armed it wakes,
+                # finds no armed project, and sleeps again.
+                loops.append(group.create_task(autostart.run(routes.store)))
+                # And the one that walks a drawing somebody pressed run on (037-runs.sql). It
+                # only ever queues; the loop above is what actually starts anything.
+                loops.append(group.create_task(engine.run(routes.store)))
+            if settings.appraise:
+                # And the pass that reads the idea pool, so a list of sixty is a list
+                # somebody can scan (agent_desk/ideas/appraise.py). Off unless asked for (S2).
+                loops.append(group.create_task(appraise.run(routes.store)))
+            if pulls.repos():
+                # And the open pull requests of the repositories somebody named (B3). Read-only,
+                # so it runs whether or not this console has hands.
+                loops.append(group.create_task(pulls.run()))
             # And the one that brings back what somebody put off until a moment that has now
             # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
             # would be a daemon, and this program does not have one.
-            recalling = group.create_task(later.run(routes.store))
-            # And the one that walks a drawing somebody pressed run on (037-runs.sql). It only
-            # ever queues; the loop above is what actually starts anything, under the rules that
-            # were already there.
-            walking = group.create_task(engine.run(routes.store))
+            loops.append(group.create_task(later.run(routes.store)))
             try:
                 yield
             finally:
-                watching.cancel()
-                nudging.cancel()
-                reading.cancel()
-                recalling.cancel()
-                walking.cancel()
+                for loop in loops:
+                    loop.cancel()
                 # Every block still in flight is stopped and says so. Without the second half a
                 # run cancelled before its first step leaves a block `queued` with nothing behind
                 # it, which the crash rule deliberately does not clean up on the next start.

@@ -197,11 +197,11 @@
           <option value="touches">together with… they make a third thing</option>
         </select>
         <label class="visually-hidden" for="to-{{ idea.id }}">which idea</label>
-        <select id="to-{{ idea.id }}" name="to_id">
-          {% for other in roots %}{% if other.id != idea.id %}
-          <option value="{{ other.id }}">{{ other.summary[:60] }}</option>
-          {% endif %}{% endfor %}
-        </select>
+        {# One shared list of choices for every card (`idea-choices`, below the list) rather than a
+           <select> of every idea inside every idea: that was the page growing with the square of
+           the pool — 3.7 MB at two hundred open ideas (_research/04_dogfooding_gaps.md, B6). #}
+        <input id="to-{{ idea.id }}" name="to_id" list="idea-choices" required
+               autocomplete="off" placeholder="the other idea…">
         <button type="submit">link them</button>
       </form>
     </details>
@@ -309,6 +309,9 @@
   <span class="hint-key">/idea</span> — and it lands here.</p>
 {% endif %}
 
+<datalist id="idea-choices">
+  {% for other in roots %}<option value="{{ other.id }}">{{ other.summary[:60] }}</option>{% endfor %}
+</datalist>
 {% for idea in roots %}
 {{ card(idea, children) }}
 {% endfor %}

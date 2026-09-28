@@ -20,6 +20,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from agent_desk.config import settings
+from agent_desk.observe.elsewhere import elsewhere
 from agent_desk.observe.model import RECORDED_CLI_VERSION, RegistryRead, Session
 
 PROC = Path("/proc")
@@ -176,6 +177,8 @@ def read_registry(*, pattern: str | None = None, proc_root: Path = PROC) -> Regi
         except ValidationError as exc:
             notices.append(f"{path.name}: {_why(exc)}")
             continue
+        if elsewhere(session.cwd):
+            continue  # another executor's agent (observe/elsewhere.py): not this board's
         if is_alive(session.pid, session.proc_start, proc_root=proc_root):
             sessions.append(session)
 

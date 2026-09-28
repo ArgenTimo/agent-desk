@@ -106,7 +106,7 @@ make install   dependencies, dev group included
 make gate      ruff · mypy · pytest -m unit     — what stop-verify.sh runs at every turn end
 make verify    gate + check-links + coverage
 make coverage  the suite with a floor under it
-make run       the console
+make run       a dev console on .desk-data/ and its own port; PROD=1 for the working one
 ```
 
 **The coverage floor is where the suite already stands, not an aspiration.** A threshold nobody

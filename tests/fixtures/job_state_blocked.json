@@ -1,0 +1,35 @@
+{
+  "state": "blocked",
+  "detail": "what it was doing",
+  "tempo": "blocked",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "tokens": 4352,
+  "needs": "what the job is waiting for, in its own words",
+  "output": {
+    "result": "scrubbed"
+  },
+  "children": null,
+  "linkScanOffset": 399715,
+  "linkScanPath": "/home/someone/.claude/projects/-home-someone-a-project/a-transcript.jsonl",
+  "template": "bg",
+  "respawnFlags": [],
+  "providerEnv": {},
+  "intent": "what somebody asked for",
+  "name": "a short name the cli made up",
+  "nameSource": "auto",
+  "sessionId": "22222222-3333-4444-8555-666666666666",
+  "resumeSessionId": "22222222-3333-4444-8555-666666666666",
+  "daemonShort": "22222222",
+  "cliVersion": "2.1.273",
+  "cwd": "/home/someone/a-project",
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:05:00.000Z",
+  "firstTerminalAt": null,
+  "backend": "daemon",
+  "suggestedReply": "a reply the job suggests"
+}

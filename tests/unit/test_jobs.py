@@ -12,6 +12,7 @@ import pathlib
 
 import pytest
 from agent_desk.observe import jobs
+from agent_desk.observe.model import JOB_STATES, JobEnd
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -99,3 +100,77 @@ def test_an_unknown_state_is_passed_through_rather_than_mapped(jobs_root: pathli
     assert ended is not None
     assert ended.state == "cancelled"
     assert not ended.failed
+
+
+# --- B1: blocked and stopped, recorded at 2.1.267 / 2.1.273 --------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fixture", "terminal", "failed", "waiting"),
+    [
+        ("job_state_blocked.json", False, False, True),
+        ("job_state_stopped.json", True, True, False),
+        ("job_state_running.json", False, False, False),
+        ("job_state_working.json", False, False, False),
+        ("job_state_done.json", True, False, False),
+        ("job_state_failed.json", True, True, False),
+    ],
+)
+def test_every_recorded_state_reads_as_what_the_cli_meant(
+    fixture: str, terminal: bool, failed: bool, waiting: bool
+) -> None:
+    """`stopped` is over but not finished; `blocked` is waiting on a human and not over — it can
+    be answered and carry on."""
+    job = JobEnd.model_validate(json.loads((FIXTURES / fixture).read_text()))
+
+    assert job.state in JOB_STATES
+    assert (job.terminal, job.failed, job.waiting) == (terminal, failed, waiting)
+
+
+@pytest.mark.unit
+def test_a_blocked_job_says_what_it_needs_and_a_stopped_one_what_it_asked() -> None:
+    blocked = JobEnd.model_validate(json.loads((FIXTURES / "job_state_blocked.json").read_text()))
+    stopped = JobEnd.model_validate(json.loads((FIXTURES / "job_state_stopped.json").read_text()))
+
+    assert blocked.needs and blocked.questions == 1
+    assert stopped.block is not None and stopped.questions == len(stopped.block.questions) == 1
+
+
+@pytest.mark.unit
+def test_the_board_read_finds_the_waiting_jobs_and_names_a_state_it_has_not_seen(
+    jobs_root: pathlib.Path,
+) -> None:
+    _job(jobs_root, "aaaaaaaa", "job_state_blocked.json")
+    _job(jobs_root, "bbbbbbbb", "job_state_done.json")
+    _job(jobs_root, "cccccccc", "job_state_stopped.json")
+    (jobs_root / "dddddddd").mkdir()
+    (jobs_root / "dddddddd" / "state.json").write_text(json.dumps({"state": "hibernating"}))
+
+    read = jobs.read_jobs()
+
+    assert [one.short_id for one in read.waiting] == ["aaaaaaaa"]
+    assert len(read.notices) == 1
+    assert "'hibernating'" in read.notices[0]
+
+
+@pytest.mark.unit
+def test_a_job_file_that_does_not_parse_is_a_notice_on_the_board(jobs_root: pathlib.Path) -> None:
+    (jobs_root / "eeeeeeee").mkdir()
+    (jobs_root / "eeeeeeee" / "state.json").write_text("{ not json")
+
+    assert "could not be read" in jobs.read_jobs().notices[0]
+
+
+@pytest.mark.unit
+def test_the_board_says_how_many_are_waiting_and_how_to_answer_them(
+    jobs_root: pathlib.Path,
+) -> None:
+    from agent_desk.web import routes
+
+    _job(jobs_root, "aaaaaaaa", "job_state_blocked.json")
+    _job(jobs_root, "ffffffff", "job_state_blocked.json")
+
+    page = routes.render_board()
+
+    assert "2 background jobs waiting on you" in page
+    assert "claude attach aaaaaaaa" in page
+    assert "what the job is waiting for, in its own words" in page

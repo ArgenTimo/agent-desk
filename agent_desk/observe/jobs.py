@@ -20,10 +20,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent_desk.config import settings
-from agent_desk.observe.model import JobEnd
+from agent_desk.observe.elsewhere import elsewhere
+from agent_desk.observe.model import JOB_STATES, JobEnd
 
 
 def state_path(short_id: str) -> Path:
@@ -53,3 +54,62 @@ def read_job(short_id: str) -> JobEnd | None:
         return JobEnd.model_validate(json.loads(raw))
     except (ValidationError, json.JSONDecodeError):
         return None
+
+
+class WaitingJob(BaseModel):
+    """A background job blocked on a human, with the short id `claude attach` takes."""
+
+    model_config = ConfigDict(frozen=True)
+
+    short_id: str
+    job: JobEnd
+
+
+class JobsRead(BaseModel):
+    """Every job file, read once: the ones waiting on a human, and what could not be read."""
+
+    model_config = ConfigDict(frozen=True)
+
+    waiting: list[WaitingJob] = []
+    notices: list[str] = []
+
+    @property
+    def questions(self) -> int:
+        """What the waiting jobs have asked, counted: each job's questions, or the one it needs."""
+        return sum(one.job.questions for one in self.waiting)
+
+
+def read_jobs() -> JobsRead:
+    """All background jobs the CLI keeps, for the board. Blocking; call it in a thread.
+
+    A job in a state this program has not seen is a notice, never a guess (docs/adr/0004) — it is
+    neither counted as waiting nor as over.
+    """
+    waiting: list[WaitingJob] = []
+    unknown: dict[str, int] = {}
+    unreadable = 0
+    for path in sorted(settings.jobs_root.glob("*/state.json")):
+        try:
+            job = JobEnd.model_validate(json.loads(path.read_text()))
+        except OSError:
+            continue  # tidied away between the glob and the read
+        except (ValidationError, json.JSONDecodeError):
+            unreadable += 1
+            continue
+        if elsewhere(job.cwd):
+            continue  # another executor's job (observe/elsewhere.py)
+        if job.state not in JOB_STATES:
+            unknown[job.state] = unknown.get(job.state, 0) + 1
+        elif job.waiting:
+            waiting.append(WaitingJob(short_id=path.parent.name, job=job))
+    notices = [
+        f"{count} background job{'' if count == 1 else 's'} in a state this program has not seen: "
+        f"'{state}' — not counted as waiting or as over (tests/fixtures/job_state_*.json)"
+        for state, count in sorted(unknown.items())
+    ]
+    if unreadable:
+        notices.append(
+            f"{unreadable} background job file{'' if unreadable == 1 else 's'} could not be read "
+            "— the CLI's job format may have changed (agent_desk/observe/jobs.py)"
+        )
+    return JobsRead(waiting=waiting, notices=notices)

@@ -196,5 +196,3 @@ async def test_the_one_getter_that_answers_with_a_row_either_way(desk: Store) ->
     arming = await desk.autostart("a-project-nobody-has-touched")
 
     assert not arming.armed
-    assert not arming.exploring
-    assert not arming.tidying

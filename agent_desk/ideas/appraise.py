@@ -32,6 +32,7 @@ nothing at all — which is what an unread idea should look like.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import structlog
@@ -213,3 +214,24 @@ async def sweep(store: Store) -> int:
         log.info("ideas.appraised", idea=idea.id, size=size, shape=shape)
         looked += 1
     return looked
+
+
+# How often the pool is read. Fifteen minutes because a notebook does not change between blinks,
+# and because reading an idea costs a model call.
+APPRAISE_SECONDS = 900.0
+
+
+async def run(store: Store) -> None:
+    """Read the ideas nobody has read yet, for as long as the console runs.
+
+    A failed sweep waits for the next one, and a cancel goes through rather than being swallowed —
+    `app.lifespan` cancels this task on the way out and the group then *waits* for it, and a sweep
+    is several model calls, so the cancel lands inside one of them far more often than it lands in
+    the sleep.
+    """
+    while True:
+        try:
+            await sweep(store)
+        except Exception:
+            log.exception("ideas.sweep_failed")
+        await asyncio.sleep(APPRAISE_SECONDS)

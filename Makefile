@@ -3,7 +3,17 @@
 # the same thing (CLAUDE.md, "Stack").
 
 .DEFAULT_GOAL := help
+# A console started from a checkout is a dev console unless somebody says otherwise: its own
+# database under .desk-data/ and a port derived from the checkout's path, so two worktrees run side
+# by side and neither ever opens the database the working console uses (A5 in
+# _research/06_backlog.md). The working one is `make run PROD=1`, or the installed copy (A2).
+ifeq ($(PROD),1)
 PORT ?= 8787
+DESK_ENV :=
+else
+PORT ?= $(shell printf '%s' '$(CURDIR)' | cksum | awk '{print 8800 + $$1 % 1000}')
+DESK_ENV := export AGENT_DESK_DATA_DIR=$(CURDIR)/.desk-data;
+endif
 # Deliberately not 0.0.0.0 by default: `make share SHARE_HOST=0.0.0.0` is a sentence somebody has
 # to type, and typing it is the moment the security model changes.
 SHARE_HOST ?= 127.0.0.1
@@ -16,7 +26,7 @@ SHARE_PORT ?= 8788
 POETRY = unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT; poetry
 URL  := http://127.0.0.1:$(PORT)
 
-.PHONY: help install gate verify test coverage lint typecheck run share overlay check-links clean
+.PHONY: help install gate verify test coverage lint typecheck run share overlay check-links clean prod-install prod-update
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -88,20 +98,34 @@ check-patterns: ## The packaged secret shapes must match the ones the commit hoo
 # *inside* this repository (.claude/worktrees/), so without it every file that agent touches
 # restarts the console — which kills the loop that started it, mid-run, several times a minute.
 mcp: ## The MCP server on stdin/stdout, for an agent to attach to
-	$(POETRY) run python -m agent_desk.mcp
+	$(DESK_ENV) $(POETRY) run python -m agent_desk.mcp
 
-run: ## The console on http://127.0.0.1:8787
-	$(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
+run: ## The console: a dev one on .desk-data/ and its own port; PROD=1 for the working one on 8787
+	@echo "agent-desk on $(URL), data in $(if $(DESK_ENV),$(CURDIR)/.desk-data,~/.local/share/agent-desk)"
+	$(DESK_ENV) $(POETRY) run uvicorn agent_desk.web.app:asgi --host 127.0.0.1 --port $(PORT) --reload \
 	  --reload-exclude '.claude/worktrees/*' --reload-exclude '*/.claude/worktrees/*' \
 	  --timeout-graceful-shutdown 2 --no-access-log
+
+# The working console is not this checkout: it is a copy of a tag under ~/opt, run by
+# systemd --user without --reload (A2, scripts/prod.sh). Updating it is a decision with a name.
+prod-install: ## Install the working console from a tag: make prod-install TAG=desk-YYYYMMDD
+	@test -n "$(TAG)" || { echo "TAG= is required"; exit 2; }
+	scripts/prod.sh install $(TAG)
+
+prod-update: ## Move the working console to another tag: make prod-update TAG=desk-YYYYMMDD
+	@test -n "$(TAG)" || { echo "TAG= is required"; exit 2; }
+	scripts/prod.sh update $(TAG)
 
 # The one target that changes the security model of this tool. Everything else binds to
 # loopback, where "anything that can reach the port can already read ~/.claude/" holds; this one
 # puts an ideas list on the network, and what protects it is a named link per viewer
 # (docs/07-security.md, docs/09-roadmap.md Phase 4).
+# `export` rather than a VAR=… prefix: $(POETRY) begins with `unset …;`, so a prefix goes to the
+# unset and never reaches the program.
 share: ## The console, plus the shared ideas view on the network
 	@echo "the shared ideas list will be reachable on $(SHARE_HOST):$(SHARE_PORT) — links are minted at $(URL)/viewers"
-	AGENT_DESK_SHARE_HOST=$(SHARE_HOST) AGENT_DESK_SHARE_PORT=$(SHARE_PORT) $(POETRY) run python -m agent_desk
+	$(DESK_ENV) export AGENT_DESK_SHARE_HOST=$(SHARE_HOST) AGENT_DESK_SHARE_PORT=$(SHARE_PORT) \
+	  AGENT_DESK_PORT=$(PORT); $(POETRY) run python -m agent_desk
 
 overlay: ## The console in its own window, for a window rule to pin always-on-top
 	@browser=$$(command -v google-chrome || command -v chromium || command -v chromium-browser); \

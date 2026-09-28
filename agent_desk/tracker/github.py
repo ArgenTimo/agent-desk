@@ -43,6 +43,8 @@ class Pull:
     url: str
     waiting_for: str
     draft: bool = False
+    # When it was opened, as GitHub wrote it (ISO 8601, UTC); "" when the response had none.
+    created_at: str = ""
 
     @property
     def key(self) -> str:
@@ -114,6 +116,7 @@ def read_pulls(raw: bytes) -> tuple[Pull, ...]:
                 url=str(one.get("html_url", "")),
                 waiting_for=waiting_for(one),
                 draft=bool(one.get("draft")),
+                created_at=str(one.get("created_at") or ""),
             )
         )
     return tuple(pulls)
