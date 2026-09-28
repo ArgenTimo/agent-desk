@@ -1,0 +1,39 @@
+[
+  {
+    "pid": 10001,
+    "cwd": "/home/someone/a-project",
+    "kind": "interactive",
+    "startedAt": 1790000000001,
+    "sessionId": "11111111-2222-4333-8444-555555555555",
+    "name": "a-project-1",
+    "status": "idle"
+  },
+  {
+    "pid": 10002,
+    "cwd": "/home/someone/a-project",
+    "kind": "interactive",
+    "startedAt": 1790000000002,
+    "sessionId": "22222222-2222-4333-8444-555555555555",
+    "name": "a-project-2",
+    "status": "busy"
+  },
+  {
+    "pid": 10003,
+    "cwd": "/home/someone/a-project",
+    "kind": "interactive",
+    "startedAt": 1790000000003,
+    "sessionId": "33333333-2222-4333-8444-555555555555",
+    "name": "a-project-3",
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  },
+  {
+    "id": "44444444",
+    "cwd": "/home/someone/a-project",
+    "kind": "background",
+    "startedAt": 1790000000004,
+    "sessionId": "44444444-2222-4333-8444-555555555555",
+    "name": "a-project-4",
+    "state": "blocked"
+  }
+]

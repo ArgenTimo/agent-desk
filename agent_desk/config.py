@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # --- Observation cadence. The registry is five small files; polling it is cheap. ---------
     registry_poll_seconds: float = 2.0
+    # `claude agents --json` is a process (~0.2 s, ~190 MB at 2.1.283), so its list is kept this
+    # long between reads rather than asked for at every redraw (observe/agents.py).
+    agents_poll_seconds: float = 10.0
     transcript_tail_lines: int = 40
     # A transcript reaches tens of megabytes, so the reader seeks from the end and stops. The
     # budget is bytes rather than lines because a single line holding a tool result can be

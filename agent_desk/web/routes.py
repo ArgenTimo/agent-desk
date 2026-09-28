@@ -77,7 +77,7 @@ from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, inbox, kin, meeting, waking
-from agent_desk.observe import attach, folder, jobs, reading, registry, transcript
+from agent_desk.observe import agents, attach, folder, jobs, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -509,7 +509,9 @@ def board(ours: Collection[str] | None = None) -> tuple[list[BoardRow], list[str
     here. `None` means the question was not asked and every row says so, rather than a default
     that would have thirty callers asserting something none of them looked up.
     """
-    read = registry.read_registry()
+    # Which sessions exist is the CLI's published answer; the registry files fill in the rest, and
+    # stand in alone, with a notice, when the command cannot be read (B7, observe/agents.py).
+    read = agents.listed(registry.read_registry(), agents.read_agents())
     now = now_ms()
     rows: list[BoardRow] = []
     for session in read.sessions:
