@@ -41,6 +41,7 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | [0011](adr/0011-the-workbench-is-a-constructor.md) | the workbench builds things: typed cards, typed lines, an engine that queues |
 | [0012](adr/0012-the-one-irreversible-thing.md) | this console may close a session, and only with all four conditions true — superseded by 0013 |
 | [0013](adr/0013-back-to-observing.md) | explore and land, kicking and closing sessions are deleted; the rest of the hands stay frozen |
+| [0014](adr/0014-reading-an-external-executor.md) | *proposed* — an external executor (ai-worker) is read from its API like `~/.claude/`: statuses verbatim with `seen_at`, no control buttons, token by name |
 
 ## Keeping this map honest
 
