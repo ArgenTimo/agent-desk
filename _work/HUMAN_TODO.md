@@ -79,3 +79,6 @@ writes "waiting for a human" into the registry, that is the fact rule five says 
 have today — but `docs/03-session-observation.md` requires a human to confirm a meaning before the
 reader acts on it. Look at a few values (`jq .waitingFor ~/.claude/sessions/*.json`) and, if it is
 that fact, say so in docs/03; reading it is then a small observe/ change with a recorded fixture.
+Evidence since (B7): `claude agents --json` printed `"status": "waiting", "waitingFor": "permission
+prompt"` for a session that was sitting at a permission prompt. It is recorded in
+`tests/fixtures/claude_agents.json`, parsed as `Agent.waiting_for`, and deliberately not rendered.
