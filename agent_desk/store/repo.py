@@ -554,6 +554,11 @@ class Term(BaseModel):
     created_at: int
 
 
+# The one tracker an idea is filed in (docs/adr/0005). Rows with any other `tracker` are kept and
+# not read as filings (`Store.filings`).
+FILED_IN = "jira"
+
+
 class Filing(BaseModel):
     """Where an idea went, once a human sent it there (docs/adr/0005)."""
 
@@ -1724,12 +1729,21 @@ class Store:
         return filing
 
     async def filings(self) -> list[Filing]:
+        """Issues ideas were filed as — in a tracker (`FILED_IN`).
+
+        The live database also holds 259 rows with tracker 'git': a commit URL recorded against an
+        idea by something outside this code between 2026-09-07 and 09-16, when no code path wrote
+        that value. They are kept exactly as they are and read by nothing here — a commit is not a
+        filing, and counting it as one hid those ideas from every place that shows unfiled work
+        (_work/DECISIONS.md D13).
+        """
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
-                    "ORDER BY created_at DESC"
-                )
+                    "WHERE tracker = :tracker ORDER BY created_at DESC"
+                ),
+                {"tracker": FILED_IN},
             )
             return [Filing(**row._mapping) for row in rows]
 
@@ -1738,9 +1752,9 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
-                    "WHERE idea_id = :idea_id"
+                    "WHERE idea_id = :idea_id AND tracker = :tracker"
                 ),
-                {"idea_id": idea_id},
+                {"idea_id": idea_id, "tracker": FILED_IN},
             )
             row = rows.first()
             return None if row is None else Filing(**row._mapping)

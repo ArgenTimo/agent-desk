@@ -74,3 +74,13 @@ Undo: edit the unit in `scripts/prod.sh`, then `prod.sh update <tag>`.
 `systemctl --user disable --now agent-desk && rm ~/.config/systemd/user/agent-desk.service && rm -rf ~/opt/agent-desk-prod`.
 From here the live database changes because its owner runs; the isolated-gate check compares
 schema_version, the `.lock` holder and the jobs count instead of mtimes.
+
+## D13 · The 259 `filing` rows with tracker='git' stay, and are not filings (task 19)
+All 259 rows in the live `filing` table have `tracker='git'` and a commit URL of this repository
+(2026-09-07 … 09-16); no code in any ref ever wrote `tracker="git"`, so something outside the code
+(a session's script) recorded "built in commit X" there. 258 of those ideas are `done`, 1 dropped.
+Decision: no migration and no move — the existing `tracker` column already marks them. The store
+reads only `tracker = 'jira'` (`FILED_IN`) in `filings()`/`filing_of()`; the delete guard still
+counts any row, because the foreign key does. The commit links are not shown anywhere now.
+Undo: drop the `WHERE tracker = :tracker` in those two queries.
+If the commit links are wanted on idea cards, that is a new, explicit reader of `tracker='git'`.
