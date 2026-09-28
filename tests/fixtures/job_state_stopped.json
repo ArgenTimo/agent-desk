@@ -1,0 +1,64 @@
+{
+  "state": "stopped",
+  "detail": "what it was doing",
+  "tempo": "idle",
+  "fan": [
+    {
+      "id": "scrubbed",
+      "kind": "scrubbed",
+      "label": "an option",
+      "startedAt": 1789045857717
+    }
+  ],
+  "tokens": 1368,
+  "block": {
+    "questions": [
+      {
+        "question": "a question it asked",
+        "options": [
+          {
+            "label": "an option",
+            "description": "what that option means"
+          },
+          {
+            "label": "an option",
+            "description": "what that option means"
+          },
+          {
+            "label": "an option",
+            "description": "what that option means"
+          },
+          {
+            "label": "an option",
+            "description": "what that option means"
+          }
+        ]
+      }
+    ]
+  },
+  "output": null,
+  "children": null,
+  "linkScanOffset": 298908,
+  "linkScanPath": "/home/someone/.claude/projects/-home-someone-a-project/a-transcript.jsonl",
+  "template": "bg",
+  "respawnFlags": [],
+  "providerEnv": {},
+  "intent": "what somebody asked for",
+  "name": "a short name the cli made up",
+  "nameSource": "auto",
+  "sessionId": "22222222-3333-4444-8555-666666666666",
+  "resumeSessionId": "22222222-3333-4444-8555-666666666666",
+  "daemonShort": "22222222",
+  "cliVersion": "2.1.267",
+  "cwd": "/home/someone/a-project",
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:05:00.000Z",
+  "firstTerminalAt": "2026-09-20T10:05:00.000Z",
+  "bridgeSessionId": "scrubbed",
+  "bridgeOwnerAccountUuid": "scrubbed",
+  "bridgeOwnerOrganizationUuid": "scrubbed",
+  "bridgeOutboundOnly": false,
+  "backend": "daemon",
+  "lastTerminalAt": "scrubbed",
+  "deadEpochReapedAt": "scrubbed"
+}

@@ -917,6 +917,80 @@ async def test_an_instruction_that_names_no_session_prepares_nothing(
     assert after is not None and "could not tell which project" in (after.answer or "")
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ["do", "desk"])
+async def test_a_go_ahead_with_nothing_in_front_of_it_starts_nothing(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """ "Бери в работу" with an empty workbench names no work (docs/04-threads-and-blocks.md).
+
+    The fake's directive run names session 1 all the same — which is what the real one did — so
+    this holds even where a project gets picked: *where* was answered, *what* never was. And the
+    request about the console itself is the same words with the same hole in them.
+    """
+    from agent_desk import dispatch
+
+    def never(instruction: str, *, cwd: str, name: str, env: object = None) -> dispatch.Started:
+        pytest.fail("a go-ahead at nothing started an agent")
+
+    monkeypatch.setattr(dispatch, "start", never)
+    monkeypatch.setenv("KIND", kind)
+
+    block = await blocks.submit(desk, "Бери в работу!", [make_row("alpha", "main")])
+    assert await _settled(desk, block.id) == "answered"
+
+    after = await desk.block(block.id)
+    assert after is not None and "could not tell what to take on" in (after.answer or "")
+    assert await desk.tasks() == []
+    assert await desk.directives() == []
+
+
+@pytest.mark.unit
+async def test_a_go_ahead_at_something_written_on_the_workbench_is_an_instruction(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard is about an empty workbench, not about the words: point at anything and they
+    point at it."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None
+    ) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="agent8")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "do")
+
+    block = await blocks.submit(
+        desk,
+        "бери в работу",
+        [make_row("alpha", "main")],
+        notes_="the registry reader drops an entry whose pid was reused",
+    )
+    assert await _settled(desk, block.id) == "answered"
+    assert len(told) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("said", "bare"),
+    [
+        ("бери в работу", True),
+        ("  Бери в работу, пожалуйста!  ", True),
+        ("take it on.", True),
+        ("бери в работу парсер реестра", False),
+        ("take on the registry reader", False),
+        ("tell alpha-d0 to test everything again", False),
+    ],
+)
+def test_a_go_ahead_is_the_whole_line_or_it_is_not_one(said: str, bare: bool) -> None:
+    """A go-ahead followed by what to go ahead with is an instruction like any other."""
+    assert blocks.names_nothing(said) is bare
+
+
 # --- what one call to the model is built from ---------------------------------------------------
 @pytest.mark.unit
 def test_cards_from_two_projects_are_one_question() -> None:

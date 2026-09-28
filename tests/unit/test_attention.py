@@ -265,3 +265,92 @@ def test_nothing_about_a_lost_canary_closes_anything() -> None:
 
     for ending in ("/stop", "/close", "/end", "data-stop"):
         assert ending not in around, f"the canary line offers {ending!r}"
+
+
+# --- and the session nobody can be asked in (docs/stories/04) --------------------------------------
+@pytest.mark.unit
+def test_a_background_agent_is_never_inferred_to_be_waiting_for_a_person() -> None:
+    """Thirty-four of thirty-eight rows on a real board said "may want you". Every one of them was
+    a `--bg` agent, and the single session a person was sitting in said nothing at all.
+
+    The three conditions are sound and unchanged. What was wrong is where they were applied: a
+    background agent has no prompt for anybody to wait at, and this console is the thing that made
+    that true — `dispatch.build_task` writes "you cannot be asked anything once you start" into the
+    brief of every one it starts.
+
+    A guess applied where its premise is false is CLAUDE.md's fifth rule in its subtlest form: the
+    flag always said "a guess, not a signal" and carried its observation, and no amount of hedging
+    in the wording repairs a premise that is not true.
+    """
+    for kind in ("bg", "background"):
+        hint = attention_hint(
+            _session(status="idle", kind=kind, statusUpdatedAt=NOW - 14 * 60_000),
+            _tail("assistant"),
+            now=NOW,
+            after_seconds=FIVE_MINUTES,
+        )
+
+        assert not hint.waiting, f"a {kind} session is flagged as possibly waiting for a person"
+        assert hint.finished, "and it does not say what it did instead"
+        assert hint.observation == "idle 14m · last entry: assistant", (
+            "the observation the reading was made from went with the flag"
+        )
+
+
+@pytest.mark.unit
+def test_a_session_somebody_is_sitting_in_is_still_flagged() -> None:
+    """The whole point of narrowing it. A flag on nine rows in ten is not a flag; a flag on the one
+    row where somebody may be needed is the thing the board is worth opening for."""
+    hint = attention_hint(
+        _session(status="idle", kind="interactive", statusUpdatedAt=NOW - 14 * 60_000),
+        _tail("assistant"),
+        now=NOW,
+        after_seconds=FIVE_MINUTES,
+    )
+
+    assert hint.waiting
+    assert not hint.finished
+
+
+@pytest.mark.unit
+def test_the_two_readings_are_never_both_true() -> None:
+    """One of them is a reason to stop what you are doing and the other is not. A row that said
+    both would be a row that answers the question twice."""
+    for kind in ("bg", "background", "interactive", "shell", "something-new"):
+        for status in ("idle", "busy", "shell"):
+            for last in ("assistant", "user", None):
+                for quiet in (0, 14):
+                    hint = attention_hint(
+                        _session(status=status, kind=kind, statusUpdatedAt=NOW - quiet * 60_000),
+                        _tail(last),
+                        now=NOW,
+                        after_seconds=FIVE_MINUTES,
+                    )
+
+                    assert not (hint.waiting and hint.finished)
+
+
+@pytest.mark.unit
+def test_a_background_agent_that_has_finished_does_not_sort_above_the_work() -> None:
+    """It used to. Thirty-four agents that had stopped ranked first, so the board opened with
+    everything that needed nothing."""
+    done = _session(status="idle", kind="bg", statusUpdatedAt=NOW - 14 * 60_000)
+    hint = attention_hint(done, _tail("assistant"), now=NOW, after_seconds=FIVE_MINUTES)
+    busy = _session(status="busy")
+
+    assert triage_rank(done, hint) > triage_rank(
+        busy, attention_hint(busy, _tail("assistant"), now=NOW, after_seconds=FIVE_MINUTES)
+    )
+
+
+@pytest.mark.unit
+def test_a_background_agent_still_working_says_neither() -> None:
+    """ "It has finished a turn" is a reading of silence. There is no silence here."""
+    hint = attention_hint(
+        _session(status="busy", kind="bg", statusUpdatedAt=NOW - 14 * 60_000),
+        _tail("assistant"),
+        now=NOW,
+        after_seconds=FIVE_MINUTES,
+    )
+
+    assert not hint.waiting and not hint.finished

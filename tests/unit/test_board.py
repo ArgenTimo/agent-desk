@@ -7,8 +7,10 @@ liveness check of docs/03-session-observation.md running for real rather than be
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import pathlib
 import re
 import time
 from collections.abc import AsyncIterator
@@ -23,12 +25,28 @@ from agent_desk.web import routes, sse
 from jinja2 import UndefinedError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+TEMPLATES = Path(routes.TEMPLATES)
 MINUTE = 60_000
 
 pytestmark = pytest.mark.skipif(
     not Path("/proc/self/stat").exists(),
     reason="liveness is /proc-based; docs/03-session-observation.md was verified on Linux",
 )
+
+
+def _live_pids(how_many: int) -> list[int]:
+    """Processes that are actually running, for a registry that is keyed by pid.
+
+    Two entries naming one pid are one entry to the reader, so a test about a directory holding a
+    dozen sessions cannot be written by alternating between this process and its parent.
+    """
+    found = [
+        int(name)
+        for name in sorted(os.listdir("/proc"), key=lambda one: one.isdigit() and int(one))
+        if name.isdigit() and Path(f"/proc/{name}/stat").exists()
+    ]
+    assert len(found) >= how_many, "this machine is not running enough processes to key a registry"
+    return found[:how_many]
 
 
 def _starttime(pid: int) -> str:
@@ -624,3 +642,502 @@ def test_a_card_opens_in_plain_words_and_keeps_the_technical_half_a_press_away(
     plain = card.split('class="plain-only"')[1].split('class="technical-only"')[0]
     assert "pid" not in plain
     assert str(os.getpid()) not in plain
+
+
+# --- whose session this is (docs/stories/03) -------------------------------------------------------
+@pytest.mark.unit
+def test_a_row_says_nothing_about_whose_it_is_until_somebody_asks(home: Home) -> None:
+    """Thirty callers of `board` want the rows in order to find the sessions a question is about
+    and have no use for this reading.
+
+    A default of `"agent"` would have every one of them quietly asserting something nobody looked
+    up — CLAUDE.md's fifth rule broken to make a field tidier. Absent is a real answer.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    rows, _ = routes.board()
+
+    assert [row.whose for row in rows] == [""]
+
+
+@pytest.mark.unit
+def test_the_board_tells_what_it_started_from_what_it_merely_found(home: Home) -> None:
+    """Measured on a real console: thirty-six rows, of which this console had started **none** —
+    and the board said the same thing about all thirty-six.
+
+    `bg` is how this console starts a session and it is also how anything else does, so the
+    registry alone cannot answer it. What can is that the console wrote the id down when it
+    started one.
+    """
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+    home.session(
+        os.getppid(), "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    rows, _ = routes.board({"aaaaaaaa"})
+    whose = {row.session.session_id.split("-")[0]: row.whose for row in rows}
+
+    assert whose["aaaaaaaa"] == "ours"
+    assert whose["bbbbbbbb"] == "agent", (
+        "a background session nobody here started is presented as one that was"
+    )
+
+
+@pytest.mark.unit
+def test_a_session_somebody_is_sitting_in_is_not_an_agent(home: Home) -> None:
+    """One of the thirty-six was the person's own terminal, and it read exactly like the other
+    thirty-five."""
+    home.session(
+        os.getpid(),
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        cwd="/home/dev/alpha",
+        kind="interactive",
+    )
+
+    rows, _ = routes.board(set())
+
+    assert [row.whose for row in rows] == ["person"]
+
+
+@pytest.mark.unit
+def test_a_directory_holding_more_sessions_than_anybody_reads_arrives_folded(home: Home) -> None:
+    """One worktree on a real console held twenty-three sessions, and the board — thirty-six rows —
+    was mostly that single directory written out flat.
+
+    Folded is not hidden: the head says how many are inside and one press opens it. A board that
+    quietly showed twelve of thirty-six would be wrong in a way nobody can see.
+    """
+    # Real pids, because the registry is keyed by one and this file's liveness check is the one in
+    # docs/03-session-observation.md running for real rather than stubbed.
+    many = _live_pids(routes.MANY_IN_ONE_PLACE + 1)
+    for n, pid in enumerate(many):
+        home.session(
+            pid,
+            f"aaaaaaaa-0000-4000-8000-{n:012d}",
+            cwd="/home/dev/alpha/.claude/worktrees/one-piece-of-work",
+        )
+
+    html = routes.render_board()
+
+    crowded = html[html.index('class="node card instance') :]
+    crowded = crowded[: crowded.index("</summary>")]
+    assert "crowded" in crowded
+    assert " open\n" not in crowded and " open " not in crowded, (
+        "a directory of two dozen sessions is written out in full"
+    )
+    assert f'class="pill">{routes.MANY_IN_ONE_PLACE + 1}<' in crowded, (
+        "the folded head does not say how many it folded"
+    )
+
+
+@pytest.mark.unit
+def test_a_handful_in_one_place_is_still_a_list(home: Home) -> None:
+    """A checkout with a person and a couple of agents in it is a list, not a wall."""
+    for n, pid in enumerate(_live_pids(2)):
+        home.session(pid, f"aaaaaaaa-0000-4000-8000-{n:012d}", cwd="/home/dev/alpha")
+
+    html = routes.render_board()
+
+    instance = html[html.index('class="node card instance') :]
+    assert "crowded" not in instance[: instance.index("</summary>")]
+
+
+@pytest.mark.unit
+def test_the_header_says_how_many_of_them_this_console_started(home: Home) -> None:
+    """A board of thirty-six that says nothing about which of them it is answerable for presents
+    all thirty-six as though it knows what they are."""
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+    home.session(
+        os.getppid(), "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    html = routes.render_board(ours={"aaaaaaaa"})
+
+    assert "2 sessions" in html
+    assert "1 started here" in html
+
+
+@pytest.mark.unit
+def test_a_board_that_started_all_of_them_does_not_say_so_twice(home: Home) -> None:
+    """A count that always equals the one beside it is a count nobody reads."""
+    home.session(
+        os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha", kind="bg"
+    )
+
+    html = routes.render_board(ours={"aaaaaaaa"})
+
+    head = html[html.index('class="tree-head"') : html.index("</div>", html.index("tree-head"))]
+    assert "1 session" in head
+    assert "started here" not in head
+
+
+@pytest.mark.unit
+def test_a_board_rendered_without_asking_says_nothing_about_who_started_what(home: Home) -> None:
+    """The same rule one level up from the row. A caller that did not hand in what this console
+    started gets no sentence about it, rather than a confident `0 started here` about a question
+    nobody put — which would read as "this console started none of them"."""
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    html = routes.render_board()
+
+    assert "started here" not in html
+
+
+@pytest.mark.unit
+def test_a_finished_agent_says_so_on_the_board_without_wearing_the_flag(home: Home) -> None:
+    """Both halves in the rendered page: the sentence a background agent gets, and the flag it does
+    not get. Thirty-four rows wore that flag on a real board and not one of them could be waiting
+    for anybody."""
+    now = int(time.time() * 1000)
+    home.session(
+        os.getpid(),
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        cwd="/home/dev/alpha/.claude/worktrees/w",
+        kind="bg",
+        status="idle",
+        updatedAt=now - 20 * MINUTE,
+        statusUpdatedAt=now - 20 * MINUTE,
+    )
+    home.transcript(
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        _entry("user", "fix the thing"),
+        _entry("assistant", "fixed it and opened a branch"),
+    )
+
+    html = routes.render_board()
+
+    assert "finished a turn" in html
+    assert "may want you" not in html
+
+
+# --- what the stream does while nothing happens (docs/stories/05) ----------------------------------
+@pytest.mark.unit
+async def test_a_quiet_pass_does_not_build_the_conversation_to_prove_it_is_quiet(
+    home: Home, wired: Store
+) -> None:
+    """Measured on a real console with nobody touching it: 862 KiB of conversation HTML assembled
+    every two seconds, compared against a byte-identical string and dropped.
+
+    The stream has always been careful about the network — it holds the previous render and pushes
+    only what changed — and careless about the work.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    built: list[int] = []
+    real = routes.render_blocks
+
+    async def counted() -> str:
+        built.append(1)
+        return await real()
+
+    events = sse.board_events()
+    try:
+        routes.render_blocks = counted  # type: ignore[assignment]
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1], "the first pass has to build it — there is nothing to compare against"
+
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1], "a pass over an untouched store built the whole conversation again"
+    finally:
+        routes.render_blocks = real  # type: ignore[assignment]
+        await events.aclose()
+
+
+@pytest.mark.unit
+async def test_the_pass_after_a_write_builds_it_again(home: Home, wired: Store) -> None:
+    """The half that matters more. A staleness check that misses a change is worse than no check:
+    an answer shown two ticks late is a console people reload, and reloading is the thing a live
+    stream exists to remove."""
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001")
+    built: list[int] = []
+    real = routes.render_blocks
+
+    async def counted() -> str:
+        built.append(1)
+        return await real()
+
+    events = sse.board_events()
+    try:
+        routes.render_blocks = counted  # type: ignore[assignment]
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+        assert built == [1]
+
+        await wired.create_idea(
+            text_="something happened",
+            summary="something happened",
+            source_kind="typed",
+            author="human",
+        )
+        while not (await anext(events)).startswith("event: heartbeat"):
+            pass
+
+        assert len(built) == 2, "a write to the store did not reach the next pass"
+    finally:
+        routes.render_blocks = real  # type: ignore[assignment]
+        await events.aclose()
+
+
+@pytest.mark.unit
+async def test_the_board_is_not_gated_on_the_store_because_it_is_not_read_from_it(
+    home: Home, wired: Store
+) -> None:
+    """A session going busy is not a write. If the board waited for one, the surface that exists to
+    show what is running would be the one thing on the page that could not."""
+    source = (Path(routes.__file__).parent / "sse.py").read_text(encoding="utf-8")
+
+    body = source[source.index("async def board_events(") :]
+    gated = body[body.index("if not fresh") : body.index("\n        ):")]
+
+    assert "render_blocks" in gated and "render_column" in gated and "render_blockers" in gated
+    assert "render_board" not in gated, "the board waits for somebody to write to the store"
+
+
+@pytest.mark.unit
+async def test_a_template_is_formatted_off_the_event_loop(wired: Store) -> None:
+    """Ninety milliseconds of Jinja on the loop is ninety milliseconds in which nothing else this
+    console does can run — every other request, every other stream, every run reporting a step."""
+    held: list[float] = []
+
+    async def beat() -> None:
+        last = time.perf_counter()
+        for _ in range(2000):
+            await asyncio.sleep(0)
+            now = time.perf_counter()
+            held.append(now - last)
+            last = now
+
+    ticking = asyncio.create_task(beat())
+    try:
+        await routes.render_blocks()
+    finally:
+        ticking.cancel()
+
+    assert held, "the loop never got a turn at all"
+    assert max(held) < 0.05, (
+        f"the loop was held for {max(held) * 1000:.0f}ms while a template was formatted"
+    )
+
+
+# --- what a session is costing the machine (docs/stories/09) ---------------------------------------
+@pytest.mark.unit
+def test_a_card_says_what_its_session_is_holding(home: Home) -> None:
+    """This arrived by happening: the machine ran out of memory twice during this work and killed a
+    test run and the console itself. Thirty sessions were holding eight gigabytes between them and
+    the board, which was open the whole time, said nothing about any of it.
+
+    A reading of the file beside the one the liveness check already opens, not an inference.
+    """
+    home.session(os.getpid(), "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+
+    rows, _ = routes.board()
+
+    assert rows[0].holding, "the board carries no reading of what the session holds"
+    assert rows[0].holding > 1024 * 1024, "a live python process holding under a megabyte"
+    assert re.search(r">(\d+ MB|[\d.]+ GB)<", routes.render_board()), (
+        "the number is read and never shown"
+    )
+
+
+@pytest.mark.unit
+def test_a_process_the_machine_will_not_speak_about_gets_no_number_invented(
+    home: Home, tmp_path: pathlib.Path
+) -> None:
+    """A system where that file is not what this program expects gets no pill, rather than a wrong
+    number — the same rule as everywhere else on this board."""
+    from agent_desk.observe import registry as reader
+
+    assert reader.resident_bytes(999_999) is None
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+    empty = tmp_path / str(os.getpid())
+    empty.mkdir()
+    (empty / "statm").write_text("not what this expects\n")
+    assert reader.resident_bytes(os.getpid(), proc_root=tmp_path) is None
+
+
+@pytest.mark.unit
+def test_the_page_size_is_asked_of_the_system_and_not_assumed() -> None:
+    """It is a kernel build option. A number wrong by a factor of four on somebody's machine is
+    worse than no number."""
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text()
+
+    body = source[source.index("def resident_bytes(") :]
+    body = body[: body.index("\n\n\n")]
+    assert "4096" not in body, "the page size is written into the arithmetic"
+    assert "_PAGE_BYTES" in body
+    assert "sysconf" in source
+
+
+@pytest.mark.unit
+def test_what_a_session_holds_is_said_the_way_a_person_says_it() -> None:
+    assert routes._megabytes(None) == ""
+    assert routes._megabytes(0) == ""
+    assert routes._megabytes(560 * 1024 * 1024) == "560 MB"
+    assert routes._megabytes(1536 * 1024 * 1024) == "1.5 GB"
+    # Whole megabytes below a gigabyte: nothing here is decided at a finer resolution, and a number
+    # that changes on every tick is one nobody reads.
+    assert routes._megabytes(int(111.4 * 1024 * 1024)) == "111 MB"
+
+
+@pytest.mark.unit
+def test_nothing_on_the_board_adds_those_numbers_up() -> None:
+    """A resident set counts every shared page in full, so adding thirty of them counts the pages
+    they share thirty times. Measured on the author's machine: the sum was 8.43 GiB where the
+    proportional figure was 5.63 — an overstatement of a third.
+
+    The honest total is in `smaps_rollup` and costs two hundred and fifty times as much to read, on
+    a surface that renders every two seconds — which is the cost `docs/stories/05` was about
+    removing. So there is no total, and this is what says so.
+    """
+    board = (TEMPLATES / "_board.html").read_text(encoding="utf-8")
+
+    assert "holding" in board
+    assert "sum(" not in board and "| sum" not in board, (
+        "the board totals what must not be totalled"
+    )
+    # And the expensive honest reading has not crept onto a surface that renders every two seconds.
+    # It is named in the docstring on purpose — that is where the decision is written down — so
+    # this asserts it is not *opened*, which is the thing that would cost 274ms a tick.
+    source = (pathlib.Path(routes.__file__).parent.parent / "observe" / "registry.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"smaps_rollup"' not in source and "'smaps_rollup'" not in source, (
+        "the proportional reading is being opened, at two hundred and fifty times the cost"
+    )
+
+
+# --- a project as it actually is (docs/stories/10) ---------------------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cwd", "home", "worktree"),
+    [
+        ("/home/a/proj", "/home/a/proj", ""),
+        ("/home/a/proj/.claude/worktrees/beri-v-rabotu", "/home/a/proj", "beri-v-rabotu"),
+        # Somewhere deeper inside a worktree is still that worktree's work.
+        ("/home/a/proj/.claude/worktrees/w/src/pkg", "/home/a/proj", "w"),
+        # A worktree somebody made beside the checkout is a copy of its own.
+        ("/home/a/proj-shift", "/home/a/proj-shift", ""),
+        # The directory that holds worktrees is not itself one.
+        ("/home/a/proj/.claude/worktrees", "/home/a/proj/.claude/worktrees", ""),
+    ],
+)
+def test_where_a_session_works_is_read_from_its_path(cwd: str, home: str, worktree: str) -> None:
+    assert routes.where_it_works(cwd) == (home, worktree)
+
+
+@pytest.mark.unit
+def test_a_background_session_is_shown_under_the_checkout_its_worktree_belongs_to(
+    home: Home,
+) -> None:
+    """`claude --bg --worktree <name>` runs inside the checkout it was started from, and grouping by
+    working directory made every one an instance beside that checkout. Twenty-three of them, for one
+    checkout, on the author's board."""
+    person, agent = _live_pids(2)
+    home.session(person, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(
+        agent,
+        "bbbbbbbb-0000-4000-8000-000000000002",
+        cwd="/home/dev/alpha/.claude/worktrees/fix-the-parser",
+        kind="bg",
+    )
+
+    projects = routes.shape(routes.board()[0], [])
+    instances = [one for project in projects for one in project.instances]
+
+    assert [one.path for one in instances] == ["/home/dev/alpha"]
+    assert len(instances[0].rows) == 2
+    worktrees = {row.session.session_id[:8]: row.worktree for row in instances[0].rows}
+    assert worktrees == {"aaaaaaaa": "", "bbbbbbbb": "fix-the-parser"}
+    assert "⎇ fix-the-parser" in routes.render_board()
+
+
+@pytest.mark.unit
+def test_another_checkout_of_the_same_repository_is_still_an_instance_of_its_own(
+    home: Home,
+) -> None:
+    """A copy made beside the checkout is a copy of the project on this machine, which is what an
+    instance is. Only the CLI's scratch space inside a checkout is folded into it."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/alpha")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/alpha-review")
+
+    paths = sorted(
+        one.path for project in routes.shape(routes.board()[0], []) for one in project.instances
+    )
+
+    assert paths == ["/home/dev/alpha", "/home/dev/alpha-review"]
+
+
+@pytest.mark.unit
+def test_a_session_card_says_which_kind_it_is_in_its_head(home: Home) -> None:
+    """One can be written to from here and the other cannot (docs/adr/0009). The only difference
+    used to be a slightly different blue dot."""
+    one, two = _live_pids(2)
+    home.session(one, "aaaaaaaa-0000-4000-8000-000000000001", cwd="/home/dev/a", kind="bg")
+    home.session(two, "bbbbbbbb-0000-4000-8000-000000000002", cwd="/home/dev/b", kind="interactive")
+
+    html = routes.render_board()
+
+    heads = re.findall(r'<summary class="card-head">(.*?)</summary>', html, re.S)
+    kinds = [re.search(r'session-kind (bg|terminal)"', head) for head in heads]
+    assert sorted(found.group(1) for found in kinds if found) == ["bg", "terminal"], (
+        "a session card does not say in its head which kind of session it is"
+    )
+
+
+@pytest.mark.unit
+def test_the_agents_a_session_started_are_children_of_it(home: Home) -> None:
+    """The transcript records each `Agent` call and whether it came back. They were a row of tags at
+    the bottom of the card, indistinguishable from the pills beside them."""
+    session_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    home.session(os.getpid(), session_id, cwd="/home/dev/alpha")
+    home.transcript(
+        session_id,
+        {
+            "type": "assistant",
+            "isSidechain": False,
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Agent",
+                        "input": {"subagent_type": "Explore", "description": "map the modules"},
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_2",
+                        "name": "Agent",
+                        "input": {"subagent_type": "reviewer", "description": "review the diff"},
+                    },
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "isSidechain": False,
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}],
+            },
+        },
+    )
+
+    html = routes.render_board()
+
+    children = html[html.index('<ul class="children agents"') :]
+    children = children[: children.index("</ul>")]
+    names = re.findall(r'<span class="node-name">(.*?)</span>', children)
+    assert names == ["review the diff", "map the modules"], (
+        "the agents are not children of the session, or the running one is not first"
+    )
+    assert 'class="node card agent working"' in children

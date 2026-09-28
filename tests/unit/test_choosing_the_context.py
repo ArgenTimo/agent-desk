@@ -104,11 +104,16 @@ def test_clicking_again_takes_it_back_out() -> None:
 
 
 def test_choosing_nothing_is_back_to_everything() -> None:
-    """Which is what makes the gesture safe: there is no state it can be stuck in."""
-    picking = _body("pinnedTargets")
+    """Which is what makes the gesture safe: there is no state it can be stuck in.
+
+    Asserted where the set is decided. The names in the field and the count under the bench are one
+    reading now — `cardsBeingCarried` — so the fallback is stated once and both of them get it.
+    """
+    picking = _body("cardsBeingCarried")
 
     assert "chosen.length" in picking
     assert "? chosen" in picking or "chosen\n" in picking
+    assert "cardsBeingCarried()" in _body("pinnedTargets")
 
 
 def test_a_drag_is_not_a_click() -> None:

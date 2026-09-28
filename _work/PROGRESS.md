@@ -1,0 +1,93 @@
+# Progress — autonomous plan of 2026-09-27
+
+Source of task IDs: `_research/06_backlog.md`, `_research/01_repo_cleanup_plan.md`,
+`../_integration/07_dogfooding_safety.md`. On a fresh session: read this file and continue with the
+first row that is not done / blocked / human.
+
+Isolated test run until A1 was merged (and still used for every gate here):
+`scratchpad/iso-gate.sh <dir> gate` — fake `claude` first on PATH logging each call,
+`AGENT_DESK_DATA_DIR`/`AGENT_DESK_CLAUDE_HOME` on a temp dir, and a before/after snapshot of
+`~/.local/share/agent-desk/*` (mtime, size) and the number of `~/.claude/jobs` entries.
+
+| # | Task | Status | Branch / PR | How verified | Notes |
+|---|---|---|---|---|---|
+| 0 | Backup | done | local branch `backup/2026-09-27-before-autonomy` (ce3f286) | `git log -1` on it; bundles in `~/agent-desk-salvage/` | not pushed: repo is public, see DECISIONS D1 |
+| 1 | U0 salvage | done | — | `~/agent-desk-salvage/README.md` lists 4 dirty worktrees, stash, 9e3de5d test; DB copied via sqlite backup API from a `mode=ro` connection, `integrity_check` ok, schema_version max 79 | |
+| 2 | A1 hermetic suite | done | #14 (73e2d4c) | isolated `make gate`: 2708 passed, 0 fake-claude calls, live DB mtime/size and jobs count unchanged; mutation (drop DATA_DIR redirect) fails the new test | |
+| 3 | Job cleanup (07 §7) | human | `_work/proposed/rm-test-jobs.sh` | snapshot `~/agent-desk-salvage/agents-2026-09-27.json` + `jobs-2026-09-27/`; 203 blocked = 199 test ("бери в работу") + 1 explore + 3 other | `claude rm` fails: background service not running (supervisor dead since 09-16) → HUMAN_TODO H2 |
+| 4 | U1 PR/branch/worktree cleanup | done (branch deletion → human H3) | merged #20 (with the fuller ../agent-desk-shift patch), #18, #13, #16 (migration renumbered 079); closed #15 #8 #21 #3 #17 #12 #11 #5 | open PRs 18→5 (#19 #10 #9 #7 #6, all frozen agent-launch/engine work); worktrees 32→3; `uniq -d` over migration numbers empty; each merge after an isolated green gate | local branch/stash deletion refused by auto-mode classifier → H3 |
+| 5 | A4 safe migrations | done | #22 (ed9b93f) | 9 tests in test_migrate.py (mutations: name check off → 2 fail; checks outside txn → 1 fails); isolated gate 2741 passed; live DB backed up (`~/agent-desk-salvage/agent-desk.db.before-a4`), restore verified, reconciled (D8); a copy opens with main, nothing pending | |
+| 6 | A3 flock + recover=False | done | #23 | tests/unit/test_one_process.py 5 tests (mutations: MCP recover=True → fails; lifespan without lock → fails); live smoke: two `python -m agent_desk` on one temp data_dir — second exits with `AlreadyRunning … pid N …`, first still serves 200 | uvicorn exits 0 on a refused startup |
+| 7 | A5 dev isolated by default | done | #24 | tests/unit/test_make_run.py (3, read from `make -n`); live: `make run` served 200 on :9055 with data in ./.desk-data, live DB mtime unchanged | also fixed: `make share` never passed its AGENT_DESK_SHARE_* vars (a VAR= prefix went to `unset`) |
+| 8 | A2 prod instance | done | `a2-prod-instance`; tags desk-20260927-rc1 → desk-20260927 | installed at ~/opt/agent-desk-prod, unit agent-desk.service enabled; http 200; `kill <MainPID>` → back under a new pid in <7 s; `touch` in the dev checkout → same pid; test_prod_unit.py (no --reload, Restart=always); `prod-update` exercised rc1 → final tag | Restart=always instead of on-failure (D11) |
+| 9 | A6 AGENT_DESK_HANDS | done | #25 | tests/unit/test_hands.py (8; mutations: no check in dispatch.start → fails, loops ungated → fails); suite runs with HANDS=on in conftest so the agent paths keep their tests | kicking buttons left drawn: kicking is deleted in S1 |
+| 10 | S2 appraise switch | done | #26 | test_hands: default off; lifespan with appraise off runs only `later`, with on runs appraising too | |
+| 11 | B1 jobs blocked/stopped | done | #28, prod on desk-20260927.2 (live board: 203 waiting · 202 questions) | fixtures blocked/stopped/running (+working re-recorded) from ~/.claude/jobs, structure only; test_jobs + test_autostart (stopped ≠ done; mutation fails 2); real ~/.claude/jobs: 203 waiting, 202 questions, 0 unknown states; isolated gate 2772 passed | `blocked` has `needs`, not `block.questions` — questions counted from `block.questions` when present, else 1 per `needs` |
+| 12 | B2 fixtures on current CLI | done | #29 | registry_entry + transcript re-aligned to 2.1.283 key sets (25 live transcripts), RECORDED_CLI_VERSION=2.1.283; test_transcript_shape (5; drift disabled → 3 fail); banner: fixture as recorded → no notice, 9.9.999 → notice; live board: 3 rows, 0 notices | stream_json.jsonl needs a real `claude -p` → H5; registry `waitingFor` found → H6 |
+| 13 | B7 `claude agents --json` | done | #30 | fixture claude_agents.json (2.1.283, 3 interactive + 1 background); test_agents (9: parse, listed, fallback notice, each failure named, answer cached — 5 redraws → 1 process); live board: 3 rows with the CLI's statuses, 0 notices | kept 10 s (`agents_poll_seconds`): one call is ~0.21 s and ~190 MB; a CLI row with no registry file is counted, not invented |
+| 14 | B4 go to session | done | #31; prod on desk-20260927.3 (migration 080 ran, `agent-desk.db.bak-v79` made first — A4 backup proven live) | short id to `claude attach` (the documented form; id == sessionId prefix for all 203 jobs); DISPLAY etc. from `systemctl --user show-environment` when the service has none (only those five vars, test); migration 080 `reason` + `POST /terminals/{press}/why` (closed list of 4, else 400); /standing: "sent somebody to a terminal N times: …, K not said"; go buttons on the waiting-jobs list | a real click on the owner's screen was not made (it would open a window and attach to a live job) — first thing to try on the board day |
+| 15 | B3 open PRs on board | done (token → human H7) | #32 | web/pulls.py: own read-only loop (5 min, independent of hands), `AGENT_DESK_PULL_REPOS` + token by name; fixture github_pulls.json (real response); test_pulls_on_board (7); full live response parsed → "5 open, oldest 17 days" = `gh pr list` 5 | the existing reader ran only inside autostart (off since A6) |
+| 16 | B6 quadratic select | done | #33 | one shared `<datalist>` instead of a `<select>` of every idea in every card; link route ignores an id that names no idea (was impossible with a select); test_idea_list_size: 100→200 ideas grows < 2.2× (old template fails it), 0.71 MB at 200 (research: 3.7 MB) | the backlog's "< 400 KB at 200" is NOT met: ~3.5 KB per card remain (5 forms, 9 options); getting there means lazy-loading the per-card forms — not done |
+| 17 | B5 MCP | done (approve + ai-worker file → human H8) | #34, prod on desk-20260927.4 | `.mcp.json` → `${HOME}/opt/agent-desk-prod/.venv/bin/python -m agent_desk.mcp`, `AGENT_DESK_MCP_TOOLS=keep_idea,open_ideas,ask,answer`; server filters list AND call (a tool not offered is refused); stdio check against the live store: tools/list = the four, open_ideas answered; test_mcp_offered (3, incl. keep_idea landing in the store) | opens the store with recover=False (A3) |
+| 18 | S1 remove explore/land, kicking, closing | done | #35 (implemented by a subagent, diff re-read) | isolated gate 2704 passed (−3539/+322 lines, agent_desk .py 29838→28513), coverage 94.65% ≥ 94%; land.py, tidying.py, web/kicking.py, 4 routes, 14 store methods gone; ADR 0013 accepted, 0008/0009/0012 superseded; its claims checked against _research/02 §2–3 | kept: answering a bg session from its card (`dispatch.answerable`), appraise moved to ideas/appraise.run; tables untouched |
+| 19 | filing tracker='git' | done | #36 | live DB (ro): 259 rows, all 'git', commit URLs, no code ever wrote them; store reads only tracker='jira' (FILED_IN); test_a_commit_is_not_a_filing (git row kept, not read) | no migration: the tracker column is the mark (D13) |
+| 20 | README | done | #37 | sections "The working console, and the ones you develop in" and "When the board is down: the terminal"; the MCP one-liner and `claude agents --json | jq` run as written against the working copy; test count 2705; check-links ok | ai-worker half of 07 §6 left out on purpose (integration is out of scope) |
+| 21 | D6 aiworker_workspace_roots | done | #38 | observe/elsewhere.py; applied in registry, agents.listed, jobs.read_jobs and transcript._find (by slug, can only over-hide); test_elsewhere (6; registry filter off → fails) | default `/srv/ai-worker/projects,/home/aiw` |
+| 22 | lanes module | done | #39 | web/lanes.py: LANES of functions → (template fields, notices); both renders in routes.py use `**beside.fields`; test_lanes (a lane appended in lanes.py reaches render_board and render_page; routes.py names no lane source); board/jobs/pulls tests unchanged and green | named lanes.py, not board.py, so it is not confused with routes.board(); board()/BoardRow stay in routes (11 tests patch routes.board) |
+| 23 | profile for ai-worker | done | #40 | migrations_glob → `agent_desk/store/[0-9][0-9][0-9]-*.sql` (matches 78 files), code_host.repository ArgenTimo/agent-desk, ci.platform github + pipeline_file .github/workflows/gate.yml (proposed, H9), tracker kind stays null; YAML parses | ci.platform says github before the workflow exists — noted in the file |
+| 24 | ADR draft external executors | done | #41 | docs/adr/0014 (proposed): read the executor's published API only; statuses verbatim + seen_at, unreachable is shown as unreachable; no control buttons; token by variable name; workspace roots hidden (task 21); one loop in the TaskGroup; indexed in docs/README.md; check-links ok | no code |
+| 25 | human: CI, CODEOWNERS, protection | human (H9–H11) | `human-proposals` | _work/proposed/.github/workflows/gate.yml (YAML parses; fake claude, temp dirs, fails on any call), _work/proposed/CODEOWNERS (guard files of 07 §4), exact `gh api` for branch protection | guarded paths: not written into the repo by this work |
+
+## Baseline numbers (before)
+
+- open PRs: 18; worktrees (PycharmProjects repo): 32; blocked jobs: 203 (research), to re-count in task 3
+- tests: 2704 passed on origin/main 974a306 (research); lines of code: see final report
+
+
+## Final report (2026-09-27)
+
+### Done and how it was verified
+Every merged task passed the isolated gate (fake `claude` first on PATH, temp data dirs,
+before/after check of the live DB and the jobs count) with 0 calls, and its diff was re-read before
+the squash merge. PRs merged by this work: #14, #16, #18, #20, #13, #22–#41 (plus 7+1 closed).
+
+- **Safety first (0, A):** hermetic suite (A1); PR/worktree cleanup (U1); migrations by name with a
+  backup before any change, the live DB reconciled after a restore-checked backup (A4); one console
+  per data dir, guest opens for MCP (A3); dev consoles isolated by default (A5); hands (A6) and
+  idea appraisal (S2) off by default; the working console is a tagged copy under systemd — survives
+  kill, ignores dev edits, and the A4 backup was seen working live on migration 080 (A2).
+- **Board (B):** 203 blocked jobs shown as a fact with `claude attach` buttons (B1); fixtures on the
+  running CLI, transcript drift detection, banner off (B2); `claude agents --json` as the list (B7);
+  go-to-session from a service, reasons for going asked not guessed, counted on /standing (B4);
+  open PRs per repository (B3, needs a token); ideas column linear, not quadratic (B6); MCP inbox
+  for sessions (B5).
+- **Narrowing (C):** explore/land, kicking and session closing deleted, ADR 0013 (S1); git
+  "filings" kept but not read as filings (task 19); README prod/dev and terminal fallback (20).
+- **Readiness (D):** executor workspaces hidden (21); board lanes module (22); profile facts (23);
+  ADR 0014 proposed (24); CI/CODEOWNERS/protection proposed (25).
+
+### Blocked / not done
+- **Job cleanup (3):** `claude rm` needs the Claude background service, which is not running; the
+  plan does not allow starting it → H2 with a ready script for the 200 junk jobs.
+- **Local branch deletion (part of U1):** refused by the auto-mode classifier → H3.
+- **B6's "< 400 KB at 200 ideas":** not met (0.71 MB, linear now); needs lazy per-card forms.
+- **B4 real click:** not pressed on the owner's screen; first thing to try on the board day.
+- **stream_json fixture:** needs a real `claude -p` → H5.
+
+### For the human, in order of importance
+H0 restore the three denies + strict JSON · H2 start the service and remove 200 junk jobs ·
+H9 CI gate · H11 protect main · H10 CODEOWNERS · H7 read-only GitHub token for the PR lane ·
+H8 approve the MCP server (+ ai-worker copy) · H6 decide what `waitingFor` means · H5 re-record
+the stream fixture · H3 delete stale local branches · H4 (FYI: the working console is a service) ·
+H1 (Stop hook: nothing to change in the repo).
+
+### Numbers (before → after)
+| | before (2026-09-27 start) | after |
+|---|---|---|
+| open PRs | 18 | 5 (#19, #10, #9, #7, #6 — frozen agent-launch work) |
+| worktrees (~/PycharmProjects/agent-desk) | 32 | 3 (main + 2 inside ~/.claude/jobs, gone with H2) |
+| `blocked` background jobs | 203 | 203 (H2 removes 200) |
+| unit tests (`make gate`) | 2704 on origin/main | 2714 (≈ +110 new, ≈ −100 with the deleted features) |
+| agent_desk/**/*.py lines | 29 045 (974a306) | 28 630 |
+| tests/**/*.py lines | 41 923 | 41 892 |
+| live DB | schema 79, names unrecorded, 66/78/79 foreign | schema 80, every version named, `.bak-v79` beside it |

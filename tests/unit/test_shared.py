@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import pytest
+from agent_desk.store import redact
 from agent_desk.store.repo import Store, token_hash
 from agent_desk.web import shared
 
@@ -688,3 +689,60 @@ async def test_the_two_pages_reach_each_other(desk: Store) -> None:
 
     assert f"/shared/{token}/bench" in ideas
     assert f"/shared/{token}" in bench
+
+
+# --- and the rule the whole surface exists to keep -------------------------------------------------
+# A GitHub token's real shape, from `.claude/security-patterns.yaml`. Planted in every field either
+# shared page reads, because "everything it renders is scrubbed on the way out" is a claim about
+# every field and was held up by one example per page.
+A_SECRET = "ghp_" + "A" * 36
+CARRYING = f"the key is {A_SECRET} keep it somewhere"
+
+
+@pytest.mark.unit
+async def test_nothing_a_viewer_can_open_renders_a_secret_it_was_given(desk: Store) -> None:
+    """Rule four of CLAUDE.md, over the whole of both pages rather than one field of one.
+
+    The store keeps a person's own words verbatim on purpose — losing the thought to a filter is
+    the tool failing at its job — so every one of these fields really does hold the token, and the
+    only thing between it and a teammate's screen is `scrub` at the boundary.
+    """
+    _, token = await desk.create_viewer("a colleague")
+    await desk.create_idea(text_=CARRYING, summary=CARRYING, source_kind="typed", author="human")
+    thread = await desk.create_thread(CARRYING)
+    await _a_card(desk, "step:one", CARRYING, thread.id)
+    await _a_card(desk, "step:two", CARRYING, thread.id)
+    await desk.tie_cards(
+        from_name="step:one", to_name="step:two", kind="then", says=CARRYING, thread_id=thread.id
+    )
+
+    for path in (f"/shared/{token}", f"/shared/{token}/bench"):
+        status, body, _ = await _request("GET", path)
+
+        assert status == 200, path
+        assert A_SECRET not in body, path
+        # And the scrubbing is what removed it, rather than the field never having been rendered.
+        assert redact.REDACTED in body, path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/shared/",
+        "/shared/nope",
+        "/shared/../../etc/passwd",
+        "/shared/%2e%2e/%2e%2e/etc/passwd",
+        "/",
+        "/board",
+        "/ideas",
+    ],
+)
+async def test_every_way_in_that_is_not_a_link_that_works_answers_the_same(path: str) -> None:
+    """ "The same answer for a wrong token, a revoked one and a missing store: a viewer learns
+    whether their own link works, and nothing else" — and a viewer who tries something else learns
+    that this bind has nothing else on it."""
+    status, body, _ = await _request("GET", path)
+
+    assert status in (404, 405), path
+    assert "ghp_" not in body

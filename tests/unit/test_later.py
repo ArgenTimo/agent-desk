@@ -15,6 +15,8 @@ from agent_desk.ideas import inbox, waking
 from agent_desk.store.repo import Idea, Store
 from agent_desk.web import later
 
+from tests.unit.landed import as_landed
+
 KEY = "origin:acme/api"
 NOW = datetime(2026, 3, 4, 14, 30, tzinfo=UTC)
 
@@ -232,7 +234,7 @@ async def test_the_gate_is_green_when_the_last_thing_landed_and_nothing_is_in_fl
         "a task that finished without offering a branch says nothing about the gate"
     )
 
-    await desk.task_landed(task.id, "merged", landed=True)
+    await as_landed(desk, task.id, "merged", landed=True)
     assert await later.gate_is_green(desk, KEY) is True
 
     failed = await desk.queue_task(
@@ -245,7 +247,7 @@ async def test_the_gate_is_green_when_the_last_thing_landed_and_nothing_is_in_fl
     await desk.take_next_task(KEY)
     await desk.task_started(failed.id, "agent-2")
     await desk.finish_task(failed.id)
-    await desk.task_landed(failed.id, "the gate said no", landed=False)
+    await as_landed(desk, failed.id, "the gate said no", landed=False)
     assert await later.gate_is_green(desk, KEY) is False
 
 

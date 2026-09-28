@@ -1,31 +1,29 @@
 """The machine this suite runs on is not an input to it.
 
-`Settings` resolves `claude_home` and `data_dir` from the environment (config.py), and half the
-package binds `settings` at module import. So the redirect has to happen here, at the top of the
-one file pytest loads before any test module — an empty `~/.claude` and an empty `data_dir` for
-every test, whether or not it remembered to ask for them.
+`Settings` resolves `claude_home`, `data_dir` and `claude_bin` from the environment (config.py),
+and half the package binds `settings` at module import. So the redirect has to happen here, at
+the top of the one file pytest loads before any test module — an empty `~/.claude`, an empty
+`data_dir` and a CLI that does not exist, for every test, whether or not it remembered to ask.
 
-It is a guard against one defect, and the defect has now happened twice. A test that renders the
-board without redirecting reads the real registry and then the tail of every live session on this
-machine, so its assertions are about whatever an agent working beside the suite happened to be
-saying: `test_a_board_rendered_without_the_number_shows_no_number` asserted the word "today" was
-absent and failed the moment a live session wrote that word in a sentence, having passed in the
-same `make verify` ten minutes earlier (01M1ZEN85PA2NYSV70H59ZZFWN). The store half is the same
-shape with worse consequences — `web/routes.py` opens `settings.db_path` at import, which without
-this is the console's own database, live, while its owner is using it.
+Three doors, each of which has already been walked through:
 
-The third path out is not a read at all, and it is the one worth being explicit about. Every
-surface that spawns something resolves `settings.claude_bin`: `answer/session.py` execs it to ask
-a question, `dispatch.py` execs it to *start an agent* in a working directory, `opening.py` hands
-it to a terminal emulator. Its default is `claude`, which on the machine this suite runs on is on
-PATH and works. Every test today overrides it — but that is a convention, and the two paragraphs
-above are what a convention is worth here. So it is pointed at a name inside the empty tree that
-nothing will ever create: a test that forgets now reaches `needs_toolchain` from the answer
-engine and "is not installed here" from `dispatch`, instead of spending somebody's money or
-leaving a headless agent running in a repository nobody pointed it at.
+- `claude_bin`. The CLI is resolved from PATH, and on the machine this suite usually runs on it is
+  there. A test that reached `dispatch.start` without faking it started a real `claude --bg` agent
+  — in a worktree of whichever checkout ran the gate — and a test that reached the answer engine
+  spent a real `claude -p` call. The Stop hook runs the gate at every turn end, which made that one
+  agent, named after the test's input, every few minutes: fifty-four of them told only "бери в
+  работу" in one day (docs/adr/0006 — an agent is started by a click, never by a background loop).
+  It is pointed at a name inside the empty tree that nothing will ever create, so every such path
+  becomes the one it already handles: the CLI is not installed here.
+- `data_dir`. `web/routes.py` opens `settings.db_path` at import, which without this is the
+  console's own database, live, while its owner is using it — migrated by whatever branch ran the
+  gate, its running blocks marked failed by `_recover_interrupted`, its `secrets.json` rewritten.
+- `claude_home`. A test that renders the board without redirecting reads the real registry and the
+  tail of every live session, so its assertions are about whatever an agent working beside the
+  suite happened to be saying.
 
-Set rather than defaulted: an `AGENT_DESK_CLAUDE_HOME` already in somebody's environment is
-exactly the value this must not use.
+Set rather than defaulted: a value already in somebody's environment is exactly the value this
+must not use. A test that wants a CLI or a store builds its own.
 """
 
 from __future__ import annotations
@@ -40,7 +38,10 @@ _ELSEWHERE = Path(tempfile.mkdtemp(prefix="agent-desk-suite-"))
 (_ELSEWHERE / "claude" / "projects").mkdir(parents=True)
 os.environ["AGENT_DESK_CLAUDE_HOME"] = str(_ELSEWHERE / "claude")
 os.environ["AGENT_DESK_DATA_DIR"] = str(_ELSEWHERE / "data")
-os.environ["AGENT_DESK_CLAUDE_BIN"] = str(_ELSEWHERE / "no-answer-engine-here")
+os.environ["AGENT_DESK_CLAUDE_BIN"] = str(_ELSEWHERE / "claude-is-never-run-by-this-suite")
+# The suite exercises the agent-starting paths, which a console runs only with hands on (A6). It
+# is safe to say so here because the CLI above does not exist; `test_hands.py` asserts the default.
+os.environ["AGENT_DESK_HANDS"] = "on"
 
 
 def pytest_sessionfinish() -> None:

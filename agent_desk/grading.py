@@ -99,12 +99,22 @@ def from_history(blocks: list[Block], labels: dict[str, BlockKind]) -> list[Row]
 
     Empty input is left out rather than counted as an easy row: an empty line is not a decision the
     prompt has to get right.
+
+    And the same line twice is one row. Half of what this console has been asked is the sentence a
+    combine writes for itself, and fifty rows of one sentence is not a set — it is one measurement
+    with a large number beside it. Found by looking at the screen: eleven of the first fourteen rows
+    were the same words.
     """
     found = []
+    said_already: set[str] = set()
     for block in blocks:
         kind = labels.get(block.id)
         if kind is None or not block.input.strip():
             continue
+        words = " ".join(block.input.split())
+        if words in said_already:
+            continue
+        said_already.add(words)
         found.append(
             Row(
                 block_id=block.id,
@@ -132,17 +142,20 @@ def _cards_in(context: str) -> int:
     )
 
 
-def already_said(blocks: list[Block]) -> dict[str, BlockKind]:
-    """Labels nobody has to type: the blocks a person already corrected.
-
-    «Разметка берётся из уже исправленных блоков: `thread_set_by='human'` и правки вида — это
-    готовые метки.» A person who moved a block to a thread by hand said what it was about; the kind
-    on such a block is the one that stands after they touched it. That is a label, and asking them
-    to give it again is asking them to do the same work twice.
-    """
-    return {
-        block.id: block.kind for block in blocks if block.thread_set_by == "human" and block.input
-    }
+# Deliberately not here: a function that read `thread_set_by == "human"` and took `block.kind` as
+# the label.
+#
+# «Разметка берётся из уже исправленных блоков… — это готовые метки», and half of that is right: a
+# correction *is* a label and asking for it twice is asking somebody to do the same work twice. The
+# half that was wrong is which correction. Setting a block's *thread* by hand says what it was
+# about; the kind on it is still whatever the classifier decided, so feeding it back made most of
+# the set the classifier's own answers — and a measurement over that scores near a hundred per cent
+# and means nothing. It was visible the moment the screen was opened in a browser: every prefilled
+# row read "the console said question · you said question".
+#
+# The correction that *is* a label is somebody pressing one of the kinds on a block, and
+# `blocks.take_it_as` now writes one there — which is a person saying what it really was, in the
+# one place they say it.
 
 
 async def _asks_the_classifier(row: Row) -> str:

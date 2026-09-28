@@ -24,6 +24,9 @@ async def desk(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Async
     store = Store(tmp_path / "agent-desk.db")
     await store.open()
     monkeypatch.setattr(routes, "store", store)
+    # Every idea in this file belongs to KEY, and the idea column is the chosen project's
+    # (docs/stories/11) — so these tests look at KEY's column, which is the one they are about.
+    await store.set_setting(routes.FOCUS_KEY, KEY)
     yield store
     await store.close()
 
@@ -252,57 +255,6 @@ async def test_a_discarded_idea_cannot_be_built_or_deferred_through_the_route(
 
     assert status == 409
     assert await desk.tasks() == []
-
-
-@pytest.mark.unit
-async def test_running_the_gate_again_on_a_branch_that_would_not_merge(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """What somebody does about an unmerged branch once they have pushed a fix — and it was two
-    pages away from the card that named it."""
-    from agent_desk import land
-
-    task = await desk.queue_task(
-        repo_key=KEY, cwd=str(tmp_path), title="a change", instruction="x", source_kind="found"
-    )
-    await desk.take_next_task(KEY)
-    await desk.finish_task(task.id)
-    await desk.task_landed(task.id, "not merged: the gate said no", landed=False)
-
-    offered: list[tuple[str, str]] = []
-
-    def second_time(cwd: str, worktree: str, *, push: bool = True) -> land.Landed:
-        offered.append((cwd, worktree))
-        return land.Landed(landed=True, detail="merged", branch="worktree-a-change")
-
-    monkeypatch.setattr(routes.land, "land", second_time)
-
-    await _post(f"/tasks/{task.id}/land", {"key": KEY})
-
-    assert offered == [(str(tmp_path), routes.autostart.worktree_of(task))]
-    again = next(one for one in await desk.tasks() if one.id == task.id)
-    assert again.landed is True
-    assert again.detail == "merged"
-
-
-@pytest.mark.unit
-async def test_a_task_that_never_finished_is_not_offered_to_the_gate(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """There is no branch yet. Running a gate on one would be running it on whatever the worktree
-    happened to contain."""
-
-    def never(*args: object, **kwargs: object) -> object:  # pragma: no cover - must not be called
-        raise AssertionError("the gate was run on a task that has not finished")
-
-    monkeypatch.setattr(routes.land, "land", never)
-    task = await desk.queue_task(
-        repo_key=KEY, cwd=str(tmp_path), title="a change", instruction="x", source_kind="found"
-    )
-
-    status, _ = await _post(f"/tasks/{task.id}/land", {"key": KEY})
-
-    assert status == 200
 
 
 @pytest.mark.unit

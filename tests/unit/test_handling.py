@@ -511,3 +511,56 @@ def test_the_page_lays_it_out_after_taking_cards_off_and_not_before() -> None:
 
     assert "if (said.tidy) tidyUp();" in body
     assert body.index("pin.remove()") < body.index("if (said.tidy) tidyUp();")
+
+
+# --- and a stored blob that is not the shape this wrote -------------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "not json at all",
+        "",
+        "[]",
+        '{"nothing": {}}',
+        '{"handling": null}',
+        '{"handling": 5}',
+        '{"handling": []}',
+        '{"handling": {"marked": "not a list"}}',
+        '{"handling": {"marked": [null, 5, "x"]}}',
+        '{"handling": {"marked": [{"why": "no name"}]}}',
+        '{"handling": {"sorted": [{"names": ["a"]}]}}',
+        '{"handling": {"joined": [{"from": "a"}]}}',
+        '{"handling": {"named": [{"label": "no name"}]}}',
+        '{"handling": {"given": [{"name": "a"}]}}',
+        '{"handling": {"folded": "a"}}',
+        '{"handling": {"folded": [{"a": 1}]}}',
+    ],
+)
+def test_a_stored_arrangement_of_the_wrong_shape_rearranges_nothing(stored: str) -> None:
+    """This is read while the conversation is being rendered, so one unreadable row must cost that
+    row rather than the whole column.
+
+    The docstring on `read_json` has promised that since it was written — "an older block, a failed
+    run, a row somebody edited by hand: none of them is a reason to fail rendering the
+    conversation" — while the reading underneath it raised `TypeError` on a `marked` that was a
+    string and `KeyError` on a line missing one of its ends. Found by handing it shapes nothing in
+    this program writes, which is exactly the set the promise is about.
+    """
+    asked = handling.read_json(stored)
+
+    assert asked.empty
+
+
+@pytest.mark.unit
+def test_the_readable_half_of_a_half_readable_arrangement_still_happens() -> None:
+    """Dropping the row is the point; dropping its neighbours would be this doing the damage it is
+    guarding against."""
+    stored = (
+        '{"handling": {"marked": [{"name": "idea:a", "why": "this one"}, {"why": "no name"}],'
+        ' "joined": [{"from": "idea:a"}, {"from": "idea:a", "to": "idea:b", "kind": "then"}]}}'
+    )
+
+    asked = handling.read_json(stored)
+
+    assert [one.name for one in asked.marked] == ["idea:a"]
+    assert [(one.from_name, one.to_name) for one in asked.joined] == [("idea:a", "idea:b")]

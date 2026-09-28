@@ -50,6 +50,12 @@ def _refuse(at: Any, code: int, why: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": at, "error": {"code": code, "message": why}}
 
 
+def offered() -> tuple[tools.Tool, ...]:
+    """The tools this server was started to offer (`settings.mcp_tools`), in their usual order."""
+    wanted = {one.strip() for one in settings.mcp_tools.split(",") if one.strip()}
+    return tuple(one for one in tools.TOOLS if not wanted or one.name in wanted)
+
+
 def _tools_said() -> dict[str, Any]:
     return {
         "tools": [
@@ -61,7 +67,7 @@ def _tools_said() -> dict[str, Any]:
                 # the server, so a client can tell the two kinds apart without reading prose.
                 "annotations": {"readOnlyHint": not one.writes, "destructiveHint": False},
             }
-            for one in tools.TOOLS
+            for one in offered()
         ]
     }
 
@@ -90,6 +96,10 @@ async def answer(store: Store, said: dict[str, Any]) -> dict[str, Any] | None:
         return _reply(at, _tools_said())
     if method == "tools/call":
         given = said.get("params") or {}
+        name = str(given.get("name", ""))
+        if all(one.name != name for one in offered()):
+            # Not offered is not there: a tool left out of the list is refused, not merely hidden.
+            return _reply(at, tools._text(f"There is no tool called {name}. Ask for tools/list."))
         return _reply(
             at,
             await tools.call(store, str(given.get("name", "")), given.get("arguments") or {}),
@@ -122,14 +132,21 @@ async def serve(reader: asyncio.StreamReader, write: Any, store: Store) -> None:
             write(json.dumps(back))
 
 
+async def open_store() -> Store:
+    """The console's file, opened as a guest: migrated if it must be, but its running blocks are
+    the console's to account for, not this process's (R1, _research/04_dogfooding_gaps.md)."""
+    store = Store(settings.db_path)
+    await store.open(recover=False)
+    return store
+
+
 async def run() -> None:  # pragma: no cover - the process entry point
     """Open the store beside the console's and talk on stdin.
 
     The same file the console has open. That is what WAL is for, and it is why this can be a second
     process rather than a route: an agent's tool call does not wait on a browser being open.
     """
-    store = Store(settings.db_path)
-    await store.open()
+    store = await open_store()
     reader = asyncio.StreamReader()
     await asyncio.get_running_loop().connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), sys.stdin

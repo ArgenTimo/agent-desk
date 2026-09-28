@@ -45,12 +45,14 @@
   </div>
   <div class="card-body">
     <div class="idea-buttons">
-      {% if task.waiting %}
+      {% if task.waiting and hands %}
       <form method="post" action="/tasks/{{ task.id }}/start"
             hx-post="/tasks/{{ task.id }}/start" hx-target="#message">
         <input type="hidden" name="key" value="{{ task.repo_key }}">
         <button type="submit" title="start an agent on this ticket now">take it on</button>
       </form>
+      {% elif task.waiting %}
+      <span class="pill quiet">queued</span>
       {% elif task.finished_at %}
       <span class="pill quiet">done here</span>
       {% else %}

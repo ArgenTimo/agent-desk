@@ -137,6 +137,18 @@ def _ended(code: int) -> str:
     return f"the run was killed ({named})"
 
 
+# The longest single line of the engine's output this reads. `asyncio`'s default is 64 KiB, and a
+# stream-json event is one line: when a run reads a file with the `Read` tool, the event carrying
+# what it read is as long as the file. Found by drawing this console's own repository with the real
+# engine — `store/repo.py` is several hundred kilobytes — and the read raised `ValueError` out of
+# the middle of the loop: not `AnswerFailed`, so nothing above caught it, and the block would have
+# stayed `running` for ever. Every answer that reads a big file was one file away from the same.
+#
+# Sixteen megabytes is far above anything a tool result is allowed to be, and still a bound: a
+# line longer than this is skipped (see the loop), not buffered without end.
+_LONGEST_LINE = 16 * 1024 * 1024
+
+
 def _kill_run(process: asyncio.subprocess.Process) -> None:
     """Kill the run, not merely the process that started it.
 
@@ -332,7 +344,7 @@ tally = Tally()
 
 async def _lines(stream: asyncio.StreamReader) -> AsyncIterator[bytes]:
     """Every line the run printed — including the ones the stream is still holding when its pipe
-    breaks under it.
+    breaks under it — except a line longer than `_LONGEST_LINE`, which is skipped.
 
     A `StreamReader` raises a stored exception *ahead of* its own buffer: `readuntil` checks
     `self._exception` before it looks for a separator, so a reset that arrives after the answer
@@ -345,22 +357,29 @@ async def _lines(stream: asyncio.StreamReader) -> AsyncIterator[bytes]:
     gone, the transport has already reported it, and nothing further can be fed. What was in the
     buffer is what the run said, and it is an answer.
     """
-    try:
-        async for raw in stream:
-            yield raw
-    except ConnectionResetError:
-        # `set_exception(None)` is how a reader is told to stop raising; typeshed says a reader is
-        # only ever given a real exception, which is true of the callers it was written for.
-        #
-        # It is only safe with nothing waiting on the stream: `set_exception` hands its argument
-        # to a pending waiter, and `Future.set_exception(None)` is a `TypeError`. Here there is
-        # none — the exception that brought us into this branch cleared the waiter on its way out
-        # — and the line matters because it is the condition a later refactor could take away
-        # without noticing. Reading this stream from two places at once is what would do it.
-        stream.set_exception(None)  # type: ignore[arg-type]
-        stream.feed_eof()
-        async for raw in stream:
-            yield raw
+    while True:
+        try:
+            raw = await stream.readline()
+        except ValueError:
+            # A line longer than `_LONGEST_LINE`. `readline` has already dropped it and the next
+            # one reads normally, so it is skipped the way a line that will not parse is: what
+            # matters is the text and the result, and a tool's output too big to hold is neither.
+            continue
+        except ConnectionResetError:
+            # `set_exception(None)` is how a reader is told to stop raising; typeshed says a reader
+            # is only ever given a real exception, which is true of the callers it was written for.
+            #
+            # It is only safe with nothing waiting on the stream: `set_exception` hands its argument
+            # to a pending waiter, and `Future.set_exception(None)` is a `TypeError`. Here there is
+            # none — the exception that brought us into this branch cleared the waiter on its way
+            # out — and the line matters because it is the condition a later refactor could take
+            # away without noticing. Reading this stream from two places at once is what would.
+            stream.set_exception(None)  # type: ignore[arg-type]
+            stream.feed_eof()
+            continue
+        if not raw:
+            return
+        yield raw
 
 
 async def _run(
@@ -396,6 +415,7 @@ async def _run(
             stderr=asyncio.subprocess.PIPE,
             # Its own process group, so the whole run can be ended in one call — see _kill_run.
             start_new_session=True,
+            limit=_LONGEST_LINE,
         )
     except FileNotFoundError as exc:
         raise AnswerFailed(

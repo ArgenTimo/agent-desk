@@ -11,10 +11,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import pytest
-from agent_desk.store.repo import Kicking, Store, Subscription
+from agent_desk.store.repo import Store, Subscription
 from agent_desk.web import plans
-
-NOW = 1_788_400_000_000
 
 
 @dataclass
@@ -57,8 +55,6 @@ def test_a_plan_adds_up_what_this_console_has_seen() -> None:
         [_plan(limit=100_000)],
         [_row("aaa", "agent-desk", 30_000), _row("bbb", "other", 20_000)],
         {"aaa": "p1", "bbb": "p1"},
-        {},
-        NOW,
     )
 
     (one,) = made
@@ -73,7 +69,7 @@ def test_a_plan_adds_up_what_this_console_has_seen() -> None:
 def test_without_a_stated_limit_there_is_no_percentage_to_show() -> None:
     """A percentage presented as an account balance would be the guessed status CLAUDE.md's fifth
     rule is about, wearing a progress bar."""
-    (one,) = plans.plans([_plan()], [_row("aaa", "agent-desk", 30_000)], {"aaa": "p1"}, {}, NOW)
+    (one,) = plans.plans([_plan()], [_row("aaa", "agent-desk", 30_000)], {"aaa": "p1"})
 
     assert one.seen_tokens == 30_000
     assert one.percent is None
@@ -81,32 +77,8 @@ def test_without_a_stated_limit_there_is_no_percentage_to_show() -> None:
 
 
 @pytest.mark.unit
-def test_a_plan_that_is_out_says_when_it_comes_back() -> None:
-    """The one hard fact available: a `--resume` the CLI refused for want of budget."""
-    kicked = Kicking(short_id="aaa", armed_at=1, resume_at=NOW + 900_000)
-
-    (one,) = plans.plans(
-        [_plan(limit=100)], [_row("aaa", "agent-desk", 10)], {"aaa": "p1"}, {"aaa": kicked}, NOW
-    )
-
-    assert one.out
-    assert one.out_until == NOW + 900_000
-
-
-@pytest.mark.unit
-def test_a_break_that_is_over_is_not_a_break() -> None:
-    kicked = Kicking(short_id="aaa", armed_at=1, resume_at=NOW - 60_000)
-
-    (one,) = plans.plans(
-        [_plan()], [_row("aaa", "agent-desk", 10)], {"aaa": "p1"}, {"aaa": kicked}, NOW
-    )
-
-    assert not one.out
-
-
-@pytest.mark.unit
 def test_a_session_on_no_plan_is_counted_against_none() -> None:
-    (one,) = plans.plans([_plan(limit=100)], [_row("aaa", "agent-desk", 90)], {}, {}, NOW)
+    (one,) = plans.plans([_plan(limit=100)], [_row("aaa", "agent-desk", 90)], {})
 
     assert one.sessions == 0
     assert one.seen_tokens == 0
@@ -114,7 +86,7 @@ def test_a_session_on_no_plan_is_counted_against_none() -> None:
 
 @pytest.mark.unit
 def test_the_percentage_never_runs_past_the_end_of_the_bar() -> None:
-    (one,) = plans.plans([_plan(limit=100)], [_row("aaa", "a", 400)], {"aaa": "p1"}, {}, NOW)
+    (one,) = plans.plans([_plan(limit=100)], [_row("aaa", "a", 400)], {"aaa": "p1"})
 
     assert one.percent == 100
     assert one.close

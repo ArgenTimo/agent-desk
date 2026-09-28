@@ -36,6 +36,12 @@ case "$prompt" in
   *PLEASE_GARBLE*)
     printf 'this line is not json\\n'
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"still answered"}]}}\\n' ;;
+  *PLEASE_READ_A_BIG_FILE*)
+    printf '{"type":"system","subtype":"init"}\n'
+    printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"'
+    head -c 300000 /dev/zero | tr '\\0' 'x'
+    printf '"}]}}\n'
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"read it whole"}]}}\n' ;;
   *ONLY_RESULT*)
     printf '{"type":"result","subtype":"success","is_error":false,"result":"summarised"}\\n' ;;
   *)
@@ -737,3 +743,31 @@ async def test_with_no_second_engine_nothing_changes(
     with pytest.raises(session.AnswerFailed, match="exited 1"):
         async for _ in session.stream_answer("a question"):
             pass
+
+
+# --- a run that reads a big file ------------------------------------------------------------------
+@pytest.mark.unit
+async def test_a_run_that_reads_a_big_file_still_answers(
+    fake_claude: pathlib.Path, store: Store
+) -> None:
+    """A stream-json event is one line, and the one carrying what a `Read` call returned is as long
+    as the file. Found by drawing this console's own repository with the real engine: asyncio's
+    default line limit is 64 KiB, `store/repo.py` is several hundred, and the read raised
+    `ValueError` out of the loop — not `AnswerFailed`, so nothing caught it and the block would have
+    stayed `running` for ever."""
+    said = "".join([chunk async for chunk in session.stream_answer("PLEASE_READ_A_BIG_FILE")])
+
+    assert said == "read it whole"
+
+
+@pytest.mark.unit
+async def test_a_line_longer_than_the_bound_is_skipped_and_the_answer_survives(
+    fake_claude: pathlib.Path, store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound is a bound: a line longer than it is not buffered without end, and it is not a
+    reason to lose the answer behind it either — the same rule as a line that will not parse."""
+    monkeypatch.setattr(session, "_LONGEST_LINE", 64 * 1024)
+
+    said = "".join([chunk async for chunk in session.stream_answer("PLEASE_READ_A_BIG_FILE")])
+
+    assert said == "read it whole"

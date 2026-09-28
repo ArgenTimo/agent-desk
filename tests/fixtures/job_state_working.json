@@ -1,37 +1,41 @@
 {
   "state": "working",
-  "detail": "doing the thing it was asked to do",
+  "detail": "what it was doing",
   "tempo": "idle",
   "inFlight": {
     "tasks": 0,
-    "queued": 0,
+    "queued": 1,
     "kinds": [],
     "drainableMonitors": 0
   },
-  "tokens": 26,
+  "fan": [
+    {
+      "id": "scrubbed",
+      "kind": "scrubbed",
+      "label": "an option",
+      "startedAt": 1789555423126,
+      "doneAt": 1789556320574,
+      "failed": true
+    }
+  ],
+  "tokens": 4977,
   "output": null,
   "children": null,
-  "linkScanOffset": 212493,
+  "linkScanOffset": 411922,
   "linkScanPath": "/home/someone/.claude/projects/-home-someone-a-project/a-transcript.jsonl",
   "template": "bg",
   "respawnFlags": [],
-  "providerEnv": {},
   "intent": "what somebody asked for",
+  "name": "a short name the cli made up",
+  "nameSource": "auto",
   "sessionId": "22222222-3333-4444-8555-666666666666",
   "resumeSessionId": "22222222-3333-4444-8555-666666666666",
   "daemonShort": "22222222",
-  "cliVersion": "2.1.261",
+  "cliVersion": "2.1.273",
   "cwd": "/home/someone/a-project",
-  "createdAt": "2026-09-05T08:13:54.432Z",
-  "updatedAt": "2026-09-05T08:13:58.925Z",
-  "firstTerminalAt": null,
-  "worktreePath": "/home/someone/a-project/.claude/worktrees/a-name",
-  "worktreeBranch": "worktree-a-name",
-  "bridgeSessionId": "scrubbed",
-  "bridgeOwnerAccountUuid": "scrubbed",
-  "bridgeOwnerOrganizationUuid": "scrubbed",
-  "bridgeOutboundOnly": false,
+  "providerEnv": {},
   "backend": "daemon",
-  "name": "a short name the cli made up",
-  "nameSource": "auto"
+  "createdAt": "2026-09-20T10:00:00.000Z",
+  "updatedAt": "2026-09-20T10:05:00.000Z",
+  "firstTerminalAt": "2026-09-20T10:05:00.000Z"
 }

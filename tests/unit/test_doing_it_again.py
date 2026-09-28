@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import time
 import urllib.parse
 from collections.abc import AsyncIterator
 from typing import ClassVar
@@ -231,3 +232,54 @@ def test_it_is_asked_when_something_was_answered_and_not_on_a_clock() -> None:
     code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("//"))
 
     assert "if (settled > answeredSoFar) noticeTheRepetition();" in code
+
+
+# --- and what it costs to notice -------------------------------------------------------------------
+def test_the_pattern_is_never_handed_more_than_the_opening_of_a_question() -> None:
+    """`_NOISE` is quadratic on a long run of letters with no digit in it: `[A-Za-z]*` swallows the
+    run and then backtracks one character at a time looking for the `\\d` that is not there.
+
+    Measured before the bound: 2.4 seconds at twenty thousand characters, 59 at a hundred thousand
+    — in `GET /workbench/again`, which is an async route with no thread under it, over the last
+    twelve blocks. One pasted base64 blob, one minified line, one long URL, and the console stops
+    for everybody on it.
+
+    Asserted as the shape rather than as a clock, for the reason `test_bench_speed.py` gives: a
+    stopwatch fails on a loaded machine and passes on a fast one, and neither says whether the
+    mistake came back. The mistake is handing that pattern a string nobody bounded.
+    """
+    saw: list[int] = []
+    real = repeating._NOISE
+
+    class Watched:
+        def sub(self, replacement: str, said: str) -> str:
+            saw.append(len(said))
+            return real.sub(replacement, said)
+
+    try:
+        repeating._NOISE = Watched()  # type: ignore[assignment]
+        repeating.shape_of("x" * 100_000, "idea · something")
+    finally:
+        repeating._NOISE = real
+
+    assert saw == [repeating.MOST_TEXT]
+
+
+def test_an_enormous_question_still_has_the_shape_its_opening_gives_it() -> None:
+    """The bound may not change what a question is: the shape is the first three words, and a
+    paste is what comes after them."""
+    short = repeating.shape_of("draft a plan for the migration", "idea · x")
+    pasted = repeating.shape_of("draft a plan for the migration\n\n" + "q" * 100_000, "idea · x")
+
+    assert pasted == short
+    assert pasted.words == ("draft", "a", "plan")
+
+
+def test_a_paste_with_no_spaces_in_it_does_not_stop_the_console() -> None:
+    """The one thing the shape test above cannot say: what the failure actually was. Sixty seconds
+    against a ceiling of two is not a measurement that can go either way on a slow machine."""
+    started = time.monotonic()
+
+    repeating.noticed([("z" * 100_000, "idea · x")] * repeating.RECENT)
+
+    assert time.monotonic() - started < 2.0

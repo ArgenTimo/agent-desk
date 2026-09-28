@@ -52,8 +52,9 @@ async def gate_is_green(store: Store, repo_key: str) -> bool:
     """Whether the last thing this project finished got through its own gate.
 
     Not by running one. This console never runs a command inside a repository it watches — the
-    gate it knows about is the one `land.land` already ran in an agent's worktree, and the result
-    of that is recorded on the task (docs/adr/0008).
+    gate it knows about is the one the landing (gone since docs/adr/0013) ran in an agent's
+    worktree, and the result of that is recorded on the task (docs/adr/0008). Nothing records a
+    new one now, so this reads what was written before.
 
     So the answer is: nothing of this project's is in flight, and the last branch that was offered
     to it got through. **A project whose gate has never run is not green**, because nothing has

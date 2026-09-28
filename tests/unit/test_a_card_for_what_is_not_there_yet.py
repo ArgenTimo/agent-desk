@@ -74,12 +74,20 @@ def test_the_turning_thing_stops_for_somebody_who_asked_for_that() -> None:
 # --- and it is not a thing --------------------------------------------------------------------------
 def test_it_carries_nothing_into_the_next_message() -> None:
     """There is nothing to carry. A card that said it was being sent, about a thing that does not
-    exist, would be the console lying twice."""
-    assert ":not(.promise)" in _body("pinnedTargets")
+    exist, would be the console lying twice.
+
+    Asserted where the set is gathered rather than where it is spelled out as targets: the count
+    under the bench and the names in the field are one reading now, so the rule is stated once and
+    both of them get it.
+    """
+    assert ":not(.promise)" in _body("cardsBeingCarried")
+    assert "cardsBeingCarried()" in _body("pinnedTargets")
 
 
 def test_it_is_not_counted_among_the_cards_being_carried() -> None:
-    assert ":not(.promise)" in _body("syncTargets")
+    """The same one reading. A promise excluded from the message and counted in the sentence under
+    it would be the console contradicting itself in two adjacent elements."""
+    assert "cardsBeingCarried()" in _body("syncTargets")
 
 
 def test_it_is_never_written_down() -> None:

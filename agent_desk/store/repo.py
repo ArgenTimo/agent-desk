@@ -28,6 +28,7 @@ from sqlalchemy import bindparam, event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from ulid import ULID
 
+from agent_desk.store.migrate import migrate
 from agent_desk.store.redact import scrub, scrub_optional
 
 # The fifth is a request about *this console* — "tidy up the ideas", "put a button here" — as
@@ -517,8 +518,9 @@ class Tool(BaseModel):
 class Autostart(BaseModel):
     """What one project is allowed to do on its own, and what it has spent doing it.
 
-    Two switches, because they are two decisions (docs/adr/0008): `armed` starts work somebody
-    queued, and `exploring` goes looking for something to fix when there is nothing queued.
+    One switch: `armed` starts work somebody queued. `exploring_at`, `per_day` and `tidying_at`
+    are columns of two switches that are gone (docs/adr/0013) — read so the row still loads, and
+    used by nothing.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -530,56 +532,14 @@ class Autostart(BaseModel):
     disarmed_why: str | None = None
     exploring_at: int | None = None
     per_day: int = 3
-    # Where this project is on disk, recorded by the panel that pressed the switch: an exploration
-    # is the first task in a project and has none to inherit a directory from.
+    # Where this project is on disk, recorded when it was attached: the queue needs a directory
+    # before any session has appeared there.
     cwd: str | None = None
-    # The third thing a project may be allowed to do on its own (076): close a session whose canary
-    # is lost, once it is idle and its checkout is clean. Off, like the other two, and for a
-    # sharper reason — closing a session is the one irreversible act in this console.
     tidying_at: int | None = None
 
     @property
     def armed(self) -> bool:
         return self.armed_at is not None
-
-    @property
-    def tidying(self) -> bool:
-        return self.tidying_at is not None
-
-    @property
-    def exploring(self) -> bool:
-        return self.exploring_at is not None
-
-
-class Kicking(BaseModel):
-    """One session that is not allowed to idle, and what it has spent not idling (docs/adr/0009).
-
-    Keyed by the short id, because that is the name the CLI's own `stop` and `logs` take and the
-    prefix of the id `--resume` takes. Per session rather than per project: this is a permission
-    about one conversation.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    short_id: str
-    session_id: str = ""
-    cwd: str = ""
-    armed_at: int | None = None
-    kicks: int = 0
-    kicked_at: int | None = None
-    # When the account was out of budget, this is when to look again. A limit is a wait, not a
-    # failure, and this field is the difference between the two.
-    resume_at: int | None = None
-    failures: int = 0
-    disarmed_why: str | None = None
-    per_hour: int = 4
-
-    @property
-    def armed(self) -> bool:
-        return self.armed_at is not None
-
-    def waiting(self, now_ms: int) -> bool:
-        return self.resume_at is not None and self.resume_at > now_ms
 
 
 class Term(BaseModel):
@@ -592,6 +552,11 @@ class Term(BaseModel):
     term: str
     means: str
     created_at: int
+
+
+# The one tracker an idea is filed in (docs/adr/0005). Rows with any other `tracker` are kept and
+# not read as filings (`Store.filings`).
+FILED_IN = "jira"
 
 
 class Filing(BaseModel):
@@ -690,6 +655,23 @@ class StepCard(BaseModel):
         return f"step:{self.id}"
 
 
+class SketchCard(BaseModel):
+    """A picture of something a project has, drawn from reading the project (078)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    kind: str
+    label: str
+    lines: str = ""
+    read_from: str = ""
+    made_at: int
+
+    @property
+    def name(self) -> str:
+        return f"sketch:{self.id}"
+
+
 class BenchCard(BaseModel):
     """One card on the workbench, where somebody put it (040-bench.sql).
 
@@ -718,6 +700,9 @@ class BenchCard(BaseModel):
     # inventing one.
     came: str = ""
     came_at: int = 0
+    # When its content last changed after it arrived — a step's state, a check read back, a new
+    # name — as the page saw it happen (079). Zero is "not since it arrived", not "unknown".
+    changed_at: int = 0
 
 
 class Template(BaseModel):
@@ -985,71 +970,6 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _statements(script: str) -> list[str]:
-    """One SQL statement per element, split on the semicolons that actually end one.
-
-    The sqlite driver takes one statement per call, so a schema file is split here — and the split
-    has to know where it is. A `;` inside a comment already cut a `CREATE TABLE` in half once
-    ("sha256 of a token; not stored", which failed as `incomplete input`), and a `;` inside a
-    string literal would do the same to the first migration that seeds a row or writes a
-    `CHECK (x IN ('a;b'))`. So this walks the script once, tracking quotes and both kinds of
-    comment, rather than deleting comments and hoping.
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    index = 0
-    while index < len(script):
-        character = script[index]
-        pair = script[index : index + 2]
-
-        if quote is not None:
-            current.append(character)
-            if character == quote:
-                quote = None
-            index += 1
-        elif character in "'\"`[":
-            # SQLite accepts four quotings, and a `;` inside any of them is not the end of a
-            # statement: '…', "…", `…` and [ … ].
-            quote = "]" if character == "[" else character
-            current.append(character)
-            index += 1
-        elif pair == "--":
-            end = script.find("\n", index)
-            index = len(script) if end == -1 else end
-        elif pair == "/*":
-            end = script.find("*/", index + 2)
-            index = len(script) if end == -1 else end + 2
-        elif character == ";":
-            statements.append("".join(current))
-            current = []
-            index += 1
-        else:
-            current.append(character)
-            index += 1
-
-    statements.append("".join(current))
-    return [statement.strip() for statement in statements if statement.strip()]
-
-
-def _migrations(directory: Path) -> list[tuple[int, Path]]:
-    """`schema.sql` is version 1; every later change is `NNN-<name>.sql` applied in order.
-
-    Forward-only, and never edited in place: a file that has been applied on a machine is history
-    (docs/adr/0003).
-    """
-    found = [(1, directory / "schema.sql")]
-    for path in sorted(directory.glob("[0-9][0-9][0-9]-*.sql")):
-        version = int(path.name[:3])
-        if version <= 1:
-            # `001-anything.sql` would sort before `schema.sql`, apply, record version 1, and the
-            # baseline would then be skipped for ever. The glob invites exactly that filename, so
-            # it is refused loudly rather than resolved quietly.
-            raise ValueError(f"{path.name}: version 1 is schema.sql; number migrations from 002")
-        found.append((version, path))
-    return sorted(found)
-
-
 def _prepare_connection(dbapi_connection: Any, _record: Any) -> None:
     """Two settings per connection, and the second one is why migrations are safe.
 
@@ -1114,13 +1034,53 @@ class Store:
             raise RuntimeError("the store is not open")
         return self._engine
 
-    async def open(self) -> None:
+    def written_at(self) -> str:
+        """A fingerprint of this database as the filesystem last saw it.
+
+        For the one caller that needs to know whether it is worth *building* an answer at all. The
+        stream that keeps the console live re-rendered the whole conversation every two seconds —
+        862 KiB, 90 ms of it on the event loop — to compare it against a byte-identical string and
+        throw it away.
+
+        **Why not `PRAGMA data_version`.** SQLite's own answer to this question is documented not
+        to change for commits made on the same connection, and this program writes and reads
+        through one pooled engine. It would miss exactly the writes that matter.
+
+        **Why the write-ahead log and not only the file.** In WAL mode a commit lands in `-wal` and
+        the database itself can go untouched for a long time; a fingerprint of the main file alone
+        would report a busy console as quiet.
+
+        **It is allowed to be wrong in one direction only.** A checkpoint moves these bytes without
+        changing anything anybody renders, and that costs one wasted render. Missing a write would
+        cost an answer arriving two ticks late, which is what makes people reload a page that a
+        live stream exists to stop them reloading. Those are not the same kind of wrong, and this
+        is deliberately the cheap, conservative one: it says "something was written", never "this
+        is what changed".
+        """
+        marks: list[str] = []
+        for where in (self.path, self.path.with_name(self.path.name + "-wal")):
+            try:
+                stat = where.stat()
+            except OSError:
+                # A `-wal` that is not there is an answer, and so is a database that has not been
+                # created yet: both are states this can be asked about and neither is an error.
+                marks.append("-")
+                continue
+            marks.append(f"{stat.st_size}:{stat.st_mtime_ns}")
+        return "|".join(marks)
+
+    async def open(self, *, recover: bool = True) -> None:
+        """`recover` is for the console alone: only the process that runs blocks can say which of
+        them were interrupted. Anything else that opens this file beside it — the MCP server, a
+        script — passes False, or it marks the console's running blocks failed (R1 in
+        _research/04_dogfooding_gaps.md)."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine("sqlite+aiosqlite:///" + str(self.path))
         event.listen(self._engine.sync_engine, "connect", _prepare_connection)
         event.listen(self._engine.sync_engine, "begin", _begin_explicitly)
         await self._migrate()
-        await self._recover_interrupted()
+        if recover:
+            await self._recover_interrupted()
 
     async def close(self) -> None:
         if self._engine is not None:
@@ -1129,45 +1089,44 @@ class Store:
 
     # --- schema ---------------------------------------------------------------------------
     async def _migrate(self) -> None:
-        """Apply what has not been applied, each file in one transaction with its own version row.
-
-        The transaction is the point. A file that fails halfway, or a process killed between its
-        statements and its `schema_version` row, must leave the database exactly as it found it —
-        otherwise the next start finds tables it is about to create and never opens again.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "CREATE TABLE IF NOT EXISTS schema_version ("
-                    "version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)"
-                )
-            )
-            rows = await conn.execute(text("SELECT version FROM schema_version"))
-            applied = {row[0] for row in rows}
-
-        for version, path in _migrations(Path(__file__).parent):
-            if version in applied:
-                continue
-            async with self.engine.begin() as conn:
-                for statement in _statements(path.read_text()):
-                    await conn.execute(text(statement))
-                await conn.execute(
-                    text("INSERT INTO schema_version (version, applied_at) VALUES (:v, :t)"),
-                    {"v": version, "t": _now_ms()},
-                )
+        """See `store/migrate.py`: backup first, refuse a history this code did not write."""
+        await migrate(self.engine, self.path)
 
     async def _recover_interrupted(self) -> None:
-        """A block that was running when the process died comes back `failed`, never `answered`.
+        """A block that did not finish comes back `failed`, never `answered`, and says which way.
 
         A restart that silently promoted an unfinished block would produce an empty answer that
-        looks complete (design/02-data-model.md, "Crash behaviour"). A `queued` block is left
-        queued: it never started, and nothing about it is lost by running it now.
+        looks complete (design/02-data-model.md, "Crash behaviour").
+
+        **Both unfinished states, not just one.** A block is created `queued` and the same request
+        starts the run that moves it on; a process that dies in that window leaves it queued, and
+        nothing anywhere reads a queued block afterwards. This used to leave it alone, reasoning
+        that "nothing about it is lost by running it now" — which was true and described something
+        no code does. One in the author's own store sat that way for forty-five hours: on the page,
+        in a state that reads as *about to happen*, with somebody waiting for it.
+
+        The two reasons are kept apart because they are different facts and lead to different
+        decisions. `interrupted` means an answer was being written and part of it may be true;
+        `never started` means the question was never asked and re-asking costs exactly what asking
+        it the first time would have. `telling.stopped` says each of them in words, and a settled
+        block already carries the one press that acts on it.
+
+        Startup-only, and that is the whole of the licence this takes. "Nothing is running it" is
+        not something the store can see while the console is up — that would be an inference from
+        silence — but "this process has just started and did not queue that" is a fact.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "UPDATE block SET state = 'failed', error = 'interrupted', finished_at = :t "
                     "WHERE state = 'running'"
+                ),
+                {"t": _now_ms()},
+            )
+            await conn.execute(
+                text(
+                    "UPDATE block SET state = 'failed', error = 'never started', finished_at = :t "
+                    "WHERE state = 'queued'"
                 ),
                 {"t": _now_ms()},
             )
@@ -1621,22 +1580,6 @@ class Store:
                 {"agent_id": agent_id, "id": task_id},
             )
 
-    async def task_landed(self, task_id: str, detail: str, *, landed: bool) -> None:
-        """What happened when its branch was offered to the project (docs/adr/0008).
-
-        Both halves: the sentence for whoever reads the card, and the boolean for whatever has to
-        decide something from it. A condition that had to read the sentence would be depending on
-        the shape of prose (032-task-landed.sql).
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE task SET detail = :detail, landed = :landed WHERE id = :id"),
-                {"detail": detail[:500], "landed": int(landed), "id": task_id},
-            )
-        await self.note_in_the_shift(
-            "gate", ("green: " if landed else "red: ") + (detail or "it said nothing")
-        )
-
     async def task_failed(self, task_id: str, detail: str) -> None:
         """It stays failed and says why. Retry is a click (docs/adr/0007)."""
         async with self.engine.begin() as conn:
@@ -1684,116 +1627,10 @@ class Store:
                 text(
                     "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
                     "exploring_at, per_day, cwd, tidying_at FROM autostart "
-                    "WHERE armed_at IS NOT NULL OR exploring_at IS NOT NULL"
+                    "WHERE armed_at IS NOT NULL"
                 )
             )
             return [Autostart(**row._mapping) for row in rows]
-
-    # --- a session that is not allowed to idle (docs/adr/0009) --------------------------------
-    async def kicking(self, short_id: str) -> Kicking:
-        """Absent is off, which is what every session is until somebody presses the button."""
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE short_id = :short_id"
-                ),
-                {"short_id": short_id},
-            )
-            row = rows.first()
-            return Kicking(short_id=short_id) if row is None else Kicking(**row._mapping)
-
-    async def kicked_sessions(self) -> list[Kicking]:
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE armed_at IS NOT NULL"
-                )
-            )
-            return [Kicking(**row._mapping) for row in rows]
-
-    async def switched_off_sessions(self) -> list[Kicking]:
-        """Sessions that stopped being kept going, and said why (docs/adr/0009).
-
-        The same shape as `switched_off_projects`, and for the same reason: turning itself off is
-        what takes a row out of `kicked_sessions`, and that is the moment it is worth showing.
-        """
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT short_id, session_id, cwd, armed_at, kicks, kicked_at, resume_at, "
-                    "failures, disarmed_why, per_hour FROM kicking WHERE disarmed_why IS NOT NULL"
-                )
-            )
-            return [Kicking(**row._mapping) for row in rows]
-
-    async def kick_session(
-        self, short_id: str, *, on: bool, session_id: str = "", cwd: str = "", per_hour: int = 4
-    ) -> None:
-        """Switch kicking on or off for one session.
-
-        The full id and the directory are recorded when the button is pressed, by the card that
-        already knows them: the loop must be able to continue a session whose registry entry has
-        gone, and a registry entry goes the moment the session is stopped — which is the first
-        thing a kick does.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO kicking (short_id, session_id, cwd, armed_at, per_hour) "
-                    "VALUES (:short_id, :session_id, :cwd, :armed_at, :per_hour) "
-                    "ON CONFLICT (short_id) DO UPDATE SET armed_at = :armed_at, "
-                    "session_id = CASE WHEN :session_id = '' THEN kicking.session_id "
-                    "ELSE :session_id END, "
-                    "cwd = CASE WHEN :cwd = '' THEN kicking.cwd ELSE :cwd END, "
-                    "per_hour = :per_hour, failures = 0, disarmed_why = NULL, resume_at = NULL"
-                ),
-                {
-                    "short_id": short_id,
-                    "session_id": session_id,
-                    "cwd": cwd,
-                    "armed_at": _now_ms() if on else None,
-                    "per_hour": per_hour,
-                },
-            )
-
-    async def note_kick(self, short_id: str) -> None:
-        """One more turn kept alive. The count is what says whether this was worth switching on."""
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "UPDATE kicking SET kicks = kicks + 1, kicked_at = :t, failures = 0, "
-                    "resume_at = NULL WHERE short_id = :short_id"
-                ),
-                {"t": _now_ms(), "short_id": short_id},
-            )
-
-    async def kick_waits_until(self, short_id: str, when_ms: int) -> None:
-        """The account is out of budget. Not a failure: the switch stays on and this is when."""
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE kicking SET resume_at = :t WHERE short_id = :short_id"),
-                {"t": when_ms, "short_id": short_id},
-            )
-
-    async def note_kick_failure(self, short_id: str) -> int:
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE kicking SET failures = failures + 1 WHERE short_id = :short_id"),
-                {"short_id": short_id},
-            )
-        return (await self.kicking(short_id)).failures
-
-    async def stop_kicking(self, short_id: str, *, why: str) -> None:
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "UPDATE kicking SET armed_at = NULL, disarmed_why = :why "
-                    "WHERE short_id = :short_id"
-                ),
-                {"why": why[:300], "short_id": short_id},
-            )
 
     async def switched_off_projects(self) -> list[Autostart]:
         """Projects that turned themselves off, and said why (docs/adr/0007).
@@ -1811,77 +1648,17 @@ class Store:
             )
             return [Autostart(**row._mapping) for row in rows]
 
-    async def explore(self, repo_key: str, *, per_day: int, on: bool, cwd: str = "") -> None:
-        """Switch exploring on or off for one project (docs/adr/0008).
-
-        Separate from arming on purpose: "start what I queued" and "find something to do" are
-        different permissions, and a project can have the first without the second.
-        """
+    async def remember_checkout(self, repo_key: str, cwd: str) -> None:
+        """Where a project is on disk, so its queue has a directory before any session does."""
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
                     "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
-                    "disarmed_why, exploring_at, per_day, cwd) VALUES (:repo_key, NULL, 2, 0, "
-                    "NULL, :t, :per_day, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
-                    "exploring_at = :t, per_day = :per_day, cwd = COALESCE(:cwd, autostart.cwd)"
+                    "disarmed_why, cwd) VALUES (:repo_key, NULL, 2, 0, NULL, :cwd) "
+                    "ON CONFLICT (repo_key) DO UPDATE SET cwd = :cwd"
                 ),
-                {
-                    "repo_key": repo_key,
-                    "t": _now_ms() if on else None,
-                    "per_day": max(1, min(per_day, 12)),
-                    "cwd": cwd or None,
-                },
+                {"repo_key": repo_key, "cwd": cwd},
             )
-
-    async def tidying_projects(self) -> list[Autostart]:
-        """Projects switched on to close a session whose canary is lost (076).
-
-        Its own reader, and not a filter over `armed_projects`: a project switched on only for this
-        is not armed for anything else, and returning it from there put it through the whole of the
-        loop — the queue, the tracker, the exploration. The switches are three permissions and the
-        readers have to be three as well.
-        """
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT repo_key, armed_at, per_hour, failures, disarmed_why, "
-                    "exploring_at, per_day, cwd, tidying_at FROM autostart "
-                    "WHERE tidying_at IS NOT NULL"
-                )
-            )
-            return [Autostart(**row._mapping) for row in rows]
-
-    async def tidy_sessions(self, repo_key: str, *, on: bool, cwd: str = "") -> None:
-        """Switch tidying on or off for one project (076).
-
-        Its own switch, beside arming and exploring, because it is its own permission: "close a
-        session that has stopped signing" is a different thing to allow from "start what I queued",
-        and the difference matters more here than anywhere else — this is the one irreversible act
-        in the console.
-        """
-        async with self.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO autostart (repo_key, armed_at, per_hour, failures, "
-                    "disarmed_why, tidying_at, cwd) VALUES (:repo_key, NULL, 2, 0, "
-                    "NULL, :t, :cwd) ON CONFLICT (repo_key) DO UPDATE SET "
-                    "tidying_at = :t, cwd = COALESCE(:cwd, autostart.cwd)"
-                ),
-                {"repo_key": repo_key, "t": _now_ms() if on else None, "cwd": cwd or None},
-            )
-
-    async def explored_since(self, repo_key: str, since_ms: int) -> int:
-        """How much of the day's budget this project has spent looking for work of its own."""
-        async with self.engine.connect() as conn:
-            rows = await conn.execute(
-                text(
-                    "SELECT COUNT(*) AS n FROM task WHERE repo_key = :repo_key "
-                    "AND source_kind = 'found' AND started_at IS NOT NULL AND started_at >= :since"
-                ),
-                {"repo_key": repo_key, "since": since_ms},
-            )
-            row = rows.first()
-            return int(row._mapping["n"]) if row else 0
 
     async def arm(self, repo_key: str, *, per_hour: int) -> None:
         """Switch it on for one project. Arming clears whatever disarmed it last time."""
@@ -1952,12 +1729,21 @@ class Store:
         return filing
 
     async def filings(self) -> list[Filing]:
+        """Issues ideas were filed as — in a tracker (`FILED_IN`).
+
+        The live database also holds 259 rows with tracker 'git': a commit URL recorded against an
+        idea by something outside this code between 2026-09-07 and 09-16, when no code path wrote
+        that value. They are kept exactly as they are and read by nothing here — a commit is not a
+        filing, and counting it as one hid those ideas from every place that shows unfiled work
+        (_work/DECISIONS.md D13).
+        """
         async with self.engine.connect() as conn:
             rows = await conn.execute(
                 text(
                     "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
-                    "ORDER BY created_at DESC"
-                )
+                    "WHERE tracker = :tracker ORDER BY created_at DESC"
+                ),
+                {"tracker": FILED_IN},
             )
             return [Filing(**row._mapping) for row in rows]
 
@@ -1966,9 +1752,9 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT id, idea_id, tracker, issue_key, url, created_at FROM filing "
-                    "WHERE idea_id = :idea_id"
+                    "WHERE idea_id = :idea_id AND tracker = :tracker"
                 ),
-                {"idea_id": idea_id},
+                {"idea_id": idea_id, "tracker": FILED_IN},
             )
             row = rows.first()
             return None if row is None else Filing(**row._mapping)
@@ -2191,10 +1977,22 @@ class Store:
         summary, a draft — is not deleted by this program; `dropped` is the state for that
         (docs/05-ideas.md).
 
-        Unanswered suggestions naming it go first, on either side of the pair (069). They are this
-        console's own working note about a row that is about to stop existing, so nobody loses
-        anything — but the foreign key is real, and without this the delete raises and the
-        splitter's own placeholder stays in the list for ever.
+        Three things point at an idea, and each is dealt with on its own terms.
+
+        **Unanswered suggestions go.** They are this console's own working note about a row that is
+        about to stop existing, so nobody loses anything (069).
+
+        **Children are orphaned.** An idea whose parent is being removed is a top-level idea, which
+        is what it now is. This is the reachable one: "this was not an idea — answer it instead"
+        deletes every idea a message produced, and a message that turned out to be three thoughts
+        has a parent with children. Any child somebody has *kept* survives on purpose — and the
+        parent delete then hit the foreign key and answered the button with a 500.
+
+        **A filed idea is refused**, like a drafted one. A filing says an issue exists in somebody
+        else's tracker, and the row here is the only record this console has of that; losing it to
+        a correction is worse than leaving a line in the pool. Filing sets the state to `done` two
+        lines later in the route that files, so this is belt as well as braces — but the braces are
+        an ordering in another file, and this is the function that must not raise.
         """
         async with self.engine.begin() as conn:
             await conn.execute(
@@ -2202,9 +2000,14 @@ class Store:
                 {"id": idea_id},
             )
             await conn.execute(
+                text("UPDATE idea SET parent_id = NULL WHERE parent_id = :id"),
+                {"id": idea_id},
+            )
+            await conn.execute(
                 text(
                     "DELETE FROM idea WHERE id = :id AND state = 'new' "
-                    "AND NOT EXISTS (SELECT 1 FROM draft WHERE draft.idea_id = idea.id)"
+                    "AND NOT EXISTS (SELECT 1 FROM draft WHERE draft.idea_id = idea.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM filing WHERE filing.idea_id = idea.id)"
                 ),
                 {"id": idea_id},
             )
@@ -3503,6 +3306,74 @@ class Store:
                 {"short_id": short_id, "name": name, "t": _now_ms()},
             )
 
+    async def went_to_a_terminal(self, session_id: str) -> int:
+        """Record that the board sent somebody to a terminal (077).
+
+        The honest half of the roadmap's first measure. A press of `go to it` is this console
+        handing somebody back to a terminal because the board did not answer their question, and
+        driving that to zero is what docs/09-roadmap.md says phase one exists for.
+        """
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("INSERT INTO went_to_a_terminal (session_id, at) VALUES (:session_id, :at)"),
+                {"session_id": session_id, "at": _now_ms()},
+            )
+            return int(done.lastrowid or 0)
+
+    async def why_it_went(self, press: int, reason: str) -> bool:
+        """The reason somebody gave for one press (080). False when there is no such press."""
+        async with self.engine.begin() as conn:
+            done = await conn.execute(
+                text("UPDATE went_to_a_terminal SET reason = :reason WHERE id = :id"),
+                {"reason": reason, "id": press},
+            )
+            return bool(done.rowcount)
+
+    async def terminal_reasons_since(self, since_ms: int) -> dict[str, int]:
+        """Presses in a window, by the reason given; '' is the ones nobody labelled."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT reason, COUNT(*) FROM went_to_a_terminal WHERE at >= :since "
+                    "GROUP BY reason"
+                ),
+                {"since": since_ms},
+            )
+            return {str(row[0]): int(row[1]) for row in rows}
+
+    async def terminals_since(self, since_ms: int) -> int:
+        """How many times, in a window. A window because an all-time total stops moving, and a
+        number that stops moving is one nobody looks at twice."""
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text("SELECT COUNT(*) FROM went_to_a_terminal WHERE at >= :since"),
+                {"since": since_ms},
+            )
+            return int(rows.scalar_one())
+
+    async def ideas_since(self, since_ms: int) -> tuple[int, int]:
+        """Thoughts written down in a window, and how many of them were built.
+
+        The second of the two numbers docs/09-roadmap.md says this project is judged by, and it has
+        been derivable since the first migration without ever being shown. Counted in SQL rather
+        than by reading every idea into memory: the pool is four hundred and seventy-nine rows on
+        the author's machine and this is asked on a surface that renders every couple of seconds.
+
+        `done` and not `promoted`: the roadmap's word for the far end is "promoted", and the state
+        that actually means a thought became something is `done` — `promoted` is one step on the way
+        and a count that used it would report an idea that was built as though it had stalled.
+        """
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT COUNT(*), COALESCE(SUM(state = 'done'), 0) FROM idea "
+                    "WHERE created_at >= :since"
+                ),
+                {"since": since_ms},
+            )
+            captured, built = rows.one()
+            return int(captured), int(built)
+
     async def canaries(self) -> dict[str, str]:
         """Every session this console told to sign its replies, by short id."""
         async with self.engine.connect() as conn:
@@ -3560,6 +3431,57 @@ class Store:
             )
             return [StepCard(**row._mapping) for row in rows]
 
+    async def add_sketch_card(
+        self, *, kind: str, label: str, lines: str = "", read_from: str = ""
+    ) -> SketchCard:
+        """One thing a drawing found in a project. Bounded here as well as where it was read, because
+        a store method is called by more than one reader and the second one may not have read it."""
+        card = SketchCard(
+            id=_new_id(),
+            kind=(kind.strip() or "thing")[:40],
+            label=(label.strip() or "something")[:120],
+            lines=lines[:4000],
+            read_from=read_from[:200],
+            made_at=_now_ms(),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO sketch_card (id, kind, label, lines, read_from, made_at) "
+                    "VALUES (:id, :kind, :label, :lines, :read_from, :made_at)"
+                ),
+                card.model_dump(),
+            )
+        return card
+
+    async def sketch_card(self, card_id: str) -> SketchCard | None:
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id = :id"
+                ),
+                {"id": card_id},
+            )
+            row = rows.first()
+            return None if row is None else SketchCard(**row._mapping)
+
+    async def sketch_cards(self, names: Sequence[str]) -> dict[str, SketchCard]:
+        """The ones named, by card name. A digest asks for the cards on one bench, not every drawing
+        ever made."""
+        ids = [name.split(":", 1)[1] for name in names if name.startswith("sketch:")]
+        if not ids:
+            return {}
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT id, kind, label, lines, read_from, made_at FROM sketch_card "
+                    "WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            )
+            return {f"sketch:{row._mapping['id']}": SketchCard(**row._mapping) for row in rows}
+
     # --- the workbench ------------------------------------------------------------------------
     async def keep_bench(
         self, cards: Sequence[BenchCard], *, thread_id: str = "", moved: bool = False
@@ -3608,9 +3530,9 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
-                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
-                        ":came_at)"
+                        "ord, by_hand, thread_id, came, came_at, changed_at) VALUES (:name, :kind, "
+                        ":card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, "
+                        ":came, :came_at, :changed_at)"
                     ),
                     rows,
                 )
@@ -3665,7 +3587,7 @@ class Store:
             for row in await conn.execute(
                 text(
                     "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
-                    "came, came_at "
+                    "came, came_at, changed_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},
@@ -3806,11 +3728,23 @@ class Store:
                 await conn.execute(
                     text(
                         "INSERT INTO bench_card (name, kind, card_id, label, x, y, shown, spent, "
-                        "ord, by_hand, thread_id, came, came_at) VALUES (:name, :kind, :card_id, "
-                        ":label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, :came, "
-                        ":came_at)"
+                        "ord, by_hand, thread_id, came, came_at, changed_at) VALUES (:name, :kind, "
+                        ":card_id, :label, :x, :y, :shown, :spent, :ord, :by_hand, :thread_id, "
+                        ":came, :came_at, :changed_at)"
                     ),
-                    [{**card, "thread_id": thread_id} for card in was["cards"]],
+                    # A step is JSON written at the time, so one recorded before 042, 045 or 079
+                    # lacks the columns those added; they get the defaults the migrations gave.
+                    [
+                        {
+                            "by_hand": 0,
+                            "came": "",
+                            "came_at": 0,
+                            "changed_at": 0,
+                            **card,
+                            "thread_id": thread_id,
+                        }
+                        for card in was["cards"]
+                    ],
                 )
             for tie in await conn.execute(text("SELECT id, from_name, to_name FROM card_tie")):
                 if tie._mapping["from_name"] in here and tie._mapping["to_name"] in here:
@@ -3846,7 +3780,7 @@ class Store:
             rows = await conn.execute(
                 text(
                     "SELECT name, kind, card_id, label, x, y, shown, spent, ord, by_hand, "
-                    "came, came_at "
+                    "came, came_at, changed_at "
                     "FROM bench_card WHERE thread_id = :thread_id ORDER BY ord"
                 ),
                 {"thread_id": thread_id},
