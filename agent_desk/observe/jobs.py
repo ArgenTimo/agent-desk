@@ -23,6 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent_desk.config import settings
+from agent_desk.observe.elsewhere import elsewhere
 from agent_desk.observe.model import JOB_STATES, JobEnd
 
 
@@ -95,6 +96,8 @@ def read_jobs() -> JobsRead:
         except (ValidationError, json.JSONDecodeError):
             unreadable += 1
             continue
+        if elsewhere(job.cwd):
+            continue  # another executor's job (observe/elsewhere.py)
         if job.state not in JOB_STATES:
             unknown[job.state] = unknown.get(job.state, 0) + 1
         elif job.waiting:
