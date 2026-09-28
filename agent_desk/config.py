@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # day's ceiling above. `AGENT_DESK_APPRAISE=on` runs it again while the console is up.
     appraise: bool = False
 
+    # --- Open pull requests on the board (B3). -----------------------------------------------
+    # `owner/name,owner/name`. Empty shows nothing and reads nothing. The token is named, never
+    # held here: its value comes from the environment or secrets.json (agent_desk/secrets.py), and
+    # only read access is needed — GitHub is read here, never written.
+    pull_repos: str = ""
+    github_token_env: str = "AGENT_DESK_GITHUB_TOKEN"  # noqa: S105 — the name of a variable
+
     @property
     def registry_glob(self) -> str:
         """`*.json`, never `*`. See the module docstring."""

@@ -12,6 +12,12 @@
 {% endfor %}
 {% endif %}
 
+{# Open pull requests of the repositories named in AGENT_DESK_PULL_REPOS (B3), read by their own
+   loop every five minutes. A repository that could not be read says why, in the same place. #}
+{% for line in pull_lines or [] %}
+<p class="small pull-line">{{ line }}</p>
+{% endfor %}
+
 {# Background jobs the CLI itself marked `blocked` (B1). Not "may want you": the job file says it
    is waiting on a human and what for, so this is said as a fact. Answering stays in a terminal —
    `claude attach` — because writing into a session is not something this board does. #}

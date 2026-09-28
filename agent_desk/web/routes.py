@@ -109,7 +109,7 @@ from agent_desk.store.repo import (
     Thread,
 )
 from agent_desk.tracker import jira
-from agent_desk.web import autostart, blockers, engine, plans
+from agent_desk.web import autostart, blockers, engine, plans, pulls
 from agent_desk.web import blocks as block_runs
 from agent_desk.web import kicking as nudge
 
@@ -681,6 +681,7 @@ def render_board(
         # Background jobs blocked on a human — the CLI wrote `blocked`, so this is a fact (B1).
         waiting_jobs=background.waiting,
         waiting_questions=background.questions,
+        pull_lines=pulls.lines(),
         # What each project is linked to, for the menu on its card. Read with the board rather
         # than fetched when the menu opens: it is four links, and a click that waits for a round
         # trip is a click that feels broken.
@@ -1285,6 +1286,7 @@ async def render_page(message: str = "") -> str:
             notices=notices + background.notices,
             waiting_jobs=background.waiting,
             waiting_questions=background.questions,
+            pull_lines=pulls.lines(),
             links=await board_links(),
             work=await board_work(),
             kicks=await board_kicks(),

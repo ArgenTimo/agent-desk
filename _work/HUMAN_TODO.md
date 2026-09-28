@@ -82,3 +82,19 @@ that fact, say so in docs/03; reading it is then a small observe/ change with a 
 Evidence since (B7): `claude agents --json` printed `"status": "waiting", "waitingFor": "permission
 prompt"` for a session that was sitting at a permission prompt. It is recorded in
 `tests/fixtures/claude_agents.json`, parsed as `Agent.waiting_for`, and deliberately not rendered.
+
+## H7 · Open pull requests on the board need a read-only token (B3)
+The line "PR · repo: N open, oldest X days" is read from GitHub with a token this work may not
+hold. Create a fine-grained PAT with **read-only** access (Metadata: read, Pull requests: read)
+to `ArgenTimo/agent-desk` and `bagorbenko/DuckyFlow` (the latter needs the org/owner to allow it;
+a classic token with `repo` scope also works but is broader), then:
+```
+systemctl --user edit agent-desk
+#   [Service]
+#   Environment=AGENT_DESK_PULL_REPOS=ArgenTimo/agent-desk,bagorbenko/DuckyFlow
+#   Environment=AGENT_DESK_GITHUB_TOKEN=<the token>
+systemctl --user restart agent-desk
+```
+Expected on the board (2026-09-27): `PR · ArgenTimo/agent-desk: 5 open, oldest 17 days` and
+`PR · bagorbenko/DuckyFlow: 1 open, oldest 20 days` (checked against `gh pr list`). Without the
+token each repository says why it could not be read, which is also a correct board.

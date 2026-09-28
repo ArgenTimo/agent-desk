@@ -25,7 +25,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from agent_desk import lock
 from agent_desk.answer import session
 from agent_desk.config import settings
-from agent_desk.web import autostart, blocks, engine, kicking, later, routes, sse
+from agent_desk.web import autostart, blocks, engine, kicking, later, pulls, routes, sse
 from agent_desk.web.origin import guard
 
 STATIC = Path(__file__).parent / "static"
@@ -73,6 +73,10 @@ async def _console() -> AsyncIterator[None]:
                 # And the pass that reads the idea pool, so a list of sixty is a list
                 # somebody can scan (agent_desk/ideas/appraise.py). Off unless asked for (S2).
                 loops.append(group.create_task(kicking.appraising(routes.store)))
+            if pulls.repos():
+                # And the open pull requests of the repositories somebody named (B3). Read-only,
+                # so it runs whether or not this console has hands.
+                loops.append(group.create_task(pulls.run()))
             # And the one that brings back what somebody put off until a moment that has now
             # come (031-deferred.sql). Same lifetime again: a reminder that outlives the console
             # would be a daemon, and this program does not have one.
