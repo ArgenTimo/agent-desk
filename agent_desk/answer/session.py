@@ -113,6 +113,30 @@ class _Tail:
         return f" — {scrub(last.strip())[:200]}" if last.strip() else ""
 
 
+def _ended(code: int) -> str:
+    """What a finished run's return code says, in the words of the thing that actually happened.
+
+    A negative code is not an exit status. POSIX has a child either exit with a status of its own
+    or be terminated by a signal, and Python encodes the second as `-signum` — so "the run exited
+    -9" is that encoding shown to somebody who did not write it, and there is no such exit status.
+    docs/04-threads-and-blocks.md asks a failed block to say why; a number that is not the kind of
+    number it looks like says less than nothing, because it invites a search for exit code 9.
+
+    It is also the shape a failure here most often takes on this machine rather than a rare one:
+    the console runs beside the agents it is watching, and the kernel reclaiming memory ends a run
+    with SIGKILL. `test_a_run_that_only_reads_files_still_says_something` names it as one of the
+    three shapes that outlive the reader fix (01M1ZEN85PA2NYSV70H59ZZFWN), and a run killed under
+    the suite's own load reads the same way there as it does on a card.
+    """
+    if code >= 0:
+        return f"the run exited {code}"
+    try:
+        named = signal.Signals(-code).name
+    except ValueError:  # pragma: no cover - a signal number this platform does not name
+        named = f"signal {-code}"
+    return f"the run was killed ({named})"
+
+
 # The longest single line of the engine's output this reads. `asyncio`'s default is 64 KiB, and a
 # stream-json event is one line: when a run reads a file with the `Read` tool, the event carrying
 # what it read is as long as the file. Found by drawing this console's own repository with the real
@@ -318,6 +342,46 @@ class Tally:
 tally = Tally()
 
 
+async def _lines(stream: asyncio.StreamReader) -> AsyncIterator[bytes]:
+    """Every line the run printed — including the ones the stream is still holding when its pipe
+    breaks under it — except a line longer than `_LONGEST_LINE`, which is skipped.
+
+    A `StreamReader` raises a stored exception *ahead of* its own buffer: `readuntil` checks
+    `self._exception` before it looks for a separator, so a reset that arrives after the answer
+    does takes the answer with it. Measured, and it is not a near miss — three complete lines fed
+    in, `set_exception`, and iterating the reader yields **none** of them. The end of a stream
+    behaves the other way round: `feed_eof` leaves the buffer alone and every line still comes out,
+    which is why only this one case needs saying.
+
+    So the reset is turned back into the end of a stream, which is what it actually is: the pipe is
+    gone, the transport has already reported it, and nothing further can be fed. What was in the
+    buffer is what the run said, and it is an answer.
+    """
+    while True:
+        try:
+            raw = await stream.readline()
+        except ValueError:
+            # A line longer than `_LONGEST_LINE`. `readline` has already dropped it and the next
+            # one reads normally, so it is skipped the way a line that will not parse is: what
+            # matters is the text and the result, and a tool's output too big to hold is neither.
+            continue
+        except ConnectionResetError:
+            # `set_exception(None)` is how a reader is told to stop raising; typeshed says a reader
+            # is only ever given a real exception, which is true of the callers it was written for.
+            #
+            # It is only safe with nothing waiting on the stream: `set_exception` hands its argument
+            # to a pending waiter, and `Future.set_exception(None)` is a `TypeError`. Here there is
+            # none — the exception that brought us into this branch cleared the waiter on its way
+            # out — and the line matters because it is the condition a later refactor could take
+            # away without noticing. Reading this stream from two places at once is what would.
+            stream.set_exception(None)  # type: ignore[arg-type]
+            stream.feed_eof()
+            continue
+        if not raw:
+            return
+        yield raw
+
+
 async def _run(
     prompt: str,
     *,
@@ -358,6 +422,15 @@ async def _run(
             f"needs_toolchain: {binary or settings.claude_bin} is not on PATH, so nothing can "
             "answer a block"
         ) from exc
+    except OSError as exc:
+        # There, and it would not start: not executable, or held open for writing by something at
+        # that instant (ETXTBSY). Either way it said nothing and is not an answer — the engine is
+        # unavailable. Left raw it skipped the second engine, lost its errno, and reached a card as
+        # "PermissionError while running the answer engine" (01M1ZEN85PA2NYSV70H59ZZFWN).
+        raise AnswerFailed(
+            f"the answer engine could not be started: {binary or settings.claude_bin} — "
+            f"{exc.strerror or type(exc).__name__}"
+        ) from exc
 
     said_something = False
     result_text = ""
@@ -388,66 +461,56 @@ async def _run(
         async with asyncio.timeout(settings.answer_timeout_seconds):
             # A run that exits the moment it has finished printing can close the pipe while it is
             # still being read, and asyncio raises `ConnectionResetError` out of the middle of the
-            # loop. Everything already read is still good — the answer is *in* those lines — so
-            # this is the end of the stream rather than a failure, and treating it as one threw
-            # away an answer that had arrived. Caught here rather than left to `OSError` above,
-            # because that path marks the block failed and loses what was said.
-            with contextlib.suppress(ConnectionResetError):
-                while True:
-                    try:
-                        raw = await stdout.readline()
-                    except ValueError:
-                        # A line longer than `_LONGEST_LINE`. `readline` has already dropped it and
-                        # the next one reads normally, so it is skipped the way a line that will not
-                        # parse is: what matters is the text and the result, and a tool's output
-                        # that is too big to hold is not either of those.
-                        continue
-                    if not raw:
-                        break
-                    line = raw.decode(errors="replace").strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except ValueError:
-                        # The CLI's own format, and it is not a contract either (docs/adr/0004). A
-                        # line this program cannot read is skipped rather than raised on: the run may
-                        # still answer, and an unreadable line is not evidence that it will not.
-                        continue
-                    if not isinstance(event, dict):
-                        continue
+            # loop. That is the end of the stream rather than a failure, and treating it as one
+            # threw away an answer that had arrived — so it is handled here rather than left to
+            # the `OSError` branch above, which marks the block failed and loses what was said.
+            #
+            # Suppressing it was not enough, and the difference is the whole of this: the lines
+            # the reader was still holding go with the exception unless they are asked for again.
+            # `_lines` asks.
+            async for raw in _lines(stdout):
+                line = raw.decode(errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    # The CLI's own format, and it is not a contract either (docs/adr/0004). A
+                    # line this program cannot read is skipped rather than raised on: the run may
+                    # still answer, and an unreadable line is not evidence that it will not.
+                    continue
+                if not isinstance(event, dict):
+                    continue
 
-                    kind = event.get("type")
-                    if kind == "assistant":
-                        # What it is doing, before what it has said: a turn that only used a tool has
-                        # no text in it, and it is exactly those turns that make the silence.
-                        if on_step is not None and (step := _step_of(event)):
-                            on_step(step)
-                        text = _text_of(event)
-                        if text:
-                            said_something = True
-                            yield text
-                    elif kind == "result":
-                        # What it cost, as the run itself reported it — before the error check, because
-                        # a run that failed after spending money still spent it. Read defensively: the
-                        # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
-                        # cannot be read is recorded as nothing rather than as a guess.
-                        with contextlib.suppress(TypeError, ValueError):
-                            spent = float(event.get("total_cost_usd") or 0)
-                            await tally.note(spent)
-                            # And to whoever asked, so a step can say what it cost rather than only
-                            # the day's total being able to (058-what-a-step-cost.sql).
-                            if on_cost is not None:
-                                on_cost(spent)
-                        if event.get("is_error"):
-                            raise AnswerFailed(
-                                str(event.get("subtype") or "the run reported an error")
-                            )
-                        result_text = str(event.get("result") or "")
+                kind = event.get("type")
+                if kind == "assistant":
+                    # What it is doing, before what it has said: a turn that only used a tool has
+                    # no text in it, and it is exactly those turns that make the silence.
+                    if on_step is not None and (step := _step_of(event)):
+                        on_step(step)
+                    text = _text_of(event)
+                    if text:
+                        said_something = True
+                        yield text
+                elif kind == "result":
+                    # What it cost, as the run itself reported it — before the error check, because
+                    # a run that failed after spending money still spent it. Read defensively: the
+                    # shape is the CLI's and nobody promised it (docs/adr/0004), and a cost that
+                    # cannot be read is recorded as nothing rather than as a guess.
+                    with contextlib.suppress(TypeError, ValueError):
+                        spent = float(event.get("total_cost_usd") or 0)
+                        await tally.note(spent)
+                        # And to whoever asked, so a step can say what it cost rather than only
+                        # the day's total being able to (058-what-a-step-cost.sql).
+                        if on_cost is not None:
+                            on_cost(spent)
+                    if event.get("is_error"):
+                        raise AnswerFailed(str(event.get("subtype") or "the run reported an error"))
+                    result_text = str(event.get("result") or "")
 
             code = await process.wait()
             if code != 0 and not said_something:
-                raise AnswerFailed(f"the run exited {code}{complaints.summary()}")
+                raise AnswerFailed(f"{_ended(code)}{complaints.summary()}")
             if not said_something and result_text:
                 # Nothing streamed, but the run summarised itself. Better than an empty answer,
                 # and it is the same text.
@@ -464,7 +527,8 @@ async def _run(
 
 
 # What makes a failure worth trying a second engine for. Every one of these is the engine being
-# *unavailable* — out of budget, not installed, unreachable — and none of them is an answer.
+# *unavailable* — out of budget, not installed, would not start, unreachable — and none of them is
+# an answer.
 #
 # The distinction is the whole of this feature and it is worth stating plainly: a refusal is an
 # answer. It arrives as text, `stream_answer` yields it, nothing raises, and no fallback can
@@ -478,6 +542,7 @@ UNAVAILABLE = (
     "usage limit",
     "quota",
     "needs_toolchain",
+    "could not be started",
     "no answer within",
     "could not reach",
     "connection",

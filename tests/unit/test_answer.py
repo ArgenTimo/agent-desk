@@ -198,6 +198,60 @@ async def test_a_line_this_program_cannot_read_does_not_lose_the_answer(
     assert answered.answer == "still answered"
 
 
+# --- a pipe that breaks after the answer arrived --------------------------------------------------
+# Fed by hand rather than by a subprocess, and that is the point of them: a reset that lands
+# between two lines of a real run is a two-microsecond window nobody can aim at, which is exactly
+# how it reached the suite as a test that failed one run in an unknown number and passed the next
+# (01M1ZEN85PA2NYSV70H59ZZFWN). Here the window is the whole test.
+@pytest.mark.unit
+async def test_a_reset_after_the_answer_does_not_take_the_answer_with_it() -> None:
+    """`StreamReader` raises a stored exception ahead of its own buffer, so every complete line
+    still sitting there goes with the reset unless it is asked for again."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\nthree\n")
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    assert [line async for line in session._lines(stream)] == [b"one\n", b"two\n", b"three\n"]
+
+
+@pytest.mark.unit
+async def test_iterating_the_reader_itself_is_what_loses_them() -> None:
+    """The reason `_lines` exists, pinned — so that a future reader who thinks the helper is
+    ceremony can see what taking it out costs, and so this stops being true loudly if a later
+    asyncio changes it."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\nthree\n")
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    got: list[bytes] = []
+    with pytest.raises(ConnectionResetError):
+        async for line in stream:
+            got.append(line)
+
+    assert got == [], "asyncio started returning the buffer, and `_lines` can go"
+
+
+@pytest.mark.unit
+async def test_a_stream_that_simply_ends_is_unchanged() -> None:
+    """The ordinary path, and the reason only the reset needed saying: `feed_eof` leaves the
+    buffer alone, and a reader that was never given an exception is iterated exactly as before."""
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\ntwo\n")
+    stream.feed_eof()
+
+    assert [line async for line in session._lines(stream)] == [b"one\n", b"two\n"]
+
+
+@pytest.mark.unit
+async def test_a_reset_before_anything_arrived_is_still_the_end_of_the_stream() -> None:
+    """Nothing to rescue is not an error either — the run said nothing, and the callers above
+    already have a sentence for a run that said nothing."""
+    stream = asyncio.StreamReader()
+    stream.set_exception(ConnectionResetError("Connection lost"))
+
+    assert [line async for line in session._lines(stream)] == []
+
+
 @pytest.mark.unit
 async def test_a_run_that_only_summarises_itself_still_answers(
     fake_claude: pathlib.Path, store: Store
@@ -413,6 +467,108 @@ async def test_a_failed_run_says_more_than_its_exit_code(
     assert failed.state == "failed"
     assert "exited 3" in (failed.error or "")
     assert "429" in (failed.error or "")
+
+
+@pytest.mark.unit
+async def test_a_run_that_was_killed_says_so_rather_than_reporting_a_negative_exit_code(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """`-9` is not an exit status and there is no exit code 9 to look up.
+
+    POSIX has a child either exit with a status of its own or be terminated by a signal, and
+    Python encodes the second as `-signum`; `str(exc)` is what `fail_block` writes and what a
+    person then reads on the card, so the encoding was reaching them raw
+    (docs/04-threads-and-blocks.md: a block that fails says why).
+
+    Killed for real rather than by a patched return code, because the whole claim is about what
+    `process.wait()` hands back from a signal death: the fake ends itself with SIGKILL after
+    reading the prompt and printing nothing (01M1ZEN85PA2NYSV70H59ZZFWN, the third of the three
+    shapes `test_a_run_that_only_reads_files_still_says_something` names).
+    """
+    binary = tmp_path / "killed" / "claude"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\ncat > /dev/null\nkill -9 $$\n")
+    binary.chmod(0o755)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert failed.state == "failed"
+    assert "killed" in (failed.error or "") and "SIGKILL" in (failed.error or "")
+    assert "-9" not in (failed.error or "")
+
+
+@pytest.mark.unit
+def test_an_exit_status_is_still_a_number_and_a_signal_is_still_a_name() -> None:
+    """Both halves, because a fix that renamed the ordinary case too would make every failure read
+    like a kill. Only a negative code is a signal."""
+    assert session._ended(0) == "the run exited 0"
+    assert session._ended(3) == "the run exited 3"
+    assert session._ended(-9) == "the run was killed (SIGKILL)"
+    assert session._ended(-11) == "the run was killed (SIGSEGV)"
+
+
+@pytest.mark.unit
+def test_a_killed_run_is_not_read_as_an_engine_this_machine_does_not_have() -> None:
+    """The wording changed on a string that decides whether a second engine is tried, so this is
+    the property that had to survive it: a kill is not the engine being *unavailable*. The kernel
+    reclaiming memory would take a local model with it, and retrying inside the same second would
+    be the console answering a question it had not thought about."""
+    assert not session.unavailable("the run was killed (SIGKILL)")
+
+
+@pytest.mark.unit
+async def test_an_engine_that_is_there_but_will_not_start_says_so_rather_than_its_class_name(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """Found, and refused by exec — here because it is not executable; ETXTBSY takes the same
+    path. It used to escape `_run` as a bare `OSError` and reach the card as "PermissionError while
+    running the answer engine", which names a class and not a cause (01M1ZEN85PA2NYSV70H59ZZFWN).
+
+    Refused for real rather than by a patched exec: the claim is about what the kernel hands back.
+    """
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\necho never\n")
+    binary.chmod(0o644)
+    monkeypatch.setattr(session, "settings", Settings(claude_bin=str(binary)))
+
+    block = await _block(store)
+    await session.answer_block(store, block, "a question")
+
+    failed = await store.block(block.id)
+    assert failed is not None
+    assert failed.state == "failed"
+    assert "could not be started" in (failed.error or "")
+    assert "Permission denied" in (failed.error or "")
+    assert "while running the answer engine" not in (failed.error or "")
+
+
+@pytest.mark.unit
+async def test_an_engine_that_will_not_start_is_one_the_second_engine_stands_in_for(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It said nothing, so trying the other one cannot repeat anything — the same footing as an
+    engine that is not installed at all, which already falls back."""
+    primary = tmp_path / "claude"
+    primary.write_text("#!/bin/sh\necho never\n")
+    primary.chmod(0o644)
+    local = tmp_path / "local"
+    local.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"local"}]}}\\n\'\n'
+        'printf \'{"type":"result","result":"local"}\\n\'\n'
+    )
+    local.chmod(0o755)
+    monkeypatch.setattr(
+        session,
+        "settings",
+        Settings(claude_bin=str(primary), local_model_bin=str(local), daily_usd=0.0),
+    )
+
+    assert [c async for c in session.stream_answer("q")] == ["local"]
 
 
 @pytest.mark.unit
