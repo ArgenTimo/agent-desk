@@ -443,12 +443,18 @@ async def test_dispatching_from_a_refusal_briefs_the_agent_like_every_other_door
 async def test_words_typed_at_a_refusal_name_the_session_they_were_typed_at(
     home: Home, desk: Store, started: list[dict[str, str]]
 ) -> None:
-    """ "бери в работу" with no directive behind it has one object, the session whose refusal it
-    was typed into. Six agents on 2026-09-10 started without it, each one working out from
-    transcripts which session "it" was."""
+    """Words typed at a refusal with no directive behind them have one object, the session whose
+    refusal they were typed into. Six agents on 2026-09-10 started without it, each one working
+    out from transcripts which session "it" was.
+
+    Not the bare "бери в работу" of that day: that line now starts nothing at all (#13, "names no
+    work"). A go-ahead with the work after it still starts an agent, and is still typed at a
+    session the agent should be told about."""
     session_id = _a_session(home)
 
-    status, _ = await _post(f"/sessions/{session_id}/dispatch", {"text": "бери в работу"})
+    status, _ = await _post(
+        f"/sessions/{session_id}/dispatch", {"text": "бери в работу парсер реестра"}
+    )
 
     assert status == 200
     (call,) = started
