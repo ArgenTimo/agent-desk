@@ -143,21 +143,6 @@
       <span class="small">⏱ comes back {{ idea | comes_back }}</span>
       <button type="submit" title="stop waiting and put it back in the pool">bring it back now</button>
     </form>
-    {% else %}
-    <form class="idea-later" method="post" action="/ideas/{{ idea.id }}/later"
-          hx-post="/ideas/{{ idea.id }}/later" hx-target="#idea-list">
-      <input type="hidden" name="from" value="column">
-      <label class="visually-hidden" for="later-{{ idea.id }}">when to come back to it</label>
-      <select id="later-{{ idea.id }}" name="when" onchange="this.form.requestSubmit()">
-        <option value="">not now, ask me…</option>
-        <option value="tomorrow">tomorrow morning</option>
-        <option value="next week">next week</option>
-        <option value="in 2 hours">in two hours</option>
-        <option value="когда освободится">when nothing is running</option>
-        <option value="once the gate is green">once the gate is green</option>
-      </select>
-      <button type="submit" class="visually-hidden">put it off</button>
-    </form>
     {% endif %}
     {% endif %}
 
@@ -187,23 +172,12 @@
     </ul>
     {% endif %}
 
-    <details class="more link-form">
-      <summary>say what this one depends on</summary>
-      <form method="post" action="/ideas/link" hx-post="/ideas/link" hx-target="#idea-list">
-        <input type="hidden" name="from_id" value="{{ idea.id }}">
-        <label class="visually-hidden" for="kind-{{ idea.id }}">how they relate</label>
-        <select id="kind-{{ idea.id }}" name="kind">
-          <option value="needs">this one needs…</option>
-          <option value="touches">together with… they make a third thing</option>
-        </select>
-        <label class="visually-hidden" for="to-{{ idea.id }}">which idea</label>
-        {# One shared list of choices for every card (`idea-choices`, below the list) rather than a
-           <select> of every idea inside every idea: that was the page growing with the square of
-           the pool — 3.7 MB at two hundred open ideas (_research/04_dogfooding_gaps.md, B6). #}
-        <input id="to-{{ idea.id }}" name="to_id" list="idea-choices" required
-               autocomplete="off" placeholder="the other idea…">
-        <button type="submit">link them</button>
-      </form>
+    {# Putting it off and saying what it depends on are fetched when this is opened (B6): with both
+       drawn into every card the column was ~3.5 KB an idea, 0.7 MB at two hundred. The deferred
+       state stays above, because that one is something the card has to say. #}
+    <details class="more idea-more" data-more="{{ idea.id }}">
+      <summary>{{ "put it off · " if idea.state != "dropped" and not idea.deferred else "" }}say what it depends on</summary>
+      <div class="more-body"></div>
     </details>
 
     {% for child in children[idea.id] %}

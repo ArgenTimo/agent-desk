@@ -4381,6 +4381,16 @@ async def _project_choices() -> list[tuple[str, str]]:
     ]
 
 
+@router.get("/ideas/{idea_id}/more", response_class=HTMLResponse)
+async def idea_more(idea_id: str) -> HTMLResponse:
+    """What an idea card fetches when its "more" is opened: putting it off, and saying what it
+    depends on (B6). Drawn into every card they were two thirds of a 0.7 MB column."""
+    idea = await store.idea(idea_id)
+    if idea is None:
+        return HTMLResponse('<p class="empty small">that idea is gone</p>', status_code=404)
+    return HTMLResponse(env.get_template("_idea_more.html").render(idea=idea))
+
+
 @router.get("/ideas/{idea_id}/kin", response_class=HTMLResponse)
 async def idea_kin(idea_id: str) -> HTMLResponse:
     """What an idea is made of and what it belongs to, for the workbench to bring along.

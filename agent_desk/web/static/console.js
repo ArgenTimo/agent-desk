@@ -6790,6 +6790,25 @@ function offerWhy(going, press, reasons) {
   setTimeout(() => holder.remove(), 15000);
 }
 
+// An idea card's "more" — putting it off, saying what it depends on — is fetched the first time it
+// is opened rather than drawn into every card (B6). `toggle` does not bubble, so it is caught on the
+// way down.
+document.addEventListener('toggle', async (event) => {
+  const more = event.target;
+  if (!(more instanceof HTMLDetailsElement) || !more.open || !more.dataset.more) return;
+  if (more.dataset.loaded) return;
+  more.dataset.loaded = 'yes';
+  const body = more.querySelector('.more-body');
+  try {
+    const answer = await fetch(`/ideas/${encodeURIComponent(more.dataset.more)}/more`);
+    body.innerHTML = await answer.text();
+    if (window.htmx) htmx.process(body);
+  } catch {
+    body.textContent = 'could not read it';
+    delete more.dataset.loaded;
+  }
+}, true);
+
 // What it always did, kept for the fallback and for anything else on the board that hands over a
 // line to paste.
 document.addEventListener('click', async (event) => {
