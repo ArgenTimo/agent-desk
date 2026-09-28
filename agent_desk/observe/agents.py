@@ -20,6 +20,7 @@ import time
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_desk.config import settings
+from agent_desk.observe.elsewhere import elsewhere
 from agent_desk.observe.model import RegistryRead
 
 TIMEOUT_SECONDS = 5.0
@@ -108,7 +109,11 @@ def listed(read: RegistryRead, said: AgentsRead) -> RegistryRead:
                 f"{said.notice} — the board is read from ~/.claude/sessions alone",
             ],
         )
-    status = {one.session_id: one.status for one in said.agents if one.kind == "interactive"}
+    status = {
+        one.session_id: one.status
+        for one in said.agents
+        if one.kind == "interactive" and not elsewhere(one.cwd)
+    }
     sessions = [
         one.model_copy(update={"status": status[one.session_id] or one.status})
         for one in read.sessions

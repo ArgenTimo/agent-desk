@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     # Which MCP tools this server offers (`keep_idea,open_ideas,…`); empty offers all of them. A
     # client's own config narrows it, so a session gets the inbox without the workbench (B5).
     mcp_tools: str = ""
+
+    # --- Where another executor keeps its own agents (task 21; ADR 0014, proposed). ------------
+    # A session whose working directory is under one of these is that executor's — ai-worker's
+    # project workspaces and its OS user's home by default — and it is neither shown on the board
+    # nor has its transcript opened. Comma-separated; empty hides nothing.
+    aiworker_workspace_roots: str = "/srv/ai-worker/projects,/home/aiw"
     github_token_env: str = "AGENT_DESK_GITHUB_TOKEN"  # noqa: S105 — the name of a variable
 
     @property

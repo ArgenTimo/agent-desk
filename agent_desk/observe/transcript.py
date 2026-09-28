@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_desk.config import settings
+from agent_desk.observe.elsewhere import elsewhere_slug
 from agent_desk.observe.model import AgentCall, TailEntry, TranscriptTail
 
 # A session id reaches this module from a URL path, and it is interpolated into a glob. Anything
@@ -61,7 +62,10 @@ def _find(session_id: str, root: Path) -> Path | None:
     """
     if not _SESSION_ID.match(session_id):
         return None
-    matches = list(root.glob(f"*/{session_id}.jsonl"))
+    # Another executor's session is not opened at all (observe/elsewhere.py).
+    matches = [
+        one for one in root.glob(f"*/{session_id}.jsonl") if not elsewhere_slug(one.parent.name)
+    ]
     if not matches:
         return None
 
