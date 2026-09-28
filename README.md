@@ -69,7 +69,7 @@ Nothing here needs a server, a database daemon, a container or a network. One pr
 file under `~/.local/share/agent-desk/`, and read access to `~/.claude/`.
 
 **It starts no agents unless told to.** With `AGENT_DESK_HANDS` unset (or `off`) the console does
-not dispatch, run the autostart, kicking or workbench-engine loops, or draw the buttons for them —
+not dispatch, run the autostart or workbench-engine loops, or draw the buttons for them —
 it watches and keeps ideas. `AGENT_DESK_HANDS=on` brings those back. Reading the idea pool in the
 background costs model calls, so it too runs only with `AGENT_DESK_APPRAISE=on`.
 
@@ -99,7 +99,7 @@ What is optional, per project, and set from the board rather than from a file:
 | **Words used here** | your names for things, so an agent is told what they mean |
 | **Links** | Jira, GitHub, a dashboard — opened from the card's `⋯` menu |
 | **Environment** | the *names* of variables the work needs; never a value ([`docs/07-security.md`](docs/07-security.md)) |
-| **Start what I queue** / **find something to fix** | the two switches of [`adr/0007`](docs/adr/0007-a-loop-that-decides-when-not-what.md) and [`adr/0008`](docs/adr/0008-an-agent-that-finds-its-own-work.md) |
+| **Start what I queue** | the switch of [`adr/0007`](docs/adr/0007-a-loop-that-decides-when-not-what.md) |
 
 ### On another machine
 

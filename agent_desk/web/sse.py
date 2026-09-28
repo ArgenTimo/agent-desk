@@ -82,9 +82,8 @@ async def board_events() -> AsyncIterator[str]:
                     groups,
                     links,
                     await routes.board_work(),
-                    await routes.board_kicks(),
                     await routes.board_canaries(),
-                    await routes.board_plans(*await routes.board_rows_and_kicks()),
+                    await routes.board_plans(),
                     await routes.board_spent(),
                     # This stream replaces the whole board every couple of seconds, so anything
                     # the first render knew and this one does not is a fact that survives for two

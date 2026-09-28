@@ -6,6 +6,8 @@ permission flags, the worktree, the click, and once.
 
 from __future__ import annotations
 
+import itertools
+import json
 import pathlib
 import re
 import shutil
@@ -14,6 +16,7 @@ from collections.abc import AsyncIterator
 import pytest
 from agent_desk import dispatch
 from agent_desk.config import Settings
+from agent_desk.observe.model import Session
 from agent_desk.store.repo import McpServer, Store
 from agent_desk.web import routes
 
@@ -293,14 +296,24 @@ def test_a_kick_with_nothing_to_say_or_nowhere_to_go_is_refused(tmp_path: pathli
 
 
 @pytest.mark.unit
-def test_a_limit_is_told_apart_from_something_being_broken() -> None:
-    """It decides whether a refusal becomes a wait or counts towards two failures. Loose on
-    purpose: this is the one shape here not recorded from a real occurrence."""
-    assert dispatch.looks_like_a_limit("usage limit reached · resets at 14:00")
-    assert dispatch.looks_like_a_limit("You have hit your rate limit")
-    assert dispatch.looks_like_a_limit("out of quota for now")
-    assert not dispatch.looks_like_a_limit("Error creating worktree: Invalid worktree name")
-    assert not dispatch.looks_like_a_limit("")
+def test_only_an_idle_background_session_can_be_answered_from_its_card() -> None:
+    """`stop` and `--resume` are the CLI's door into a background session, and a session that is
+    working is never interrupted (docs/adr/0002). Enumerated, because the space is that small, and
+    every refusal is a sentence the card shows."""
+    fixtures = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
+    entry = json.loads((fixtures / "registry_entry.json").read_text())
+
+    for status, kind in itertools.product(
+        ("idle", "busy", "shell"), ("bg", "background", "interactive", "terminal")
+    ):
+        session = Session.model_validate({**entry, "status": status, "kind": kind})
+        why = dispatch.answerable(session)
+        if status == "idle" and kind in dispatch.ANSWERABLE_KINDS:
+            assert why == ""
+        else:
+            assert why.strip(), "a refusal without words sends somebody to find out why"
+    interactive = Session.model_validate({**entry, "status": "idle", "kind": "interactive"})
+    assert "only a background session" in dispatch.answerable(interactive)
 
 
 # What a person types into the name field, and what a person types into a server row. Both fields

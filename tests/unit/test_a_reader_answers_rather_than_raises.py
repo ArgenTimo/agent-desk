@@ -71,7 +71,6 @@ MODULES = (
     "starting",
     "telling",
     "ties",
-    "tidying",
     "tooling",
 )
 
@@ -151,7 +150,6 @@ def test_the_sweep_finds_the_readers_it_is_about() -> None:
         "starting.key_and_name",
         "connectors.guess",
         "seen.read",
-        "tidying.may_close",
     } <= names
 
 

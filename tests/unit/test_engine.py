@@ -16,6 +16,8 @@ from agent_desk import process
 from agent_desk.store.repo import Store
 from agent_desk.web import engine
 
+from tests.unit.landed import as_landed
+
 KEY = "origin:acme/api"
 ENGINE = pathlib.Path(__file__).resolve().parents[2] / "agent_desk" / "web" / "engine.py"
 
@@ -116,7 +118,7 @@ async def test_the_next_step_is_told_what_the_last_one_produced(
     (first,) = await desk.tasks()
     await desk.take_next_task(KEY)
     await desk.finish_task(first.id)
-    await desk.task_landed(first.id, "found six dead sessions", landed=True)
+    await as_landed(desk, first.id, "found six dead sessions", landed=True)
     await engine.tick(desk)  # settles the first
     await engine.tick(desk)  # queues the second
 
@@ -362,8 +364,10 @@ def test_a_step_is_told_the_permissions_it_does_not_have() -> None:
     assert "not being offered to the gate" in said
     assert "rather than fetching" in said
 
-    given = " ".join(engine._permission_words(("work", "land", "push", "net")))
-    assert "Do not push" not in given
+    # Nothing a step can be given lets it merge or push any more (docs/adr/0013).
+    given = " ".join(engine._permission_words(("work", "net")))
+    assert "Do not push" in given
+    assert "rather than fetching" not in given
 
 
 @pytest.mark.unit
@@ -437,47 +441,14 @@ async def test_a_run_whose_last_step_is_done_ends(desk: Store, tmp_path: pathlib
 
 
 @pytest.mark.unit
-async def test_a_step_allowed_to_land_is_offered_to_the_gate(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_step_that_was_once_allowed_to_land_is_simply_done(
+    desk: Store, tmp_path: pathlib.Path
 ) -> None:
-    """The `land` and `push` permissions enforced rather than described: this console calls the
-    landing and tells it whether to push, or does neither."""
-    from agent_desk import land
-
-    offered: list[tuple[str, bool]] = []
-
-    def landing(cwd: str, worktree: str, *, push: bool = True) -> land.Landed:
-        offered.append((worktree, push))
-        return land.Landed(landed=True, detail="merged", branch="b")
-
-    monkeypatch.setattr(engine.land, "land", landing)
+    """A row written when `land` was a permission (docs/adr/0013 took it away) merges nothing: the
+    step finishes the way every other step does."""
     await desk.set_card_role("idea:one", "action")
     await desk.set_card_field("idea:one", "do", "the work")
     await desk.set_card_leave("idea:one", ["work", "land"])
-    run, _ = await engine.begin(desk, names=["idea:one"], repo_key=KEY, cwd=str(tmp_path))
-    assert run is not None
-    await engine.tick(desk)
-
-    (task,) = await desk.tasks()
-    await desk.take_next_task(KEY)
-    await desk.finish_task(task.id)
-    await engine.tick(desk)
-
-    assert len(offered) == 1
-    assert offered[0][1] is False, "it pushed without being allowed to"
-    assert (await desk.cards_made())["idea:one"] == "merged"
-
-
-@pytest.mark.unit
-async def test_a_step_not_allowed_to_land_is_not_offered_to_the_gate(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def never(*args: object, **kwargs: object) -> object:  # pragma: no cover
-        raise AssertionError("a branch was merged by a step that was not allowed to")
-
-    monkeypatch.setattr(engine.land, "land", never)
-    await desk.set_card_role("idea:one", "action")
-    await desk.set_card_field("idea:one", "do", "the work")
     run, _ = await engine.begin(desk, names=["idea:one"], repo_key=KEY, cwd=str(tmp_path))
     assert run is not None
     await engine.tick(desk)
@@ -488,36 +459,6 @@ async def test_a_step_not_allowed_to_land_is_not_offered_to_the_gate(
     await engine.tick(desk)
 
     assert (await desk.run_steps(run.id))[0].state == "done"
-
-
-@pytest.mark.unit
-async def test_a_gate_that_says_no_stops_the_run(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing lands that the project's own gate will not take (docs/adr/0008), and the steps
-    after this one assumed it had."""
-    from agent_desk import land
-
-    monkeypatch.setattr(
-        engine.land,
-        "land",
-        lambda cwd, worktree, *, push=True: land.Landed(landed=False, detail="the gate said no"),
-    )
-    await desk.set_card_role("idea:one", "action")
-    await desk.set_card_field("idea:one", "do", "the work")
-    await desk.set_card_leave("idea:one", ["work", "land"])
-    run, _ = await engine.begin(desk, names=["idea:one"], repo_key=KEY, cwd=str(tmp_path))
-    assert run is not None
-    await engine.tick(desk)
-    (task,) = await desk.tasks()
-    await desk.take_next_task(KEY)
-    await desk.finish_task(task.id)
-
-    await engine.tick(desk)
-
-    (ended,) = await desk.runs()
-    assert not ended.going
-    assert "the gate said no" in (ended.stopped_why or "")
 
 
 @pytest.mark.unit

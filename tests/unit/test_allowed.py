@@ -40,13 +40,9 @@ def test_every_enforced_permission_names_a_branch_that_actually_exists() -> None
     checked against the code that would have to honour it."""
     pkg = pathlib.Path(__file__).resolve().parents[2] / "agent_desk"
     dispatching = (pkg / "dispatch.py").read_text(encoding="utf-8")
-    landing = (pkg / "land.py").read_text(encoding="utf-8")
 
     # `work`: an agent in a worktree of its own.
     assert "worktree" in dispatching
-    # `land` and `push`: this console calls the landing, and tells it whether to push.
-    assert "def land(" in landing
-    assert "push: bool" in landing
     # `read`: answering without starting an agent is a thing this program already does.
     assert (pkg / "answer" / "session.py").exists()
 
@@ -54,7 +50,7 @@ def test_every_enforced_permission_names_a_branch_that_actually_exists() -> None
 @pytest.mark.unit
 def test_a_step_nobody_has_touched_runs_the_way_tasks_already_run() -> None:
     """Nothing granted is not everything refused. Its own copy and nothing further — and merging
-    or pushing is a thing somebody should have to say out loud."""
+    or pushing is not a thing a step can be given at all (docs/adr/0013)."""
     assert allowed.leave_for(None) == ("work",)
     assert allowed.leave_for([]) == ("work",)
     assert allowed.NATURALLY == ("work",)
@@ -76,4 +72,4 @@ def test_read_wins_over_work_when_both_are_somehow_set() -> None:
     that decides whether a process can write to disk, so the narrower reading is the only safe
     one."""
     assert allowed.reads_only(("read", "work"))
-    assert not allowed.reads_only(("work", "land"))
+    assert not allowed.reads_only(("work",))

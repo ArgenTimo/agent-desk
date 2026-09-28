@@ -107,20 +107,6 @@ async def test_a_commit_writes_a_line(desk: Store) -> None:
     assert step.what == "commit" and "4f2a1c" in step.said
 
 
-async def test_a_gate_result_writes_a_line_either_way(desk: Store) -> None:
-    """Red is the half that matters after a compaction, and it is the half a summary loses."""
-    task = await desk.queue_task(
-        repo_key="k", cwd="/tmp", title="a job", instruction="do it", source_kind="idea"
-    )
-
-    await desk.task_landed(task.id, "two tests failed", landed=False)
-
-    going = await desk.the_shift()
-    assert going is not None
-    (step,) = await desk.shift_steps(going.id)
-    assert step.what == "gate" and step.said.startswith("red")
-
-
 # --- where it stopped ---------------------------------------------------------------------------
 async def test_where_it_stopped_says_the_four_things(desk: Store) -> None:
     """ "Последняя незакрытая идея, последний коммит, состояние дерева, что было красным.\" """
@@ -128,10 +114,8 @@ async def test_where_it_stopped_says_the_four_things(desk: Store) -> None:
     done = await desk.create_idea(text_="done one", summary="done one", source_kind="typed")
     await desk.set_idea_state(done.id, "done")
     await desk.record_filing(idea_id=done.id, tracker="git", issue_key="4f2a1c", url="http://x/")
-    task = await desk.queue_task(
-        repo_key="k", cwd="/tmp", title="a job", instruction="do it", source_kind="idea"
-    )
-    await desk.task_landed(task.id, "two tests failed", landed=False)
+    # What a gate said, as the shift recorded it back when this console still ran one.
+    await desk.note_in_the_shift("gate", "red: two tests failed")
 
     said = await standing.where_it_stopped(desk)
 
@@ -146,11 +130,8 @@ async def test_nothing_yet_says_so_rather_than_showing_an_empty_shape(desk: Stor
 
 
 async def test_a_green_gate_after_a_red_one_is_what_is_reported(desk: Store) -> None:
-    task = await desk.queue_task(
-        repo_key="k", cwd="/tmp", title="a job", instruction="do it", source_kind="idea"
-    )
-    await desk.task_landed(task.id, "two tests failed", landed=False)
-    await desk.task_landed(task.id, "it merged", landed=True)
+    await desk.note_in_the_shift("gate", "red: two tests failed")
+    await desk.note_in_the_shift("gate", "green: it merged")
 
     assert "last green" in await standing.where_it_stopped(desk)
 

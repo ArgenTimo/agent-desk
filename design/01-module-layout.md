@@ -24,7 +24,7 @@ agent_desk/
 
   ideas/         the pool: capture, reading, drafting
     inbox.py       capture — no model call, cannot fail on a busy machine
-    appraise.py    what a background pass makes of an idea; never writes `state`
+    appraise.py    what a background pass makes of an idea, and its loop; never writes `state`
     describe.py    the one sentence a card says about itself
     meeting.py     a transcript read into the pool (docs/10)
     waking.py      when a deferred thing comes back — pure (031)
@@ -34,12 +34,11 @@ agent_desk/
     jira.py        the board, its tickets, and the one door out (adr/0005, adr/0010)
     github.py      pull requests waiting on a person
 
-  web/           FastAPI, Jinja2, HTMX, SSE. The only module that may dispatch or land.
+  web/           FastAPI, Jinja2, HTMX, SSE. The only module that may dispatch.
     app.py         the lifespan: one task group, five loops, cancelled on the way out
     routes.py      every route
     blocks.py      the input field: one task group for every run in flight
     autostart.py   the queue loop — decides *when*, never *what* (adr/0007)
-    kicking.py     the loop that will not let a switched-on session idle (adr/0009)
     later.py       the loop that brings back what was put off (031)
     engine.py      the loop that walks a drawing, one step at a time (037, adr/0011)
     blockers.py    what is stopped, computed rather than stored
@@ -58,7 +57,6 @@ agent_desk/
     looking.py     the bench as the model is shown it: numbered cards, and the lines between
 
   dispatch.py    starting an agent: the argv, the briefing, the worktree name
-  land.py        offering a branch to the project's own gate (adr/0008)
   peer.py        the ONE write path into a running session (adr/0002)
   connectors.py  what each kind of link lets this console actually do
   secrets.py     names an environment variable; never reads a credential file
@@ -95,7 +93,7 @@ a substring search matches the comment explaining why a module does *not* do a t
 - **only `observe/` parses what Claude Code writes** (adr/0004). `store/repo.py`,
   `answer/session.py`, `tracker/jira.py`, `tracker/github.py` and `secrets.py` are named
   exceptions, each because it parses JSON that is this program's own or somebody else's API.
-- **only `web/` imports `dispatch`, `land`, `tracker` or `peer`** — the four doors out.
+- **only `web/` imports `dispatch`, `tracker` or `peer`** — the three doors out.
 - **only `tracker/` opens a socket**, and every request it makes is https.
 - **nothing reads a credential file.** The paths are named in `.claude/settings.json`'s deny
   list; the test is the second lock.

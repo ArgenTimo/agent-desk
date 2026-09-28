@@ -55,7 +55,6 @@ from agent_desk import (
     finding,
     grading,
     handling,
-    land,
     opening,
     pasted,
     peer,
@@ -98,7 +97,6 @@ from agent_desk.store.repo import (
     Group,
     Idea,
     IdeaState,
-    Kicking,
     LooksLike,
     ProjectLink,
     Seen,
@@ -111,7 +109,6 @@ from agent_desk.store.repo import (
 from agent_desk.tracker import jira
 from agent_desk.web import autostart, blockers, engine, plans, pulls
 from agent_desk.web import blocks as block_runs
-from agent_desk.web import kicking as nudge
 
 router = APIRouter()
 
@@ -575,22 +572,18 @@ async def board_work() -> dict[str, dict[str, int]]:
     return counted
 
 
-async def board_rows_and_kicks() -> tuple[list[BoardRow], dict[str, Kicking]]:
-    """What the plans strip needs, read once. A convenience for the stream, which has no board row
-    of its own to hand over."""
-    rows, _ = await asyncio.to_thread(board)
-    return rows, await board_kicks()
+async def board_plans(rows: list[BoardRow] | None = None) -> str:
+    """The subscriptions strip above the projects (agent_desk/web/plans.py).
 
-
-async def board_plans(rows: list[BoardRow], kicks: dict[str, Kicking]) -> str:
-    """The subscriptions strip above the projects (agent_desk/web/plans.py)."""
+    `rows` is the board when the caller has already read it; the stream has none of its own to
+    hand over, so it is read here.
+    """
+    read = rows if rows is not None else (await asyncio.to_thread(board))[0]
     return env.get_template("_plans.html").render(
         plans=plans.plans(
             await store.subscriptions(),
-            rows,
+            read,
             await store.session_subscriptions(),
-            kicks,
-            now_ms(),
         )
     )
 
@@ -608,15 +601,6 @@ async def board_ours() -> set[str]:
 async def board_canaries() -> dict[str, str]:
     """The signature each session this console started was told to keep (023-canary.sql)."""
     return await store.canaries()
-
-
-async def board_kicks() -> dict[str, Kicking]:
-    """Which sessions are switched on to keep going, by short id (docs/adr/0009).
-
-    Read with the board for the same reason the links are: it is a handful of rows, and a button
-    whose state arrives one round trip after the card is a button that looks broken.
-    """
-    return {arming.short_id: arming for arming in await store.kicked_sessions()}
 
 
 @dataclass(frozen=True)
@@ -658,7 +642,6 @@ def render_board(
     groups: list[Group] | None = None,
     links: dict[str, list[ProjectLink]] | None = None,
     work: dict[str, dict[str, int]] | None = None,
-    kicks: dict[str, Kicking] | None = None,
     canaries: dict[str, str] | None = None,
     plans_html: str = "",
     spent: Spent | None = None,
@@ -689,9 +672,6 @@ def render_board(
         # What it has going on and what it has got through — from this program's own queue, which
         # is the only work it can honestly count (docs/adr/0007).
         work=work or {},
-        # Which sessions are switched on not to idle, so the button on each card shows its own
-        # state rather than the same state on all of them (docs/adr/0009).
-        kicks=kicks or {},
         # The signature each session this console started was told to keep, so the card can say
         # when one stops (023-canary.sql).
         canaries=canaries or {},
@@ -1289,9 +1269,8 @@ async def render_page(message: str = "") -> str:
             pull_lines=pulls.lines(),
             links=await board_links(),
             work=await board_work(),
-            kicks=await board_kicks(),
             canaries=await board_canaries(),
-            plans=await board_plans(rows, await board_kicks()),
+            plans=await board_plans(rows),
             flagged=sum(1 for row in rows if row.hint.waiting),
             spent=await board_spent(),
             focus=await store.setting(FOCUS_KEY),
@@ -1830,7 +1809,6 @@ async def render_project(key: str, refused: str = "") -> str:
         arming=await store.autostart(key),
         # The console says exactly what the loop decided, because it asks the same function.
         why_not=await autostart.why_not(store, key),
-        explore_why=await autostart.why_not_explore(store, key),
         # What is simply true here, whatever the task is. It goes verbatim into every agent this
         # console starts in this project (020-project-note.sql).
         note=await store.project_note(key),
@@ -2102,34 +2080,6 @@ async def remove_project_link(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
-@router.post("/tidy-sessions", response_class=HTMLResponse)
-async def switch_tidying(request: Request) -> Response:
-    """Let this project close a session whose canary is lost, or stop letting it (076).
-
-    «Закрытие сессии выбрасывает то, что она не закоммитила. Это единственное необратимое действие
-    во всей консоли, и решение о нём должно приниматься с открытыми глазами, а не заодно с
-    кнопкой.» So it is its own switch, off by default, on the project's own settings, and the panel
-    says what it will do before it is pressed.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    where = next(
-        (
-            one.instances[0].path
-            for one in shape(
-                (await asyncio.to_thread(board))[0],
-                await store.groups(),
-                await store.seen_projects(),
-            )
-            if one.key == key and one.instances
-        ),
-        "",
-    )
-    await store.tidy_sessions(key, on=form.get("tidying", "") == "yes", cwd=where)
-    panel = await render_project(key)
-    return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
-
-
 @router.post("/mcp-servers", response_class=HTMLResponse)
 async def add_mcp_server(request: Request) -> Response:
     """Attach an MCP server to a project (074).
@@ -2194,9 +2144,8 @@ async def create_project(request: Request) -> Response:
                     await store.groups(),
                     await board_links(),
                     await board_work(),
-                    await board_kicks(),
                     await board_canaries(),
-                    await board_plans(*await board_rows_and_kicks()),
+                    await board_plans(),
                     await board_spent(),
                 )
             )
@@ -2216,7 +2165,6 @@ async def add_to_project(group_id: str, request: Request) -> Response:
                 await store.groups(),
                 await board_links(),
                 await board_work(),
-                await board_kicks(),
                 spent=await board_spent(),
             )
         )
@@ -2234,7 +2182,6 @@ async def dissolve_project(group_id: str, request: Request) -> Response:
                 await store.groups(),
                 await board_links(),
                 await board_work(),
-                await board_kicks(),
                 spent=await board_spent(),
             )
         )
@@ -4622,12 +4569,9 @@ async def attach_project(request: Request) -> Response:
     if pointed.url:
         await store.set_link(repo_key=pointed.repo_key, name="repository", url=pointed.url)
     if pointed.path:
-        # Where it is, so the queue and an exploration have a directory to work in without
-        # waiting for a session to appear there first (docs/adr/0008).
-        arming = await store.autostart(pointed.repo_key)
-        await store.explore(
-            pointed.repo_key, per_day=arming.per_day, on=arming.exploring, cwd=pointed.path
-        )
+        # Where it is, so the queue has a directory to work in without waiting for a session to
+        # appear there first.
+        await store.remember_checkout(pointed.repo_key, pointed.path)
     log.info("project attached", project=pointed.name, key=pointed.repo_key)
 
     panel = await render_project(pointed.repo_key)
@@ -4803,15 +4747,6 @@ async def task_action(task_id: str, action: str, request: Request) -> Response:
                 await _start_it(claimed)
     elif action == "drop":
         await store.drop_task(task_id)
-    elif action == "land":
-        # Offer the branch to the project again, once somebody has pushed a fix to it. The same
-        # call the settling pass makes, with the same rule behind it: nothing lands that the
-        # project's own gate will not take (docs/adr/0008). A gate that says no again leaves the
-        # branch exactly where it is and says why, which is what it did the first time.
-        task = next((t for t in await store.tasks() if t.id == task_id), None)
-        if task is not None and task.finished_at is not None:
-            offered = await asyncio.to_thread(land.land, task.cwd, autostart.worktree_of(task))
-            await store.task_landed(task.id, offered.detail, landed=offered.landed)
     elif action == "retry":
         task = next((t for t in await store.tasks() if t.id == task_id), None)
         if task is not None and task.failed_at is not None:
@@ -5033,64 +4968,6 @@ async def set_project_note(request: Request) -> Response:
     return HTMLResponse(await render_page(panel))
 
 
-@router.post("/explore", response_class=HTMLResponse)
-async def set_exploring(request: Request) -> Response:
-    """Let a project find its own work when its queue is empty (docs/adr/0008).
-
-    A second switch rather than a wider one: arming says "start what I put here", this says "and
-    when there is nothing, find something". Two decisions, made separately.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    if key:
-        try:
-            per_day = int(form.get("per_day", "3"))
-        except ValueError:
-            per_day = 3
-        # The checkout goes with the switch: an exploration is the first task in a project and
-        # has none to inherit a directory from (docs/adr/0008).
-        rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups(), await store.seen_projects())
-        named = next((project for project in projects if project.key == key), None)
-        where = named.instances[0].path if named and named.instances else ""
-        await store.explore(key, per_day=per_day, on=form.get("exploring") == "yes", cwd=where)
-    panel = await render_project(key)
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
-
-
-@router.post("/projects/kicking", response_class=HTMLResponse)
-async def set_kicking_here(request: Request) -> Response:
-    """Switch every background session in one project into not being allowed to idle.
-
-    docs/adr/0009 says "all of them" is a click repeated, not a wider switch — so this is exactly
-    that: the same per-session rows the card's own button writes, written for the sessions that
-    are in this project right now. A session started afterwards is a new decision and gets its own
-    click, which is the property that keeps the switch a permission rather than a policy.
-    """
-    form = await _form(request)
-    key = form.get("key", "").strip()
-    on = form.get("kicking") == "yes"
-    if key:
-        rows, _ = await asyncio.to_thread(board)
-        projects = shape(rows, await store.groups(), await store.seen_projects())
-        named = next((project for project in projects if project.key == key), None)
-        for row in [r for i in (named.instances if named else []) for r in i.rows]:
-            if row.session.kind != "bg":
-                continue
-            await store.kick_session(
-                row.session.session_id.split("-")[0],
-                on=on,
-                session_id=row.session.session_id,
-                cwd=row.session.cwd,
-            )
-    panel = await render_project(key)
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
-
-
 @router.post("/plans", response_class=HTMLResponse)
 async def manage_plans(request: Request) -> Response:
     """Declare a subscription, or forget one (025-subscriptions.sql).
@@ -5123,7 +5000,7 @@ async def render_plans_page() -> str:
         subscriptions=await store.subscriptions(),
         placed=await store.session_subscriptions(),
         rows=rows,
-        plans=await board_plans(rows, await board_kicks()),
+        plans=await board_plans(rows),
     )
 
 
@@ -5174,8 +5051,8 @@ async def say_to_session(session_id: str, request: Request) -> Response:
         )
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
 
-    refused = nudge.kickable(row.session)
-    if refused and row.session.kind not in nudge.KICKABLE_KINDS:
+    refused = dispatch.answerable(row.session)
+    if refused and row.session.kind not in dispatch.ANSWERABLE_KINDS:
         # A session in a terminal. The refusal names the rule rather than the symptom.
         panel = env.get_template("_dispatch.html").render(started=False, detail=refused)
         return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
@@ -5194,39 +5071,6 @@ async def say_to_session(session_id: str, request: Request) -> Response:
         project=row.session.project,
     )
     return HTMLResponse(panel if _wants_fragment(request) else await render_page(panel))
-
-
-@router.post("/sessions/{session_id}/kicking", response_class=HTMLResponse)
-async def set_kicking(session_id: str, request: Request) -> Response:
-    """Switch one session into not being allowed to idle, or back out of it (docs/adr/0009).
-
-    This is the explicit human click docs/adr/0002 requires, and what it buys is a standing
-    permission rather than one message — which is the whole of what 0009 changes about that rule.
-    Nothing here writes into a session that is working: the loop checks the registry every time,
-    and `busy` is never continued.
-
-    The full id and the checkout are recorded now, by the card that has them, because the first
-    thing a kick does is stop the session — and a stopped session has no registry entry to read
-    them back from.
-    """
-    form = await _form(request)
-    on = form.get("kicking") == "yes"
-    rows, _ = await asyncio.to_thread(board)
-    row = next((r for r in rows if r.session.session_id == session_id), None)
-    short = session_id.split("-")[0]
-    if row is not None:
-        await store.kick_session(
-            short, on=on, session_id=row.session.session_id, cwd=row.session.cwd
-        )
-    elif not on:
-        # Switching one off must work even for a session that has since gone: otherwise the row
-        # stays armed forever and the loop keeps saying it is not running any more.
-        await store.kick_session(short, on=False)
-
-    panel = render_card("session", session_id, await store.groups())
-    if _wants_fragment(request):
-        return HTMLResponse(panel)
-    return HTMLResponse(await render_page(panel))
 
 
 @router.post("/sessions/{session_id}/dispatch", response_class=HTMLResponse)
