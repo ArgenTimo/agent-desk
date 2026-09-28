@@ -76,7 +76,7 @@ from agent_desk import secrets as kept
 from agent_desk.answer import session as answer_session
 from agent_desk.config import settings
 from agent_desk.ideas import appraise, bench, chart, describe, inbox, kin, meeting, waking
-from agent_desk.observe import agents, attach, folder, jobs, reading, registry, transcript
+from agent_desk.observe import agents, attach, folder, reading, registry, transcript
 from agent_desk.observe.model import (
     AttentionHint,
     Session,
@@ -107,7 +107,7 @@ from agent_desk.store.repo import (
     Thread,
 )
 from agent_desk.tracker import jira
-from agent_desk.web import autostart, blockers, engine, plans, pulls
+from agent_desk.web import autostart, blockers, engine, lanes, plans
 from agent_desk.web import blocks as block_runs
 
 router = APIRouter()
@@ -655,16 +655,14 @@ def render_board(
     show nothing rather than a confident `$0.00`, which is a different claim entirely.
     """
     rows, notices = board(ours)
-    background = jobs.read_jobs()
+    beside = lanes.read_lanes()
     projects = shape(rows, groups or [])
     return env.get_template("_board.html").render(
         rows=rows,
         projects=projects,
-        notices=notices + background.notices,
-        # Background jobs blocked on a human — the CLI wrote `blocked`, so this is a fact (B1).
-        waiting_jobs=background.waiting,
-        waiting_questions=background.questions,
-        pull_lines=pulls.lines(),
+        notices=notices + beside.notices,
+        # Everything shown beside the sessions — waiting jobs, pull requests (web/lanes.py).
+        **beside.fields,
         # What each project is linked to, for the menu on its card. Read with the board rather
         # than fetched when the menu opens: it is four links, and a click that waits for a round
         # trip is a click that feels broken.
@@ -1246,7 +1244,7 @@ async def render_page(message: str = "") -> str:
     """
     groups = await store.groups()
     rows, notices = await asyncio.to_thread(board, await board_ours())
-    background = await asyncio.to_thread(jobs.read_jobs)
+    beside = await asyncio.to_thread(lanes.read_lanes)
     projects = shape(rows, groups, await store.seen_projects())
     # Written from the read that happened anyway, never on a schedule of its own (073). A project
     # this console has seen stays on the board after its last session ends, because everything
@@ -1263,10 +1261,8 @@ async def render_page(message: str = "") -> str:
         board=env.get_template("_board.html").render(
             rows=rows,
             projects=projects,
-            notices=notices + background.notices,
-            waiting_jobs=background.waiting,
-            waiting_questions=background.questions,
-            pull_lines=pulls.lines(),
+            notices=notices + beside.notices,
+            **beside.fields,
             links=await board_links(),
             work=await board_work(),
             canaries=await board_canaries(),
