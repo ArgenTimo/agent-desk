@@ -165,7 +165,7 @@ anywhere; ideas are captured before anything is generated and grow into drafts t
 program's store; and a classifier proposes a subject that one click undoes
 ([`docs/09-roadmap.md`](docs/09-roadmap.md)).
 
-The suite is 2705 unit tests (`make gate`, about four minutes) with a 94% coverage floor, and it
+The suite is 2742 unit tests (`make gate`, about four minutes) with a 94% coverage floor, and it
 starts no agent and opens nothing of the machine it runs on (`tests/conftest.py`).
 
 The distinction is the one that page insists on: **a phase is not done because its tests pass.**

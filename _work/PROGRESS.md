@@ -27,7 +27,7 @@ Isolated test run until A1 was merged (and still used for every gate here):
 | 13 | B7 `claude agents --json` | done | #30 | fixture claude_agents.json (2.1.283, 3 interactive + 1 background); test_agents (9: parse, listed, fallback notice, each failure named, answer cached — 5 redraws → 1 process); live board: 3 rows with the CLI's statuses, 0 notices | kept 10 s (`agents_poll_seconds`): one call is ~0.21 s and ~190 MB; a CLI row with no registry file is counted, not invented |
 | 14 | B4 go to session | done | #31; prod on desk-20260927.3 (migration 080 ran, `agent-desk.db.bak-v79` made first — A4 backup proven live) | short id to `claude attach` (the documented form; id == sessionId prefix for all 203 jobs); DISPLAY etc. from `systemctl --user show-environment` when the service has none (only those five vars, test); migration 080 `reason` + `POST /terminals/{press}/why` (closed list of 4, else 400); /standing: "sent somebody to a terminal N times: …, K not said"; go buttons on the waiting-jobs list | a real click on the owner's screen was not made (it would open a window and attach to a live job) — first thing to try on the board day |
 | 15 | B3 open PRs on board | done (token → human H7) | #32 | web/pulls.py: own read-only loop (5 min, independent of hands), `AGENT_DESK_PULL_REPOS` + token by name; fixture github_pulls.json (real response); test_pulls_on_board (7); full live response parsed → "5 open, oldest 17 days" = `gh pr list` 5 | the existing reader ran only inside autostart (off since A6) |
-| 16 | B6 quadratic select | done | #33 + `ideas-lazy-forms` | shared `<datalist>` (#33), then putting-off and linking fetched on opening a card's "more" (`GET /ideas/{id}/more`); test_idea_list_size: 100→200 grows < 2.2×, 200 ideas < 400 KB (the backlog's criterion, now met) | |
+| 16 | B6 quadratic select | done | #33 + #45 | shared `<datalist>` (#33), then putting-off and linking fetched on opening a card's "more" (`GET /ideas/{id}/more`); test_idea_list_size: 100→200 grows < 2.2×, 200 ideas < 400 KB (the backlog's criterion, now met) | |
 | 17 | B5 MCP | done (approve + ai-worker file → human H8) | #34, prod on desk-20260927.4 | `.mcp.json` → `${HOME}/opt/agent-desk-prod/.venv/bin/python -m agent_desk.mcp`, `AGENT_DESK_MCP_TOOLS=keep_idea,open_ideas,ask,answer`; server filters list AND call (a tool not offered is refused); stdio check against the live store: tools/list = the four, open_ideas answered; test_mcp_offered (3, incl. keep_idea landing in the store) | opens the store with recover=False (A3) |
 | 18 | S1 remove explore/land, kicking, closing | done | #35 (implemented by a subagent, diff re-read) | isolated gate 2704 passed (−3539/+322 lines, agent_desk .py 29838→28513), coverage 94.65% ≥ 94%; land.py, tidying.py, web/kicking.py, 4 routes, 14 store methods gone; ADR 0013 accepted, 0008/0009/0012 superseded; its claims checked against _research/02 §2–3 | kept: answering a bg session from its card (`dispatch.answerable`), appraise moved to ideas/appraise.run; tables untouched |
 | 19 | filing tracker='git' | done | #36 | live DB (ro): 259 rows, all 'git', commit URLs, no code ever wrote them; store reads only tracker='jira' (FILED_IN); test_a_commit_is_not_a_filing (git row kept, not read) | no migration: the tracker column is the mark (D13) |
@@ -70,7 +70,6 @@ the squash merge. PRs merged by this work: #14, #16, #18, #20, #13, #22–#41 (p
 - **Job cleanup (3):** `claude rm` needs the Claude background service, which is not running; the
   plan does not allow starting it → H2 with a ready script for the 200 junk jobs.
 - **Local branch deletion (part of U1):** refused by the auto-mode classifier → H3.
-- **B6's "< 400 KB at 200 ideas":** not met (0.71 MB, linear now); needs lazy per-card forms.
 - **B4 real click:** not pressed on the owner's screen; first thing to try on the board day.
 - **stream_json fixture:** needs a real `claude -p` → H5.
 
@@ -81,13 +80,21 @@ H8 approve the MCP server (+ ai-worker copy) · H6 decide what `waitingFor` mean
 the stream fixture · H3 delete stale local branches · H4 (FYI: the working console is a service) ·
 H1 (Stop hook: nothing to change in the repo).
 
+### After the owner's merges (2026-09-28)
+The owner merged #9/#10 and #6 (into #5's branch), which left main red and three PRs conflicting.
+#44 fixed the test #10 brought in (a bare "бери в работу" is refused since #13); #43 (#5+#6),
+#7 and #19 were brought up to date with main without rewriting history, each gated, and merged by
+the owner. `make verify` on the result: 2739 passed twice (gate + coverage), 0 claude calls. #45
+then finished B6 (200 ideas: 385 KB). The working console runs desk-20260928 or later.
+
 ### Numbers (before → after)
-| | before (2026-09-27 start) | after |
+| | before (2026-09-27 start) | after (2026-09-28) |
 |---|---|---|
-| open PRs | 18 | 5 (#19, #10, #9, #7, #6 — frozen agent-launch work) |
+| open PRs | 18 | 0 |
 | worktrees (~/PycharmProjects/agent-desk) | 32 | 3 (main + 2 inside ~/.claude/jobs, gone with H2) |
 | `blocked` background jobs | 203 | 203 (H2 removes 200) |
-| unit tests (`make gate`) | 2704 on origin/main | 2714 (≈ +110 new, ≈ −100 with the deleted features) |
-| agent_desk/**/*.py lines | 29 045 (974a306) | 28 630 |
-| tests/**/*.py lines | 41 923 | 41 892 |
+| unit tests (`make gate`) | 2704 | 2742 |
+| agent_desk/**/*.py lines | 29 045 | 28 860 |
+| tests/**/*.py lines | 41 923 | 42 487 |
+| ideas column, 200 open ideas | 3.7 MB | 385 KB |
 | live DB | schema 79, names unrecorded, 66/78/79 foreign | schema 80, every version named, `.bak-v79` beside it |
