@@ -144,11 +144,14 @@ async def test_the_column_offers_the_decisions_on_a_live_card(desk: Store, a_pro
     html = await routes.render_ideas()
 
     assert f"/ideas/{idea.id}/build" in html, "there is no way to turn an idea into work"
-    assert f"/ideas/{idea.id}/later" in html, "there is no way to put one off"
     assert f"/ideas/{idea.id}/shape" in html, "the is-it-built question still has no answer"
     assert "no, it does not" in html
     assert "yes, it exists" in html
-    assert "when nothing is running" in html
+    # Putting it off is in the card's "more", fetched when it is opened (B6).
+    assert f'data-more="{idea.id}"' in html
+    more = (await routes.idea_more(idea.id)).body.decode()
+    assert f"/ideas/{idea.id}/later" in more, "there is no way to put one off"
+    assert "when nothing is running" in more
 
 
 @pytest.mark.unit

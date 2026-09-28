@@ -35,12 +35,13 @@ async def _rendered_with(desk: Store, count: int) -> int:
 
 
 async def test_twice_the_ideas_is_about_twice_the_page_not_four_times(desk: Store) -> None:
-    """Measured 2026-09-27: ~3.5 KB an idea, 0.71 MB at two hundred (it was 3.7 MB)."""
+    """3.7 MB at two hundred when every card held every idea; 0.71 MB with one shared list; under
+    the backlog's 400 KB once putting off and linking are fetched when a card's "more" is opened."""
     hundred = await _rendered_with(desk, 100)
     two_hundred = await _rendered_with(desk, 200)
 
     assert two_hundred / hundred < 2.2
-    assert two_hundred < 800_000
+    assert two_hundred < 400_000
 
 
 async def test_a_link_to_an_idea_that_is_not_there_is_not_stored(
@@ -61,3 +62,27 @@ async def test_a_link_to_an_idea_that_is_not_there_is_not_stored(
         await routes.link_ideas(type("R", (), {"headers": {"hx-request": "true"}})())  # type: ignore[arg-type]
 
     assert [(link.from_id, link.to_id) for link in await desk.idea_links()] == [(one.id, other.id)]
+
+
+async def test_a_cards_more_is_fetched_with_both_forms_in_it(desk: Store) -> None:
+    idea = await desk.create_idea(text_="a", summary="a", source_kind="typed")
+
+    listed = await routes.render_ideas()
+    more = (await routes.idea_more(idea.id)).body.decode()
+
+    assert f'data-more="{idea.id}"' in listed
+    assert 'name="when"' not in listed and 'name="to_id"' not in listed
+    assert 'name="when"' in more and 'name="to_id"' in more
+
+
+async def test_a_dropped_idea_can_be_linked_but_not_put_off(desk: Store) -> None:
+    idea = await desk.create_idea(text_="a", summary="a", source_kind="typed")
+    await desk.set_idea_state(idea.id, "dropped")
+
+    more = (await routes.idea_more(idea.id)).body.decode()
+
+    assert 'name="when"' not in more and 'name="to_id"' in more
+
+
+async def test_an_idea_that_is_gone_says_so(desk: Store) -> None:
+    assert (await routes.idea_more("no-such-idea")).status_code == 404
