@@ -53,8 +53,9 @@ from datetime import UTC, datetime
 
 import structlog
 
-from agent_desk import allowed, checking, dispatch, engines, land, process, roles, slots
+from agent_desk import allowed, checking, dispatch, engines, process, roles, slots
 from agent_desk.answer.session import AnswerFailed, stream_answer
+from agent_desk.config import settings
 from agent_desk.ideas import waking
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import Run, RunStep, Store
@@ -113,6 +114,8 @@ async def begin(
     `given` is what somebody typed to start it, which the steps can then read (057). A pipeline is
     a shape run more than once with different inputs, so the input belongs to the run.
     """
+    if not settings.hands:
+        return None, "the workbench engine is off here (AGENT_DESK_HANDS is off)"
     cards = await bench_of(store, names)
     why = process.ready_to_run(cards, await lines_of(store, names))
     if why:
@@ -185,10 +188,8 @@ def _permission_words(given: tuple[str, ...]) -> list[str]:
     reporting work it was not permitted to keep.
     """
     said = [f"You may {allowed.ALLOWED[one].means}." for one in given]
-    if "land" not in given:
-        said.append("Do not merge anything: this step's branch is not being offered to the gate.")
-    if "push" not in given:
-        said.append("Do not push.")
+    said.append("Do not merge anything: this step's branch is not being offered to the gate.")
+    said.append("Do not push.")
     if "net" not in given:
         said.append("Work from what is already here rather than fetching anything.")
     return said
@@ -723,21 +724,7 @@ async def _settle(store: Store, run: Run, card: process.Card, step: RunStep) -> 
     if task.finished_at is None:
         return 0
 
-    # It finished. Offer the branch to the gate if this step was allowed to.
-    given = allowed.leave_for((await store.card_leaves()).get(card.name))
     made = task.detail or "it finished"
-    if "land" in given and task.landed is None:
-        offered = await asyncio.to_thread(
-            land.land, task.cwd, autostart.worktree_of(task), push="push" in given
-        )
-        await store.task_landed(task.id, offered.detail, landed=offered.landed)
-        made = offered.detail
-        if not offered.landed:
-            await store.set_run_step(
-                run_id=run.id, name=card.name, state="failed", detail=offered.detail
-            )
-            await store.end_run(run.id, why=f"{card.label or card.name}: {offered.detail}")
-            return 1
     await store.card_made(card.name, made[:MOST_MADE])
     on_bench = await bench_of(store, run.names)
     broke = await _checked(store, run, card, made, on_bench, await lines_of(store, run.names))
@@ -977,7 +964,7 @@ async def run(store: Store) -> None:
 
     Same shape as the other four and the same reasons: a bad tick logs and waits, and a cancel
     goes through rather than being swallowed — `app.lifespan` cancels this and then waits for it,
-    and a tick sits in a thread for as long as a landing takes.
+    and a tick sits in a thread for as long as a model call takes.
     """
     while True:
         try:

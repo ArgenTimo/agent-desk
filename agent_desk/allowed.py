@@ -12,8 +12,7 @@ at all — it is the guessed status CLAUDE.md's fifth rule is about, wearing a c
 So each one carries `held`, and there are exactly two values:
 
 - **`enforced`** — this console does the thing or refuses to. Not starting an agent, starting it
-  in one directory rather than another, calling `land.land` or not, passing `push=False`. Every
-  one of these is a branch in this program's own code, and the switch is what the branch reads.
+  in one directory rather than another. Every one of these is a branch in this program's own code, and the switch is what the branch reads.
 - **`asked`** — it goes into the briefing the agent is given, in words. An agent that ignores it
   is not stopped by anything here. That is a real and useful thing to be able to say to a step;
   it is not a guarantee, and the card says so rather than implying otherwise.
@@ -59,20 +58,6 @@ ALLOWED: dict[str, Leave] = {
         held="enforced",
         how="`claude --bg -w`, and the observed checkout is never written to (CLAUDE.md, rule 2)",
     ),
-    "land": Leave(
-        name="land",
-        says="offer it to the gate",
-        means="put the branch in front of the project's own gate when the work is finished",
-        held="enforced",
-        how="this console calls the landing, or does not — and a failing gate merges nothing",
-    ),
-    "push": Leave(
-        name="push",
-        says="push the branch",
-        means="send the branch to the remote once it has landed",
-        held="enforced",
-        how="the landing is asked to push, or asked not to",
-    ),
     # "У Action есть разрешения; добавить среди них «это делает человек» — и шаг встаёт в очередь к
     # человеку, показывает, что от него нужно, ждёт нажатия и отдаёт результат дальше по цепочке."
     #
@@ -99,8 +84,8 @@ ALLOWED: dict[str, Leave] = {
 }
 
 # What a step may do when nobody has said. Its own copy and nothing further: that is what this
-# console does today when somebody presses build, and everything past it — merging, pushing —
-# is a thing somebody should have to say out loud.
+# console does today when somebody presses build. Merging and pushing are not permissions a step
+# can be given at all: this console does neither (docs/adr/0013).
 NATURALLY: tuple[str, ...] = ("work",)
 
 

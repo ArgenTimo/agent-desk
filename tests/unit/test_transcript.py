@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
+from agent_desk.config import settings
 from agent_desk.observe import transcript
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -205,3 +206,79 @@ def test_a_line_separator_inside_an_entry_does_not_tear_the_record(tmp_path: Pat
     assert [entry.role for entry in tail.entries] == ["assistant", "user"]
     assert tail.last_entry is not None
     assert tail.last_entry.text == said
+
+
+# --- what a file that is not what it was yesterday does to this ---------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("what", "body"),
+    [
+        ("nothing at all", ""),
+        ("one line, cut in half", '{"type":"user","message":{"content":"hi"}'),
+        ("lines that are not JSON", "hello\nworld\n"),
+        ("bytes that are not text", "\x00\x00\x00\n"),
+        ("JSON that is not an object", "[1, 2, 3]\n"),
+        ("an object of the wrong shape", '{"nothing": "familiar"}\n'),
+    ],
+)
+def test_a_transcript_this_cannot_read_is_read_as_nothing(
+    tmp_path: Path, what: str, body: str
+) -> None:
+    """«Формат не контракт» — a CLI update may change these without warning (docs/adr/0004), and a
+    half-written file is the ordinary case rather than the strange one: this reads a file something
+    else is appending to.
+
+    Nothing here may raise. The board renders a row per session, and one unreadable file must cost
+    that session's row rather than the whole board.
+    """
+    root = tmp_path / "projects" / "-somewhere"
+    root.mkdir(parents=True)
+    (root / f"{SESSION_ID}.jsonl").write_text(body)
+
+    tail = transcript.read_tail(SESSION_ID, root=tmp_path / "projects")
+
+    assert tail is None or tail.entries == []
+
+
+@pytest.mark.unit
+def test_a_line_this_cannot_read_costs_that_line_and_not_the_file(tmp_path: Path) -> None:
+    """One bad line among good ones is the shape a format change actually arrives in: something
+    new in the middle of a file that is otherwise exactly as it was."""
+    root = tmp_path / "projects" / "-somewhere"
+    root.mkdir(parents=True)
+    good = json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "it works"}]}}
+    )
+    (root / f"{SESSION_ID}.jsonl").write_text(f"{good}\nnot json at all\n{good}\n")
+
+    tail = transcript.read_tail(SESSION_ID, root=tmp_path / "projects")
+
+    assert tail is not None
+    assert [one.text for one in tail.entries] == ["it works", "it works"]
+
+
+@pytest.mark.unit
+def test_a_huge_transcript_is_bounded_by_what_it_reads_not_by_what_is_there(
+    tmp_path: Path,
+) -> None:
+    """A session that has been running for a week has a transcript of tens of megabytes. Reading it
+    whole would put the board's own memory in the hands of however long somebody left a terminal
+    open — and this is read every couple of seconds, for every session.
+    """
+    root = tmp_path / "projects" / "-somewhere"
+    root.mkdir(parents=True)
+    line = json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "x" * 500}]}}
+    )
+    where = root / f"{SESSION_ID}.jsonl"
+    where.write_text("\n".join([line] * 20_000))
+    assert where.stat().st_size > 10_000_000, "the fixture is meant to be large"
+
+    tail = transcript.read_tail(SESSION_ID, root=tmp_path / "projects")
+
+    assert tail is not None
+    # Two bounds, and the file is far past both: a window of bytes off the end, and a count of
+    # lines out of that window (config.py).
+    assert 0 < len(tail.entries) <= settings.transcript_tail_lines
+    # And what it read is the *end* of the file, which is what a tail is.
+    assert tail.entries[-1].text.startswith("x")

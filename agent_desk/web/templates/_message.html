@@ -49,7 +49,9 @@
     <input type="hidden" name="text" value="{{ text }}">
     <input type="hidden" name="directive" value="{{ directive_id }}">
     <footer>
+      {% if hands %}
       <button type="submit" class="send" title="start a new agent in this project on this text">Have an agent do it instead</button>
+      {% endif %}
       {# And the oldest transport there is, for a moment you choose. #}
       <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('unsent').textContent)">Copy it</button>
       <a class="as-button" href="/">Close</a>

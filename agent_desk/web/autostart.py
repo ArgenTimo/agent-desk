@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Sequence
 from pathlib import Path
 
 import structlog
 
-from agent_desk import dispatch, land
-from agent_desk import tidying as tidying_
+from agent_desk import dispatch
 from agent_desk.observe import jobs, registry
-from agent_desk.observe.model import JobEnd, lost_the_canary, now_ms
+from agent_desk.observe.model import JobEnd
+from agent_desk.observe.shape import where_it_works
 from agent_desk.store.repo import Autostart, BenchCard, Pull, Store, Task
 from agent_desk.tracker import github, jira
 from agent_desk.web import blockers
@@ -37,10 +36,6 @@ TICK_SECONDS = 30.0
 # than by a person, is the shape of the mess docs/adr/0007 is careful about.
 WINDOW_MS = 60 * 60 * 1000
 AT_ONCE = 1
-
-# A day, for the budget that bounds an agent looking for its own work. Exploration is not urgent
-# by definition, and an hourly budget for it would be an invitation (docs/adr/0008).
-DAY_MS = 24 * 60 * 60 * 1000
 
 # Two consecutive failures disarm a project. A rule that keeps firing into a broken condition — a
 # full disk, an expired token, a worktree that will not create — is the three-in-the-morning
@@ -122,14 +117,25 @@ async def why_not(store: Store, repo_key: str, live: set[str] | None = None) -> 
 async def about(store: Store, repo_key: str) -> dict[str, object]:
     """What is true in this project whatever the task is, for `dispatch.build_task`.
 
-    One place, so that a note or a word added on a project's page reaches the queue, an
-    exploration and a session being kept going — rather than the one path somebody remembered to
-    wire it into (020-project-note.sql, 021-glossary.sql).
+    One place, so that a note or a word added on a project's page reaches everything this console
+    starts — rather than the one path somebody remembered to wire it into (020-project-note.sql,
+    021-glossary.sql).
     """
     return {
         "standing": await store.project_note(repo_key),
         "glossary": [(term.term, term.means) for term in await store.terms(repo_key)],
     }
+
+
+def project_of(task: Task) -> str:
+    """The project a task is in, as the agent is told it: the checkout's directory name.
+
+    Not the title. The title is the line somebody typed, and passing it as the project told a
+    dispatched agent "This is in бери в работу." A task queued from a session that was itself in a
+    worktree has that worktree as its cwd, so the checkout is read through it — otherwise the agent
+    is told it is in `beri-v-rabotu` (docs/03-session-observation.md).
+    """
+    return Path(where_it_works(task.cwd)[0]).name
 
 
 async def _start(store: Store, task: Task) -> None:
@@ -138,7 +144,7 @@ async def _start(store: Store, task: Task) -> None:
         dispatch.start,
         dispatch.build_task(
             task.instruction,
-            project=task.title,
+            project=project_of(task),
             **await about(store, task.repo_key),  # type: ignore[arg-type]
         ),
         cwd=task.cwd,
@@ -207,7 +213,10 @@ async def settle(store: Store, live: set[str]) -> list[str]:
             continue
 
         if ended is not None and ended.failed:
-            detail = ended.detail or "its agent exited without saying why"
+            if ended.state == "stopped":
+                detail = "its agent was stopped before it finished"
+            else:
+                detail = ended.detail or "its agent exited without saying why"
             await store.task_failed(task.id, detail)
             failures = await store.note_failure(task.repo_key)
             log.warning("autostart.died", repo=task.repo_key, agent=task.agent_id, detail=detail)
@@ -217,13 +226,6 @@ async def settle(store: Store, live: set[str]) -> list[str]:
 
         await store.finish_task(task.id)
         await _back_where_it_started(store, task)
-
-        # What it found, merged if the project's own gate passes on it (docs/adr/0008, as the
-        # owner amended it). A failing gate leaves the branch exactly where it is and says why.
-        if task.source_kind == "found":
-            result = await asyncio.to_thread(land.land, task.cwd, worktree_of(task, ended))
-            await store.task_landed(task.id, result.detail, landed=result.landed)
-            log.info("autostart.landed", repo=task.repo_key, landed=result.landed)
 
         for idea_id in (task.source_ref or "").split(","):
             idea = await store.idea(idea_id) if idea_id else None
@@ -280,79 +282,6 @@ async def _back_where_it_started(store: Store, task: Task) -> None:
         ],
         thread_id=block.thread_id,
     )
-
-
-def _stopped_signing(row: object, name: str) -> bool:
-    """Whether the last thing this session said was unsigned (023-canary.sql).
-
-    The same reading the board renders, written here rather than imported from the routes: this is
-    a loop, and a loop that imported a web module would be the console's own dependency arrow
-    pointing backwards (docs/02-architecture.md).
-    """
-    tail = getattr(row, "tail", None)
-    last = getattr(tail, "last_entry", None) if tail else None
-    if last is None or last.role != "assistant" or not last.text:
-        return False
-    return lost_the_canary(last.text, name)
-
-
-async def tidy_lost_canaries(store: Store, rows: Sequence[object] | None) -> list[str]:
-    """Close the sessions a switched-on project has said may be closed (076).
-
-    «Закрывать сессию с потерянной канарейкой автоматически — со своим переключателем и проверкой.»
-
-    Three readings before anything happens, and `agent_desk/tidying.py` holds the order: the switch,
-    the canary, the status, the checkout. This function is the part that reads a disk and calls the
-    door — the decision is over there, where it can be tested without a machine.
-
-    «Закрытие сессии выбрасывает то, что она не закоммитила.» So the `git status` is not a nicety:
-    it is the whole safety argument, and a pass that skipped it once would be the one that lost
-    somebody's work. A checkout that cannot be read at all counts as not clean.
-
-    Never raises: this is one line of a tick that has other things to do.
-    """
-    tidying = {one.repo_key for one in await store.tidying_projects()}
-    if not tidying:
-        # The ordinary case on every console: no switch, no reading, no thread.
-        return []
-    if rows is None:
-        # Nobody read the board, so nothing is known about any session — and not knowing is a
-        # reason not to close something (docs/adr/0012).
-        return []
-    canaries = await store.canaries()
-    now = now_ms()
-    closed: list[str] = []
-    for row in rows:
-        session = getattr(row, "session", None)
-        if session is None or getattr(row, "project_key", "") not in tidying:
-            continue
-        short = session.session_id.split("-")[0]
-        name = canaries.get(short, "")
-        if not name:
-            # Not a session this console started and told to sign. An unsigned reply from anybody
-            # else's session means nothing at all (023-canary.sql), and closing one on the strength
-            # of it would be closing a stranger's work.
-            continue
-        clean, why = await asyncio.to_thread(land.nothing_uncommitted, session.cwd)
-        may = tidying_.may_close(
-            armed=True,
-            canary_lost=_stopped_signing(row, name),
-            status=session.status,
-            clean=clean,
-            idle_for_ms=max(0, now - session.status_updated_at),
-        )
-        if not may.yes:
-            log.debug("tidy.left", session=short, why=may.why or why)
-            continue
-        done = await asyncio.to_thread(dispatch.stop, short)
-        log.info(
-            "tidy.closed" if done.started else "tidy.would_not",
-            session=short,
-            why=may.why if done.started else done.detail,
-        )
-        if done.started:
-            closed.append(short)
-    return closed
 
 
 async def _destination(store: Store, repo_key: str) -> jira.Destination | None:
@@ -505,153 +434,49 @@ async def check_claims(store: Store) -> int:
     return checked
 
 
-async def _may_explore(store: Store, arming: Autostart, live: set[str]) -> str:
-    """Why this project may not go looking right now, or an empty string (docs/adr/0008).
-
-    The queue comes first, always: exploration happens when there is nothing a human chose, and
-    the moment something is queued the queue wins.
-    """
-    if not arming.exploring:
-        return "not exploring"
-    if await running_for(store, arming.repo_key, live) >= AT_ONCE:
-        return "one is already running"
-    if any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
-        return "there is queued work, which comes first"
-    spent = await store.explored_since(arming.repo_key, int(time.time() * 1000) - DAY_MS)
-    if spent >= arming.per_day:
-        return f"the day's budget is spent ({spent} of {arming.per_day})"
-    return ""
-
-
-async def why_not_explore(store: Store, repo_key: str, live: set[str] | None = None) -> str:
-    """The reason this project is not looking for work right now, in the loop's own words."""
-    if live is None:
-        live = await asyncio.to_thread(live_agents)
-    return await _may_explore(store, await store.autostart(repo_key), live)
-
-
-async def _explore(store: Store, arming: Autostart) -> Task | None:
-    """Send one agent to find one thing worth fixing, and mark what it produces as its own.
-
-    The marking is the whole of docs/adr/0008: a queue that mixes what somebody asked for with
-    what a machine proposed is a queue that has stopped meaning anything.
-    """
-    # Where the switch was pressed, then this console's own checkout, then whatever an earlier
-    # task in this project used. A project whose directory is not known is not explored.
-    cwd = arming.cwd or ""
-    if not cwd and arming.repo_key.startswith("desk:"):
-        cwd = arming.repo_key.split(":", 1)[1]
-    if not cwd:
-        for task in await store.tasks(repo_key=arming.repo_key):
-            cwd = task.cwd
-            break
-    if not cwd or not Path(cwd).is_dir():
-        return None
-
-    project = Path(cwd).name
-    task = await store.queue_task(
-        repo_key=arming.repo_key,
-        cwd=cwd,
-        title=f"looking for something to fix in {project}",
-        instruction=dispatch.go_looking(project),
-        source_kind="found",
-    )
-    await store.take_next_task(arming.repo_key)
-    # The name is what its worktree and branch are called, so it is the same string the landing
-    # looks for afterwards.
-    result = await asyncio.to_thread(
-        dispatch.start,
-        dispatch.build_task(
-            dispatch.go_looking(project),
-            project=project,
-            **await about(store, arming.repo_key),  # type: ignore[arg-type]
-        ),
-        cwd=cwd,
-        name=task.title,
-        servers=await store.mcp_servers(arming.repo_key),
-    )
-    if result.started:
-        await store.task_started(task.id, result.agent_id)
-        await store.clear_failures(arming.repo_key)
-        log.info("autostart.exploring", repo=arming.repo_key, agent=result.agent_id)
-        return task
-
-    await store.task_failed(task.id, result.detail)
-    failures = await store.note_failure(arming.repo_key)
-    if failures >= FAILURES_BEFORE_DISARM:
-        await store.disarm(
-            arming.repo_key, why=f"two starts in a row failed: {result.detail}"[:300]
-        )
-        # And the switch that started *this*. Arming and exploring are two decisions
-        # (docs/adr/0008), so disarming the queue leaves exploring exactly where it was — which
-        # meant a project whose starts kept failing went looking again on the next tick, and the
-        # one after, for as long as the console stayed open. The rule is that it stops.
-        await store.explore(arming.repo_key, per_day=arming.per_day, on=False)
-    return task
-
-
-async def tick(
-    store: Store, live: set[str] | None = None, rows: Sequence[object] | None = None
-) -> Task | None:
-    """One pass: settle what has finished, then start at most one thing that may start.
-
-    `rows` is the board as it stands, for the one thing here that is about sessions rather than
-    about tasks. `None` is the ordinary case and means "read it if it is needed" — which is only
-    where a project has been switched on for tidying, because reading the board is a registry read
-    and a transcript tail per session (docs/adr/0012). A caller that has already read it passes it
-    in; a test passes what it wants the board to be.
-    """
+async def tick(store: Store, live: set[str] | None = None) -> Task | None:
+    """One pass: settle what has finished, then start at most one thing that may start."""
     armed = await store.armed_projects()
     started = await store.tasks()
-    # The third switch is asked about here rather than further down, because it is one of the three
-    # reasons a tick has anything to do at all — and a tick that returned before reaching it would
-    # be a switch somebody pressed that does nothing (076).
-    tidying = await store.tidying_projects()
     nothing_going = not any(task.started_at and not task.finished_at for task in started)
-    if not armed and not tidying and nothing_going:
+    if not armed and nothing_going:
         # The ordinary case on most consoles, and it costs nothing: no registry read, no thread.
         return None
     if live is None:
         live = await asyncio.to_thread(live_agents)
 
     await settle(store, live)
-    # Sessions a switched-on project has said may be closed (076). After settling, because a
-    # session that has just finished a task is one whose checkout has just changed.
-    #
-    # The board is read here rather than by the loop above, so that `run` stays one call: a loop
-    # that did work of its own before the tick is a loop a test cannot stand in for, and standing
-    # in for it is how the cancellation rule above is tested at all.
-    if tidying:
-        await tidy_lost_canaries(store, rows if rows is not None else await _the_board(store))
     # Anything somebody said was cleared, checked against what is actually true now. Before
     # starting work, because a blocker that has gone may be the reason something can start.
     await check_claims(store)
 
     for arming in armed:
-        if not await why_not(store, arming.repo_key, live):
-            task = await store.take_next_task(arming.repo_key)
-            if task is not None:
-                await _start(store, task)
-                # One start per tick, across every project. Nothing here is urgent, and a burst is
-                # the thing this file exists to not do.
-                return task
+        # Per project, for the reason `run` gives per tick: a loop that takes the console down with
+        # it is a worse failure than anything it was started to do. Here the blast radius is the
+        # projects *after* this one — a token that expired at two in the morning raises in the
+        # first project's tracker, every project below it is skipped, and the next tick raises in
+        # the same place. A queue that stops moving and says nothing is the shape of failure this
+        # whole file is written against, and it costs one project's turn instead of the console's.
+        try:
+            if not await why_not(store, arming.repo_key, live):
+                task = await store.take_next_task(arming.repo_key)
+                if task is not None:
+                    await _start(store, task)
+                    # One start per tick, across every project. Nothing here is urgent, and a
+                    # burst is the thing this file exists to not do.
+                    return task
 
-        # Nothing queued here, but there may be something on the project's own board. A ticket
-        # somebody wrote comes before anything an agent would find for itself (docs/adr/0010),
-        # which is why this sits above the exploration and below the queue.
-        # And what is waiting on a person over on GitHub, which never becomes queued work —
-        # a review is not something an agent can give (docs/adr/0010).
-        await pull_requests(store, arming)
+            # Nothing queued here, but there may be something on the project's own board. A ticket
+            # somebody wrote comes after the queue (docs/adr/0010).
+            # And what is waiting on a person over on GitHub, which never becomes queued work —
+            # a review is not something an agent can give (docs/adr/0010).
+            await pull_requests(store, arming)
 
-        if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
-            if await pull_tickets(store, arming):
-                return None
-
-        # Nothing queued, and this project was told it may find something (docs/adr/0008).
-        if not await _may_explore(store, arming, live):
-            found = await _explore(store, arming)
-            if found is not None:
-                return found
+            if not any(task.waiting for task in await store.tasks(repo_key=arming.repo_key)):
+                if await pull_tickets(store, arming):
+                    return None
+        except Exception:
+            log.exception("autostart.project_failed", repo=arming.repo_key)
     return None
 
 
@@ -661,9 +486,7 @@ async def run(store: Store) -> None:
     A bad tick logs and waits for the next one: a loop that took the console down with it would be
     a worse failure than anything it was started to do. Cancellation is the one thing it lets
     through, and it has to be — `app.lifespan` cancels this task on the way out and the group then
-    *waits* for it, so a swallowed cancel is a console that will not close. And the cancel lands
-    inside a tick rather than in the sleep more often than it looks: a tick sits in a thread for
-    as long as `land.land` takes, which is `make install` and the repository's own gate.
+    *waits* for it, so a swallowed cancel is a console that will not close.
     """
     while True:
         try:
@@ -671,25 +494,3 @@ async def run(store: Store) -> None:
         except Exception:
             log.exception("autostart.tick_failed")
         await asyncio.sleep(TICK_SECONDS)
-
-
-async def _the_board(store: Store) -> Sequence[object] | None:
-    """The sessions as they stand, for the one thing a tick does that is about sessions.
-
-    Only where a project has been switched on for it: this is a registry read and a transcript tail
-    per session, and a console where nobody pressed that switch should pay nothing for it.
-
-    Read here rather than inside the tick, so a test can hand a tick the board it wants without a
-    registry on the machine — and a read that fails is a tick that tidies nothing, which is the safe
-    direction (docs/adr/0012).
-    """
-    if not await store.tidying_projects():
-        return None
-    from agent_desk.web import routes
-
-    try:
-        rows, _ = await asyncio.to_thread(routes.board)
-    except Exception:
-        log.exception("autostart.board_unreadable")
-        return None
-    return rows

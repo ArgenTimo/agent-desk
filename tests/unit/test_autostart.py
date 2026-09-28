@@ -158,11 +158,38 @@ async def test_it_starts_what_was_queued_and_says_which_agent_has_it(
     task = await autostart.tick(desk, live=set())
 
     assert task is not None
-    assert started == [dispatch.build_task("run the tests again", project="run the tests again")]
+    assert started == [dispatch.build_task("run the tests again", project=tmp_path.name)]
     (stored,) = await desk.tasks()
     assert stored.agent_id == "agent1"
     assert stored.started_at is not None
     assert stored.failed_at is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cwd", "project"),
+    [
+        ("/home/a/agent-desk", "agent-desk"),
+        # Queued from a session that was itself an agent in a worktree: the checkout, not the slug.
+        ("/home/a/agent-desk/.claude/worktrees/beri-v-rabotu", "agent-desk"),
+    ],
+)
+async def test_an_agent_is_told_the_project_it_is_in_and_not_the_line_that_was_typed(
+    desk: Store, cwd: str, project: str
+) -> None:
+    """The bug: "бери в работу" queued and started told the agent "This is in бери в работу."."""
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=cwd,
+        title="бери в работу",
+        instruction="бери в работу",
+        source_kind="typed",
+    )
+
+    assert autostart.project_of(task) == project
+    assert f"This is in {project}." in dispatch.build_task(
+        task.instruction, project=autostart.project_of(task)
+    )
 
 
 @pytest.mark.unit
@@ -281,122 +308,12 @@ async def test_a_human_can_put_a_built_idea_back(desk: Store) -> None:
     assert (await desk.idea(idea.id)).state == "kept"  # type: ignore[union-attr]
 
 
-# --- an agent that finds its own work (docs/adr/0008) ---------------------------------------------
 @pytest.mark.unit
-async def test_nothing_is_explored_in_a_project_that_was_not_switched_on(
-    desk: Store, tmp_path: pathlib.Path, started: list[str]
+async def test_a_task_an_agent_found_for_itself_settles_like_any_other(
+    desk: Store, tmp_path: pathlib.Path
 ) -> None:
-    """Arming the queue says "start what I put here"; exploring is a second decision."""
-    await desk.arm(KEY, per_hour=5)
-
-    assert await autostart.tick(desk, live=set()) is None
-    assert started == []
-    assert await autostart.why_not_explore(desk, KEY, live=set()) == "not exploring"
-
-
-@pytest.mark.unit
-async def test_queued_work_always_comes_before_anything_it_finds(
-    desk: Store, tmp_path: pathlib.Path, started: list[str]
-) -> None:
-    """Exploration happens when there is nothing a human chose, and never instead of it."""
-    await desk.arm(KEY, per_hour=5)
-    await desk.explore(KEY, per_day=3, on=True)
-    await _queue(desk, tmp_path, "what a person asked for")
-
-    task = await autostart.tick(desk, live=set())
-
-    assert task is not None and task.title == "what a person asked for"
-    assert task.source_kind == "typed"
-    assert len(started) == 1
-
-
-@pytest.mark.unit
-async def test_with_an_empty_queue_it_goes_looking_and_says_so(
-    desk: Store, tmp_path: pathlib.Path, started: list[str]
-) -> None:
-    """And what it produces is marked as its own, which is the whole of docs/adr/0008."""
-    await desk.explore(KEY, per_day=3, on=True)
-    # It needs somewhere to work: a project it has run something in before.
-    done = await desk.queue_task(
-        repo_key=KEY,
-        cwd=str(tmp_path),
-        title="an earlier task",
-        instruction="earlier",
-        source_kind="typed",
-    )
-    await desk.take_next_task(KEY)
-    await desk.task_started(done.id, "old")
-    await desk.finish_task(done.id)
-
-    found = await autostart.tick(desk, live=set())
-
-    assert found is not None
-    assert found.source_kind == "found"
-    assert "looking for something to fix" in found.title
-    # One thing, small, tested, and not a redesign.
-    assert "exactly one" in started[0]
-    assert "must not do: add a feature" in started[0]
-
-
-@pytest.mark.unit
-async def test_the_day_s_budget_stops_it_looking_again(
-    desk: Store, tmp_path: pathlib.Path, started: list[str]
-) -> None:
-    await desk.explore(KEY, per_day=1, on=True)
-    seed = await desk.queue_task(
-        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
-    )
-    await desk.take_next_task(KEY)
-    await desk.task_started(seed.id, "old")
-    await desk.finish_task(seed.id)
-
-    first = await autostart.tick(desk, live=set())
-    assert first is not None
-    (running,) = [t for t in await desk.tasks() if t.source_kind == "found"]
-    await desk.finish_task(running.id)
-
-    assert await autostart.tick(desk, live=set()) is None
-    assert len(started) == 1
-    assert "day's budget is spent" in await autostart.why_not_explore(desk, KEY, live=set())
-
-
-@pytest.mark.unit
-async def test_it_does_not_look_while_its_own_agent_is_still_out(
-    desk: Store, tmp_path: pathlib.Path, started: list[str]
-) -> None:
-    """One agent per project, whatever started it."""
-    await desk.explore(KEY, per_day=9, on=True)
-    seed = await desk.queue_task(
-        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
-    )
-    await desk.take_next_task(KEY)
-    await desk.task_started(seed.id, "agent1")
-    await desk.finish_task(seed.id)
-
-    await autostart.tick(desk, live=set())
-    assert len(started) == 1
-
-    assert await autostart.tick(desk, live={"agent1"}) is None
-    assert len(started) == 1
-
-
-@pytest.mark.unit
-async def test_what_it_found_is_offered_to_the_project_when_its_agent_goes(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """docs/adr/0008, as amended: the branch is merged when the project's own gate passes on it,
-    and what happened is written against the task either way."""
-    from agent_desk import land
-    from agent_desk.web import autostart as loop
-
-    offered: list[tuple[str, str]] = []
-
-    def fake_land(cwd: str, worktree_name: str) -> land.Landed:
-        offered.append((cwd, worktree_name))
-        return land.Landed(True, "merged and pushed — `make verify` passed")
-
-    monkeypatch.setattr(loop.land, "land", fake_land)
-
+    """docs/adr/0013 took the landing away. A `found` task left from before settles as finished,
+    and nothing is merged — there is nothing left here that could merge it."""
     task = await desk.queue_task(
         repo_key=KEY,
         cwd=str(tmp_path),
@@ -407,90 +324,11 @@ async def test_what_it_found_is_offered_to_the_project_when_its_agent_goes(
     await desk.take_next_task(KEY)
     await desk.task_started(task.id, "agent4")
 
-    await loop.settle(desk, set())
-
-    # Offered under the same name its worktree was made with.
-    assert offered == [(str(tmp_path), loop.worktree_of(task))]
-    settled = next(one for one in await desk.tasks() if one.id == task.id)
-    assert settled.finished_at is not None
-    assert settled.detail is not None and "merged and pushed" in settled.detail
-
-
-@pytest.mark.unit
-async def test_work_a_person_queued_is_never_merged_by_the_loop(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Only what the loop found itself. A task somebody wrote is theirs to land."""
-    from agent_desk.web import autostart as loop
-
-    monkeypatch.setattr(
-        loop.land, "land", lambda cwd, name: pytest.fail("it merged somebody's own task")
-    )
-    task = await desk.queue_task(
-        repo_key=KEY,
-        cwd=str(tmp_path),
-        title="what a person asked for",
-        instruction="do it",
-        source_kind="typed",
-    )
-    await desk.take_next_task(KEY)
-    await desk.task_started(task.id, "agent5")
-
-    await loop.settle(desk, set())
+    await autostart.settle(desk, set())
 
     settled = next(one for one in await desk.tasks() if one.id == task.id)
     assert settled.finished_at is not None
-
-
-@pytest.mark.unit
-async def test_a_project_with_no_checkout_here_is_not_explored(
-    desk: Store, started: list[str]
-) -> None:
-    """It has to know where to work. A repository key alone is not a directory."""
-    await desk.explore(KEY, per_day=3, on=True)
-
-    assert await autostart.tick(desk, live=set()) is None
-    assert started == []
-
-
-@pytest.mark.unit
-async def test_two_failed_explorations_switch_the_project_off(
-    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The same rule as the queue: a rule that keeps firing into a broken condition stops.
-
-    `armed is False` is not the assertion that matters here and never was: this project was never
-    armed, so that line held on the day exploring kept running anyway. The switch that has to go
-    off is the one that started this — otherwise a project whose worktrees will not create asks
-    for another every thirty seconds, all night, which is the failure the rule exists to end.
-    """
-    tried: list[str] = []
-
-    def refuses(
-        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
-    ) -> dispatch.Started:
-        tried.append(instruction)
-        return dispatch.Started(False, detail="no disk space")
-
-    monkeypatch.setattr(dispatch, "start", refuses)
-    await desk.explore(KEY, per_day=9, on=True)
-    seed = await desk.queue_task(
-        repo_key=KEY, cwd=str(tmp_path), title="seed", instruction="seed", source_kind="typed"
-    )
-    await desk.take_next_task(KEY)
-    await desk.task_started(seed.id, "old")
-    await desk.finish_task(seed.id)
-
-    await autostart.tick(desk, live=set())
-    await autostart.tick(desk, live=set())
-
-    arming = await desk.autostart(KEY)
-    assert arming.armed is False
-    assert arming.exploring is False
-    assert arming.disarmed_why is not None and "no disk space" in arming.disarmed_why
-
-    await autostart.tick(desk, live=set())
-    assert len(tried) == 2, "it went looking again after switching itself off"
+    assert settled.landed is None
 
 
 @pytest.mark.unit
@@ -558,6 +396,33 @@ async def test_an_agent_that_died_before_it_ran_does_not_mark_its_ideas_built(
     died = next(one for one in await desk.tasks() if one.id == task.id)
     assert died.failed_at is not None and died.finished_at is None
     assert died.detail is not None and "Invalid worktree name" in died.detail
+
+
+@pytest.mark.unit
+async def test_an_agent_somebody_stopped_is_not_counted_as_work_done(
+    desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`claude stop` writes `stopped`: over, but its work was not finished (B1). Settling it as
+    done would mark its idea built — the same mistake as the six that died before they ran."""
+    idea = await desk.create_idea(text_="a thought", summary="a thought", source_kind="typed")
+    task = await desk.queue_task(
+        repo_key=KEY,
+        cwd=str(tmp_path),
+        title="build it",
+        instruction="build it",
+        source_kind="idea",
+        source_ref=idea.id,
+    )
+    await desk.take_next_task(KEY)
+    await desk.task_started(task.id, "stopped1")
+    monkeypatch.setattr(autostart.jobs, "read_job", lambda short: JobEnd(state="stopped"))
+
+    assert await autostart.settle(desk, set()) == []
+
+    assert (await desk.idea(idea.id)).state == "new"  # type: ignore[union-attr]
+    stopped = next(one for one in await desk.tasks() if one.id == task.id)
+    assert stopped.failed_at is not None and stopped.finished_at is None
+    assert stopped.detail == "its agent was stopped before it finished"
 
 
 @pytest.mark.unit
@@ -846,9 +711,9 @@ async def test_the_loop_stops_when_the_cancel_lands_inside_a_tick(
     """`app.lifespan` cancels this task and then waits for it, so it has to end.
 
     The cancel arriving while the loop is parked between passes was always fine. The one that
-    matters is the other one: a tick sits in a thread for as long as `land.land` takes — `make
-    install` and then the repository's own gate — and a cancellation swallowed there leaves the
-    loop running and the TaskGroup holding it waiting for a task that never finishes.
+    matters is the other one: a tick sits in a thread for as long as a start or a tracker read
+    takes, and a cancellation swallowed there leaves the loop running and the TaskGroup holding it
+    waiting for a task that never finishes.
     """
     in_a_tick = asyncio.Event()
 
@@ -987,3 +852,40 @@ async def test_a_ticket_and_a_pull_request_do_not_erase_each_other(
 
     keys = {one.key for one in await desk.tracker_blockers()}
     assert keys == {"DUCK-3", "#12"}
+
+
+@pytest.mark.unit
+async def test_one_project_having_a_bad_day_does_not_cost_the_others_theirs(
+    desk: Store, tmp_path: pathlib.Path, started: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run` already refuses to let a bad tick take the console down. Inside the tick the same
+    thing was true one level up and not one level down: a project whose tracker raised — a token
+    that expired at two in the morning — skipped every project below it in the list, and the next
+    tick raised in the same place, and the one after that.
+
+    A queue that stops moving and says nothing is the failure this whole file is written against.
+    So the cost of a project's bad day is that project's turn.
+    """
+    other = "origin:acme/other"
+    await desk.arm(KEY, per_hour=5)
+    await desk.arm(other, per_hour=5)
+    # Only the second has anything queued, so the tick walks past the first into the part of a
+    # project's turn that talks to something outside this machine.
+    await desk.queue_task(
+        repo_key=other, cwd=str(tmp_path), title="t", instruction="do it", source_kind="typed"
+    )
+    order = [one.repo_key for one in await desk.armed_projects()]
+    assert order[0] == KEY, "this test needs the cranky project to be the one that goes first"
+
+    async def cranky(store: Store, arming: object) -> int:
+        if getattr(arming, "repo_key", "") == KEY:
+            raise RuntimeError("the token expired at 2am")
+        return 0
+
+    monkeypatch.setattr(autostart, "pull_requests", cranky)
+
+    task = await autostart.tick(desk, live=set())
+
+    assert task is not None
+    assert task.repo_key == other
+    assert len(started) == 1 and started[0].startswith("do it")

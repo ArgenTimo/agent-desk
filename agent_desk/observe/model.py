@@ -12,6 +12,7 @@ what it does not name, this program does not depend on.
 from __future__ import annotations
 
 import time
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path
 
@@ -20,11 +21,14 @@ from pydantic import BaseModel, ConfigDict, Field
 # The CLI version tests/fixtures/ was recorded from. A live session reporting anything else is not
 # an error and never a block — it is the advisory banner of docs/adr/0004, and the fixture README
 # is the procedure.
-RECORDED_CLI_VERSION = "2.1.259"
+RECORDED_CLI_VERSION = "2.1.283"
 
 # docs/03-session-observation.md: written by the session itself, and the only trustworthy
 # statement about what it is doing.
 KNOWN_STATUSES = ("idle", "busy", "shell")
+
+# Below this many lines a share of unknown ones says nothing (TranscriptTail.drift).
+DRIFT_MIN_LINES = 10
 
 
 def now_ms() -> int:
@@ -60,6 +64,25 @@ class Session(BaseModel):
         return Path(self.cwd).name or self.cwd
 
 
+class JobQuestion(BaseModel):
+    """One question a background job put to a human (`block.questions[]`, recorded at 2.1.267)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    question: str = ""
+
+
+class JobBlock(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    questions: list[JobQuestion] = []
+
+
+# Every `state` a job file has been seen to carry (tests/fixtures/job_state_*.json). One outside
+# this set is shown as a notice rather than guessed at (docs/adr/0004).
+JOB_STATES = frozenset({"working", "running", "blocked", "stopped", "done", "failed"})
+
+
 class JobEnd(BaseModel):
     """How one `claude --bg` job ended, from `~/.claude/jobs/<short>/state.json`.
 
@@ -79,10 +102,30 @@ class JobEnd(BaseModel):
     detail: str = ""
     tokens: int | None = None
     worktree_branch: str = Field(default="", alias="worktreeBranch")
+    # What a `blocked` job is waiting for, in its own words, and the questions it asked. The CLI
+    # writes these; they are facts about the job, not an inference from its silence.
+    needs: str | None = None
+    block: JobBlock | None = None
+    name: str = ""
+    cwd: str = ""
 
     @property
     def failed(self) -> bool:
-        return self.state == "failed"
+        """Over without having finished its work: it died, or somebody stopped it. A stopped job
+        is not a finished one, and settling it as done would close its task and its idea."""
+        return self.state in ("failed", "stopped")
+
+    @property
+    def waiting(self) -> bool:
+        """Blocked on a human — the CLI's own word for it, so the board may say it as a fact."""
+        return self.state == "blocked"
+
+    @property
+    def questions(self) -> int:
+        """How many things it is waiting to be told: its questions, or the one thing it `needs`."""
+        if self.block is not None and self.block.questions:
+            return len(self.block.questions)
+        return 1 if self.needs else 0
 
     @property
     def terminal(self) -> bool:
@@ -91,11 +134,12 @@ class JobEnd(BaseModel):
         Recorded rather than reasoned about: a `--bg` job reads `working` both while it holds a
         turn *and* while it sits at the prompt afterwards, and its process outlives either — so
         "the session is gone from the registry" never becomes true for an agent that succeeds.
-        `done` and `failed` are the two values the CLI writes when it is over, and both carry a
-        `firstTerminalAt`. Anything else is treated as still going, which is the safe direction:
-        a state this program has not seen must not end somebody's task.
+        `done`, `failed` and `stopped` are the values the CLI writes when it is over, and each
+        carries a `firstTerminalAt`. Anything else — `blocked` included, which can be answered and
+        carry on — is treated as still going, which is the safe direction: a state this program
+        has not seen must not end somebody's task.
         """
-        return self.state in ("done", "failed")
+        return self.state in ("done", "failed", "stopped")
 
 
 class RegistryRead(BaseModel):
@@ -159,6 +203,28 @@ class TranscriptTail(BaseModel):
     # the number a person means by "how big has this got" — not a bill, and not a total of
     # everything ever spent, which the window this is read from could not see anyway.
     context_tokens: int | None = None
+    # The shape check of docs/adr/0004, for the file with no version to compare: how many lines
+    # the window held, how many were of a type this program has never seen, and which keys it reads
+    # were absent from the lines that should carry them ("assistant.timestamp").
+    read_lines: int = 0
+    unknown_lines: int = 0
+    missing: list[str] = []
+
+    @property
+    def drift(self) -> str | None:
+        """A sentence for the board when the transcript no longer looks like what was recorded."""
+        if self.missing:
+            return (
+                f"transcript lines are missing {', '.join(self.missing)} — the CLI's transcript "
+                "format may have changed; re-record tests/fixtures/transcript.jsonl"
+            )
+        if self.read_lines >= DRIFT_MIN_LINES and self.unknown_lines * 2 > self.read_lines:
+            share = round(100 * self.unknown_lines / self.read_lines)
+            return (
+                f"{share}% of a transcript's lines are of types this program has not seen — the "
+                "CLI's transcript format may have changed (agent_desk/observe/transcript.py)"
+            )
+        return None
 
     @property
     def last_entry(self) -> TailEntry | None:
@@ -247,6 +313,12 @@ class AttentionHint(BaseModel):
 
     waiting: bool
     observation: str
+    # The same silence, read for a session nobody can answer. A `--bg` agent that has gone quiet
+    # after its own last word has finished a turn; it is not waiting, because there is no prompt to
+    # wait at. Kept apart from `waiting` rather than folded into it: one of them is a reason to
+    # stop what you are doing and the other is not, and a board that said them with one word made
+    # nine rows in ten say "look here".
+    finished: bool = False
 
 
 def since(then_ms: int, now: int) -> str:
@@ -265,6 +337,13 @@ def since(then_ms: int, now: int) -> str:
     return f"{seconds // 86_400}d"
 
 
+# The kinds of session that have somebody at a prompt. A `--bg` agent does not, and that is not a
+# guess about it: `dispatch.build_task` writes the sentence into the brief of every one this console
+# starts — "you are running in a git worktree of your own and **cannot be asked anything once you
+# start**". Anything else is a terminal a person opened.
+ASKABLE_KINDS: tuple[str, ...] = ("bg", "background")
+
+
 def attention_hint(
     session: Session,
     tail: TranscriptTail | None,
@@ -277,18 +356,59 @@ def attention_hint(
     All three, and never fewer: an idle session whose last entry is the human's is one that was
     interrupted or has already been answered, and a session idle for ten seconds is one that is
     about to be busy again.
+
+    **And a session somebody could actually be asked in.** Those three conditions are sound and
+    their reasoning is unchanged; what was wrong is where they were applied. A `--bg` agent has no
+    prompt for anybody to wait at, so the same silence means it has *finished a turn* — a different
+    fact, worth showing, and not a reason to put down what you are doing.
+
+    Measured before this: thirty-four of thirty-eight rows on a real board said "may want you", all
+    thirty-four were background agents, and the one session a person was sitting in said nothing. A
+    flag on nine rows in ten is not a flag.
+
+    This is CLAUDE.md's fifth rule in its subtlest form. Nothing here reported a status as known —
+    the flag has always said "a guess, not a signal" and carried the observation behind it. What it
+    did was apply a guess where its premise was false, and no hedging in the wording repairs that.
     """
     last = tail.last_entry if tail else None
     seen = f"{session.status} {since(session.status_updated_at, now)}"
     seen += f" · last entry: {last.role}" if last else " · no transcript entry read"
 
-    waiting = (
+    quiet = (
         session.status == "idle"
         and last is not None
         and last.role == "assistant"
         and (now - session.status_updated_at) >= after_seconds * 1000
     )
-    return AttentionHint(waiting=waiting, observation=seen)
+    asked = session.kind not in ASKABLE_KINDS
+    return AttentionHint(waiting=quiet and asked, finished=quiet and not asked, observation=seen)
+
+
+# What can honestly be said about where a session came from. Three answers and no fourth, because
+# the fourth would be a guess:
+#
+#   `ours`   — this console started it. The short id is one it recorded against a task it
+#              dispatched, which is a fact rather than an inference.
+#   `agent`  — a background session it did not start. `--bg` is how this console starts one and it
+#              is also how anything else does, so "background" is the whole of what can be read
+#              from the registry about it.
+#   `person` — an interactive session: somebody is sitting in it.
+#
+# Measured on a real console, this is the difference between a board that can be scanned and one
+# that cannot: thirty-six rows, of which four were this console's, one was the person's own
+# terminal, and thirty-one were background sessions nothing here knows anything about — all
+# rendered identically, so all thirty-six read as things that might need answering.
+#
+# `ours` is handed in for the same reason `now` is: this is a reading of a session and the set of
+# ids belongs to the store, which `observe/` does not open.
+WHOSE: tuple[str, ...] = ("ours", "agent", "person")
+
+
+def whose(session: Session, ours: Collection[str]) -> str:
+    """Whether this console started this session, merely found it, or a person is sitting in it."""
+    if session.session_id.split("-")[0] in ours:
+        return "ours"
+    return "agent" if session.kind in ("bg", "background") else "person"
 
 
 def triage_rank(session: Session, hint: AttentionHint) -> int:

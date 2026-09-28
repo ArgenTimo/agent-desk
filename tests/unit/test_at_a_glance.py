@@ -126,7 +126,39 @@ async def test_a_generated_line_that_reads_at_a_glance_is_taken(
     assert kept.summary == better
 
 
+def test_a_summary_with_no_line_in_it_is_not_a_proposal() -> None:
+    """The card with nothing on it.
+
+    Nothing reaches this branch through `capture` any more — text with no words in it is refused a
+    step earlier now, for everybody rather than only for the desk — and `better_summary` drops a
+    blank reply before it asks. It stays because `unclear` is the predicate that answers "why can
+    this line not be read", and "" is the first thing a new caller will hand it; a predicate that
+    raises on the emptiest of its inputs is not one.
+    """
+    assert "no line to read" in inbox.unclear("")
+    assert "no line to read" in inbox.unclear("   \n\t ")
+
+
 async def test_a_proposal_with_no_first_line_is_refused(store: Store) -> None:
-    # `fallback_summary` of whitespace is the empty string, so this is the card with nothing on it.
-    with pytest.raises(ValueError, match="no line to read"):
+    # Refused before the at-a-glance rule is consulted, and by a rule that holds for every author:
+    # a row with no words in it is a line in the pool its own author cannot recognise.
+    with pytest.raises(ValueError, match="nothing written down"):
         await inbox.capture(store, "   \n\n  ", author="desk")
+
+
+async def test_a_model_that_answers_with_nothing_leaves_the_card_as_it_was(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blank reply is a failed run, not a decision to blank the card — and the line the card
+    already has was checked at capture, so keeping it is keeping something readable."""
+
+    async def blank(_prompt: str) -> AsyncIterator[str]:
+        yield "  \n \n"
+
+    idea = await inbox.capture(store, GOOD, author="desk")
+    monkeypatch.setattr(appraise, "stream_answer", blank)
+
+    assert await appraise.better_summary(store, idea) is False
+    kept = await store.idea(idea.id)
+    assert kept is not None
+    assert kept.summary == GOOD

@@ -8,7 +8,11 @@ Everything on this page was verified against Claude Code `2.1.251` on Linux, re-
 `2.1.258` — the CLI updated itself between the two readings, and a key had appeared — and read
 again at `2.1.259`, where the shape held and a status value did not. Nothing broke and nothing
 announced it, which is [adr/0004](adr/0004-the-transcript-format-is-not-a-contract.md)
-demonstrating its own argument before a line of the parser existed.
+demonstrating its own argument before a line of the parser existed. Re-checked at `2.1.283`
+(2026-09-27): the keys this program reads held; `bridgeSessionId` left the registry, `last-prompt`
+traded `promptId` for `leafUuid`, a registry entry was seen carrying `waitingFor` (not read — see
+the `waiting` paragraph below), and transcripts now hold sixteen line types, which the reader
+counts so that a window of unknown ones is a notice rather than a quiet session.
 
 These files are internal state, not a published interface. Treat every shape below as *recorded*,
 not *promised*.

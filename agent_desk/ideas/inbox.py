@@ -109,6 +109,13 @@ async def capture(
     paragraph, the work of getting into its context has been handed to the reader — which is the
     work the proposal was supposed to save.
     """
+    # Nothing at all, from anybody. This is not the asymmetry above and does not weaken it: a bare
+    # "билд" is a note somebody wrote to themselves and costs nobody anything, while a row with no
+    # words in it is a line in the pool its own author cannot recognise. Nine callers guard this
+    # today; the tenth is the one that will not, and the cost of forgetting is a notebook growing
+    # blank rows with nothing saying where they came from.
+    if not text.strip():
+        raise ValueError("there is nothing written down")
     if author == "desk" and (why := unclear(fallback_summary(text))):
         raise ValueError(f"a proposal has to read at a glance: {why}")
     idea = await store.create_idea(

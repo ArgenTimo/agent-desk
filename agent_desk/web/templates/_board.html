@@ -12,8 +12,46 @@
 {% endfor %}
 {% endif %}
 
+{# Open pull requests of the repositories named in AGENT_DESK_PULL_REPOS (B3), read by their own
+   loop every five minutes. A repository that could not be read says why, in the same place. #}
+{% for line in pull_lines or [] %}
+<p class="small pull-line">{{ line }}</p>
+{% endfor %}
+
+{# Background jobs the CLI itself marked `blocked` (B1). Not "may want you": the job file says it
+   is waiting on a human and what for, so this is said as a fact. Answering stays in a terminal —
+   `claude attach` — because writing into a session is not something this board does. #}
+{% if waiting_jobs %}
+<details class="waiting-jobs">
+  <summary class="notice small"><strong>{{ waiting_jobs | length }} background job{{ "" if waiting_jobs | length == 1 else "s" }} waiting on you</strong>
+    · {{ waiting_questions }} question{{ "" if waiting_questions == 1 else "s" }}</summary>
+  <ul class="small">
+    {% for one in waiting_jobs %}
+    <li><button type="button" class="chip goto" data-open="{{ one.short_id }}"
+                data-copy="claude attach {{ one.short_id }}"
+                title="open this job in a terminal on this machine">↗ go to it</button>
+      <code>claude attach {{ one.short_id }}</code>
+      <span class="dim">{{ one.job.name or one.short_id }}{% if one.job.cwd %} · {{ one.job.cwd.rstrip("/").split("/")[-1] }}{% endif %}</span>
+      {% if one.job.needs %}<br><span>{{ one.job.needs | truncate(200) }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
 <div class="tree-head">
   <span class="tree-count">{{ rows | length }} session{{ "" if rows | length == 1 else "s" }}</span>
+  {# Of those, the ones this console started. A board of thirty-six that says nothing about which
+     of them it is answerable for presents all thirty-six as though it knows what they are, and it
+     knows what four of them are (CLAUDE.md, rule five). Said only when the two differ, because a
+     count that always equals the one beside it is a count nobody reads. #}
+  {% set asked = rows | selectattr("whose") | list | length %}
+  {% set started_here = rows | selectattr("whose", "equalto", "ours") | list | length %}
+  {# `asked` guards the same rule one level up: a caller that did not hand in what this console
+     started gets no sentence about it, rather than a confident "0 started here" about a question
+     nobody put. #}
+  {% if asked and started_here != rows | length %}
+  <span class="tree-count" title="the rest are sessions this console did not start — it can say they are running and nothing more">{{ started_here }} started here</span>
+  {% endif %}
   {% if flagged %}<span class="tree-count flagged-count">{{ flagged }} may want you</span>{% endif %}
   {# What the asking has cost today, as the runs themselves reported it (043-spending.sql). Here
      rather than on a page of its own, because "это та вещь, отсутствие которой обнаруживается в
@@ -40,7 +78,22 @@
 
 {% for project in projects %}
 <div class="project-slot">
-<details class="node card project{% if project.flagged %} flagged{% endif %}" open
+    {# «У проектов должна быть кнопка выбрать.» On the card rather than in its menu, because it is
+       the thing somebody does with a project most often — and beside the card's `<summary>` rather
+       than inside it, because a control inside a disclosure's summary is swallowed by the
+       disclosure, which is exactly what happened to the `⋯` before it moved out. A form, so it works with no script; and
+       `hx-swap="none"` with the column refreshed by its own trigger, because choosing a project must
+       not put it on the workbench — a click on the card head would. The pressed state is
+       `aria-pressed`, so it is a fact for a screen reader and not only a colour. #}
+    <form class="choose-project" method="post" action="/projects/focus"
+          hx-post="/projects/focus" hx-target="#idea-list" hx-swap="innerHTML">
+      <input type="hidden" name="key" value="{{ project.key }}">
+      <button type="submit" class="chip choose{% if focus == project.key %} on{% endif %}"
+              aria-pressed="{{ 'true' if focus == project.key else 'false' }}"
+              title="{{ 'chosen — its ideas are shown and a message is for it; press to choose none' if focus == project.key else 'work on this project: show its ideas and address messages to it' }}">
+        {{ "✓ chosen" if focus == project.key else "choose" }}</button>
+    </form>
+<details class="node card project{% if project.flagged %} flagged{% endif %}{% if focus == project.key %} chosen-project{% endif %}" open
          data-drop="project" data-project="{{ project.key }}"
          data-kind="project" data-id="{{ project.key }}" data-label="{{ project.name }}"
          draggable="true">
@@ -63,18 +116,29 @@
 
   <div class="card-body">
     {% for instance in project.instances %}
-    <details class="node card instance" open
+    {# Folded when there are more sessions here than anybody reads one by one. One worktree on a
+       real console held twenty-three, and the board — thirty-six rows — was mostly that single
+       directory written out flat. Folded is not hidden: the head says how many are inside, how
+       many of them may want somebody, and one press opens it. #}
+    <details class="node card instance{% if instance.crowded %} crowded{% endif %}"
+             {% if not instance.crowded %}open{% endif %}
              data-kind="instance" data-id="{{ instance.path }}" data-label="{{ instance.name }}"
              draggable="true">
       <summary class="card-head">
         <span class="twist" aria-hidden="true"></span>
         <span class="card-name">{{ instance.name }}</span>
         <span class="pill">{{ instance.rows | length }}</span>
+        {# Whose they are, and only when it is worth saying. A directory of agents this console
+           started is a different thing from a directory of sessions it knows nothing about, and
+           the board said the same about both (CLAUDE.md, rule five). #}
+        {% if instance.mine %}<span class="pill whose-person" title="sessions somebody is sitting in">{{ instance.mine }} yours</span>{% endif %}
+        {% if instance.ours %}<span class="pill whose-ours" title="agents this console started and can account for">{{ instance.ours }} started here</span>{% endif %}
+        {% if instance.flagged %}<span class="pill whose-flagged" title="may want a person">{{ instance.flagged }} may want you</span>{% endif %}
       </summary>
 
       <div class="card-body">
         {% for row in instance.rows %}
-        <details class="node card session {{ row.session.status }}{% if row.session.kind == "bg" %} bg{% endif %}{% if row.hint.waiting %} flagged{% endif %}" open
+        <details class="node card session {{ row.session.status }}{% if row.whose %} whose-{{ row.whose }}{% endif %}{% if row.session.kind == "bg" %} bg{% endif %}{% if row.hint.waiting %} flagged{% endif %}" open
                  data-session="{{ row.session.session_id }}"
                  data-kind="session" data-id="{{ row.session.session_id }}"
                  data-label="{{ row.tail.title if row.tail and row.tail.title else row.session.name }}"
@@ -82,6 +146,20 @@
           <summary class="card-head">
             <span class="dot {{ row.session.status }}" aria-hidden="true"></span>
             <span class="card-name">{{ row.tail.title if row.tail and row.tail.title else row.session.name }}</span>
+            {# Which kind of session this is, in the head, before anything else is read. One of them
+               can be written to from here and the other cannot (docs/adr/0009), and the only
+               difference used to be a slightly different blue dot — which is colour, and colour on
+               this page means status. #}
+            {% if row.session.kind in ("bg", "background") %}
+            <span class="pill session-kind bg" title="a background session — this console can continue it and answer it">background</span>
+            {% else %}
+            <span class="pill session-kind terminal" title="a session in a terminal — this console can read it and cannot write to it">terminal</span>
+            {% endif %}
+            {% if row.worktree %}
+            {# Shown under the checkout it works in now, so which of the checkout's worktrees is the
+               one thing the move would otherwise lose. #}
+            <span class="pill quiet worktree" title="working in .claude/worktrees/{{ row.worktree }} inside this checkout">⎇ {{ row.worktree }}</span>
+            {% endif %}
             <span class="age">{{ row.session.updated_at | ago }}</span>
           </summary>
 
@@ -93,20 +171,23 @@
                one line of what it is doing. Everything a card said beyond that was noise on a
                surface somebody glances at (docs/06-console.md). #}
             <div class="state-line">
-              {% set kick = kicks.get(row.session.session_id.split("-")[0]) %}
-              {% if row.session.status == "idle" and kick and kick.resume_at %}
-              {# An idle row that knows *why* it is idle. Not an inference: this console tried to
-                 continue this session and the account said there was nothing left to spend, so
-                 the time is the one it was given rather than one it worked out. #}
-              <span class="pill state break" title="the registry says: idle — and a kick was refused for want of budget">
-                🍽 on a break until {{ kick.resume_at | at }}</span>
-              {% elif row.session.status == "idle" %}
+              {% if row.session.status == "idle" %}
               {# A picture and plain words, because "idle" says nothing to somebody who does not
                  use a terminal. The registry's own word stays on the tooltip: this renders a
                  fact, it does not replace one (docs/03-session-observation.md). #}
               <span class="pill state idle" title="the registry says: idle">🚬 having a smoke</span>
               {% else %}
               <span class="pill state {{ row.session.status }}" title="the registry says: {{ row.session.status }}">{{ row.session.status | plainly }}</span>
+              {% endif %}
+              {# The same question asked of the machine instead of the model. It arrived by
+                 happening: this machine ran out of memory twice with thirty sessions holding eight
+                 gigabytes between them and a board that said nothing about any of it.
+
+                 A measurement and never a verdict — whether half a gigabyte is too much depends on
+                 the machine, the work and the hour, and a console that coloured it would be putting
+                 a judgement where rule five allows a reading. #}
+              {% if row.holding %}
+              <span class="pill quiet" title="what the machine says this session is holding — a reading, not a judgement">{{ row.holding | megabytes }}</span>
               {% endif %}
               {% if row.tail and row.tail.context_tokens %}
               <span class="pill quiet" title="what this session is carrying right now">{{ row.tail.context_tokens | tokens }}</span>
@@ -118,6 +199,13 @@
               {% endif %}
               {% if row.hint.waiting %}
               <span class="pill attention" title="{{ row.hint.observation }} — a guess, not a signal">⚑ may want you</span>
+              {% endif %}
+              {# The same silence, read for a session nobody can answer. A background agent has no
+                 prompt to wait at — this console wrote that into its brief — so quiet after its own
+                 last word means it has finished a turn. Worth knowing, and not a reason to put
+                 down what you are doing, which is why it does not wear the flag. #}
+              {% if row.hint.finished %}
+              <span class="pill quiet" title="{{ row.hint.observation }} — it has no prompt to wait at, so this is a turn that ended">finished a turn</span>
               {% endif %}
               {# The canary (023-canary.sql). This session was told to begin every reply with its
                  own name, in the first message of the conversation — so a reply that has stopped
@@ -194,26 +282,7 @@
                title="start a fresh session in this project — this one is left exactly as it is">start a fresh one</a>
             {% endif %}
 
-            {# The switch that will not let this session sit idle (docs/adr/0009). It is the
-               explicit click docs/adr/0002 requires, so it says what it will do before it is
-               pressed — and where it cannot be offered it says why instead of showing a button
-               that would lie. #}
             {% if row.session.kind == "bg" %}
-            <form class="kick" method="post"
-                  action="/sessions/{{ row.session.session_id }}/kicking"
-                  hx-post="/sessions/{{ row.session.session_id }}/kicking"
-                  hx-target="#message">
-              <input type="hidden" name="kicking" value="{{ "no" if kick and kick.armed else "yes" }}">
-              {% if kick and kick.armed %}
-              <button type="submit" class="chip kicking on"
-                      title="it is continued whenever it goes idle — {{ kick.kicks }} turn{{ "" if kick.kicks == 1 else "s" }} so far. Press to stop.">
-                👟 keeping it going</button>
-              {% else %}
-              <button type="submit" class="chip kicking"
-                      title="while this console runs, continue this session whenever it goes idle: its own unfinished work first, and something worth fixing when there is none">
-                👟 don't let it idle</button>
-              {% endif %}
-            </form>
             {# "Go to it", and it goes (01M1VAZ5PT5YHPDZ6BR780HM0E). The *page* cannot open a
                terminal — but the console is a process on this machine and it can, so the button
                asks it to. `data-copy` stays: on a machine with no terminal this console knows how
@@ -224,9 +293,6 @@
                     data-copy="claude attach {{ row.session.session_id.split('-')[0] }}"
                     title="open this session in a terminal on this machine">
               ↗ go to it</button>
-            {% if kick and kick.disarmed_why %}
-            <p class="small quiet one">it stopped being kept going: {{ kick.disarmed_why }}</p>
-            {% endif %}
             {% else %}
             <p class="small quiet one"
                title="`stop` and `--resume` are the CLI's door into a background session; a terminal has none this console is allowed to open (docs/adr/0009)">
@@ -234,17 +300,28 @@
             {% endif %}
 
             {% if row.tail and row.tail.agents %}
-            <div class="chips">
-              {% for agent in row.tail.agents[:5] %}
-              <span class="node chip agent{% if agent.running %} working{% endif %}"
-                    data-kind="agent" data-id="{{ row.session.session_id }}"
-                    data-label="{{ agent.kind }}: {{ agent.description }}" draggable="true"
-                    title="{{ agent.kind }}{{ ' · still running' if agent.running else '' }}">
+            {# The agents this session started, as children of it rather than a row of tags. The
+               transcript records each `Agent` call and whether its result came back; a call whose
+               result has not arrived is still running as far as this window can see, which is the
+               same limit everything else on this board has (docs/03-session-observation.md).
+               Running ones first: they are the ones that are still doing something. #}
+            {% set running = row.tail.agents | selectattr("running") | list %}
+            {% set back = row.tail.agents | rejectattr("running") | list %}
+            <ul class="children agents" aria-label="agents this session started">
+              {% for agent in (running + back)[:8] %}
+              <li class="node card agent{% if agent.running %} working{% endif %}"
+                  data-kind="agent" data-id="{{ row.session.session_id }}"
+                  data-label="{{ agent.kind }}: {{ agent.description }}" draggable="true"
+                  title="{{ agent.kind }}{{ ' · still running' if agent.running else ' · came back' }}">
                 <span class="dot {{ 'busy' if agent.running else 'done' }}" aria-hidden="true"></span>
+                <span class="agent-kind">{{ agent.kind }}</span>
                 <span class="node-name">{{ agent.description or agent.kind }}</span>
-              </span>
+              </li>
               {% endfor %}
-            </div>
+              {% if (running + back) | length > 8 %}
+              <li class="small quiet">and {{ (running + back) | length - 8 }} more</li>
+              {% endif %}
+            </ul>
             {% endif %}
           </div>
         </details>
@@ -266,41 +343,10 @@
       <span class="menu-what">New instance…</span>
       <span class="menu-why">a copy of the checkout with an agent working in it</span>
     </a>
-    {# Narrow the right-hand column to this one. A board with six projects on it has a column
-       about all six, and when you are working on one of them that column is mostly noise. #}
-    <form method="post" action="/projects/focus"
-          hx-post="/projects/focus" hx-target="#idea-list">
-      <input type="hidden" name="key" value="{{ project.key }}">
-      <button type="submit" class="menu-item">
-        <span class="menu-what">Show only this one</span>
-        <span class="menu-why">narrow the blockers and the ideas to {{ project.name }}</span>
-      </button>
-    </form>
     <a class="menu-item" href="/projects/page?key={{ project.key | urlencode }}">
       <span class="menu-what">Project settings</span>
       <span class="menu-why">services, environment, the queue</span>
     </a>
-    {# "All of them" is a click repeated rather than a wider switch (docs/adr/0009): this writes
-       the same per-session rows the card's own button writes, for the sessions in this project
-       now. One started afterwards is a new decision and gets its own click. #}
-    <form method="post" action="/projects/kicking"
-          hx-post="/projects/kicking" hx-target="#message">
-      <input type="hidden" name="key" value="{{ project.key }}">
-      <input type="hidden" name="kicking" value="yes">
-      <button type="submit" class="menu-item">
-        <span class="menu-what">👟 Don't let any of them idle</span>
-        <span class="menu-why">continue every background session here whenever it goes quiet</span>
-      </button>
-    </form>
-    <form method="post" action="/projects/kicking"
-          hx-post="/projects/kicking" hx-target="#message">
-      <input type="hidden" name="key" value="{{ project.key }}">
-      <input type="hidden" name="kicking" value="no">
-      <button type="submit" class="menu-item">
-        <span class="menu-what">Let them idle again</span>
-        <span class="menu-why">stop continuing them</span>
-      </button>
-    </form>
     {% for link in links.get(project.key, []) %}
     <a class="menu-item" href="{{ link.url }}" target="_blank" rel="noreferrer noopener">
       <span class="menu-what">Open {{ link.name }}</span>

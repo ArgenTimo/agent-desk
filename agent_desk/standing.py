@@ -24,6 +24,7 @@ here is worse than a gap, because this is precisely the text somebody reads inst
 
 from __future__ import annotations
 
+from agent_desk import opening
 from agent_desk.observe.model import now_ms, since
 from agent_desk.store.repo import Store
 
@@ -88,6 +89,26 @@ async def where_it_stopped(store: Store) -> str:
         f"{'is' if len(open_) == 1 else 'are'} open."
         + (f" The newest is {open_[0].id}: {open_[0].summary}" if open_ else "")
     )
+
+    # The board's own measure (077, 080): how often it sent somebody back to a terminal, and why,
+    # as they said it. A press nobody labelled is counted as not said rather than guessed at.
+    went = await store.terminal_reasons_since(shift.began_at)
+    if went:
+        total = sum(went.values())
+        parts = [
+            f"{count} {opening.REASONS[reason]}"
+            for reason, count in sorted(went.items(), key=lambda item: -item[1])
+            if reason in opening.REASONS
+        ]
+        if went.get(""):
+            parts.append(f"{went['']} not said")
+        said.append(
+            f"The board sent somebody to a terminal {total} time{'' if total == 1 else 's'} in it: "
+            + ", ".join(parts)
+            + "."
+        )
+    else:
+        said.append("The board has not sent anybody to a terminal in it.")
 
     commits = [one for one in reversed(steps) if one.what == "commit"]
     said.append(f"Last commit: {commits[0].said}" if commits else "No commit in this shift yet.")

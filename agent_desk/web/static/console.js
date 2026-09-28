@@ -338,6 +338,13 @@ stream.addEventListener('board', (event) => {
   if (event.data === lastBoard || document.body.classList.contains('dragging-card')) return;
   lastBoard = event.data;
   document.getElementById('board').innerHTML = event.data;
+  // The board carries htmx of its own now — the choose button on a project card is a form that
+  // posts through htmx — and markup written with innerHTML is invisible to htmx until it is
+  // processed. Without this the button worked exactly once, on the page as it was served, and the
+  // first board refresh turned it back into a plain form that navigated the whole console away to
+  // `/projects/focus`. Every other swap in this file already does this; the board was the one that
+  // had nothing to process.
+  if (window.htmx) htmx.process(document.getElementById('board'));
   applyFolded();
   // A session that has started its first subagent has parts it did not have a moment ago, and a
   // checkout whose last session ended has none any more.
@@ -603,19 +610,34 @@ function showBenchToggle() {
 //
 // A note is not a card the server can look up — it is text that exists only here — so it is
 // carried in its own field rather than named as a target that would 404.
-function pinnedTargets() {
+// The one answer to "what will this message carry". The names and the number both come from here,
+// because they were coming from two selectors that did not match — the count kept `.own` and did
+// not require `[data-kind]`, so the sentence under the bench and the field the message is built
+// from were describing different sets. A number beside a Send button that is not the number being
+// sent is the shape of mistake this console exists to not make.
+//
+// `.block-card` is out for the same reason `.answer-card` always was, and it took a change on the
+// server to be able to say so. The two are the halves of one exchange and travel as the thread's
+// own history; `on_the_bench` has always dropped them from the digest. The page went on sending
+// them because a card a *gesture* named had to be among the targets to survive — so on a real
+// bench the strip said `carrying 37 cards` while the model was shown twenty-seven. That coupling
+// is gone: a named card is now included wherever it came from, and this can say what it means.
+function cardsBeingCarried() {
   const chosen = chosenCards().filter(
     (pin) => pin.dataset.kind && !pin.classList.contains('own')
   );
-  const carried = chosen.length
+  return chosen.length
     ? chosen
     : // `.pin` matters. Without it this matched every element carrying `data-kind` *inside* a
       // card as well — the idea lines a block card lists — and a bench showing seven cards was
       // sending a hundred and twenty-three targets with every message. Silently, because the
       // count beside the field was measuring something else. The same mistake `pin()` made once
       // and for the same reason: `[data-kind]` is not a card, `.pin[data-kind]` is.
-      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
-  return carried
+      [...pins.querySelectorAll('.pin[data-kind]:not(.own):not(.answer-card):not(.block-card):not(.promise):not(.spent):not(.ringed):not(.put-away)')];
+}
+
+function pinnedTargets() {
+  return cardsBeingCarried()
     .map((pin) => `${pin.dataset.kind}:${pin.dataset.id}${pin.dataset.deep === 'yes' ? ':full' : ''}`)
     .join(',');
 }
@@ -635,15 +657,14 @@ function syncTargets() {
   document.getElementById('say-targets').value = pinnedTargets();
   document.getElementById('say-history').value = attachedBlocks();
   const attached = document.querySelectorAll('#blocks .attach.on').length;
-  const picked = chosenCards().filter((pin) => pin.dataset.kind).length;
-  // An answer card is not one of them. What it says travels with the next message already, as the
-  // thread it belongs to, and `on_the_bench` drops it from the prompt for that reason — so
-  // counting it here would tell somebody their message carries twice what it carries.
-  const live =
-    picked ||
-    pins.querySelectorAll(
-      '.pin:not(.answer-card):not(.promise):not(.spent):not(.ringed):not(.put-away)'
-    ).length;
+  // The same set the message is built from, counted rather than measured a second way. An answer
+  // card is not one of them: what it says travels with the next message already, as the thread it
+  // belongs to, and `on_the_bench` drops it from the prompt for that reason — so counting it here
+  // would tell somebody their message carries twice what it carries.
+  const live = cardsBeingCarried().length;
+  const picked = chosenCards().filter(
+    (pin) => pin.dataset.kind && !pin.classList.contains('own')
+  ).length;
   const carried = live + attached;
   // Which of the two it is, said in words. "Carrying 3 cards" under a bench of thirty is a
   // sentence somebody reads twice; "asking about these 3 only" is one they read once.
@@ -775,7 +796,8 @@ function isAStep(holder) {
 
 function showRunFrom(holder) {
   const button = holder.querySelector('.pin-run');
-  if (button) button.hidden = !isAStep(holder);
+  // A console that does not start agents does not offer to (AGENT_DESK_HANDS, config.py).
+  if (button) button.hidden = !isAStep(holder) || document.body.dataset.hands !== 'on';
 }
 
 async function runFromHere(holder) {
@@ -1056,6 +1078,8 @@ async function runTheCheck(holder) {
     const body = await fetch(`/cards/check?id=${encodeURIComponent(holder.dataset.id)}`);
     if (body.ok) {
       holder.querySelector('.pin-body').innerHTML = await body.text();
+      if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
+      changed(holder);
       showCheck(holder);
       // Out of the way, not out of existence. A failed one stays open: it is the thing somebody
       // has to act on, and folding it away would hide the sentence saying what to do.
@@ -1536,6 +1560,9 @@ async function pin(card, how) {
   // rather than having one invented for it.
   holder.dataset.came = how?.came || '';
   holder.dataset.cameAt = String(how?.cameAt || Date.now());
+  // When its content last changed after it arrived (079). Nothing is invented for a new card: zero
+  // is "not since it arrived", and only `changed()` moves it.
+  holder.dataset.changedAt = String(how?.changedAt || 0);
   holder.innerHTML = `<div class="pin-head"><span class="pin-live" title="in the next message — press to leave it out">●</span>
     <button type="button" class="pin-role" title="what this is in the process"></button>
     <span class="pin-kind">${card.kind}</span>
@@ -1581,6 +1608,10 @@ async function pin(card, how) {
     holder.querySelector('.pin-body').innerHTML = response.ok
       ? await response.text()
       : '<p class="empty small">could not read this one</p>';
+    // A card body is server markup written with innerHTML, which htmx cannot see until it is
+    // handed to it — the idea card's project picker was dead on every card until this line
+    // (docs/stories/14).
+    if (window.htmx) htmx.process(holder.querySelector('.pin-body'));
     nameItProperly(holder, card);
     writeHint(holder);
     showParts(holder);
@@ -1707,6 +1738,36 @@ function markHintCounts(holder, joined) {
   dot.textContent = String(joined);
   dot.title = `joined to ${joined} other card${joined === 1 ? '' : 's'}`;
 }
+
+// --- the whole of a name that did not fit --------------------------------------------------------
+//
+// `.pin-label` is one line with an ellipsis on it, which is right — a head that wrapped would push
+// every card taller than the thing it describes. What was wrong is that the half of a name that
+// went off the end was unreadable without opening the card, and on a bench of thirty-seven that is
+// thirty-seven presses to find out what is in front of you.
+//
+// Measured when the pointer arrives rather than when the card is written. Asking for `scrollWidth`
+// makes the browser settle the layout before it can answer, and doing that once per card while a
+// bench is being built is exactly the read-after-write loop `tests/unit/test_bench_speed.py`
+// exists about. On hover it is one read, on one element, after everything has already settled.
+//
+// And nothing at all on a label that fits: a tooltip that repeats what is already on the screen
+// teaches somebody that tooltips here say nothing, which costs the ones that do.
+function sayTheWholeName(label) {
+  const whole = label.textContent.trim();
+  // A pixel of tolerance, because a sub-pixel width makes `scrollWidth` a rounding away from
+  // `clientWidth` on a label that is plainly not clipped.
+  if (whole && label.scrollWidth > label.clientWidth + 1) label.title = whole;
+  else label.removeAttribute('title');
+}
+
+// Delegated, so it covers the card written a moment ago, the one whose name arrived with its body
+// (`nameItProperly`), and the one somebody renames — rather than three call sites of which two
+// would be found by whoever adds the fourth.
+pins?.addEventListener('pointerover', (event) => {
+  const label = event.target?.closest?.('.pin-label');
+  if (label) sayTheWholeName(label);
+});
 
 function setView(holder, view) {
   holder.dataset.view = view;
@@ -1925,6 +1986,7 @@ document.addEventListener('drop', (event) => {
       .then((html) => {
         if (!html) return;
         document.getElementById('idea-list').innerHTML = html;
+        if (window.htmx) htmx.process(document.getElementById('idea-list'));
         filterIdeas();
       });
     return;
@@ -1941,7 +2003,11 @@ document.addEventListener('drop', (event) => {
     body: new URLSearchParams({ repo_key: from }),
   })
     .then((response) => (response.ok ? response.text() : null))
-    .then((html) => { if (html) document.getElementById('board').innerHTML = html; });
+    .then((html) => {
+      if (!html) return;
+      document.getElementById('board').innerHTML = html;
+      if (window.htmx) htmx.process(document.getElementById('board'));
+    });
 });
 
 /* --- the third view of a card ------------------------------------------------------------------- */
@@ -1958,7 +2024,10 @@ document.addEventListener(
     body.dataset.read = 'yes';
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(body.dataset.tail)}/tail`);
-      if (response.ok) body.innerHTML = await response.text();
+      if (response.ok) {
+        body.innerHTML = await response.text();
+        if (window.htmx) htmx.process(body);
+      }
     } catch {
       body.textContent = 'could not read it';
     }
@@ -2004,6 +2073,262 @@ document.addEventListener('mouseleave', () => lightUp(''), true);
 const surface = document.getElementById('bench-surface');
 const canvas = document.getElementById('bench-canvas');
 const ties = document.getElementById('bench-ties');
+
+/* --- finding one card among thirty-seven --------------------------------------------------------- */
+//
+// Everything else on the bench head acts on the surface as a whole. None of it answers "where is
+// the card I put down ten minutes ago", and on a real console that is the question — a bench fills
+// up because the thinking went well, not because anything went wrong.
+//
+// Two rules hold this to being a *search* rather than a rearrangement:
+//
+// **Nothing moves.** A search that laid the matches out in a row would destroy the arrangement,
+// which is the thing the person built and the reason they can find anything at all. What changes
+// is one class.
+//
+// **Nothing goes away.** The cards that did not match go quiet, not hidden: the shape of the bench
+// is part of what somebody reads, and a search that empties the surface answers a question nobody
+// asked. Clearing the box puts it back exactly, because there was never anything to put back.
+const benchFind = document.getElementById('bench-find');
+const benchFound = document.getElementById('bench-found');
+
+// What a card can be found by: its kind, its name, and the words it is showing. Assembled from the
+// three rather than taken off the card whole — `pin.textContent` sweeps in every control on the
+// head, so a bench would light up on "press", "brief" and "a line", which are this console's words
+// and not the card's.
+function benchWords(pin) {
+  const label = pin.querySelector('.pin-label')?.textContent || '';
+  const body = pin.querySelector('.pin-body')?.textContent || '';
+  return `${pin.dataset.kind || ''} ${label} ${body}`.toLowerCase();
+}
+
+function filterBench() {
+  if (!benchFind) return;
+  const said = benchFind.value.trim().toLowerCase();
+  const cards = onBench();
+  let lit = 0;
+  for (const pin of cards) {
+    const hit = !said || benchWords(pin).includes(said);
+    pin.classList.toggle('unmatched', !hit);
+    if (hit) lit += 1;
+  }
+  // A line is only as loud as its quieter end: a bright line running into a card that has gone
+  // quiet reads as the line pointing at something, which is the opposite of what it means here.
+  for (const drawn of ties?.querySelectorAll('[data-from]') || []) {
+    const from = surface?.querySelector(`.pin[data-name="${CSS.escape(drawn.dataset.from)}"]`);
+    const to = surface?.querySelector(`.pin[data-name="${CSS.escape(drawn.dataset.to)}"]`);
+    drawn.classList.toggle(
+      'unmatched',
+      Boolean(from?.classList.contains('unmatched') || to?.classList.contains('unmatched'))
+    );
+  }
+  if (benchFound) {
+    benchFound.textContent = !said
+      ? ''
+      : lit
+        ? `${lit} of ${cards.length}`
+        : 'nothing on the bench matches';
+  }
+}
+
+benchFind?.addEventListener('input', filterBench);
+benchFind?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  // The first Escape clears the search and the second gives the bench back the keyboard, so that
+  // the key that means "never mind" does not also mean "and stay in this box".
+  if (benchFind.value) {
+    benchFind.value = '';
+    filterBench();
+  } else {
+    benchFind.blur();
+  }
+  event.stopPropagation();
+});
+
+/* --- what arrived while you were looking somewhere else ------------------------------------------ */
+//
+// A bench left up while an agent worked is thirty-seven cards to re-read, and the one thing
+// somebody coming back wants is which of them are new. Every card has recorded when it arrived
+// since migration 045 (`cameAt`, written by whoever made the card) and nothing has ever read that
+// as *recently*.
+//
+// Bounded to "while this window was in the background". A mark that meant "since some time this
+// morning" would be on most of the bench most of the time, which is a mark that says nothing —
+// and the moment somebody actually wants it is the moment they come back to the tab.
+//
+// And which *changed*, said apart from which arrived (079). For a long time this could only say
+// "arrived", because nothing recorded a per-card time of last change and a mark that quietly meant
+// something narrower than it said would be CLAUDE.md's fifth rule broken on the surface it is most
+// read from. `changed()` is that record: stamped where the page rewrites a card, never inferred.
+let lookedAwayAt = 0;
+
+// The one writer of `changedAt`. Called where a card's content is replaced after it arrived — a
+// step's state moving, a check read back with its verdict, a new name — and nowhere a card is
+// merely drawn, moved, folded or restored, because none of those is the card changing.
+function changed(pin) {
+  pin.dataset.changedAt = String(Date.now());
+}
+
+function markWhatArrivedSince(since) {
+  let fresh = 0;
+  let moved = 0;
+  for (const pin of onBench()) {
+    const isNew = Number(pin.dataset.cameAt || 0) > since;
+    // A card that arrived while you were away has changed since you last saw it by definition, and
+    // counting it twice would make the chip's two numbers add up to more cards than there are.
+    const isChanged = !isNew && Number(pin.dataset.changedAt || 0) > since;
+    pin.classList.toggle('arrived-since', isNew);
+    pin.classList.toggle('changed-since', isChanged);
+    if (isNew) fresh += 1;
+    if (isChanged) moved += 1;
+  }
+  const said = [fresh ? `${fresh} arrived` : '', moved ? `${moved} changed` : ''].filter(Boolean);
+  const chip = document.getElementById('bench-new');
+  if (chip) {
+    chip.hidden = said.length === 0;
+    chip.textContent = said.length ? `${said.join(', ')} while you were away` : '';
+  }
+  return fresh + moved;
+}
+
+function forgetWhatArrived() {
+  for (const pin of surface?.querySelectorAll('.pin.arrived-since, .pin.changed-since') || []) {
+    pin.classList.remove('arrived-since', 'changed-since');
+  }
+  const chip = document.getElementById('bench-new');
+  if (chip) {
+    chip.hidden = true;
+    chip.textContent = '';
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // The moment the window went away, remembered rather than worked out later: a tab restored
+    // from the background has no other way to say how long it was gone.
+    lookedAwayAt = Date.now();
+    return;
+  }
+  if (!lookedAwayAt) return;
+  markWhatArrivedSince(lookedAwayAt);
+  lookedAwayAt = 0;
+});
+
+// Looking is what clears it. The mark is there to be read once, and a bench that kept it until
+// somebody dismissed it would have added a chore to coming back — which is the opposite of the
+// point.
+document.getElementById('bench-new')?.addEventListener('click', forgetWhatArrived);
+canvas?.addEventListener('pointerdown', forgetWhatArrived);
+
+/* --- the cards that are underneath another one --------------------------------------------------- */
+//
+// A card completely covered by another is indistinguishable from a card that was never added, and
+// what somebody does about that is put down a second copy of it. Placement avoids collisions, but
+// cards are also dragged by hand, restored from a saved workbench and laid out again — and any of
+// those can leave one card exactly on top of another.
+//
+// Worked out from the sizes `drawTies` has already measured. Asking for `offsetHeight` again after
+// the lines have been written is the read-after-write that `tests/unit/test_bench_speed.py` exists
+// about; this costs one pass over a map that was built anyway.
+let underneath = [];
+
+function markWhatIsUnderneath(sizes) {
+  const cards = [...sizes.entries()].map(([name, one]) => ({
+    pin: one.pin,
+    at: placed.get(name),
+    w: one.w,
+    h: one.h,
+  }));
+  underneath = [];
+  for (let n = 0; n < cards.length; n += 1) {
+    const under = cards[n];
+    if (!under.at) continue;
+    // Only a card painted *after* this one can be covering it: they are siblings on one surface
+    // with no stacking of their own, so the later one is the one on top. A card that merely
+    // overlaps is not this — half a card is still a card somebody can see and press.
+    const covered = cards.slice(n + 1).some(
+      (over) =>
+        over.at &&
+        over.at.x <= under.at.x &&
+        over.at.y <= under.at.y &&
+        over.at.x + over.w >= under.at.x + under.w &&
+        over.at.y + over.h >= under.at.y + under.h
+    );
+    if (covered) underneath.push(under.pin);
+  }
+  const chip = document.getElementById('bench-under');
+  if (!chip) return;
+  chip.hidden = underneath.length === 0;
+  chip.textContent = underneath.length
+    ? `${underneath.length} underneath — move ${underneath.length === 1 ? 'it' : 'them'} out`
+    : '';
+}
+
+document.getElementById('bench-under')?.addEventListener('click', () => {
+  // Only the cards nobody can see move. Whatever is visible stays exactly where it was put, which
+  // is the difference between this and `tidy up` — one of them is somebody's arrangement and the
+  // other is a card that has effectively gone missing inside it.
+  for (const pin of underneath) {
+    const at = placed.get(cardName(pin));
+    if (at) place(pin, freeSpot(pin, at), { avoid: false });
+  }
+  drawTies();
+  drawRings();
+  markOffEdge();
+});
+
+/* --- holding a few cards in front --------------------------------------------------------------- */
+//
+// Between "leave everything where it is" and "take them all off" there was nothing. Somebody whose
+// next twenty minutes are about six cards wants the other thirty-one out of the way and still
+// there, and the only control for reducing what is in front of them was the destructive one — with
+// undo as the only way back, which is why nobody presses it twice.
+//
+// **It reuses `put-away` rather than inventing a second kind of hidden.** A card set aside is a
+// card that is not on the bench, and eight places in this file already say what that means: it is
+// not in the next message, no line is drawn to it, it is not counted in "carrying 37 cards", and
+// the panel that reads the bench as a process does not read it. A second class would be eight
+// selectors to remember and the ninth would be the bug.
+//
+// **And it says *why* it went away.** `foldConversation` toggles `put-away` over the conversation's
+// own cards; without this, folding and unfolding the conversation would hand back cards somebody
+// had deliberately set aside — the console undoing a decision on their behalf.
+function holdTheseCards(keep) {
+  const held = new Set(keep);
+  let aside = 0;
+  for (const pin of surface?.querySelectorAll('.pin[data-kind]') || []) {
+    if (held.has(pin)) continue;
+    pin.classList.add('put-away');
+    pin.dataset.aside = 'yes';
+    aside += 1;
+  }
+  if (aside) sayWhatIsAside();
+  return aside;
+}
+
+function bringBackWhatWasSetAside() {
+  for (const pin of surface?.querySelectorAll('.pin[data-aside="yes"]') || []) {
+    pin.classList.remove('put-away');
+    delete pin.dataset.aside;
+  }
+  sayWhatIsAside();
+}
+
+// A bench quietly holding back eleven cards and not saying so is a bench that has lost them.
+function sayWhatIsAside() {
+  const chip = document.getElementById('bench-aside');
+  if (!chip) return;
+  const many = surface?.querySelectorAll('.pin[data-aside="yes"]').length || 0;
+  chip.hidden = many === 0;
+  chip.textContent = many ? `bring back ${many} set aside` : '';
+}
+
+document.getElementById('bench-aside')?.addEventListener('click', () => {
+  bringBackWhatWasSetAside();
+  syncTargets();
+  drawTies();
+  drawRings();
+});
 
 const CARD_WIDTH = 260;
 // Where a new card lands: down and to the right of the last one, the way a stack of paper falls.
@@ -2069,6 +2394,7 @@ function benchState() {
       by_hand: pin.dataset.moved === 'yes',
       came: pin.dataset.came || '',
       came_at: Number(pin.dataset.cameAt) || 0,
+      changed_at: Number(pin.dataset.changedAt) || 0,
     }))
     .filter((one) => one.at);
 }
@@ -2218,6 +2544,7 @@ function layOut(cards) {
         // about the card, and reloading a page is not a way of making one.
         came: one.came,
         cameAt: one.came_at,
+        changedAt: one.changed_at,
       }
     );
     const node = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
@@ -3087,6 +3414,11 @@ document.getElementById('chosen-bar')?.addEventListener('click', (event) => {
   } else if (button.dataset.many === 'fold') {
     const anyOpen = many.some((pin) => pin.dataset.view !== 'hint');
     for (const pin of many) setView(pin, anyOpen ? 'hint' : 'metadata');
+  } else if (button.dataset.many === 'hold') {
+    // The choice is what stays. Nothing moves, and the cards that went are exactly where they
+    // were when they come back.
+    holdTheseCards(many);
+    chooseNone();
   } else if (button.dataset.many === 'none') {
     chooseNone();
   }
@@ -3986,7 +4318,11 @@ function showRuns() {
   const dearest = Math.max(0, ...[...states.values()].map((step) => step.usd || 0));
   for (const pin of surface?.querySelectorAll('.pin') || []) {
     const step = states.get(cardName(pin));
+    const stepWas = pin.dataset.step;
     pin.dataset.step = step ? step.state : '';
+    // A step going from going to done is the card changing (079). Only a move from a state this
+    // page had already drawn: the first pass after a load finds every step "new" and none changed.
+    if (stepWas !== undefined && stepWas !== pin.dataset.step) changed(pin);
     pin.classList.toggle('at-now', Boolean(going && going.at === cardName(pin)));
     let mark = pin.querySelector('.pin-step');
     if (!step) {
@@ -4942,6 +5278,10 @@ function drawTies() {
       `M ${from.x} ${from.y} H ${bend} V ${to.y} H ${to.x}`
     );
     path.setAttribute('class', `tie ${tie.says.replace(/\s+/g, '-')}`);
+    // Which two cards this runs between, so that a search can quieten a line whose ends have gone
+    // quiet without working the pair out again from the geometry.
+    path.dataset.from = tie.from;
+    path.dataset.to = tie.to;
     path.setAttribute('fill', 'none');
     path.setAttribute('marker-end', 'url(#tie-end)');
     made.appendChild(path);
@@ -4951,6 +5291,8 @@ function drawTies() {
     label.setAttribute('y', String((from.y + to.y) / 2 - 4));
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('class', `tie-label${tie.kind ? ` is-${tie.kind}` : ''}`);
+    label.dataset.from = tie.from;
+    label.dataset.to = tie.to;
     label.textContent = tie.says;
     if (tie.drawn) {
       // Only a line somebody drew can be changed. The ones this console works out for itself —
@@ -4971,6 +5313,17 @@ function drawTies() {
   ties.replaceChildren(made);
   ties.hidden = drew === 0;
   for (const [name, one] of pins) markHintCounts(one.pin, joined.get(name) || 0);
+  // The lines were just made again, so whatever a search had quietened is loud once more — and a
+  // card that arrived while the box had something in it has never been looked at at all. The pool
+  // re-applies its own filter after every replacement for exactly this reason.
+  filterBench();
+  // And the count of what is held back, which stops being true the moment one of those cards is
+  // taken off the bench for good.
+  sayWhatIsAside();
+  // From the sizes measured at the top of this function, before anything was written — a second
+  // pass asking the browser for them again is the read-after-write this whole function was
+  // rewritten to stop doing.
+  markWhatIsUnderneath(pins);
 }
 
 // Whether a card is on the screen right now. Arithmetic, not `getBoundingClientRect` — the surface
@@ -5235,6 +5588,10 @@ function foldConversation() {
   // distinction, and it is recorded when the card arrives (`bringItsKin`) rather than guessed at
   // now.
   for (const card of [...cards, ...surface.querySelectorAll('.pin[data-brought="yes"]')]) {
+    // A card somebody set aside stays aside. Folding the conversation is about what the
+    // conversation brought; handing back a card that was deliberately put out of the way would be
+    // this console undoing a decision on somebody's behalf.
+    if (card.dataset.aside === 'yes') continue;
     card.classList.toggle('put-away', folding);
     if (folding) {
       card.dataset.viewBefore = card.dataset.view || 'hint';
@@ -5982,15 +6339,22 @@ function syncBlocks() {
     const from = surface.querySelector(`.pin[data-name="answer:${CSS.escape(id)}"]`)
       ? `answer:${id}`
       : `block:${id}`;
+    const drawn = [];
     for (const line of article.querySelectorAll('.drawn-cards li[data-kind]')) {
       const name = `${line.dataset.kind}:${line.dataset.id}`;
-      if (!surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) {
-        pin(
-          { kind: line.dataset.kind, id: line.dataset.id, label: '' },
-          { under: from, quiet: true, came: 'drawn from a description' }
-        );
-      }
+      if (surface.querySelector(`.pin[data-name="${CSS.escape(name)}"]`)) continue;
+      drawn.push(name);
+      // Joined to the answer once, by the first thing it drew. Every drawn card used to get its
+      // own `wrote` line from the answer, and a map of sixty things is a fan of sixty lines that
+      // hides the relations the drawing exists to show.
+      const how = { quiet: true, came: 'drawn from a description' };
+      if (drawn.length === 1) how.under = from;
+      pin({ kind: line.dataset.kind, id: line.dataset.id, label: '' }, how);
     }
+    // And laid out by how they relate, not stacked where they landed. The same arrangement `tidy up`
+    // makes of an enquiry — following the lines, server-side, against the heights the cards have
+    // actually drawn themselves at — asked for once, when the drawing arrives.
+    if (drawn.length > 1) layOutDrawn(drawn);
 
     for (const line of article.querySelectorAll('[data-kind="idea"][data-id]')) {
       const name = `idea:${line.dataset.id}`;
@@ -6088,10 +6452,11 @@ function applyArrangement(said) {
   // redraws the cards it renamed. Doing it here as well would be a second writer of the same row.
   if ((said.joined || []).length) readLines();
   for (const one of said.named || []) {
-    const label = surface
-      ?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`)
-      ?.querySelector('.pin-label');
-    if (label) label.textContent = one.label;
+    const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
+    const label = pin?.querySelector('.pin-label');
+    if (!label) continue;
+    label.textContent = one.label;
+    changed(pin);
   }
   for (const one of said.given || []) {
     const pin = surface?.querySelector(`.pin[data-name="${CSS.escape(one.name)}"]`);
@@ -6161,6 +6526,54 @@ function nowCollected(name) {
 }
 
 // Where a new card goes when it belongs under others: below the lowest of them, roughly centred.
+// A drawing that has just arrived, laid out by its own lines.
+//
+// Only the cards it drew move, and only the ones nobody has touched: a card somebody dragged in
+// the second it appeared stays where they put it. Asked after the bodies have had a moment to
+// arrive, because the height a card will draw itself at is the input the layout is computed from,
+// and a layout against a guessed height overlaps the moment a card has three lines instead of one.
+function layOutDrawn(names) {
+  setTimeout(async () => {
+    const pins = names
+      .map((name) => surface?.querySelector(`.pin[data-name="${CSS.escape(name)}"]:not([data-moved])`))
+      .filter(Boolean);
+    if (pins.length < 2) return;
+    const cards = pins.map((pin) => ({
+      name: cardName(pin),
+      width: pin.offsetWidth || CARD_WIDTH,
+      height: pin.offsetHeight || 120,
+    }));
+    const inside = new Set(names);
+    const lines = everyTie().filter((one) => inside.has(one.from) && inside.has(one.to));
+    let spots = {};
+    try {
+      const answer = await fetch('/workbench/arrange', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cards, lines }),
+      });
+      spots = (await answer.json()).spots || {};
+    } catch {
+      return;
+    }
+    // Beside everything already on the bench rather than on top of it.
+    const right = Math.max(
+      0,
+      ...[...(surface?.querySelectorAll('.pin') || [])]
+        .filter((pin) => !inside.has(cardName(pin)))
+        .map((pin) => (placed.get(cardName(pin))?.x || 0) + (pin.offsetWidth || CARD_WIDTH))
+    );
+    for (const pin of pins) {
+      const at = spots[cardName(pin)];
+      if (!at) continue;
+      placed.delete(cardName(pin));
+      place(pin, { x: right + GAP * 3 + at.x, y: at.y }, { avoid: false });
+    }
+    drawTies();
+    drawRings();
+  }, 600);
+}
+
 function spotUnder(names) {
   const spots = names.map((name) => placed.get(name)).filter(Boolean);
   if (!spots.length) return null;
@@ -6342,6 +6755,7 @@ document.addEventListener('click', async (event) => {
   if (answer.opened) {
     going.textContent = '✓ opened';
     setTimeout(() => { going.textContent = said; }, 2000);
+    offerWhy(going, answer.press, answer.reasons || {});
     return;
   }
   // No terminal this console knows how to open, or it would not start. The exact line to paste is
@@ -6349,6 +6763,32 @@ document.addEventListener('click', async (event) => {
   say(answer.why || 'it would not open');
   copyTheLine(going, said);
 });
+
+// Why somebody went, if they care to say (080): four words beside the button for a few seconds, one
+// optional press. Asked, never inferred — a press nobody labels stays unlabelled.
+function offerWhy(going, press, reasons) {
+  if (!press || !Object.keys(reasons).length) return;
+  const holder = document.createElement('span');
+  holder.className = 'went-why small';
+  holder.append('why? ');
+  for (const [key, words] of Object.entries(reasons)) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = words;
+    chip.addEventListener('click', async () => {
+      await fetch(`/terminals/${press}/why`, {
+        method: 'POST',
+        headers: FORM,
+        body: new URLSearchParams({ reason: key }),
+      }).catch(() => {});
+      holder.remove();
+    });
+    holder.append(chip);
+  }
+  going.after(holder);
+  setTimeout(() => holder.remove(), 15000);
+}
 
 // What it always did, kept for the fallback and for anything else on the board that hands over a
 // line to paste.

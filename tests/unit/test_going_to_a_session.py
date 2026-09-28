@@ -26,7 +26,8 @@ def test_the_command_is_a_list_and_a_shell_never_sees_it() -> None:
     said = opening.argv("0f8cf805-a691-4599-9565-4211709833c0")
 
     assert said is not None
-    assert said[-3:] == ["claude", "attach", "0f8cf805-a691-4599-9565-4211709833c0"]
+    # The short id: what `claude agents` prints and `claude attach <id>` documents (B4).
+    assert said[-3:] == [opening.settings.claude_bin, "attach", "0f8cf805"]
     assert all(isinstance(one, str) for one in said)
 
 
@@ -137,3 +138,102 @@ def test_the_copy_handler_does_not_fire_as_well() -> None:
     code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("//"))
 
     assert "button.hasAttribute('data-open')" in code
+
+
+@pytest.mark.parametrize("said", ["\x00", "a\x00b", "\x00" * 40])
+def test_a_null_byte_from_a_url_is_an_answer_and_not_a_crash(
+    said: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`session_id` is a path parameter and nothing between the URL and here narrows it.
+
+    `POST /sessions/%00/open` decodes to exactly this, and `Popen` refuses a null byte with a
+    `ValueError` — which is neither of the two this caught, so it came out of a function whose
+    first line of documentation is that it never does, into a route with nothing left to render.
+    """
+    # The real `Popen`, and a terminal that is not on this machine: the null byte is refused while
+    # the arguments are encoded, before anything is forked, so this spawns nothing either way.
+    monkeypatch.setattr(opening.shutil, "which", lambda name: "/nowhere/" + name)
+
+    done = opening.open_it(said)
+
+    assert not done.ok
+    assert "would not open" in done.detail
+
+
+# --- B4: reliably, and why ------------------------------------------------------------------------
+def test_a_console_started_before_the_desktop_borrows_the_desktops_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A systemd --user console started at boot has no DISPLAY of its own; the user manager does."""
+    for name in ("DISPLAY", "WAYLAND_DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+    shown = "DISPLAY=:0\nXAUTHORITY=/run/user/1/x\nHOME=/home/x\nSECRET_TOKEN=nope\n"
+    monkeypatch.setattr(
+        opening.subprocess,
+        "run",
+        lambda *a, **k: opening.subprocess.CompletedProcess(a, 0, stdout=shown, stderr=""),
+    )
+    kept: dict[str, object] = {}
+    monkeypatch.setattr(opening.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(opening.subprocess, "Popen", lambda command, **rest: kept.update(rest))
+
+    assert opening.open_it("abc").ok
+
+    env = kept["env"]
+    assert isinstance(env, dict)
+    assert env["DISPLAY"] == ":0" and env["XAUTHORITY"] == "/run/user/1/x"
+    # Only what a window needs is taken; nothing else the user manager holds comes along.
+    assert "SECRET_TOKEN" not in env
+
+
+def test_a_console_that_has_a_display_asks_nobody(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.setattr(opening.subprocess, "run", lambda *a, **k: pytest.fail("asked anyway"))
+
+    assert opening._session_display() == {}
+
+
+async def test_a_press_is_recorded_and_its_reason_is_asked_not_guessed(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_desk.store.repo import Store
+
+    store = Store(tmp_path / "agent-desk.db")
+    await store.open()
+    monkeypatch.setattr(routes, "store", store)
+    monkeypatch.setattr(opening, "open_it", lambda sid: opening.Opened(True, "opened in xterm"))
+    monkeypatch.setattr(routes, "_form", _form_of({"reason": "approve"}))
+    try:
+        back = json.loads((await routes.open_a_session("abcd1234")).body)
+        assert back["opened"] and back["press"] > 0
+        assert set(back["reasons"]) == set(opening.REASONS)
+        assert await store.terminal_reasons_since(0) == {"": 1}
+
+        said = json.loads((await routes.why_it_went(back["press"], None)).body)  # type: ignore[arg-type]
+
+        assert said == {"kept": True}
+        assert await store.terminal_reasons_since(0) == {"approve": 1}
+    finally:
+        await store.close()
+
+
+async def test_a_reason_outside_the_four_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(routes, "_form", _form_of({"reason": "because I felt like it"}))
+
+    refused = await routes.why_it_went(1, None)  # type: ignore[arg-type]
+
+    assert refused.status_code == 400
+
+
+def _form_of(values: dict[str, str]):  # type: ignore[no-untyped-def]
+    async def form(request: object) -> dict[str, str]:
+        return values
+
+    return form
+
+
+def test_a_waiting_background_job_has_the_same_button() -> None:
+    """The jobs blocked on a human (B1) are the ones somebody most often has to go to."""
+    board = (HERE / "agent_desk" / "web" / "templates" / "_board.html").read_text(encoding="utf-8")
+
+    assert 'data-open="{{ one.short_id }}"' in board

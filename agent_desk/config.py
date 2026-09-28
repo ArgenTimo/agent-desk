@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # --- Observation cadence. The registry is five small files; polling it is cheap. ---------
     registry_poll_seconds: float = 2.0
+    # `claude agents --json` is a process (~0.2 s, ~190 MB at 2.1.283), so its list is kept this
+    # long between reads rather than asked for at every redraw (observe/agents.py).
+    agents_poll_seconds: float = 10.0
     transcript_tail_lines: int = 40
     # A transcript reaches tens of megabytes, so the reader seeks from the end and stops. The
     # budget is bytes rather than lines because a single line holding a tool result can be
@@ -76,6 +79,35 @@ class Settings(BaseSettings):
     # so that reaching it means something has gone wrong rather than that somebody was working
     # hard. Zero switches it off for anybody who would rather find out at the end of the month.
     daily_usd: float = 25.0
+
+    # --- Hands: whether this console starts agents at all (A6 in _research/06_backlog.md). -----
+    # Off by default. What the tool is for is looking — the board and the inbox — and the parts that
+    # start agents (dispatch, autostart, the workbench engine) are frozen rather than grown:
+    # locally `claude --bg` already does it, and for tickets it belongs to ai-worker. Off,
+    # `dispatch.start` refuses, the loops that start work are not run, and the buttons are not
+    # drawn. `AGENT_DESK_HANDS=on` brings all of it back as it was.
+    hands: bool = False
+
+    # --- Reading the idea pool in the background (S2 in _research/06_backlog.md). -------------
+    # Off by default: every sweep is model calls nobody asked for at that moment, charged to the
+    # day's ceiling above. `AGENT_DESK_APPRAISE=on` runs it again while the console is up.
+    appraise: bool = False
+
+    # --- Open pull requests on the board (B3). -----------------------------------------------
+    # `owner/name,owner/name`. Empty shows nothing and reads nothing. The token is named, never
+    # held here: its value comes from the environment or secrets.json (agent_desk/secrets.py), and
+    # only read access is needed — GitHub is read here, never written.
+    pull_repos: str = ""
+    # Which MCP tools this server offers (`keep_idea,open_ideas,…`); empty offers all of them. A
+    # client's own config narrows it, so a session gets the inbox without the workbench (B5).
+    mcp_tools: str = ""
+
+    # --- Where another executor keeps its own agents (task 21; ADR 0014, proposed). ------------
+    # A session whose working directory is under one of these is that executor's — ai-worker's
+    # project workspaces and its OS user's home by default — and it is neither shown on the board
+    # nor has its transcript opened. Comma-separated; empty hides nothing.
+    aiworker_workspace_roots: str = "/srv/ai-worker/projects,/home/aiw"
+    github_token_env: str = "AGENT_DESK_GITHUB_TOKEN"  # noqa: S105 — the name of a variable
 
     @property
     def registry_glob(self) -> str:

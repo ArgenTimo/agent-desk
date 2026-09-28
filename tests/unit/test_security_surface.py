@@ -16,7 +16,7 @@ import pathlib
 import re
 
 import pytest
-from agent_desk import dispatch, land
+from agent_desk import dispatch
 from agent_desk.observe import jobs, transcript
 from agent_desk.tracker import jira
 from agent_desk.web.routes import _prose
@@ -88,7 +88,6 @@ def test_a_worktree_name_cannot_become_a_path() -> None:
         name = dispatch._worktree_name(typed)
         assert "/" not in name, typed
         assert not name.startswith("."), typed
-        assert land.worktree_for("/repo", name).is_relative_to("/repo"), typed
 
 
 # --- the network ----------------------------------------------------------------------------

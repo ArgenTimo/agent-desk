@@ -35,11 +35,13 @@ write an ADR. Never implement the other thing and adjust the prose afterwards.
 | [0005](adr/0005-one-door-out-to-a-tracker.md) | an idea leaves for a tracker through one door, opened by a human |
 | [0006](adr/0006-the-desk-may-start-work.md) | this console may start an agent, and what that costs |
 | [0007](adr/0007-a-loop-that-decides-when-not-what.md) | a loop decides *when* work starts, never *what* the work is |
-| [0008](adr/0008-an-agent-that-finds-its-own-work.md) | an agent may find its own work; nothing lands that the gate refuses |
-| [0009](adr/0009-a-session-that-is-not-allowed-to-idle.md) | a switched-on session is kept working, and every bound is a test |
+| [0008](adr/0008-an-agent-that-finds-its-own-work.md) | an agent may find its own work; nothing lands that the gate refuses — superseded by 0013 |
+| [0009](adr/0009-a-session-that-is-not-allowed-to-idle.md) | a switched-on session is kept working, and every bound is a test — superseded by 0013 |
 | [0010](adr/0010-reading-a-tracker-back.md) | somebody else's board is quoted, never decided about |
 | [0011](adr/0011-the-workbench-is-a-constructor.md) | the workbench builds things: typed cards, typed lines, an engine that queues |
-| [0012](adr/0012-the-one-irreversible-thing.md) | this console may close a session, and only with all four conditions true |
+| [0012](adr/0012-the-one-irreversible-thing.md) | this console may close a session, and only with all four conditions true — superseded by 0013 |
+| [0013](adr/0013-back-to-observing.md) | explore and land, kicking and closing sessions are deleted; the rest of the hands stay frozen |
+| [0014](adr/0014-reading-an-external-executor.md) | *proposed* — an external executor (ai-worker) is read from its API like `~/.claude/`: statuses verbatim with `seen_at`, no control buttons, token by name |
 
 ## Keeping this map honest
 

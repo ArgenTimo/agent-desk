@@ -4,7 +4,7 @@
   "cwd": "/home/dev/projects/example",
   "startedAt": 1788379214575,
   "procStart": "10644",
-  "version": "2.1.259",
+  "version": "2.1.283",
   "peerProtocol": 1,
   "peerFeatures": [
     "notify_idle",
@@ -20,6 +20,5 @@
   "nameSince": 1788379214575,
   "status": "idle",
   "updatedAt": 1788380407338,
-  "statusUpdatedAt": 1788380407338,
-  "bridgeSessionId": "session_00000000000000000000000"
+  "statusUpdatedAt": 1788380407338
 }

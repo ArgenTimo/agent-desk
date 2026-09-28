@@ -42,6 +42,7 @@ from agent_desk.answer import session
 from agent_desk.ideas import appraise, inbox, kin
 from agent_desk.observe import reading
 from agent_desk.observe.model import Session
+from agent_desk.observe.shape import where_it_works
 from agent_desk.store.redact import scrub
 from agent_desk.store.repo import (
     BenchCard,
@@ -275,7 +276,9 @@ def _capture_context(rows: Sequence[BoardRow]) -> tuple[str, str | None, dict[st
     )
 
 
-async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Block:
+async def capture_idea(
+    store: Store, text: str, rows: Sequence[BoardRow], project: str = ""
+) -> Block:
     """`/idea`: recorded in one step, with a card and no second question (docs/05-ideas.md).
 
     The block is `answered` the moment it exists, because it is. The idea is written before any
@@ -295,7 +298,7 @@ async def capture_idea(store: Store, text: str, rows: Sequence[BoardRow]) -> Blo
         source_ref=source_ref,
         context=context,
         block_id=block.id,
-        project_key=project_of(rows),
+        project_key=project_of(rows, project),
     )
     await store.finish_block(block.id, "")
     # An idea block asks nothing further, so its subject is not a candidate for a later question
@@ -499,11 +502,17 @@ async def on_the_bench(
     message happened to be carrying. Dragging a result onto another card is somebody saying "these
     two", and a digest that then describes one of them is a digest that cannot be answered.
     """
+    # A card a *gesture* named is here because the gesture named it. It used to have to appear in
+    # `dropped` as well, which meant the page had to keep sending every block card on the bench in
+    # case one of them turned out to be half of a combine — and that is why the count under the
+    # bench said thirty-seven where the model saw twenty-seven. A coupling, not a rule.
+    dropped = [*dropped, *(one for one in named if one not in set(dropped))]
     names = [f"{kind}:{ident}" for kind, ident, _ in map(_card, dropped)]
     said = await store.cards_said(names)
     chosen = await store.card_roles()
     ideas = {f"idea:{one.id}": one for one in await store.ideas()}
     steps = {one.name: one.label for one in await store.step_cards()}
+    sketches = await store.sketch_cards(names)
     cards: list[looking.OnBench] = []
     seen: set[str] = set()
     for target in dropped:
@@ -552,6 +561,21 @@ async def on_the_bench(
                     kind="idea",
                     label=idea.summary,
                     said=idea.text,
+                    role=chosen.get(name, ""),
+                )
+            )
+            continue
+        drawn = sketches.get(name)
+        if drawn is not None:
+            # A thing a drawing found in the project: its kind and its detail are what it *says*, so
+            # a question asked with the map in front of it can answer about what each thing holds
+            # rather than about a list of labels.
+            cards.append(
+                looking.OnBench(
+                    name=name,
+                    kind="sketch",
+                    label=drawn.label,
+                    said=f"{drawn.kind}: " + "; ".join(drawn.lines.splitlines()),
                     role=chosen.get(name, ""),
                 )
             )
@@ -649,6 +673,10 @@ class Carried:
     surface: list[str]
     written: list[str]
     on_bench: list[str]
+    # Cards there was no room for in the digest. Carried out of `looking.Look` rather than counted
+    # again here: "why did it not know about X" is the other half of "why did it say that", and the
+    # only place that knows the answer is the thing that did the cutting.
+    left_out: int = 0
 
 
 async def carried_from_the_bench(
@@ -673,6 +701,7 @@ async def carried_from_the_bench(
         surface=looking.as_lines(look),
         written=await notes(store, targets),
         on_bench=[card.name for card in look.cards],
+        left_out=look.left_out,
     )
 
 
@@ -716,7 +745,7 @@ async def submit(
     """
     text = typed.strip()
     if text.startswith(IDEA_PREFIX):
-        return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows)
+        return await capture_idea(store, text[len(IDEA_PREFIX) :].strip(), rows, project)
     forced_new = text.startswith(NEW_PREFIX)
     if forced_new:
         text = text[len(NEW_PREFIX) :].strip()
@@ -746,7 +775,21 @@ async def submit(
         # The address, where a control can reach it (056). The offer to start a project from it is
         # a button; nothing here clones anything.
         await store.set_block_repo(block.id, found.repos[0])
-    carried = pasted.as_lines(found) + await _context_lines(store, rows, targets, history)
+    # Read here rather than after the record is written, and that order is the point: what a block
+    # says it carried is now derived from the same reading the prompt is built from, so the two
+    # cannot say different things. They did — a bench with one card named twice recorded four
+    # things and asked with two, and the largest message in this store says it carried ninety-six
+    # of which twenty-two are distinct. docs/04: a block that cannot say what it carried is a block
+    # whose answer cannot be explained afterwards, and one that says ninety-six is worse than one
+    # that says nothing, because somebody will reason from it.
+    #
+    # Read now rather than when the run reaches the prompt: this is what was in front of the person
+    # when they pressed send, and a bench read a minute later is a different bench.
+    bench = await carried_from_the_bench(store, rows, targets, made_from)
+    written, surface, on_bench = bench.written, bench.surface, bench.on_bench
+    carried = pasted.as_lines(found) + await _context_lines(
+        store, rows, targets, history, carried=on_bench, left_out=bench.left_out
+    )
     if notes_.strip():
         # Blocks somebody wrote on the workbench themselves — a link, a paragraph of a document, a
         # snippet of code. They are text rather than a card this console read, so they are carried
@@ -767,10 +810,6 @@ async def submit(
         aimed, about = [], ""
 
     deep = transcripts(rows, targets)
-    # Read now rather than when the run reaches the prompt: this is what was in front of the person
-    # when they pressed send, and a bench read a minute later is a different bench.
-    bench = await carried_from_the_bench(store, rows, targets, made_from)
-    written, surface, on_bench = bench.written, bench.surface, bench.on_bench
     classify = not forced_new and not thread_id
     runs.start(
         block.id,
@@ -794,6 +833,10 @@ async def submit(
             on_bench=on_bench,
             # What they were pointing at is part of what they said (agent_desk/answer/classify.py).
             pointed_at=len(targets),
+            # Who it was addressed to: the project named or chosen, or "" for the desk. Carried to
+            # the branches that file something under a project — an idea, a drawing of one — so
+            # that a project with nothing running in it is still the one they are about.
+            project=project,
         ),
     )
     return block
@@ -834,32 +877,74 @@ async def _context_lines(
     rows: Sequence[BoardRow],
     targets: Sequence[str],
     history: Sequence[str],
+    *,
+    carried: Sequence[str],
+    left_out: int = 0,
 ) -> list[str]:
     """What this question is being sent with, in the words the console used for it.
 
     Written before the run starts, so that a block that is still answering can already say what it
     was given. "Why did it say that" is a question about the context, and the context was a
     decision somebody made in a second and has already forgotten.
+
+    `carried` is the cards `on_the_bench` actually built the prompt from, and it is required rather
+    than optional. This function used to walk `targets` on its own, which made it a *second*
+    reading of "what does this message carry" — and a second reading of one question is two answers
+    to it. It gave two: a card named twice was recorded twice while the prompt saw it once, and a
+    block card that `on_the_bench` deliberately leaves out was recorded as carried, on this console
+    as `block · no longer on the board`, which reads like something went wrong.
+
+    What is still decided here is the *wording* — how many sessions a name matched, whether a whole
+    transcript went. What is decided by `on_the_bench` is which cards there are, which is the part
+    that must not be answered twice.
     """
+    # Walked in the prompt's order and not the browser's, because the prompt numbers these cards
+    # and a record in a different order is a record whose third line is not the model's third card.
+    # `targets` is consulted only for what it alone knows: whether a whole transcript went.
+    whole = {f"{kind}:{ident}" for kind, ident, deep in map(_card, targets) if deep}
     lines: list[str] = []
-    for target in targets:
-        kind, ident, deep = _card(target)
+    for name in carried:
+        kind, _, ident = name.partition(":")
+        deep = name in whole
         if kind == "idea":
             idea = await store.idea(ident)
             lines.append(f"idea · {idea.summary}" if idea else "idea · no longer in the inbox")
+            continue
+        if kind == "sketch":
+            one = await store.sketch_card(ident)
+            lines.append(f"sketch · {one.label}" if one else "sketch · no longer drawn")
             continue
         found, label = _rows_named(rows, kind, ident)
         if not found:
             lines.append(f"{kind} · no longer on the board")
             continue
-        whole = " · whole transcript" if deep else ""
+        said = " · whole transcript" if deep else ""
         lines.append(
-            f"{kind} · {label} ({len(found)} session{'' if len(found) == 1 else 's'}){whole}"
+            f"{kind} · {label} ({len(found)} session{'' if len(found) == 1 else 's'}){said}"
         )
     for block_id in history:
         earlier = await store.block(block_id)
         if earlier is not None:
             lines.append(f"earlier · {earlier.input[:80]}")
+    # And what did not go, which is the other half of the question this record is kept to answer.
+    # Two reasons a card is missing from the list above, and they are not the same reason: one is a
+    # budget and the other is a rule, so a record that reported them as one number would be telling
+    # somebody the digest was full when nothing had been cut.
+    conversation = sum(
+        1
+        for kind, ident, _ in map(_card, targets)
+        if kind in ("block", "answer") and f"{kind}:{ident}" not in set(carried)
+    )
+    if conversation:
+        lines.append(
+            f"not listed · {conversation} card{'' if conversation == 1 else 's'} of this "
+            "conversation, which travel as the thread's own history"
+        )
+    if left_out:
+        lines.append(
+            f"not listed · {left_out} more card{'' if left_out == 1 else 's'} that did not fit "
+            "the digest"
+        )
     return lines
 
 
@@ -943,6 +1028,7 @@ async def _work(
     surface: Sequence[str] = (),
     on_bench: Sequence[str] = (),
     pointed_at: int = 0,
+    project: str = "",
 ) -> None:
     """Read what was typed, then do the one thing it asked for.
 
@@ -978,7 +1064,7 @@ async def _work(
             )
             return
         if kind == "idea":
-            await record_idea(store, block, rows)
+            await record_idea(store, block, rows, project=project)
             return
         if kind == "master":
             await _master_request(store, block, rows)
@@ -987,7 +1073,7 @@ async def _work(
             await _prepare_directive(store, block, rows)
             return
         if kind == "drawing":
-            await _draw_it(store, block, surface=surface)
+            await _draw_it(store, block, surface=surface, project=project, rows=rows)
             return
         if kind == "showing":
             await _show_them(store, block, rows, on_bench)
@@ -1310,30 +1396,166 @@ async def read_tickets_now(store: Store, key: str) -> tuple[list[str], str]:
     )
 
 
-async def _draw_it(store: Store, block: Block, *, surface: Sequence[str] = ()) -> None:
-    """A process described in the input field, drawn as cards on the workbench.
+async def checkout_for(
+    store: Store, rows: Sequence[BoardRow], project: str = ""
+) -> tuple[Path | None, str]:
+    """The checkout on this machine a request about a project can read, and what to call it.
 
-    "Нарисуй процесс релиза: сначала тесты, если красные — чиним."
+    «Текущий проект» is the project a message is addressed to (`project_of`): the one chosen or
+    named, else the one the rows are about, else this console's own. A drawing of it needs a
+    directory, and this is the one place that turns the first into the second.
 
-    Every part of this already existed — `telling.shape_prompt` turns a description into steps and
-    lines, and the workbench has put those on the bench since 038 — behind a panel somebody had to
-    open first. This is the same act asked for in the field, which is where the rest of the console
-    is asked for things.
+    In the order a person would look: a checkout of it with a session in it now, which is the copy
+    somebody is working in; the checkout it was last seen in (073), for a project whose sessions have
+    all ended; and for the desk, its own code. A project that is only an address — added by its URL,
+    never cloned here — has no directory, and `None` is the honest answer: the caller says so rather
+    than drawing a project it cannot read.
+
+    A declared project answers for every repository in it, so its key is widened to theirs first —
+    otherwise choosing one would find no session in any of them.
+    """
+    key = project_of(rows, project)
+    if key == desk_key():
+        here = own_checkout()
+        return (here if here.is_dir() else None), "agent-desk"
+    keys = {key}
+    for group in await store.groups():
+        if group.id == key:
+            keys |= set(group.repo_keys)
+    for row in rows:
+        if row.project_key in keys:
+            home, _ = where_it_works(row.session.cwd)
+            if Path(home).is_dir():
+                return Path(home), row.project_name or row.session.project
+    for seen in await store.seen_projects():
+        if seen.repo_key in keys and seen.cwd and Path(seen.cwd).is_dir():
+            return Path(seen.cwd), seen.name
+    return None, key.split(":", 1)[-1]
+
+
+async def cards_from_map(store: Store, drawn: telling.Map) -> list[str]:
+    """Turn a read map into sketch cards and the named lines between them.
+
+    One card per thing, with its kind, its detail and where it was read; every one an `object`,
+    because a thing a project has is a thing that exists; every line `named`, because its words are
+    the relation (agent_desk/ties.py). Nothing here knows what a table or a feature is, which is the
+    point of it.
+    """
+    made: dict[int, str] = {}
+    for one in drawn.cards:
+        card = await store.add_sketch_card(
+            kind=one.kind, label=one.label, lines="\n".join(one.lines), read_from=one.read_from
+        )
+        made[one.number] = f"sketch:{card.id}"
+        await store.set_card_role(made[one.number], "object")
+    for line in drawn.lines:
+        await store.tie_cards(
+            from_name=made[line.from_number],
+            to_name=made[line.to_number],
+            kind="named",
+            says=line.says,
+        )
+    return list(made.values())
+
+
+async def _map_it(
+    store: Store, block: Block, where: Path, called: str, *, surface: Sequence[str]
+) -> str | None:
+    """Draw what a project has, from the project — or hand back a reply that is a process.
+
+    Run read-only over the checkout (`answer/session.py` allows `Read`, `Grep` and `Glob` and denies
+    the rest), with the checkout named in the prompt. One call: the prompt offers the process form as
+    the alternative, so a reply that is not a map is returned for the process reader rather than
+    asked for a second time. `None` means the block is settled — a map was drawn, the project could
+    not answer, or the run failed.
+    """
+    spent: list[float] = []
+    try:
+        reply = "".join(
+            [
+                chunk
+                async for chunk in session.stream_answer(
+                    telling.map_prompt(block.input, str(where), surface),
+                    add_dirs=[where],
+                    # What it is reading, while it reads. A map of this console's own repository
+                    # took three minutes on the real engine and every one of them showed only a
+                    # caret. Scrubbed for the reason `_run` scrubs it: a path a model wrote, on an
+                    # output path that never passes through the store (docs/07-security.md).
+                    on_step=lambda step: DOING.__setitem__(block.id, scrub(step)),
+                    on_cost=spent.append,
+                )
+            ]
+        )
+    except (session.AnswerFailed, OSError) as exc:
+        await store.fail_block(block.id, str(exc))
+        return None
+    finally:
+        DOING.pop(block.id, None)
+    drawn = telling.read_map(reply)
+    if drawn.empty:
+        needed = telling.read_cannot(reply)
+        if needed and not telling.read_shape(reply)[0]:
+            await store.finish_block(
+                block.id,
+                f"I read {called} and could not draw that from it: {needed}. Nothing was put on "
+                "the workbench.",
+            )
+            return None
+        return reply
+    names = await cards_from_map(store, drawn)
+    await store.finish_block(
+        block.id, telling.as_drawn_json(telling.as_mapped(drawn, called, sum(spent)), names)
+    )
+    return None
+
+
+async def _draw_it(
+    store: Store,
+    block: Block,
+    *,
+    surface: Sequence[str] = (),
+    project: str = "",
+    rows: Sequence[BoardRow] = (),
+) -> None:
+    """Something described in the input field, drawn as cards on the workbench.
+
+    "Нарисуй процесс релиза: сначала тесты, если красные — чиним." And, since the author asked for it
+    in so many words: «нарисуй мне схему базы данных текущего проекта», «создай мне матрицу фич и что
+    они закрывают» — «не делай фичи именно под эти 2 примера, а реализуй гораздо гибче».
+
+    Two ways a drawing can come out, from one model call. **A map of what a project has**, when
+    there is a project to read: the run is given read-only access to its checkout and told where it
+    is, and what comes back is things of any kind with their detail and relations of any name
+    (`telling.map_prompt`). **A process**, when what was described is steps in an order, or when there
+    is no checkout to read: the five roles and the process lines, as before.
+
+    Nothing here knows what a database or a feature matrix is. What makes a drawing a schema is what
+    somebody asked for and what the project turned out to contain.
 
     The cheapest of the new branches: one model call, cards at the end of it, undone in one press.
     That is why it may be decided on the balance of it where `do` may not.
     """
     await store.set_block_kind(block.id, "drawing")
-    try:
-        reply = "".join(
-            [
-                chunk
-                async for chunk in session.stream_answer(telling.shape_prompt(block.input, surface))
-            ]
-        )
-    except (session.AnswerFailed, OSError) as exc:
-        await store.fail_block(block.id, str(exc))
-        return
+    where, called = await checkout_for(store, rows, project)
+    if where is not None:
+        reply = await _map_it(store, block, where, called, surface=surface)
+        if reply is None:
+            return
+    else:
+        # No checkout of it here, so nothing to read: the words and the bench are all there is, and
+        # the process vocabulary — with its own refusal for anything it cannot see — is what is left.
+        try:
+            reply = "".join(
+                [
+                    chunk
+                    async for chunk in session.stream_answer(
+                        telling.shape_prompt(block.input, surface)
+                    )
+                ]
+            )
+        except (session.AnswerFailed, OSError) as exc:
+            await store.fail_block(block.id, str(exc))
+            return
     # "Рисовать по тому, что модель ВИДИТ… а не по тому, что она помнит про типичные БД." Read
     # before the shape, because a reply that says both is a reply that drew from memory anyway.
     if (needed := telling.read_cannot(reply)) and not telling.read_shape(reply)[0]:
@@ -1441,13 +1663,21 @@ async def _write_what_was_asked(store: Store, block: Block, asked: handling.Hand
             await store.name_step_card(card_id, called.label)
 
 
-def project_of(rows: Sequence[BoardRow]) -> str:
+def project_of(rows: Sequence[BoardRow], project: str = "") -> str:
     """Which project a thought or a request is about, when nothing says otherwise.
 
-    The cards that were on the workbench, if there were any; otherwise this console's own project.
-    A thought typed with nothing in front of it is a thought about the thing in front of you, and
-    the thing in front of you is the desk (docs/05-ideas.md).
+    The project it was addressed to, first — the one somebody chose, or named. «Если проект выбран,
+    то по умолчанию запросы адресованы именно ему, если не выбран и нет другого контекста на
+    верстаке — agent-desk.» Then the cards that were on the workbench; then this console's own
+    project. A thought typed with nothing chosen and nothing in front of it is a thought about the
+    thing in front of you, and the thing in front of you is the desk (docs/05-ideas.md).
+
+    The chosen project comes before the rows because a project added by its address has no rows at
+    all — no checkout here, no session — and a thought about it was being filed under whichever
+    session happened to be first on the board.
     """
+    if project:
+        return project
     for row in rows:
         if row.project_key:
             return row.project_key
@@ -1460,7 +1690,7 @@ def desk_key() -> str:
 
 
 async def record_idea(
-    store: Store, block: Block, rows: Sequence[BoardRow], *, say: str = ""
+    store: Store, block: Block, rows: Sequence[BoardRow], *, say: str = "", project: str = ""
 ) -> None:
     """A thought, recognised as one: recorded, said so, and never asked a second question.
 
@@ -1483,7 +1713,7 @@ async def record_idea(
         source_ref=source_ref,
         context=context,
         block_id=block.id,
-        project_key=project_of(rows),
+        project_key=project_of(rows, project),
     )
     await store.finish_block(block.id, say)
     await _write_ideas(store, block, idea, rows)
@@ -1726,6 +1956,70 @@ async def _secrets_for(store: Store, repo_keys: Sequence[str]) -> dict[str, str]
     return found
 
 
+# The words people use to say "start on *that*". With a card dropped in they name the work as
+# clearly as naming a session (agent_desk/answer/classify.py); with nothing in front of them they
+# name nothing, and an agent started on them has only a guess to go on. Not hypothetical: a bare
+# "бери в работу" started agent after agent here, each left to decide what it had been pointed at,
+# and most of them settled on the same open idea at once (pull requests #5 and #6). Matched as the
+# whole line, so a go-ahead with the work after it ("бери в работу парсер реестра") is not this.
+GO_AHEAD = frozenset(
+    {
+        "бери в работу",
+        "берите в работу",
+        "возьми в работу",
+        "взять в работу",
+        "делай",
+        "сделай",
+        "сделай это",
+        "сделай сейчас",
+        "сделай это сейчас",
+        "реализуй",
+        "реализуем",
+        "запусти",
+        "запускай",
+        "поехали",
+        "take it on",
+        "take it",
+        "do it",
+        "do it now",
+        "go",
+        "go ahead",
+        "start",
+        "start it",
+    }
+)
+_POLITE = frozenset({"пожалуйста", "please"})
+
+
+def names_nothing(said: str) -> bool:
+    """Is this line a go-ahead and nothing else — a pointer with nothing at the end of it?"""
+    words = [word for word in re.sub(r"[^\w\s]", " ", said.lower()).split() if word not in _POLITE]
+    return " ".join(words) in GO_AHEAD
+
+
+async def _go_ahead_at_nothing(store: Store, block: Block) -> bool:
+    """A go-ahead that names no work, sent with nothing in front of it: say so, and start nothing.
+
+    docs/adr/0006 starts no work where nothing says *where*; this is the same guess one step on,
+    where nothing says *what*. Anything the person put in front of the line — an idea, a card, an
+    earlier answer, text written on the workbench — is what the words point at, and then they are
+    an instruction like any other.
+    """
+    if not names_nothing(block.input):
+        return False
+    # Re-read: what the line was sent with is written after the block object was made.
+    written = await store.block(block.id)
+    if (written is not None and written.context) or (await store.ideas_of_blocks()).get(block.id):
+        return False
+    await store.finish_block(
+        block.id,
+        "Understood, but I could not tell what to take on: nothing was on the workbench, and the "
+        "line names no work. Drop its card onto the workbench and say it again, or say what should "
+        "be done, and I will get it started.",
+    )
+    return True
+
+
 async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) -> None:
     """A request about this console: "tidy up the ideas", "put a button here".
 
@@ -1738,6 +2032,8 @@ async def _master_request(store: Store, block: Block, rows: Sequence[BoardRow]) 
     """
     await store.set_block_kind(block.id, "master")
     await store.set_block_running(block.id)
+    if await _go_ahead_at_nothing(store, block):
+        return
 
     here = own_checkout()
     if (here / ".git").exists():
@@ -1776,6 +2072,8 @@ async def _prepare_directive(store: Store, block: Block, rows: Sequence[BoardRow
     """
     await store.set_block_kind(block.id, "instruction")
     await store.set_block_running(block.id)
+    if await _go_ahead_at_nothing(store, block):
+        return
 
     pinned = [idea for idea in await _pinned_ideas(store, block) if idea.state != "done"]
     if pinned:
