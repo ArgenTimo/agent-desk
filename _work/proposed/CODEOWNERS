@@ -1,0 +1,42 @@
+# Guard files (_integration/07_dogfooding_safety.md §4): a change to any of these needs the owner's
+# review, whoever — or whatever — opened the pull request. Takes effect with branch protection's
+# "Require review from Code Owners".
+
+# Session permissions, hooks, and the files every skill and hook reads
+/.claude/settings.json                          @ArgenTimo
+/.claude/settings.local.json                    @ArgenTimo
+/.claude/hooks/                                 @ArgenTimo
+/.claude/.ai-worker/                            @ArgenTimo
+/.claude/agents/                                @ArgenTimo
+/.claude/skills/                                @ArgenTimo
+/CLAUDE.md                                      @ArgenTimo
+
+# What makes the gate hermetic, and the gate itself
+/tests/conftest.py                              @ArgenTimo
+/tests/unit/test_no_test_starts_an_agent.py     @ArgenTimo
+/tests/fixtures/                                @ArgenTimo
+/Makefile                                       @ArgenTimo
+/pyproject.toml                                 @ArgenTimo
+/poetry.lock                                    @ArgenTimo
+/.github/                                       @ArgenTimo
+/CODEOWNERS                                     @ArgenTimo
+
+# Applied to the live database at start, without undo
+/agent_desk/store/*.sql                         @ArgenTimo
+/agent_desk/store/migrate.py                    @ArgenTimo
+
+# Secrets, redaction, cross-site protection, the lock, the working instance
+/agent_desk/secrets.py                          @ArgenTimo
+/agent_desk/store/redact.py                     @ArgenTimo
+/agent_desk/web/origin.py                       @ArgenTimo
+/agent_desk/security-patterns.yaml              @ArgenTimo
+/.claude/security-patterns.yaml                 @ArgenTimo
+/agent_desk/lock.py                             @ArgenTimo
+/scripts/prod.sh                                @ArgenTimo
+/.gitignore                                     @ArgenTimo
+/.mcp.json                                      @ArgenTimo
+
+# The reader of an external executor must not be edited by that executor (ADR 0014)
+/agent_desk/observe/aiworker.py                 @ArgenTimo
+/agent_desk/web/aiworker.py                     @ArgenTimo
+/tests/unit/test_aiworker_*.py                  @ArgenTimo

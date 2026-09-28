@@ -1,0 +1,38 @@
+# The same gate the Stop hook runs (`make gate`: ruff · mypy · pytest -m unit), on every pull
+# request and on main. Hermetic by construction (tests/conftest.py, A1) and belt-and-braces here:
+# a `claude` that only records that it was called, first on PATH, and data/home dirs in the
+# runner's temp. The job fails if anything called it.
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AGENT_DESK_DATA_DIR: ${{ runner.temp }}/agent-desk-data
+      AGENT_DESK_CLAUDE_HOME: ${{ runner.temp }}/claude-home
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: poetry
+        run: pipx install poetry
+      - name: a claude that only says it was called
+        run: |
+          mkdir -p "$RUNNER_TEMP/fakebin" "$AGENT_DESK_CLAUDE_HOME/sessions"
+          printf '#!/bin/sh\necho "$*" >> "%s/claude-calls.log"\nexit 0\n' "$RUNNER_TEMP" > "$RUNNER_TEMP/fakebin/claude"
+          chmod +x "$RUNNER_TEMP/fakebin/claude"
+          echo "$RUNNER_TEMP/fakebin" >> "$GITHUB_PATH"
+      - run: make install
+      - run: make gate
+      - name: nothing called claude
+        run: test ! -s "$RUNNER_TEMP/claude-calls.log"
