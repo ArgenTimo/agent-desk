@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # held here: its value comes from the environment or secrets.json (agent_desk/secrets.py), and
     # only read access is needed — GitHub is read here, never written.
     pull_repos: str = ""
+    # Which MCP tools this server offers (`keep_idea,open_ideas,…`); empty offers all of them. A
+    # client's own config narrows it, so a session gets the inbox without the workbench (B5).
+    mcp_tools: str = ""
     github_token_env: str = "AGENT_DESK_GITHUB_TOKEN"  # noqa: S105 — the name of a variable
 
     @property

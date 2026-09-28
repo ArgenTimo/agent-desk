@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-desk": {
+      "command": "${HOME}/opt/agent-desk-prod/.venv/bin/python",
+      "args": ["-m", "agent_desk.mcp"],
+      "env": {
+        "AGENT_DESK_MCP_TOOLS": "keep_idea,open_ideas,ask,answer"
+      }
+    }
+  }
+}
