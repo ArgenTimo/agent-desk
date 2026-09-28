@@ -892,6 +892,39 @@ async def test_an_instruction_is_written_out_and_started(
 
 
 @pytest.mark.unit
+async def test_an_instruction_takes_what_was_written_beside_it_into_the_agent(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paragraph typed on the workbench beside no cards is still what the message was sent with.
+
+    The bench an agent is handed is usually cards; this is the half of it that is nobody's card,
+    and it travels in the person's own words. Only what was sent with the message travels — the
+    thread's history is still not carried by default (docs/04-threads-and-blocks.md).
+    """
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
+    ) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="agent4")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "do")
+    block = await blocks.submit(
+        desk,
+        "tell alpha-d0 to test everything again",
+        [make_row("alpha", "main")],
+        notes_="the flaky one is test_probe_cache",
+    )
+    assert await _settled(desk, block.id) == "answered"
+
+    assert told and "the flaky one is test_probe_cache" in told[0]
+
+
+@pytest.mark.unit
 async def test_an_instruction_that_names_no_session_prepares_nothing(
     desk: Store, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1324,6 +1357,71 @@ async def test_a_request_about_the_console_is_done_in_the_console(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("taken_as", ["desk", "do"])
+async def test_an_agent_started_from_a_message_gets_the_bench_it_was_sent_with(
+    desk: Store,
+    kinds: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    taken_as: str,
+) -> None:
+    """ "бери в работу" over a set of cards reached the agent as those three words and nothing else:
+    the message said what to do, the cards said what to do it to, and only the first half was put
+    in the task. Both branches that start an agent from a sentence carry the bench."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
+    ) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="bench1")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", taken_as)
+    pointed = tmp_path / "the-card-they-meant.md"
+    pointed.write_text("x")
+
+    block = await blocks.submit(
+        desk, "бери в работу", [make_row("alpha", "main")], targets=[f"file:{pointed}"]
+    )
+    assert await _settled(desk, block.id) == "answered"
+
+    (instruction,) = told
+    assert "The workbench this was started from" in instruction
+    assert f"file:{pointed}" in instruction
+    # The bench itself, not the console's note about what the block carried. That note is written
+    # for a reader of the board, and it says a file the digest leaves out is "no longer on the
+    # board" — true of the board, and a fault to an agent the file was dropped in front of.
+    assert "no longer on the board" not in instruction
+
+
+@pytest.mark.unit
+async def test_an_agent_started_from_an_empty_bench_is_told_nothing_about_one(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heading over nothing is a heading an agent reads and learns nothing from."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
+    ) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="bench2")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "desk")
+
+    block = await blocks.submit(desk, "разгреби текущие идеи", [make_row("alpha", "main")])
+    assert await _settled(desk, block.id) == "answered"
+
+    assert "The workbench this was started from" not in told[0]
+
+
+@pytest.mark.unit
 async def test_a_request_about_a_console_whose_code_is_elsewhere_is_written_down(
     desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1416,6 +1514,70 @@ async def test_a_desk_agent_is_given_the_facts_and_the_tokens_it_needs(
     assert after is not None and "DESK_TEST_JIRA" in (after.answer or "")
     # And what it holds is never written into the prompt.
     assert "a-real-looking-secret" not in str(seen["instruction"])
+
+
+@pytest.mark.unit
+async def test_ideas_dropped_into_a_request_about_the_console_go_with_it(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ "Бери в работу" over dropped cards, read as `desk`, used to start an agent with nothing but
+    those three words: the desk branch never looked at what had been dropped in."""
+    from agent_desk import dispatch
+
+    told: list[str] = []
+
+    def fake_start(
+        instruction: str, *, cwd: str, name: str, env: object = None, **rest: object
+    ) -> dispatch.Started:
+        told.append(instruction)
+        return dispatch.Started(True, agent_id="desk2")
+
+    monkeypatch.setattr(dispatch, "start", fake_start)
+    monkeypatch.setenv("KIND", "desk")
+    idea = await desk.create_idea(
+        text_="highlight the cards a run moved on", summary="highlight moved", source_kind="typed"
+    )
+    # Out of the briefing, so the only way its text can reach the agent is by being dropped in.
+    await desk.set_idea_state(idea.id, "dropped")
+
+    block = await blocks.submit(desk, "бери в работу", [], targets=[f"idea:{idea.id}"])
+    assert await _settled(desk, block.id) == "answered"
+
+    (instruction,) = told
+    assert "highlight the cards a run moved on" in instruction
+    (task,) = await desk.tasks()
+    assert task.source_ref == idea.id
+
+
+@pytest.mark.unit
+async def test_a_request_that_waits_for_the_seat_keeps_what_it_was_sent_with(
+    desk: Store, kinds: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A waiting task is started later from its stored instruction alone, so what the message
+    carried has to be in that instruction — not only in the block beside it."""
+    from agent_desk import dispatch
+
+    monkeypatch.setattr(
+        dispatch,
+        "start",
+        lambda instruction, *, cwd, name, env=None: dispatch.Started(True, agent_id="a1"),
+    )
+    monkeypatch.setenv("KIND", "do")
+    rows = [make_row("alpha", "main")]
+
+    first = await blocks.submit(desk, "tell it to run the tests", rows)
+    assert await _settled(desk, first.id) == "answered"
+    second = await blocks.submit(
+        desk, "and then check the ports", rows, targets=["session:session-alpha:full"]
+    )
+    assert await _settled(desk, second.id) == "answered"
+
+    (waiting,) = [task for task in await desk.tasks() if task.waiting]
+    assert "The workbench this was started from" in waiting.instruction
+    assert "session:session-alpha" in waiting.instruction
+    # And a message sent with nothing is stored as nothing more than what was typed.
+    (started,) = [task for task in await desk.tasks() if not task.waiting]
+    assert "The workbench this was started from" not in started.instruction
 
 
 @pytest.mark.unit
