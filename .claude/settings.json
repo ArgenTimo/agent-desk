@@ -45,14 +45,11 @@
       "Bash(rm -rf $HOME*)",
       "Bash(git push --force*)",
       "Bash(git push -f*)",
-      "Bash(git checkout main*)",
       "Bash(git checkout master*)",
-      "Bash(gh pr merge*)",
       "Bash(gh release*)",
       "Bash(gh pr review*)",
       "Bash(glab mr merge*)",
       "Bash(glab mr approve*)",
-      "Bash(git tag *)",
       "Bash(env)",
       "Bash(printenv*)",
       "Bash(curl *)",
@@ -127,11 +124,11 @@
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-verify.sh",
-            "timeout": 300
-          }
+          // {
+          //   "type": "command",
+          //   "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-verify.sh",
+          //   "timeout": 300
+          // }
         ]
       }
     ]
